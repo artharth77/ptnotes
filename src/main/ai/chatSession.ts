@@ -1,0 +1,272 @@
+import OpenAI from 'openai'
+import { randomUUID } from 'crypto'
+import type { AIProviderConfig, ChatStreamEvent } from '@shared/types'
+import { tools, type ToolContext } from './tools'
+import { createClient } from './client'
+
+type Role = 'system' | 'user' | 'assistant' | 'tool'
+
+interface SessionMessage {
+  role: Role
+  content: string | null
+  tool_calls?: OpenAI.Chat.ChatCompletionMessageFunctionToolCall[]
+  tool_call_id?: string
+  name?: string
+}
+
+export type StreamEmitter = (event: ChatStreamEvent) => void
+
+const MAX_TOOL_ITERATIONS = 12
+
+export function buildSystemPrompt(activeProject: string, currentDate: string): string {
+  return `You are PTNotes assistant, an automation and research assistant inside a markdown notes + todo desktop app.
+
+You operate inside a project. The currently active project is "${activeProject}". Use it by default; you may target other projects by passing the "project" argument to a tool.
+
+You can create and update notes (markdown), manage the todo list, and research the web.
+
+Guidelines:
+- When the user asks to create a note or add todos, do it with the tools and confirm concisely.
+- When the user asks for up-to-date or factual information, use web_search (and web_fetch for detail) instead of relying only on your own knowledge.
+- After researching, if the user wants it saved, write a well-structured markdown note via create_note/update_note.
+- If the user references a note as \`note:<notename>\` (for example \`note:meeting-notes\`), call the read_note tool to read that specific note before responding.
+- When the user asks you to find notes about a topic, call the search_notes tool.
+- Quote the snippet returned by search_notes exactly as given; never paraphrase, reword, or summarize it.
+- Whenever you mention an existing note by name in your reply, always link to it: [note name](note:note name). The link opens the note, so never return a bare note name without a link.
+- Whenever you mention an existing todo by its text in your reply, always link to it: [todo text](todo:todo text).
+- Keep replies short and actionable.
+
+Current date: ${currentDate}.`
+}
+
+export class ChatSession {
+  private readonly messages: SessionMessage[] = []
+  private readonly getConfig: () => Promise<AIProviderConfig>
+  private readonly ctx: ToolContext
+  private readonly emit: StreamEmitter
+  private config: AIProviderConfig
+  private stopped = false
+  private abortController: AbortController | undefined
+
+  constructor(getConfig: () => Promise<AIProviderConfig>, ctx: ToolContext, emit: StreamEmitter) {
+    this.getConfig = getConfig
+    this.ctx = ctx
+    this.emit = emit
+    this.config = { baseUrl: '', apiKey: '', model: '' }
+  }
+
+  async send(userText: string): Promise<void> {
+    this.stopped = false
+    this.abortController = undefined
+    this.config = await this.getConfig()
+    if (!this.config.apiKey && !isLocalEndpoint(this.config.baseUrl)) {
+      this.emit({
+        type: 'error',
+        error: 'AI is not configured. Open AI settings to set your API key.'
+      })
+      return
+    }
+    if (!this.config.model) {
+      this.emit({ type: 'error', error: 'AI model is not configured.' })
+      return
+    }
+
+    const date = new Date().toISOString().slice(0, 10)
+    this.ensureSystemPrompt(date)
+    this.messages.push({ role: 'user', content: userText })
+
+    const client = createClient(this.config)
+    const messageId = randomUUID()
+
+    try {
+      for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
+        if (this.stopped) break
+        const result = await this.runTurn(client, messageId)
+        if (result === 'done') break
+      }
+    } catch (err) {
+      if (this.stopped) return
+      const message = err instanceof Error ? err.message : String(err)
+      this.emit({ type: 'error', error: message })
+    }
+  }
+
+  stop(): void {
+    this.stopped = true
+    this.abortController?.abort()
+  }
+
+  clear(): void {
+    this.messages.length = 0
+  }
+
+  private ensureSystemPrompt(date: string): void {
+    if (!this.messages.some((m) => m.role === 'system')) {
+      this.messages.unshift({
+        role: 'system',
+        content: buildSystemPrompt(this.ctx.activeProject, date)
+      })
+    }
+  }
+
+  /** Run one streaming turn. Returns 'done' when the model produced a final answer. */
+  private async runTurn(client: OpenAI, messageId: string): Promise<'done' | 'continue'> {
+    const apiMessages = this.messages.map((m) => {
+      const base = { role: m.role, content: m.content }
+      if (m.role === 'assistant' && m.tool_calls) return { ...base, tool_calls: m.tool_calls }
+      if (m.role === 'tool') return { ...base, tool_call_id: m.tool_call_id }
+      return base
+    }) as OpenAI.Chat.ChatCompletionMessageParam[]
+
+    this.abortController = new AbortController()
+    const signal = this.abortController.signal
+
+    let stream: AsyncIterable<OpenAI.Chat.ChatCompletionChunk>
+    try {
+      stream = await client.chat.completions.create(
+        {
+          model: this.config.model,
+          messages: apiMessages,
+          tools: tools.map((t) => t.definition),
+          stream: true
+        },
+        { signal }
+      )
+    } catch (err) {
+      if (this.stopped) return 'done'
+      throw err
+    }
+
+    let content = ''
+    const toolCalls: {
+      index: number
+      id?: string
+      name?: string
+      args: string
+    }[] = []
+
+    let firstChunk = true
+    let reasoningOpen = false
+    try {
+      for await (const chunk of stream) {
+        if (this.stopped) break
+        const delta = chunk.choices?.[0]?.delta as
+          | (OpenAI.Chat.ChatCompletionChunk.Choice.Delta & { reasoning_content?: string })
+          | undefined
+        if (!delta) continue
+        if (firstChunk) {
+          firstChunk = false
+          this.emit({ type: 'message-start', messageId })
+        }
+        if (delta.reasoning_content) {
+          if (!reasoningOpen) {
+            reasoningOpen = true
+            this.emit({ type: 'content', messageId, content: '<think>' })
+          }
+          this.emit({ type: 'content', messageId, content: delta.reasoning_content })
+        }
+        if (delta.content) {
+          if (reasoningOpen) {
+            reasoningOpen = false
+            this.emit({ type: 'content', messageId, content: '</think>\n\n' })
+          }
+          content += delta.content
+          this.emit({ type: 'content', messageId, content: delta.content })
+        }
+        if (delta.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            if (!tc) continue
+            const idx = tc.index ?? toolCalls.length
+            const entry = (toolCalls[idx] ??= { index: idx, args: '' })
+            if (tc.id) entry.id = tc.id
+            if (tc.function?.name) entry.name = tc.function.name
+            if (tc.function?.arguments) entry.args += tc.function.arguments
+          }
+        }
+      }
+      if (reasoningOpen) {
+        reasoningOpen = false
+        this.emit({ type: 'content', messageId, content: '</think>' })
+      }
+    } catch (err) {
+      if (this.stopped) return 'done'
+      throw err
+    }
+
+    if (this.stopped) return 'done'
+
+    if (toolCalls.length > 0) {
+      const completed: OpenAI.Chat.ChatCompletionMessageFunctionToolCall[] = toolCalls.map(
+        (tc) => ({
+          id: tc.id ?? `call_${tc.index}`,
+          type: 'function' as const,
+          function: { name: tc.name ?? '', arguments: tc.args || '{}' }
+        })
+      )
+
+      this.messages.push({ role: 'assistant', content: content || null, tool_calls: completed })
+      this.emit({ type: 'message-end', messageId })
+
+      for (const call of completed) {
+        if (this.stopped) break
+        const result = await this.executeTool(call)
+        this.messages.push({
+          role: 'tool',
+          tool_call_id: call.id,
+          content: result
+        })
+      }
+      if (this.stopped) return 'done'
+      return 'continue'
+    }
+
+    this.messages.push({ role: 'assistant', content: content || '…' })
+    this.emit({ type: 'message-end', messageId })
+    return 'done'
+  }
+
+  private async executeTool(
+    call: OpenAI.Chat.ChatCompletionMessageFunctionToolCall
+  ): Promise<string> {
+    let args: Record<string, unknown> = {}
+    try {
+      args = call.function.arguments ? JSON.parse(call.function.arguments) : {}
+    } catch {
+      args = {}
+    }
+
+    const tool = tools.find((t) => t.definition.function.name === call.function.name)
+    if (!tool) {
+      const result = JSON.stringify({ ok: false, error: `Unknown tool: ${call.function.name}` })
+      this.emitTool(call.function.name, args, false, result)
+      return result
+    }
+
+    try {
+      const result = await tool.execute(args, this.ctx)
+      this.emitTool(call.function.name, args, true, result)
+      return result
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      const result = JSON.stringify({ ok: false, error: message })
+      this.emitTool(call.function.name, args, false, result)
+      return result
+    }
+  }
+
+  private emitTool(name: string, args: Record<string, unknown>, ok: boolean, result: string): void {
+    this.emit({
+      type: 'tool',
+      toolCall: { id: randomUUID(), name, args, ok, result }
+    })
+  }
+}
+
+export function isLocalEndpoint(baseUrl: string): boolean {
+  try {
+    const url = new URL(baseUrl)
+    return url.hostname === 'localhost' || url.hostname === '127.0.0.1'
+  } catch {
+    return false
+  }
+}
