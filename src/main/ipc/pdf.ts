@@ -20,6 +20,10 @@ export function registerPdfIpc(
     }
   )
 
+  ipcMain.handle('files:list', async (_e: IpcMainInvokeEvent, project: string) => {
+    return service.listFiles(project)
+  })
+
   ipcMain.handle(
     'pdf:extract',
     async (_e: IpcMainInvokeEvent, path: string): Promise<PdfExtractResult> => {

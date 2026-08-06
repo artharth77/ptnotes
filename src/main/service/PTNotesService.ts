@@ -1,6 +1,6 @@
 import { promises as fs } from 'fs'
 import { createHash } from 'crypto'
-import { join, relative, sep } from 'path'
+import { basename, join, relative, sep } from 'path'
 import { app, shell } from 'electron'
 import type {
   ChatSessionMeta,
@@ -396,6 +396,24 @@ export class PTNotesService {
     const dest = join(dir, candidate)
     await fs.copyFile(sourcePath, dest)
     return dest
+  }
+
+  async listFiles(project: string): Promise<string[]> {
+    const dir = this.filesDir(project)
+    try {
+      return (await fs.readdir(dir))
+        .filter((f) => f.toLowerCase().endsWith('.pdf'))
+        .sort((a, b) => a.localeCompare(b))
+    } catch {
+      return []
+    }
+  }
+
+  async projectFilePath(project: string, fileName: string): Promise<string | null> {
+    const base = basename(fileName)
+    if (base !== fileName) return null
+    const full = join(this.filesDir(project), base)
+    return (await this.pathExists(full)) ? full : null
   }
 
   private async uniqueNoteId(project: string, base: string, exclude?: string): Promise<string> {

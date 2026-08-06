@@ -51,6 +51,7 @@ Run `npm run typecheck` and `npm run lint` after any change.
 | Chat titles | Hybrid: local heuristic from first message immediately, refined by a background AI completion; manual rename supported; history popup shows title + message count |
 | Chat note mention | `@` opens note list → inserts `note:<notename>` → AI calls `read_note` |
 | Chat todo mention | `!` opens todo list → inserts `todo:<todotext>` (filterable by text) |
+| Chat file mention | `#` opens project file list (`files:list` → `<project>/files/*.pdf`) → inserts `file:<filename>` → AI calls `read_file` (local pdf-parse extraction) |
 | Chat response rendering | Markdown via `react-markdown` + `remark-gfm` + `remark-breaks` (raw HTML escaped → XSS-safe) |
 | Web search | DuckDuckGo only (free, no API key) |
 | Page reading | Local cheerio parsing (private, no third-party service) |
@@ -156,6 +157,7 @@ src/
 - **AI:** `send` (message → streamed reply), `getConfig`, `setConfig`, `generateTitle`, `stop`, `clear`, `confirmResponse`, `onStreamEvent` (token chunks + tool-call logs + confirm events)
 - **Settings:** `get` (returns `{ rootDir }`), `chooseRoot` (native folder picker), `changeRoot` (moves data + persists + returns new `{ rootDir }`)
 - **PDF:** `copyToProject` (copy dropped PDF into `<project>/files/`), `extract` (local text via pdf-parse → `{ text, pageCount, charCount, truncated }`), `supportsUpload` (returns the AI settings `uploadPdfEnabled` toggle — user-controlled), `upload` (raw PDF via provider Responses API `input_file` — uploads base64 through the Files API, falling back to inline `file_data`), `reveal` (`shell.showItemInFolder`)
+- **Files:** `list` (`<project>/files/*.pdf` for the chat `#` picker)
 
 ## AI chat feature
 
@@ -173,8 +175,11 @@ ChatPanel (renderer) ──send──▶ Main process
 - Session is kept in memory per project (`sessions` map) so closing the drawer and reopening continues the same conversation.
 - System prompt is sent when a session starts; it includes the active project and instructs the AI that a `note:<notename>` message means it must call `read_note` for that note.
 - A `!` todo mention inserts `todo:<todotext>` which is sent to the model as-is.
+- A `#` file mention inserts `file:<filename>`; the system prompt instructs the AI that a
+  `file:<filename>` message means it must call `read_file` (extracts the PDF text locally via
+  `extractPdf`) before responding — so previously dropped PDFs can be reused without re-dragging.
 
-### Tools (12 total)
+### Tools (13 total)
 | Tool | Action |
 |---|---|
 | `create_note` | new `.md` in project `notes/` |
@@ -187,6 +192,7 @@ ChatPanel (renderer) ──send──▶ Main process
 | `toggle_todo` | toggle a checklist item |
 | `delete_todo` | remove an item |
 | `list_todos` | model context |
+| `read_file` | extract text of a project PDF attachment locally via `extractPdf` |
 | `web_search` | DuckDuckGo HTML search, no API key, Node fetch in main (user-agent header, rate-limit errors surfaced to model) |
 | `web_fetch` | direct fetch + cheerio local parse (strip scripts/styles/nav, extract title + readable text) — fully private |
 
@@ -239,7 +245,7 @@ Two-panel dialog (`.settings-layout` with `.settings-nav` + `.settings-pane`):
 
 - DuckDuckGo scraping can be rate-limited; errors are surfaced to the model so it can retry/adapt.
 - Bing Search API retired Aug 2025 and Brave dropped its free tier — avoid both.
-- Tool count is 12; keeping it near ~10 avoids model tool-selection degradation.
+- Tool count is 13; keeping it near ~10 avoids model tool-selection degradation.
 - API key must never be committed or bundled into the renderer.
 - The persistent project registry only records known project names/paths — it never stores file contents; the folder on disk remains the source of truth.
 - `note:<notename>` uses the note's slugified file name (as shown in the Notes list), so the `@` picker should insert the exact list name.

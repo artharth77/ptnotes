@@ -100,6 +100,8 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   const activeNoteId = useAppStore((s) => s.activeNoteId)
   const notes = useAppStore((s) => s.notes)
   const todos = useAppStore((s) => s.todos)
+  const projectFiles = useAppStore((s) => s.projectFiles)
+  const refreshFiles = useAppStore((s) => s.refreshFiles)
   const messages = useAppStore((s) =>
     s.activeProject ? s.chatMessages[s.activeProject] : undefined
   )
@@ -149,7 +151,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   const [input, setInput] = useState('')
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({})
   const [mention, setMention] = useState<{
-    kind: 'note' | 'todo'
+    kind: 'note' | 'todo' | 'file'
     start: number
     query: string
   } | null>(null)
@@ -162,11 +164,14 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
 
   const list = useMemo(() => messages ?? [], [messages])
 
-  const mentionItems = useMemo<(NoteMeta | Todo)[]>(() => {
+  const mentionItems = useMemo<(NoteMeta | Todo | string)[]>(() => {
     if (!mention) return []
     const q = mention.query.toLowerCase()
     if (mention.kind === 'todo') {
       return todos.filter((t) => t.text.toLowerCase().includes(q))
+    }
+    if (mention.kind === 'file') {
+      return projectFiles.filter((f) => f.toLowerCase().includes(q))
     }
     const filtered = notes.filter((n) => n.name.toLowerCase().includes(q))
     const active = notes.find((n) => n.id === activeNoteId)
@@ -174,9 +179,10 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
       return [active, ...filtered.filter((n) => n.id !== active.id)]
     }
     return filtered
-  }, [mention, notes, todos, activeNoteId])
+  }, [mention, notes, todos, projectFiles, activeNoteId])
 
-  const mentionName = (item: NoteMeta | Todo): string => ('name' in item ? item.name : item.text)
+  const mentionName = (item: NoteMeta | Todo | string): string =>
+    typeof item === 'string' ? item : 'name' in item ? item.name : item.text
 
   function focusInput(): void {
     const el = textareaRef.current
@@ -202,22 +208,33 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     const before = value.slice(0, sel)
     const at = before.lastIndexOf('@')
     const bang = before.lastIndexOf('!')
-    if (at > bang && !before.slice(at + 1).includes(' ')) {
-      setMention({ kind: 'note', start: at, query: before.slice(at + 1) })
-      setMentionIndex(0)
-    } else if (bang !== -1 && !before.slice(bang + 1).includes(' ')) {
-      setMention({ kind: 'todo', start: bang, query: before.slice(bang + 1) })
-      setMentionIndex(0)
-    } else {
+    const hash = before.lastIndexOf('#')
+    const last = Math.max(at, bang, hash)
+    if (last === -1) {
       setMention(null)
+      return
     }
+    const token = before.slice(last + 1)
+    if (token.includes(' ')) {
+      setMention(null)
+      return
+    }
+    if (last === at) setMention({ kind: 'note', start: last, query: token })
+    else if (last === bang) setMention({ kind: 'todo', start: last, query: token })
+    else setMention({ kind: 'file', start: last, query: token })
+    setMentionIndex(0)
   }
 
   function insertMention(name: string): void {
     if (!mention) return
     const before = input.slice(0, mention.start)
     const after = input.slice(mention.start + 1 + mention.query.length)
-    const token = mention.kind === 'todo' ? `todo:${name} ` : `note:${name} `
+    const token =
+      mention.kind === 'todo'
+        ? `todo:${name} `
+        : mention.kind === 'file'
+          ? `file:${name} `
+          : `note:${name} `
     setInput(`${before}${token}${after}`)
     setMention(null)
     requestAnimationFrame(() => {
@@ -302,6 +319,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     setMention(null)
     setChatBusy(true)
     setChatStreamProject(project)
+    void refreshFiles()
     void (async () => {
       try {
         await window.ptnotes.ai.send(project, opts.content)
@@ -636,7 +654,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
           <div className="mention-popup">
             {mentionItems.map((item, i) => (
               <div
-                key={'name' in item ? item.name : item.text}
+                key={typeof item === 'string' ? item : 'name' in item ? item.name : item.text}
                 className={`mention-item ${i === mentionIndex ? 'active' : ''}`}
                 onMouseDown={(e) => {
                   e.preventDefault()
@@ -644,7 +662,9 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                 }}
                 onMouseEnter={() => setMentionIndex(i)}
               >
-                <span className="mention-icon">{mention?.kind === 'todo' ? '☑' : '📄'}</span>
+                <span className="mention-icon">
+                  {mention?.kind === 'todo' ? '☑' : mention?.kind === 'file' ? '📎' : '📄'}
+                </span>
                 {mentionName(item)}
               </div>
             ))}
@@ -654,7 +674,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
           ref={textareaRef}
           value={input}
           placeholder={
-            activeProject ? 'Ask the assistant… (@ note, ! todo)' : 'Select a project first'
+            activeProject ? 'Ask the assistant… (@ note, ! todo, # file)' : 'Select a project first'
           }
           disabled={!activeProject || chatBusy}
           rows={2}

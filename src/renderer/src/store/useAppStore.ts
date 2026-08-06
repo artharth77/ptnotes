@@ -16,6 +16,7 @@ interface AppState {
   activeNoteId: string | null
   noteContent: string
   todos: Todo[]
+  projectFiles: string[]
   tab: Tab
   chatOpen: boolean
   chatMessages: Record<string, ChatMessage[]>
@@ -39,6 +40,7 @@ interface AppState {
   selectProject: (name: string) => Promise<void>
   refreshNotes: () => Promise<void>
   refreshTodos: () => Promise<void>
+  refreshFiles: () => Promise<void>
   selectNote: (id: string) => Promise<void>
   saveNote: (content: string) => Promise<void>
   createNote: (title: string) => Promise<void>
@@ -70,6 +72,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   activeNoteId: null,
   noteContent: '',
   todos: [],
+  projectFiles: [],
   tab: 'notes',
   chatOpen: false,
   chatMessages: {},
@@ -164,7 +167,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   async selectProject(name) {
     localStorage.setItem('ptnotes:activeProject', name)
     set({ activeProject: name, activeNoteId: null, noteContent: '', loading: true })
-    await Promise.all([get().refreshNotes(), get().refreshTodos(), get().loadChatSessions(name)])
+    await Promise.all([
+      get().refreshNotes(),
+      get().refreshTodos(),
+      get().refreshFiles(),
+      get().loadChatSessions(name)
+    ])
     set((state) => {
       if (!state.chatSessionIds[name]) {
         return {
@@ -189,6 +197,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!project) return set({ todos: [] })
     const todos = await window.ptnotes.todos.list(project)
     set({ todos })
+  },
+
+  async refreshFiles() {
+    const project = get().activeProject
+    if (!project) return set({ projectFiles: [] })
+    const projectFiles = await window.ptnotes.files.list(project)
+    set({ projectFiles })
   },
 
   async selectNote(id) {

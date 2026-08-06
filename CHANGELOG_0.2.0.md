@@ -22,6 +22,10 @@
   to expand the full text. In assistant messages, tool-call bubbles are now rendered above the
   response text. `create_note` / `update_note` tool bubbles show a clickable, truncated `📄 <note>` link
   in the header that opens the note (works while the bubble is collapsed).
+- Chat file mention: typing `#` in the chat input opens the project's file picker (same behavior as
+  `@` for notes). Selecting a file inserts `file:<filename>`; the AI then calls the new `read_file`
+  tool to extract the PDF text locally, so previously dropped files can be referenced again without
+  re-dragging and re-dropping them.
 
 ### Fixed
 

@@ -1,6 +1,7 @@
 import Module from 'node:module'
 import { promises as fs } from 'node:fs'
 import assert from 'node:assert/strict'
+import type { ToolContext } from '../src/main/ai/tools'
 
 const ROOT = '/tmp/ptnotes-pdf-test-root'
 
@@ -101,6 +102,30 @@ assert.equal(saved2, saved1, 'identical upload (same name+size+hash) reuses exis
 await fs.writeFile(src, '%PDF-1.4 changed')
 const saved3 = await service.copyPdfToProject('Test', src, 'My Report.pdf')
 assert.equal(saved3, `${ROOT}/Test/files/my-report-2.pdf`, 'changed content gets a new file')
+
+// ---- listFiles / projectFilePath / read_file tool ----
+const { tools } = await import('../src/main/ai/tools')
+const ctx: ToolContext = { service, activeProject: 'Test' }
+const fileList = await service.listFiles('Test')
+assert.ok(fileList.includes('my-report.pdf'), 'lists copied files')
+assert.ok(fileList.includes('my-report-2.pdf'))
+assert.equal(
+  await service.projectFilePath('Test', 'my-report.pdf'),
+  `${ROOT}/Test/files/my-report.pdf`
+)
+assert.equal(await service.projectFilePath('Test', '../TODO.md'), null, 'rejects path traversal')
+
+FAKE_TEXT = 'Hello PDF content'
+FAKE_PAGES = 2
+const readFileTool = tools.find((t) => t.definition.function.name === 'read_file')!
+const rr = JSON.parse(await readFileTool.execute({ name: 'my-report.pdf' }, ctx))
+assert.equal(rr.ok, true)
+assert.equal(rr.file, 'my-report.pdf')
+assert.equal(rr.pageCount, 2)
+assert.match(rr.text, /Hello PDF content/)
+const rrMissing = JSON.parse(await readFileTool.execute({ name: 'nope.pdf' }, ctx))
+assert.equal(rrMissing.ok, false)
+assert.match(rrMissing.error, /not found/)
 
 // ---- uploadPdf: uploads via provider Files API (file_id) + streams ----
 const events: unknown[] = []

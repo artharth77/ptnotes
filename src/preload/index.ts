@@ -101,6 +101,9 @@ const api = {
     upload: (project: string, path: string, prompt: string): Promise<void> =>
       ipcRenderer.invoke('pdf:upload', project, path, prompt),
     reveal: (path: string): Promise<void> => ipcRenderer.invoke('pdf:reveal', path)
+  },
+  files: {
+    list: (project: string): Promise<string[]> => ipcRenderer.invoke('files:list', project)
   }
 }
 
