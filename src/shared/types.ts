@@ -27,6 +27,15 @@ export interface AIProviderConfig {
   model: string
 }
 
+export interface StorageSettings {
+  rootDir: string
+}
+
+export interface AppSettings {
+  storage: StorageSettings
+  ai: AIProviderConfig
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'

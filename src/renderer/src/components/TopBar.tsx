@@ -53,8 +53,8 @@ export function TopBar(): React.JSX.Element {
         <ProjectDropdown />
       </div>
       <div className="topbar-right">
-        <button className="btn ghost" onClick={() => setSettingsOpen(true)} title="AI settings">
-          <span className="btn-icon">⚙</span> AI Settings
+        <button className="btn ghost" onClick={() => setSettingsOpen(true)} title="Settings">
+          <span className="btn-icon">⚙</span> Settings
         </button>
         <button
           className={`btn ghost ${chatOpen ? 'active' : ''}`}

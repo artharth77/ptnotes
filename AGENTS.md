@@ -45,7 +45,8 @@ Run `npm run typecheck` and `npm run lint` after any change.
 | Project registry | Persistent known-project list so folders deleted externally still show (missing paths marked red) |
 | Chat placement | Collapsible right-side drawer |
 | AI streaming | Yes (real-time) |
-| AI settings | In-app settings dialog (base URL, API key, model) |
+| Settings dialog | Two-panel dialog: **Storage** (project root path) + **AI Settings** (base URL, API key, model) |
+| Project root | Configurable via settings; default `~/Documents/PTNotes`; changing it moves all data + registry to the new location after confirmation |
 | Chat history | Persisted per session as JSON files under `<project>/chat/`; auto-saved per message; New Chat archives current thread; history picker can view/reopen old sessions |
 | Chat titles | Hybrid: local heuristic from first message immediately, refined by a background AI completion; manual rename supported; history popup shows title + message count |
 | Chat note mention | `@` opens note list → inserts `note:<notename>` → AI calls `read_note` |
@@ -65,6 +66,7 @@ Run `npm run typecheck` and `npm run lint` after any change.
 ```
 
 - App AI config stored in Electron `userData/ai-provider.json`, `chmod 600`, never in the renderer bundle.
+- App settings (project root path) stored in Electron `userData/ptnotes-settings.json`, `chmod 600`.
 - Creating a project initializes folder + `TODO.md` + `welcome.md`.
 - `.ptnotes-projects.json` in the root dir is the persistent project registry so externally-deleted folders still show (missing paths flagged `pathExists: false`).
 
@@ -74,14 +76,16 @@ Run `npm run typecheck` and `npm run lint` after any change.
 src/
 ├── main/                # Electron main process — ALL filesystem + network access
 │   ├── index.ts         # window creation, app lifecycle
+│   ├── settings.ts      # SettingsStore (userData/ptnotes-settings.json → project root)
 │   ├── service/
-│   │   └── PTNotesService.ts   # all fs operations (projects/notes/todos/chats)
+│   │   └── PTNotesService.ts   # all fs operations (projects/notes/todos/chats) + changeRootDir
 │   ├── ipc/             # ipcMain.handle registrations
 │   │   ├── projects.ts
 │   │   ├── notes.ts
 │   │   ├── todos.ts
 │   │   ├── chat.ts      # chat history persistence (list/read/write/delete/rename)
-│   │   └── ai.ts        # chat session mgmt + ai:generateTitle (chat titles)
+│   │   ├── ai.ts        # chat session mgmt + ai:generateTitle (chat titles)
+│   │   └── settings.ts  # settings:get / settings:chooseRoot / settings:changeRoot
 │   └── ai/
 │       ├── client.ts    # OpenAI-compatible client (streaming)
 │       ├── tools.ts     # tool JSON schemas + executors (bind to PTNotesService)
@@ -96,14 +100,14 @@ src/
 │   │   ├── App.tsx
 │   │   ├── store/useAppStore.ts    # zustand store (active project/note/tab, chat)
 │   │   ├── components/
-│   │   │   ├── TopBar.tsx           # project dropdown + New Project + AI settings + chat toggle
+│   │   │   ├── TopBar.tsx           # project dropdown + New Project + Settings + chat toggle
 │   │   │   ├── ProjectDropdown.tsx
 │   │   │   ├── NoteList.tsx         # Notes tab
 │   │   │   ├── TodoPanel.tsx        # Todo tab (checkboxes + progress)
 │   │   │   ├── MarkdownEditor.tsx   # TipTap WYSIWYG + markdown sync + auto-save
 │   │   │   ├── MarkdownContent.tsx  # react-markdown chat rendering + note: link handling
 │   │   │   ├── ChatDrawer.tsx       # right drawer, streaming, mentions, history, titles
-│   │   │   └── AISettingsDialog.tsx
+│   │   │   └── SettingsDialog.tsx  # two-panel Settings (Storage + AI Settings)
 │   └── ...
 └── shared/
     └── types.ts         # Project, NoteMeta, Todo, ChatMessage, tool types
@@ -127,7 +131,7 @@ src/
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ ⚙ Project A ▾ [New Project]      [AI settings] [💬 Chat]     │
+│ ⚙ Project A ▾ [New Project]      [Settings] [💬 Chat]     │
 ├─────────────────┬────────────────────────────────────────────┤
 │ Notes │ Todo    │  Editor area        │  Chat drawer         │
 │ ▸ note 1        │  ┌ toolbar ───────┐ │  (collapsible,      │
@@ -136,7 +140,7 @@ src/
 └─────────────────┴────────────────────┴──────────────────────┘
 ```
 
-- **Top bar:** current project name with dropdown (switch / new / rename / delete), AI settings, chat toggle.
+- **Top bar:** current project name with dropdown (switch / new / rename / delete), Settings, chat toggle.
 - **Middle column:** tabs for Notes (list + create/rename/delete) and Todo (interactive checklist + progress).
 - **Main area:** TipTap WYSIWYG editor for notes; auto-save to `.md` ~800ms after edits (debounced).
 
@@ -147,6 +151,7 @@ src/
 - **Todos:** `read` (parse checklist), `save` (serialize `- [ ]`/`- [x]`), `toggle`, `deleteCompleted`, `reorder`
 - **Chat history:** `list`, `read`, `write`, `delete`, `rename`
 - **AI:** `send` (message → streamed reply), `getConfig`, `setConfig`, `generateTitle`, `stop`, `clear`, `confirmResponse`, `onStreamEvent` (token chunks + tool-call logs + confirm events)
+- **Settings:** `get` (returns `{ rootDir }`), `chooseRoot` (native folder picker), `changeRoot` (moves data + persists + returns new `{ rootDir }`)
 
 ## AI chat feature
 
@@ -181,8 +186,14 @@ ChatPanel (renderer) ──send──▶ Main process
 | `web_search` | DuckDuckGo HTML search, no API key, Node fetch in main (user-agent header, rate-limit errors surfaced to model) |
 | `web_fetch` | direct fetch + cheerio local parse (strip scripts/styles/nav, extract title + readable text) — fully private |
 
-### Settings dialog fields
-Base URL (default `https://api.openai.com/v1`), API key, model name. No search provider field (DuckDuckGo-only, keyless).
+### Settings dialog
+Two-panel dialog (`.settings-layout` with `.settings-nav` + `.settings-pane`):
+- **Storage:** shows the current project root path (read-only) + **Change…** button that opens a native
+  folder picker. Selecting a new root prompts for explicit confirmation ("Move all project data…")
+  before `PTNotesService.changeRootDir` moves every project dir + `.ptnotes-projects.json`, and the
+  settings store persists the new root.
+- **AI Settings:** Base URL (default `https://api.openai.com/v1`), API key, model. No search provider
+  field (DuckDuckGo-only, keyless).
 
 ### Example research flow
 > You: *"Research the latest Electron security best practices and save it as a note."*
