@@ -35,6 +35,7 @@ interface AppState {
   recreateProject: (name: string) => Promise<void>
   renameProject: (oldName: string, newName: string) => Promise<void>
   deleteProject: (name: string) => Promise<void>
+  changeRoot: (newRoot: string) => Promise<void>
   selectProject: (name: string) => Promise<void>
   refreshNotes: () => Promise<void>
   refreshTodos: () => Promise<void>
@@ -148,6 +149,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       } else {
         set({ activeProject: null, notes: [], todos: [], activeNoteId: null, noteContent: '' })
       }
+    }
+  },
+
+  async changeRoot(newRoot) {
+    await window.ptnotes.settings.changeRoot(newRoot)
+    await get().refreshProjects()
+    const active = get().activeProject
+    if (active) {
+      await get().selectProject(active)
     }
   },
 

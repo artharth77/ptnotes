@@ -1,5 +1,5 @@
 import { promises as fs } from 'fs'
-import { join } from 'path'
+import { join, relative, sep } from 'path'
 import { app, shell } from 'electron'
 import type {
   ChatSessionMeta,
@@ -13,6 +13,7 @@ import { slugify } from '../utils/slug'
 
 const TODO_HEADER = '# Todo\n\n'
 const WELCOME_ID = 'welcome'
+const REGISTRY_FILE = '.ptnotes-projects.json'
 const WELCOME_NOTE = `# Welcome to PTNotes
 
 This is your first note. Everything you write here is stored as markdown in:
@@ -27,7 +28,7 @@ This is your first note. Everything you write here is stored as markdown in:
 `
 
 export class PTNotesService {
-  private readonly rootDir: string
+  private rootDir: string
 
   constructor(rootDir?: string) {
     this.rootDir = rootDir ?? join(app.getPath('documents'), 'PTNotes')
@@ -39,6 +40,40 @@ export class PTNotesService {
 
   async ensureRoot(): Promise<void> {
     await fs.mkdir(this.rootDir, { recursive: true })
+  }
+
+  async changeRootDir(newRoot: string): Promise<void> {
+    const target = newRoot.trim()
+    if (!target) throw new Error('New root path cannot be empty')
+    if (target === this.rootDir) {
+      throw new Error('New root path is the same as the current root')
+    }
+    if (isInside(target, this.rootDir) || isInside(this.rootDir, target)) {
+      throw new Error('New root path cannot be inside the current root folder')
+    }
+    await fs.mkdir(target, { recursive: true })
+    let entries: import('fs').Dirent[]
+    try {
+      entries = await fs.readdir(this.rootDir, { withFileTypes: true })
+    } catch {
+      entries = []
+    }
+    const dirs = entries.filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+    const registry = entries.find((e) => e.isFile() && e.name === REGISTRY_FILE)
+    for (const entry of dirs) {
+      const dest = join(target, entry.name)
+      if (await this.pathExists(dest)) throw new Error(`A folder already exists at ${dest}`)
+    }
+    if (registry && (await this.pathExists(join(target, registry.name)))) {
+      throw new Error(`A file already exists at ${join(target, registry.name)}`)
+    }
+    for (const entry of dirs) {
+      await fs.rename(join(this.rootDir, entry.name), join(target, entry.name))
+    }
+    if (registry) {
+      await fs.rename(join(this.rootDir, registry.name), join(target, registry.name))
+    }
+    this.rootDir = target
   }
 
   private projectDir(name: string): string {
@@ -66,7 +101,7 @@ export class PTNotesService {
   }
 
   private registryPath(): string {
-    return join(this.rootDir, '.ptnotes-projects.json')
+    return join(this.rootDir, REGISTRY_FILE)
   }
 
   private async loadRegistry(): Promise<string[]> {
@@ -469,6 +504,11 @@ function validateNoteId(id: string): string {
     throw new Error(`Invalid note id: ${id}`)
   }
   return id
+}
+
+function isInside(parent: string, child: string): boolean {
+  const rel = relative(parent, child)
+  return rel !== '' && !rel.startsWith('..') && !rel.startsWith(sep)
 }
 
 function deriveTitle(thread: ChatThread): string {

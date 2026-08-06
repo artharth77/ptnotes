@@ -5,6 +5,8 @@ import icon from '../../resources/icon.png?asset'
 import { PTNotesService } from './service/PTNotesService'
 import { registerProjectIpc, registerNoteIpc, registerTodoIpc, registerChatIpc } from './ipc'
 import { registerAiIpc } from './ipc/ai'
+import { registerSettingsIpc } from './ipc/settings'
+import { SettingsStore } from './settings'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -41,19 +43,22 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.ptnotes.app')
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  const service = new PTNotesService()
+  const settingsStore = new SettingsStore()
+  const settings = await settingsStore.load()
+  const service = new PTNotesService(settings.rootDir)
   registerProjectIpc(service)
   registerNoteIpc(service)
   registerTodoIpc(service)
   registerChatIpc(service)
   registerAiIpc(service)
+  registerSettingsIpc(service, settingsStore)
 
   createWindow()
 

@@ -5,7 +5,7 @@ import { NoteList } from './components/NoteList'
 import { TodoPanel } from './components/TodoPanel'
 import { MarkdownEditor } from './components/MarkdownEditor'
 import { ChatDrawer } from './components/ChatDrawer'
-import { AISettingsDialog } from './components/AISettingsDialog'
+import { SettingsDialog } from './components/SettingsDialog'
 import { PromptModal, Modal } from './components/Modal'
 import { Resizer } from './components/Resizer'
 import type { Tab, ToolCallInfo } from '@shared/types'
@@ -271,7 +271,7 @@ function App(): React.JSX.Element {
         </div>
       )}
 
-      {settingsOpen && <AISettingsDialog />}
+      {settingsOpen && <SettingsDialog />}
       <ConfirmDeleteDialog />
     </div>
   )

@@ -7,6 +7,7 @@ import type {
   ChatThread,
   ConfirmResponse,
   CreateProjectResult,
+  StorageSettings,
   NoteMeta,
   Project,
   Todo
@@ -83,6 +84,12 @@ const api = {
         ipcRenderer.removeListener('ai:stream', listener)
       }
     }
+  },
+  settings: {
+    get: (): Promise<StorageSettings> => ipcRenderer.invoke('settings:get'),
+    chooseRoot: (): Promise<string | null> => ipcRenderer.invoke('settings:chooseRoot'),
+    changeRoot: (newRoot: string): Promise<StorageSettings> =>
+      ipcRenderer.invoke('settings:changeRoot', newRoot)
   }
 }
 
