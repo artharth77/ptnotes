@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type {
   AIProviderConfig,
@@ -9,6 +9,7 @@ import type {
   CreateProjectResult,
   StorageSettings,
   NoteMeta,
+  PdfExtractResult,
   Project,
   Todo
 } from '../shared/types'
@@ -90,6 +91,16 @@ const api = {
     chooseRoot: (): Promise<string | null> => ipcRenderer.invoke('settings:chooseRoot'),
     changeRoot: (newRoot: string): Promise<StorageSettings> =>
       ipcRenderer.invoke('settings:changeRoot', newRoot)
+  },
+  pdf: {
+    getPathForFile: (file: File): string => webUtils.getPathForFile(file),
+    copyToProject: (project: string, sourcePath: string, fileName?: string): Promise<string> =>
+      ipcRenderer.invoke('pdf:copyToProject', project, sourcePath, fileName),
+    extract: (path: string): Promise<PdfExtractResult> => ipcRenderer.invoke('pdf:extract', path),
+    supportsUpload: (): Promise<boolean> => ipcRenderer.invoke('pdf:supportsUpload'),
+    upload: (project: string, path: string, prompt: string): Promise<void> =>
+      ipcRenderer.invoke('pdf:upload', project, path, prompt),
+    reveal: (path: string): Promise<void> => ipcRenderer.invoke('pdf:reveal', path)
   }
 }
 

@@ -18,13 +18,14 @@
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "electron-vite build && electron-builder --mac",
     "build:linux": "electron-vite build && electron-builder --linux",
-    "test": "tsx scripts/test-service.mts && tsx scripts/test-ai.mts && tsx scripts/test-chat.mts && tsx scripts/test-markdown.mts"
+    "test": "tsx scripts/test-service.mts && tsx scripts/test-ai.mts && tsx scripts/test-chat.mts && tsx scripts/test-markdown.mts && tsx scripts/test-pdf.mts"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "cheerio": "^1.2.0",
     "openai": "^7.4.0",
+    "pdf-parse": "^2.4.5",
     "react-markdown": "^10.1.0",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1"

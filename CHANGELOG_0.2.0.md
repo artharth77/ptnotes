@@ -11,7 +11,21 @@
   every project folder, `TODO.md`, `notes/`, `chat/` and the project registry (`.ptnotes-projects.json`)
   to the new location, then persists the root in `userData/ptnotes-settings.json` (chmod 600) via a new
   `SettingsStore`.
+- Drag & drop PDF files into the Chat panel. A `.pdf` dropped on the chat drawer opens an **Extract
+  text** dialog: the PDF is parsed locally with `pdf-parse` and the text is sent to the AI with an
+  editable prompt (default: *"Summarize this PDF, then create a note with the summary and key
+  points."*). The file is always copied to `<project>/files/<slug>.pdf` and surfaced as an attachment
+  chip linked via `pdf:reveal`; if a file with the same name already exists there with the same size
+  and SHA-256 hash, the existing file is reused instead of saving a `-2` copy. Long PDFs are truncated
+  to `MAX_PDF_CHARS` with a warning; scanned/image-only PDFs show a clear "No text found" message.
+- Chat UI: long user messages (over 400 characters) collapse to their head with a "… Show more" button
+  to expand the full text. In assistant messages, tool-call bubbles are now rendered above the
+  response text. `create_note` / `update_note` tool bubbles show a clickable, truncated `📄 <note>` link
+  in the header that opens the note (works while the bubble is collapsed).
 
 ### Fixed
 
+- Creating/renaming a note with a non-Latin title (e.g. Thai) no longer produces an "untitled" note:
+  slugification now keeps Unicode letters and combining marks for all scripts, stripping only Latin
+  combining accents.
 - Chat now displays an error message when the AI server cannot be reached. Previously the first message in a session could fail silently: the `error` stream event could arrive after `chatStreamProject` had already been reset to `null`, so the renderer dropped it. The handler now falls back to the active project so the error is always applied to the last assistant message. See [#1](https://github.com/artharth77/ptnotes/issues/1).

@@ -62,6 +62,7 @@ Run `npm run typecheck` and `npm run lint` after any change.
 └── <ProjectName>/
     ├── notes/*.md          (one file per note)
     ├── TODO.md             (markdown checklist: `- [ ]` / `- [x]`)
+    ├── files/*.pdf         (PDF attachments copied on chat drop)
     └── chat/*.json         (one file per chat session: messages + timestamps)
 ```
 
@@ -84,13 +85,15 @@ src/
 │   │   ├── notes.ts
 │   │   ├── todos.ts
 │   │   ├── chat.ts      # chat history persistence (list/read/write/delete/rename)
-│   │   ├── ai.ts        # chat session mgmt + ai:generateTitle (chat titles)
+│   │   ├── ai.ts        # chat session registry + ai:generateTitle (chat titles)
+│   │   ├── pdf.ts       # PDF attach/extract/upload (drag & drop into chat)
 │   │   └── settings.ts  # settings:get / settings:chooseRoot / settings:changeRoot
 │   └── ai/
 │       ├── client.ts    # OpenAI-compatible client (streaming)
 │       ├── tools.ts     # tool JSON schemas + executors (bind to PTNotesService)
 │       ├── chatSession.ts   # conversation state + tool-call loop
 │       ├── config.ts    # ai-provider.json load/save
+│       ├── pdf.ts       # local text extraction via pdf-parse (MAX_PDF_CHARS truncation)
 │       └── search/
 │           ├── duckduckgo.ts  # web_search (no key)
 │           └── webFetch.ts    # cheerio page extraction
@@ -152,6 +155,7 @@ src/
 - **Chat history:** `list`, `read`, `write`, `delete`, `rename`
 - **AI:** `send` (message → streamed reply), `getConfig`, `setConfig`, `generateTitle`, `stop`, `clear`, `confirmResponse`, `onStreamEvent` (token chunks + tool-call logs + confirm events)
 - **Settings:** `get` (returns `{ rootDir }`), `chooseRoot` (native folder picker), `changeRoot` (moves data + persists + returns new `{ rootDir }`)
+- **PDF:** `copyToProject` (copy dropped PDF into `<project>/files/`), `extract` (local text via pdf-parse → `{ text, pageCount, charCount, truncated }`), `supportsUpload` (returns the AI settings `uploadPdfEnabled` toggle — user-controlled), `upload` (raw PDF via provider Responses API `input_file` — uploads base64 through the Files API, falling back to inline `file_data`), `reveal` (`shell.showItemInFolder`)
 
 ## AI chat feature
 
@@ -185,6 +189,35 @@ ChatPanel (renderer) ──send──▶ Main process
 | `list_todos` | model context |
 | `web_search` | DuckDuckGo HTML search, no API key, Node fetch in main (user-agent header, rate-limit errors surfaced to model) |
 | `web_fetch` | direct fetch + cheerio local parse (strip scripts/styles/nav, extract title + readable text) — fully private |
+
+### PDF attachments (drag & drop into chat)
+
+- Dropping a `.pdf` onto the chat drawer opens an **Extract text** dialog: it parses the PDF locally
+  with `pdf-parse` (`PDFParse.getText()`) and sends the text as a `user` message, appending an optional
+  prompt (default: *"Summarize this PDF, then create a note with the summary and key points."*). A
+  dormant upload path (`ChatSession.uploadPdf` → provider Files API / inline `file_data`) still exists in
+  code but its UI is hidden.
+- The PDF is always copied into `<project>/files/<slug>.pdf` (`copyPdfToProject`) and surfaced as an
+  attachment chip on the user message (linked via `pdf:reveal`). If a file with the same name already
+  exists in `files/` with the same size **and** SHA-256 hash, the existing file is reused instead of
+  saving a new `-2` copy.
+- Long PDFs are truncated to `MAX_PDF_CHARS` with a `truncated` warning; scanned/image PDFs surface a
+  clear "No text found" error.
+- Renderer obtains the dropped file's path via preload `pdf.getPathForFile(file)` using Electron's
+  `webUtils.getPathForFile` (never `File.path`).
+- Drop turns share the same per-project `ChatSession`; `createSessionRegistry` in `ipc/ai.ts` owns the
+  session map + confirm/stop wiring used by `ai:send`.
+
+### Chat UI
+
+- User chat bubbles longer than `USER_MSG_COLLAPSE_LIMIT` (400 chars) show only the head with a
+  "… Show more" button; clicking toggles the full message ("Show less").
+- In an assistant message, tool-call bubbles are rendered **above** the response content.
+- `create_note` / `update_note` tool bubbles show a clickable `📄 <note>` pill in the header (CSS
+  truncated, max-width 180px) that opens the note, whether the bubble is collapsed or expanded.
+  Parsed from the tool result JSON (`{ ok, note }`) via `noteIdFromToolCall`.
+- Note slugs are Unicode-safe: non-Latin scripts (e.g. Thai) keep their characters, including combining
+  marks (`\p{M}`); only Latin combining accents (`\u0300-\u036f`) are stripped (see `slugify`).
 
 ### Settings dialog
 Two-panel dialog (`.settings-layout` with `.settings-nav` + `.settings-pane`):

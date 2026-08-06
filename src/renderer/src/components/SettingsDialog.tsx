@@ -43,6 +43,19 @@ function AiSettingsPane({
           placeholder="gpt-4o-mini"
         />
       </label>
+      <label className="checkbox-label">
+        <input
+          type="checkbox"
+          checked={config.uploadPdfEnabled ?? true}
+          onChange={(e) => setConfig({ ...config, uploadPdfEnabled: e.target.checked })}
+        />
+        <span>Enable PDF upload (Upload mode)</span>
+      </label>
+      <p className="hint">
+        sends the PDF as a raw file attachment to the AI provider. Only enable if your provider
+        accepts file attachments (e.g. OpenAI&apos;s Responses API). If uploads fail, use Extract
+        text mode instead.
+      </p>
     </>
   )
 }

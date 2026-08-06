@@ -1,4 +1,5 @@
 import { promises as fs } from 'fs'
+import { createHash } from 'crypto'
 import { join, relative, sep } from 'path'
 import { app, shell } from 'electron'
 import type {
@@ -86,6 +87,10 @@ export class PTNotesService {
 
   private chatDir(name: string): string {
     return join(this.projectDir(name), 'chat')
+  }
+
+  private filesDir(name: string): string {
+    return join(this.projectDir(name), 'files')
   }
 
   private chatPath(project: string, sessionId: string): string {
@@ -365,6 +370,34 @@ export class PTNotesService {
     await fs.rm(this.chatDir(project), { recursive: true, force: true })
   }
 
+  async copyPdfToProject(project: string, sourcePath: string, fileName?: string): Promise<string> {
+    const dir = this.filesDir(project)
+    await fs.mkdir(dir, { recursive: true })
+    const base = fileName ? slugify(fileName.replace(/\.pdf$/i, '')) : slugify(sourcePath)
+    const name = `${base}.pdf`
+
+    const srcSize = (await fs.stat(sourcePath)).size
+    const srcHash = await hashFile(sourcePath)
+
+    for (const f of await fs.readdir(dir).catch(() => [])) {
+      if (f !== name) continue
+      const p = join(dir, f)
+      const st = await fs.stat(p).catch(() => null)
+      if (st && st.size === srcSize && (await hashFile(p)) === srcHash) {
+        return p
+      }
+    }
+
+    let candidate = name
+    let i = 2
+    while (await this.pathExists(join(dir, candidate))) {
+      candidate = `${base}-${i++}.pdf`
+    }
+    const dest = join(dir, candidate)
+    await fs.copyFile(sourcePath, dest)
+    return dest
+  }
+
   private async uniqueNoteId(project: string, base: string, exclude?: string): Promise<string> {
     let candidate = base
     let i = 2
@@ -509,6 +542,12 @@ function validateNoteId(id: string): string {
 function isInside(parent: string, child: string): boolean {
   const rel = relative(parent, child)
   return rel !== '' && !rel.startsWith('..') && !rel.startsWith(sep)
+}
+
+async function hashFile(path: string): Promise<string> {
+  const hash = createHash('sha256')
+  hash.update(await fs.readFile(path))
+  return hash.digest('hex')
 }
 
 function deriveTitle(thread: ChatThread): string {

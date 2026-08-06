@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useAppStore } from '../store/useAppStore'
 import { MarkdownContent } from './MarkdownContent'
+import { PdfDropModal, type PdfConfirmOptions } from './PdfDropModal'
 import type { ChatMessage, ChatSessionMeta, NoteMeta, Todo } from '@shared/types'
 
 const NO_SESSIONS: ChatSessionMeta[] = []
@@ -65,6 +66,35 @@ function ThinkBox({ content }: { content: string }): React.JSX.Element {
   )
 }
 
+const USER_MSG_COLLAPSE_LIMIT = 400
+
+function noteIdFromToolCall(name: string, result?: string): string | null {
+  if (name !== 'create_note' && name !== 'update_note') return null
+  if (!result) return null
+  try {
+    const data = JSON.parse(result) as { ok?: boolean; note?: string }
+    return data.ok && data.note ? data.note : null
+  } catch {
+    return null
+  }
+}
+
+function UserBubble({ content }: { content: string }): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false)
+  const long = content.length > USER_MSG_COLLAPSE_LIMIT
+  const shown = long && !expanded ? content.slice(0, USER_MSG_COLLAPSE_LIMIT) : content
+  return (
+    <div className="chat-msg-content user-bubble">
+      {shown}
+      {long && (
+        <button className="chat-msg-more" onClick={() => setExpanded(!expanded)}>
+          {expanded ? 'Show less' : '… Show more'}
+        </button>
+      )}
+    </div>
+  )
+}
+
 export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   const activeProject = useAppStore((s) => s.activeProject)
   const activeNoteId = useAppStore((s) => s.activeNoteId)
@@ -124,6 +154,8 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     query: string
   } | null>(null)
   const [mentionIndex, setMentionIndex] = useState(0)
+  const [dragActive, setDragActive] = useState(false)
+  const [pdfDraft, setPdfDraft] = useState<{ name: string; path: string } | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const prevBusy = useRef(false)
@@ -227,6 +259,60 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     }
   }
 
+  function onDragOver(e: React.DragEvent): void {
+    if (chatBusy || !activeProject) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+    setDragActive(true)
+  }
+
+  function onDragLeave(e: React.DragEvent): void {
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return
+    setDragActive(false)
+  }
+
+  function onDrop(e: React.DragEvent): void {
+    e.preventDefault()
+    setDragActive(false)
+    if (chatBusy || !activeProject) return
+    const pdf = Array.from(e.dataTransfer.files).find((f) => f.name.toLowerCase().endsWith('.pdf'))
+    if (!pdf) return
+    const path = window.ptnotes.pdf.getPathForFile(pdf)
+    if (path) setPdfDraft({ name: pdf.name, path })
+  }
+
+  function handlePdfConfirm(opts: PdfConfirmOptions): void {
+    const project = activeProject
+    if (!project) return
+    const isFirstMessage = list.length === 0
+    const userMsg: ChatMessage = {
+      id: uid(),
+      role: 'user',
+      content: opts.content,
+      attachments: [opts.attachment],
+      toolCalls: []
+    }
+    const assistantMsg: ChatMessage = { id: uid(), role: 'assistant', content: '', toolCalls: [] }
+    appendChatMessage(project, userMsg)
+    appendChatMessage(project, assistantMsg)
+    if (isFirstMessage) {
+      setChatTitle(project, deriveLocalTitle(opts.attachment.name))
+    }
+    setInput('')
+    setMention(null)
+    setChatBusy(true)
+    setChatStreamProject(project)
+    void (async () => {
+      try {
+        await window.ptnotes.ai.send(project, opts.content)
+      } finally {
+        setChatBusy(false)
+        setChatStreamProject(null)
+        await saveCurrent(project)
+      }
+    })()
+  }
+
   async function refineTitle(project: string, text: string): Promise<void> {
     const sessionId = getActiveSessionId(project)
     if (!sessionId) return
@@ -305,7 +391,13 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   }
 
   return (
-    <aside className="chat-drawer" style={width ? { width } : undefined}>
+    <aside
+      className="chat-drawer"
+      style={width ? { width } : undefined}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
       <div className="chat-header">
         <span className="chat-header-title" title={chatTitle || 'AI Assistant'}>
           {chatTitle || 'AI Assistant'}
@@ -433,6 +525,74 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
         {list.map((m) => (
           <div key={m.id} className={`chat-msg ${m.role}`}>
             <div className="chat-msg-label">{m.role === 'user' ? 'You' : 'Assistant'}</div>
+            {m.attachments && m.attachments.length > 0 && (
+              <div className="chat-attachments">
+                {(m.attachments ?? []).map((a) => (
+                  <button
+                    key={a.id}
+                    className="chat-attachment"
+                    title={a.savedPath}
+                    onClick={() => void window.ptnotes.pdf.reveal(a.savedPath)}
+                  >
+                    <span className="chat-attachment-icon">📎</span>
+                    <span className="chat-attachment-name">{a.name}</span>
+                    {typeof a.pageCount === 'number' && (
+                      <span className="chat-attachment-meta">{a.pageCount} pages</span>
+                    )}
+                    <span className="chat-attachment-mode">
+                      {a.mode === 'extract' ? 'Extracted' : 'Uploaded'}
+                    </span>
+                    {a.truncated && (
+                      <span
+                        className="chat-attachment-warn"
+                        title="PDF was truncated; the tail was cut off"
+                      >
+                        ⚠
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+            {m.role === 'assistant' && (m.toolCalls?.length ?? 0) > 0 && (
+              <div className="chat-tools">
+                {(m.toolCalls ?? []).map((tc) => (
+                  <div key={tc.id} className={`chat-tool ${tc.ok ? 'ok' : 'fail'}`}>
+                    <div className="chat-tool-header">
+                      <button
+                        className="chat-tool-toggle-btn"
+                        onClick={() =>
+                          setExpandedTools((prev) => ({ ...prev, [tc.id]: !prev[tc.id] }))
+                        }
+                      >
+                        <span className="chat-tool-name">
+                          {tc.ok ? '🛠' : '⚠️'} {tc.name}
+                        </span>
+                        <span className="chat-tool-toggle">{expandedTools[tc.id] ? '▲' : '▼'}</span>
+                      </button>
+                      {(() => {
+                        const noteId = noteIdFromToolCall(tc.name, tc.result)
+                        return noteId ? (
+                          <button
+                            className="chat-tool-note"
+                            title={`Open note: ${noteId}`}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              void openNote(noteId)
+                            }}
+                          >
+                            📄 {noteId}
+                          </button>
+                        ) : null
+                      })()}
+                    </div>
+                    {expandedTools[tc.id] && tc.result && (
+                      <pre className="chat-tool-result">{tc.result}</pre>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
             {m.content &&
               splitContent(m.content).map((part, i) => {
                 if (part.type === 'think') {
@@ -448,34 +608,15 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                     </div>
                   )
                 }
+                if (m.role === 'user') {
+                  return <UserBubble key={i} content={part.content} />
+                }
                 return (
                   <div key={i} className={`chat-msg-content ${m.error ? 'error' : ''}`}>
                     {part.content}
                   </div>
                 )
               })}
-            {m.role === 'assistant' && (m.toolCalls?.length ?? 0) > 0 && (
-              <div className="chat-tools">
-                {(m.toolCalls ?? []).map((tc) => (
-                  <div key={tc.id} className={`chat-tool ${tc.ok ? 'ok' : 'fail'}`}>
-                    <button
-                      className="chat-tool-header"
-                      onClick={() =>
-                        setExpandedTools((prev) => ({ ...prev, [tc.id]: !prev[tc.id] }))
-                      }
-                    >
-                      <span className="chat-tool-name">
-                        {tc.ok ? '🛠' : '⚠️'} {tc.name}
-                      </span>
-                      <span className="chat-tool-toggle">{expandedTools[tc.id] ? '▲' : '▼'}</span>
-                    </button>
-                    {expandedTools[tc.id] && tc.result && (
-                      <pre className="chat-tool-result">{tc.result}</pre>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
             {chatBusy &&
               m.id === list[list.length - 1]?.id &&
               m.role === 'assistant' &&
@@ -537,6 +678,23 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
           </button>
         )}
       </div>
+
+      {dragActive && (
+        <div className="chat-drop-overlay">
+          <span className="chat-drop-icon">📄</span>
+          <span>Drop PDF to attach</span>
+        </div>
+      )}
+
+      {pdfDraft && activeProject && (
+        <PdfDropModal
+          project={activeProject}
+          fileName={pdfDraft.name}
+          path={pdfDraft.path}
+          onClose={() => setPdfDraft(null)}
+          onConfirm={handlePdfConfirm}
+        />
+      )}
     </aside>
   )
 }

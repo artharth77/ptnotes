@@ -1,5 +1,6 @@
 import OpenAI from 'openai'
 import { randomUUID } from 'crypto'
+import { toFile } from 'openai/uploads'
 import type { AIProviderConfig, ChatStreamEvent } from '@shared/types'
 import { tools, type ToolContext } from './tools'
 import { createClient } from './client'
@@ -88,6 +89,107 @@ export class ChatSession {
       if (this.stopped) return
       const message = err instanceof Error ? err.message : String(err)
       this.emit({ type: 'error', error: message })
+    }
+  }
+
+  /** Send a PDF as a raw file attachment via the provider's Responses API (single-turn, no tools). */
+  async uploadPdf(prompt: string, filename: string, base64: string): Promise<void> {
+    this.stopped = false
+    this.abortController = undefined
+    this.config = await this.getConfig()
+    if (!this.config.apiKey && !isLocalEndpoint(this.config.baseUrl)) {
+      this.emit({
+        type: 'error',
+        error: 'AI is not configured. Open AI settings to set your API key.'
+      })
+      return
+    }
+    if (!this.config.model) {
+      this.emit({ type: 'error', error: 'AI model is not configured.' })
+      return
+    }
+
+    const cleanPrompt = prompt.trim() || 'Summarize this PDF and highlight its key points.'
+    const date = new Date().toISOString().slice(0, 10)
+    this.ensureSystemPrompt(date)
+    this.messages.push({ role: 'user', content: cleanPrompt })
+
+    const client = createClient(this.config)
+    const messageId = randomUUID()
+    this.abortController = new AbortController()
+    const signal = this.abortController.signal
+
+    const buffer = Buffer.from(base64.replace(/^data:[^,]+;base64,/, ''), 'base64')
+    let filePart: {
+      type: 'input_file'
+      filename: string
+      file_id?: string
+      file_data?: string
+    } = {
+      type: 'input_file',
+      filename,
+      file_data: `data:application/pdf;base64,${buffer.toString('base64')}`
+    }
+    try {
+      const uploaded = await client.files.create({
+        file: await toFile(buffer, filename),
+        purpose: 'assistants'
+      })
+      filePart = { type: 'input_file', filename, file_id: uploaded.id }
+    } catch {
+      // provider without a Files API: fall back to inline base64 in file_data
+    }
+
+    try {
+      const stream = await client.responses.create(
+        {
+          model: this.config.model,
+          instructions: buildSystemPrompt(this.ctx.activeProject, date),
+          input: [
+            {
+              role: 'user',
+              content: [{ type: 'input_text', text: cleanPrompt }, filePart]
+            }
+          ],
+          stream: true
+        },
+        { signal }
+      )
+
+      let content = ''
+      let started = false
+      for await (const evt of stream) {
+        if (this.stopped) return
+        if (evt.type === 'response.output_text.delta') {
+          if (!started) {
+            started = true
+            this.emit({ type: 'message-start', messageId })
+          }
+          content += evt.delta
+          this.emit({ type: 'content', messageId, content: evt.delta })
+        }
+        if (evt.type === 'response.failed') {
+          const msg = evt.response.error?.message
+          this.emit({
+            type: 'error',
+            error: `${msg || 'The provider rejected the PDF upload.'} — try Extract text mode instead.`
+          })
+          return
+        }
+        if (evt.type === 'response.completed') {
+          break
+        }
+      }
+      if (this.stopped) return
+      this.messages.push({ role: 'assistant', content: content || '…' })
+      this.emit({ type: 'message-end', messageId })
+    } catch (err) {
+      if (this.stopped) return
+      const message = err instanceof Error ? err.message : String(err)
+      this.emit({
+        type: 'error',
+        error: `${message} — try Extract text mode instead.`
+      })
     }
   }
 
