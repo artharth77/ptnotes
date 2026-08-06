@@ -2,6 +2,7 @@ import type { PTNotesService } from '../service/PTNotesService'
 import { duckDuckGoSearch } from './search/duckduckgo'
 import { fetchWebPage } from './search/webFetch'
 import { slugify } from '../utils/slug'
+import { extractPdf } from './pdf'
 import type { ConfirmRequest } from '@shared/types'
 
 export interface ToolContext {
@@ -163,6 +164,59 @@ export const tools: PTTool[] = [
       if (!found) return JSON.stringify({ ok: false, error: `Note "${title}" not found` })
       const content = await ctx.service.readNote(project, found.id)
       return JSON.stringify({ ok: true, project, note: found.id, content })
+    }
+  },
+  {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'read_file',
+        description:
+          'Read the text content of a PDF file attached to a project (files live in the project files folder, referenced as `file:<name>`). Extracts the text locally and returns it, so the user does not need to drag and drop the file again.',
+        parameters: {
+          type: 'object',
+          properties: {
+            project: {
+              type: 'string',
+              description: 'Project name. Defaults to the current project.'
+            },
+            name: { type: 'string', description: 'Name of the file, e.g. report.pdf' }
+          },
+          required: ['name']
+        }
+      }
+    },
+    async execute(args, ctx) {
+      const project = projectOf(args, ctx)
+      const name = String(args.name ?? '').trim()
+      if (!name) return JSON.stringify({ ok: false, error: 'No file name provided' })
+      const path = await ctx.service.projectFilePath(project, name)
+      if (!path) {
+        const files = await ctx.service.listFiles(project)
+        return JSON.stringify({
+          ok: false,
+          error: `File "${name}" not found in this project. Available files: ${
+            files.join(', ') || '(none)'
+          }`
+        })
+      }
+      try {
+        const { text, pageCount, charCount, truncated } = await extractPdf(path)
+        return JSON.stringify({
+          ok: true,
+          project,
+          file: name,
+          pageCount,
+          charCount,
+          truncated,
+          text
+        })
+      } catch (err) {
+        return JSON.stringify({
+          ok: false,
+          error: `Could not read "${name}": ${err instanceof Error ? err.message : String(err)}`
+        })
+      }
     }
   },
   {

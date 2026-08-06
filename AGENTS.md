@@ -51,6 +51,7 @@ Run `npm run typecheck` and `npm run lint` after any change.
 | Chat titles | Hybrid: local heuristic from first message immediately, refined by a background AI completion; manual rename supported; history popup shows title + message count |
 | Chat note mention | `@` opens note list → inserts `note:<notename>` → AI calls `read_note` |
 | Chat todo mention | `!` opens todo list → inserts `todo:<todotext>` (filterable by text) |
+| Chat file mention | `#` opens project file list (`files:list` → `<project>/files/*.pdf`) → inserts `file:<filename>` → AI calls `read_file` (local pdf-parse extraction) |
 | Chat response rendering | Markdown via `react-markdown` + `remark-gfm` + `remark-breaks` (raw HTML escaped → XSS-safe) |
 | Web search | DuckDuckGo only (free, no API key) |
 | Page reading | Local cheerio parsing (private, no third-party service) |
@@ -62,6 +63,7 @@ Run `npm run typecheck` and `npm run lint` after any change.
 └── <ProjectName>/
     ├── notes/*.md          (one file per note)
     ├── TODO.md             (markdown checklist: `- [ ]` / `- [x]`)
+    ├── files/*.pdf         (PDF attachments copied on chat drop)
     └── chat/*.json         (one file per chat session: messages + timestamps)
 ```
 
@@ -84,13 +86,15 @@ src/
 │   │   ├── notes.ts
 │   │   ├── todos.ts
 │   │   ├── chat.ts      # chat history persistence (list/read/write/delete/rename)
-│   │   ├── ai.ts        # chat session mgmt + ai:generateTitle (chat titles)
+│   │   ├── ai.ts        # chat session registry + ai:generateTitle (chat titles)
+│   │   ├── pdf.ts       # PDF attach/extract/upload (drag & drop into chat)
 │   │   └── settings.ts  # settings:get / settings:chooseRoot / settings:changeRoot
 │   └── ai/
 │       ├── client.ts    # OpenAI-compatible client (streaming)
 │       ├── tools.ts     # tool JSON schemas + executors (bind to PTNotesService)
 │       ├── chatSession.ts   # conversation state + tool-call loop
 │       ├── config.ts    # ai-provider.json load/save
+│       ├── pdf.ts       # local text extraction via pdf-parse (MAX_PDF_CHARS truncation)
 │       └── search/
 │           ├── duckduckgo.ts  # web_search (no key)
 │           └── webFetch.ts    # cheerio page extraction
@@ -152,6 +156,8 @@ src/
 - **Chat history:** `list`, `read`, `write`, `delete`, `rename`
 - **AI:** `send` (message → streamed reply), `getConfig`, `setConfig`, `generateTitle`, `stop`, `clear`, `confirmResponse`, `onStreamEvent` (token chunks + tool-call logs + confirm events)
 - **Settings:** `get` (returns `{ rootDir }`), `chooseRoot` (native folder picker), `changeRoot` (moves data + persists + returns new `{ rootDir }`)
+- **PDF:** `copyToProject` (copy dropped PDF into `<project>/files/`), `extract` (local text via pdf-parse → `{ text, pageCount, charCount, truncated }`), `supportsUpload` (returns the AI settings `uploadPdfEnabled` toggle — user-controlled), `upload` (raw PDF via provider Responses API `input_file` — uploads base64 through the Files API, falling back to inline `file_data`), `reveal` (`shell.showItemInFolder`)
+- **Files:** `list` (`<project>/files/*.pdf` for the chat `#` picker)
 
 ## AI chat feature
 
@@ -169,8 +175,11 @@ ChatPanel (renderer) ──send──▶ Main process
 - Session is kept in memory per project (`sessions` map) so closing the drawer and reopening continues the same conversation.
 - System prompt is sent when a session starts; it includes the active project and instructs the AI that a `note:<notename>` message means it must call `read_note` for that note.
 - A `!` todo mention inserts `todo:<todotext>` which is sent to the model as-is.
+- A `#` file mention inserts `file:<filename>`; the system prompt instructs the AI that a
+  `file:<filename>` message means it must call `read_file` (extracts the PDF text locally via
+  `extractPdf`) before responding — so previously dropped PDFs can be reused without re-dragging.
 
-### Tools (12 total)
+### Tools (13 total)
 | Tool | Action |
 |---|---|
 | `create_note` | new `.md` in project `notes/` |
@@ -183,8 +192,36 @@ ChatPanel (renderer) ──send──▶ Main process
 | `toggle_todo` | toggle a checklist item |
 | `delete_todo` | remove an item |
 | `list_todos` | model context |
+| `read_file` | extract text of a project PDF attachment locally via `extractPdf` |
 | `web_search` | DuckDuckGo HTML search, no API key, Node fetch in main (user-agent header, rate-limit errors surfaced to model) |
 | `web_fetch` | direct fetch + cheerio local parse (strip scripts/styles/nav, extract title + readable text) — fully private |
+
+### PDF attachments (drag & drop into chat)
+
+- Dropping a `.pdf` onto the chat drawer copies it silently into `<project>/files/<slug>.pdf`
+  (`copyPdfToProject`) with no dialog, refreshes the file list, and inserts `file:<filename>` into
+  the chat input so the user can reference the dropped PDF without sending anything to the AI. Chat
+  messages containing `file:<filename>` are handled by the `read_file` tool (local `pdf-parse`
+  extraction).
+- If a file with the same name already exists in `files/` with the same size **and** SHA-256 hash,
+  the existing file is reused instead of saving a new `-2` copy.
+- Long PDFs are truncated to `MAX_PDF_CHARS` with a `truncated` warning; scanned/image PDFs surface a
+  clear "No text found" error.
+- Renderer obtains the dropped file's path via preload `pdf.getPathForFile(file)` using Electron's
+  `webUtils.getPathForFile` (never `File.path`).
+- Drop turns share the same per-project `ChatSession`; `createSessionRegistry` in `ipc/ai.ts` owns the
+  session map + confirm/stop wiring used by `ai:send`.
+
+### Chat UI
+
+- User chat bubbles longer than `USER_MSG_COLLAPSE_LIMIT` (400 chars) show only the head with a
+  "… Show more" button; clicking toggles the full message ("Show less").
+- In an assistant message, tool-call bubbles are rendered **above** the response content.
+- `create_note` / `update_note` tool bubbles show a clickable `📄 <note>` pill in the header (CSS
+  truncated, max-width 180px) that opens the note, whether the bubble is collapsed or expanded.
+  Parsed from the tool result JSON (`{ ok, note }`) via `noteIdFromToolCall`.
+- Note slugs are Unicode-safe: non-Latin scripts (e.g. Thai) keep their characters, including combining
+  marks (`\p{M}`); only Latin combining accents (`\u0300-\u036f`) are stripped (see `slugify`).
 
 ### Settings dialog
 Two-panel dialog (`.settings-layout` with `.settings-nav` + `.settings-pane`):
@@ -206,7 +243,7 @@ Two-panel dialog (`.settings-layout` with `.settings-nav` + `.settings-pane`):
 
 - DuckDuckGo scraping can be rate-limited; errors are surfaced to the model so it can retry/adapt.
 - Bing Search API retired Aug 2025 and Brave dropped its free tier — avoid both.
-- Tool count is 12; keeping it near ~10 avoids model tool-selection degradation.
+- Tool count is 13; keeping it near ~10 avoids model tool-selection degradation.
 - API key must never be committed or bundled into the renderer.
 - The persistent project registry only records known project names/paths — it never stores file contents; the folder on disk remains the source of truth.
 - `note:<notename>` uses the note's slugified file name (as shown in the Notes list), so the `@` picker should insert the exact list name.
