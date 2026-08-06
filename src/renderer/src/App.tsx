@@ -207,11 +207,18 @@ function App(): React.JSX.Element {
           }
           break
         case 'error':
-          if (project) {
-            state.updateLastAssistantMessage(project, (m) => ({ ...m, error: true }))
+          {
+            const target = project ?? state.activeProject
+            if (target && evt.error) {
+              state.updateLastAssistantMessage(target, (m) => ({
+                ...m,
+                error: true,
+                content: m.content ? `${m.content}\n\n⚠️ ${evt.error}` : evt.error!
+              }))
+            }
+            state.setChatBusy(false)
+            state.setChatStreamProject(null)
           }
-          state.setChatBusy(false)
-          state.setChatStreamProject(null)
           break
         case 'confirm':
           if (evt.confirm) {
