@@ -198,15 +198,13 @@ ChatPanel (renderer) ──send──▶ Main process
 
 ### PDF attachments (drag & drop into chat)
 
-- Dropping a `.pdf` onto the chat drawer opens an **Extract text** dialog: it parses the PDF locally
-  with `pdf-parse` (`PDFParse.getText()`) and sends the text as a `user` message, appending an optional
-  prompt (default: *"Summarize this PDF, then create a note with the summary and key points."*). A
-  dormant upload path (`ChatSession.uploadPdf` → provider Files API / inline `file_data`) still exists in
-  code but its UI is hidden.
-- The PDF is always copied into `<project>/files/<slug>.pdf` (`copyPdfToProject`) and surfaced as an
-  attachment chip on the user message (linked via `pdf:reveal`). If a file with the same name already
-  exists in `files/` with the same size **and** SHA-256 hash, the existing file is reused instead of
-  saving a new `-2` copy.
+- Dropping a `.pdf` onto the chat drawer copies it silently into `<project>/files/<slug>.pdf`
+  (`copyPdfToProject`) with no dialog, refreshes the file list, and inserts `file:<filename>` into
+  the chat input so the user can reference the dropped PDF without sending anything to the AI. Chat
+  messages containing `file:<filename>` are handled by the `read_file` tool (local `pdf-parse`
+  extraction).
+- If a file with the same name already exists in `files/` with the same size **and** SHA-256 hash,
+  the existing file is reused instead of saving a new `-2` copy.
 - Long PDFs are truncated to `MAX_PDF_CHARS` with a `truncated` warning; scanned/image PDFs surface a
   clear "No text found" error.
 - Renderer obtains the dropped file's path via preload `pdf.getPathForFile(file)` using Electron's

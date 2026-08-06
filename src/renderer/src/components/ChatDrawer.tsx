@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useAppStore } from '../store/useAppStore'
 import { MarkdownContent } from './MarkdownContent'
-import { PdfDropModal, type PdfConfirmOptions } from './PdfDropModal'
 import type { ChatMessage, ChatSessionMeta, NoteMeta, Todo } from '@shared/types'
 
 const NO_SESSIONS: ChatSessionMeta[] = []
@@ -157,7 +156,6 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   } | null>(null)
   const [mentionIndex, setMentionIndex] = useState(0)
   const [dragActive, setDragActive] = useState(false)
-  const [pdfDraft, setPdfDraft] = useState<{ name: string; path: string } | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const prevBusy = useRef(false)
@@ -291,42 +289,31 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   function onDrop(e: React.DragEvent): void {
     e.preventDefault()
     setDragActive(false)
-    if (chatBusy || !activeProject) return
+    const project = activeProject
+    if (chatBusy || !project) return
     const pdf = Array.from(e.dataTransfer.files).find((f) => f.name.toLowerCase().endsWith('.pdf'))
     if (!pdf) return
     const path = window.ptnotes.pdf.getPathForFile(pdf)
-    if (path) setPdfDraft({ name: pdf.name, path })
-  }
-
-  function handlePdfConfirm(opts: PdfConfirmOptions): void {
-    const project = activeProject
-    if (!project) return
-    const isFirstMessage = list.length === 0
-    const userMsg: ChatMessage = {
-      id: uid(),
-      role: 'user',
-      content: opts.content,
-      attachments: [opts.attachment],
-      toolCalls: []
-    }
-    const assistantMsg: ChatMessage = { id: uid(), role: 'assistant', content: '', toolCalls: [] }
-    appendChatMessage(project, userMsg)
-    appendChatMessage(project, assistantMsg)
-    if (isFirstMessage) {
-      setChatTitle(project, deriveLocalTitle(opts.attachment.name))
-    }
-    setInput('')
-    setMention(null)
-    setChatBusy(true)
-    setChatStreamProject(project)
-    void refreshFiles()
+    if (!path) return
     void (async () => {
       try {
-        await window.ptnotes.ai.send(project, opts.content)
-      } finally {
-        setChatBusy(false)
-        setChatStreamProject(null)
-        await saveCurrent(project)
+        const savedPath = await window.ptnotes.pdf.copyToProject(project, path, pdf.name)
+        await refreshFiles()
+        const idx = Math.max(savedPath.lastIndexOf('/'), savedPath.lastIndexOf('\\'))
+        const fileName = idx === -1 ? savedPath : savedPath.slice(idx + 1)
+        const token = `file:${fileName} `
+        setInput((prev) => (prev ? `${prev.trimEnd()} ${token}` : token))
+        setMention(null)
+        requestAnimationFrame(() => {
+          const el = textareaRef.current
+          if (el) {
+            el.focus()
+            const pos = el.value.length
+            el.setSelectionRange(pos, pos)
+          }
+        })
+      } catch (err) {
+        console.error('Failed to add PDF to project:', err)
       }
     })()
   }
@@ -537,7 +524,10 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
             <p className="chat-empty-project">
               Working on: <strong>{activeProject}</strong>
             </p>
-            <p className="chat-empty-hint">Type @ to reference a note, ! to reference a todo.</p>
+            <p className="chat-empty-hint">
+              Type @ to reference a note, ! to reference a todo, # to reference a file. Drop a PDF
+              to add it to the project&apos;s files.
+            </p>
           </div>
         )}
         {list.map((m) => (
@@ -702,18 +692,8 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
       {dragActive && (
         <div className="chat-drop-overlay">
           <span className="chat-drop-icon">📄</span>
-          <span>Drop PDF to attach</span>
+          <span>Drop PDF to add to project files</span>
         </div>
-      )}
-
-      {pdfDraft && activeProject && (
-        <PdfDropModal
-          project={activeProject}
-          fileName={pdfDraft.name}
-          path={pdfDraft.path}
-          onClose={() => setPdfDraft(null)}
-          onConfirm={handlePdfConfirm}
-        />
       )}
     </aside>
   )

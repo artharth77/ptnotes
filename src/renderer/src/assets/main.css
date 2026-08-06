@@ -1188,6 +1188,11 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
+}
+
+.chat-header-actions .btn {
+  white-space: nowrap;
 }
 
 .chat-history-wrap {
@@ -1627,6 +1632,9 @@ body {
   padding: 6px 10px;
   font-weight: 600;
   color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .chat-tool-toggle {
