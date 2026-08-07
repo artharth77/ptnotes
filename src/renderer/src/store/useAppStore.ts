@@ -27,6 +27,7 @@ interface AppState {
   chatStreamProject: string | null
   confirmRequest: ConfirmRequest | null
   settingsOpen: boolean
+  settingsCategory: 'storage' | 'ai'
   sidebarVisible: boolean
   loading: boolean
 
@@ -55,6 +56,8 @@ interface AppState {
   setChatStreamProject: (project: string | null) => void
   setConfirmRequest: (req: ConfirmRequest | null) => void
   setSettingsOpen: (open: boolean) => void
+  setSettingsCategory: (category: 'storage' | 'ai') => void
+  openSettings: (category?: 'storage' | 'ai') => void
   setSidebarVisible: (visible: boolean) => void
   newChat: (project: string) => Promise<void>
   openChat: (project: string, sessionId: string) => Promise<void>
@@ -83,6 +86,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   chatStreamProject: null,
   confirmRequest: null,
   settingsOpen: false,
+  settingsCategory: 'storage',
   sidebarVisible: true,
   loading: false,
 
@@ -367,6 +371,14 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setSettingsOpen(settingsOpen) {
     set({ settingsOpen })
+  },
+
+  setSettingsCategory(settingsCategory) {
+    set({ settingsCategory })
+  },
+
+  openSettings(category) {
+    set({ settingsOpen: true, settingsCategory: category ?? get().settingsCategory })
   },
 
   setSidebarVisible(sidebarVisible) {

@@ -3,8 +3,6 @@ import { useAppStore } from '../store/useAppStore'
 import { Modal, TextField } from './Modal'
 import type { AIProviderConfig, StorageSettings } from '@shared/types'
 
-type SettingsCategory = 'storage' | 'ai'
-
 function AiSettingsPane({
   config,
   setConfig
@@ -179,7 +177,8 @@ function AiSettingsPane({
 export function SettingsDialog(): React.JSX.Element {
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen)
   const changeRoot = useAppStore((s) => s.changeRoot)
-  const [category, setCategory] = useState<SettingsCategory>('storage')
+  const category = useAppStore((s) => s.settingsCategory)
+  const setSettingsCategory = useAppStore((s) => s.setSettingsCategory)
   const [storage, setStorage] = useState<StorageSettings | null>(null)
   const [aiConfig, setAiConfig] = useState<AIProviderConfig | null>(null)
   const [saving, setSaving] = useState(false)
@@ -243,11 +242,14 @@ export function SettingsDialog(): React.JSX.Element {
         <nav className="settings-nav">
           <button
             className={category === 'storage' ? 'active' : ''}
-            onClick={() => setCategory('storage')}
+            onClick={() => setSettingsCategory('storage')}
           >
             Storage
           </button>
-          <button className={category === 'ai' ? 'active' : ''} onClick={() => setCategory('ai')}>
+          <button
+            className={category === 'ai' ? 'active' : ''}
+            onClick={() => setSettingsCategory('ai')}
+          >
             AI Settings
           </button>
         </nav>

@@ -1430,6 +1430,31 @@ body {
   margin-top: 24px;
 }
 
+.chat-ai-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 14px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  text-align: center;
+}
+
+.chat-ai-hint-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.chat-ai-hint-text {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
 .chat-empty-project {
   font-size: 12px;
   color: var(--text-faint);
