@@ -62,7 +62,8 @@ const origLoad = (Module as { _load: (r: string, p: unknown, m: boolean) => unkn
 await fs.rm(ROOT, { recursive: true, force: true })
 
 const { PTNotesService } = await import('../src/main/service/PTNotesService')
-const { extractPdf, MAX_PDF_CHARS } = await import('../src/main/ai/pdf')
+const { extractPdf, readFileAsText, detectFileKind, MAX_PDF_CHARS } =
+  await import('../src/main/ai/reader')
 const { ChatSession } = await import('../src/main/ai/chatSession')
 
 const service = new PTNotesService(ROOT)
@@ -86,29 +87,109 @@ assert.equal(res.truncated, true)
 assert.equal(res.text.length, MAX_PDF_CHARS)
 assert.equal(res.charCount, MAX_PDF_CHARS + 500)
 
-// ---- extractPdf: invalid magic bytes ----
-const badPath = `${ROOT}/not-a-pdf.txt`
-await fs.writeFile(badPath, 'this is not a pdf')
-await assert.rejects(() => extractPdf(badPath), /not a valid PDF/)
+const mdPath = `${ROOT}/notes.md`
+await fs.writeFile(mdPath, '# Notes\n\nSome markdown content')
+const binPath = `${ROOT}/image.png`
+await fs.writeFile(binPath, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02]))
+
+// ---- detectFileKind: content-based, not extension-based ----
+assert.equal(await detectFileKind(pdfPath), 'pdf', 'PDF magic bytes detected')
+assert.equal(await detectFileKind(mdPath), 'text', 'markdown is text')
+assert.equal(
+  await detectFileKind(binPath),
+  'unsupported',
+  'binary without PDF magic is unsupported'
+)
+
+// ---- readFileAsText: rejects non-PDF binary ----
+await assert.rejects(() => readFileAsText(binPath), /binary file/)
+
+// ---- readFileAsText: markdown / plain text ----
+let res2 = await readFileAsText(mdPath)
+assert.equal(res2.text, '# Notes\n\nSome markdown content')
+assert.equal(res2.pageCount, 0)
+assert.equal(res2.charCount, 30)
+assert.equal(res2.truncated, false)
+
+const longTxt = 'x'.repeat(MAX_PDF_CHARS + 100)
+const txtPath = `${ROOT}/long.txt`
+await fs.writeFile(txtPath, longTxt)
+res2 = await readFileAsText(txtPath)
+assert.equal(res2.truncated, true)
+assert.equal(res2.text.length, MAX_PDF_CHARS)
+assert.equal(res2.charCount, MAX_PDF_CHARS + 100)
+
+// ---- copyFileToProject: .md / .txt ----
+const mdSrc = `${ROOT}/My Notes.md`
+await fs.writeFile(mdSrc, '# Hello')
+const mdSaved = await service.copyFileToProject('Test', mdSrc, 'My Notes.md')
+assert.equal(mdSaved, `${ROOT}/Test/files/my-notes.md`)
+assert.equal(await fs.readFile(mdSaved, 'utf8'), '# Hello')
+const mdSaved2 = await service.copyFileToProject('Test', mdSrc, 'My Notes.md')
+assert.equal(mdSaved2, mdSaved, 'identical md reuses existing copy')
+const txtSrc = `${ROOT}/readme.txt`
+await fs.writeFile(txtSrc, 'plain text')
+const txtSaved = await service.copyFileToProject('Test', txtSrc, 'readme.txt')
+assert.equal(txtSaved, `${ROOT}/Test/files/readme.txt`)
+await assert.rejects(() => service.copyFileToProject('Test', binPath, 'image.png'), /binary file/)
+assert.ok((await service.listFiles('Test')).includes('my-notes.md'), 'listFiles surfaces .md')
+assert.ok((await service.listFiles('Test')).includes('readme.txt'), 'listFiles surfaces .txt')
+
+// ---- copyFileToProject: JSON / YAML / log text formats ----
+const jsonSrc = `${ROOT}/data.json`
+await fs.writeFile(jsonSrc, '{"a": 1}')
+const jsonSaved = await service.copyFileToProject('Test', jsonSrc, 'data.json')
+assert.equal(jsonSaved, `${ROOT}/Test/files/data.json`, '.json preserved')
+const yamlSrc = `${ROOT}/config.yaml`
+await fs.writeFile(yamlSrc, 'a: 1\nb: two')
+const yamlSaved = await service.copyFileToProject('Test', yamlSrc, 'config.yaml')
+assert.equal(yamlSaved, `${ROOT}/Test/files/config.yaml`, '.yaml preserved')
+const ymlSrc = `${ROOT}/k8s.yml`
+await fs.writeFile(ymlSrc, 'apiVersion: v1')
+const ymlSaved = await service.copyFileToProject('Test', ymlSrc, 'k8s.yml')
+assert.equal(ymlSaved, `${ROOT}/Test/files/k8s.yml`, '.yml preserved')
+const logSrc = `${ROOT}/server.log`
+await fs.writeFile(logSrc, 'INFO started\nWARN retry')
+const logSaved = await service.copyFileToProject('Test', logSrc, 'server.log')
+assert.equal(logSaved, `${ROOT}/Test/files/server.log`, '.log preserved')
+
+// a text file with an unknown extension is still accepted (no extension whitelist)
+const datSrc = `${ROOT}/data.csv`
+await fs.writeFile(datSrc, 'a,b,c\n1,2,3')
+const datSaved = await service.copyFileToProject('Test', datSrc, 'data.csv')
+assert.equal(datSaved, `${ROOT}/Test/files/data.csv`, 'unknown text extension accepted')
+
+// a PDF renamed with a .txt extension is still detected as a PDF by content
+const pdfAsTxt = `${ROOT}/renamed.txt`
+await fs.writeFile(pdfAsTxt, '%PDF-1.4 fake body')
+const pdfAsTxtSaved = await service.copyFileToProject('Test', pdfAsTxt, 'renamed.txt')
+assert.equal(pdfAsTxtSaved, `${ROOT}/Test/files/renamed.pdf`, 'PDF content wins over .txt name')
+
+// listFiles surfaces the new text formats
+const fileList = await service.listFiles('Test')
+assert.ok(fileList.includes('data.json'), 'listFiles surfaces .json')
+assert.ok(fileList.includes('config.yaml'), 'listFiles surfaces .yaml')
+assert.ok(fileList.includes('k8s.yml'), 'listFiles surfaces .yml')
+assert.ok(fileList.includes('server.log'), 'listFiles surfaces .log')
 
 // ---- copyPdfToProject ----
 const src = `${ROOT}/My Report.pdf`
 await fs.writeFile(src, '%PDF-1.4 source')
-const saved1 = await service.copyPdfToProject('Test', src, 'My Report.pdf')
+const saved1 = await service.copyFileToProject('Test', src, 'My Report.pdf')
 assert.equal(saved1, `${ROOT}/Test/files/my-report.pdf`)
 assert.equal(await fs.readFile(saved1, 'utf8'), '%PDF-1.4 source')
-const saved2 = await service.copyPdfToProject('Test', src, 'My Report.pdf')
+const saved2 = await service.copyFileToProject('Test', src, 'My Report.pdf')
 assert.equal(saved2, saved1, 'identical upload (same name+size+hash) reuses existing file')
 await fs.writeFile(src, '%PDF-1.4 changed')
-const saved3 = await service.copyPdfToProject('Test', src, 'My Report.pdf')
+const saved3 = await service.copyFileToProject('Test', src, 'My Report.pdf')
 assert.equal(saved3, `${ROOT}/Test/files/my-report-2.pdf`, 'changed content gets a new file')
 
 // ---- listFiles / projectFilePath / read_file tool ----
 const { tools } = await import('../src/main/ai/tools')
 const ctx: ToolContext = { service, activeProject: 'Test' }
-const fileList = await service.listFiles('Test')
-assert.ok(fileList.includes('my-report.pdf'), 'lists copied files')
-assert.ok(fileList.includes('my-report-2.pdf'))
+const fileList2 = await service.listFiles('Test')
+assert.ok(fileList2.includes('my-report.pdf'), 'lists copied files')
+assert.ok(fileList2.includes('my-report-2.pdf'))
 assert.equal(
   await service.projectFilePath('Test', 'my-report.pdf'),
   `${ROOT}/Test/files/my-report.pdf`
@@ -126,6 +207,15 @@ assert.match(rr.text, /Hello PDF content/)
 const rrMissing = JSON.parse(await readFileTool.execute({ name: 'nope.pdf' }, ctx))
 assert.equal(rrMissing.ok, false)
 assert.match(rrMissing.error, /not found/)
+
+const mdRead = JSON.parse(await readFileTool.execute({ name: 'my-notes.md' }, ctx))
+assert.equal(mdRead.ok, true)
+assert.equal(mdRead.pageCount, 0)
+assert.match(mdRead.text, /# Hello/)
+const txtRead = JSON.parse(await readFileTool.execute({ name: 'readme.txt' }, ctx))
+assert.equal(txtRead.ok, true)
+assert.equal(txtRead.pageCount, 0)
+assert.match(txtRead.text, /plain text/)
 
 // ---- uploadPdf: uploads via provider Files API (file_id) + streams ----
 const events: unknown[] = []

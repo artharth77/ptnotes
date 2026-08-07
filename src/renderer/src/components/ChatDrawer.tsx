@@ -251,6 +251,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     if (!text || !project || chatBusy) return
 
     const isFirstMessage = list.length === 0
+    const history = list
     const userMsg: ChatMessage = { id: uid(), role: 'user', content: text, toolCalls: [] }
     const assistantMsg: ChatMessage = { id: uid(), role: 'assistant', content: '', toolCalls: [] }
     appendChatMessage(project, userMsg)
@@ -263,7 +264,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     setChatBusy(true)
     setChatStreamProject(project)
     try {
-      await window.ptnotes.ai.send(project, text)
+      await window.ptnotes.ai.send(project, text, history)
     } finally {
       setChatBusy(false)
       setChatStreamProject(null)
@@ -291,30 +292,40 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     setDragActive(false)
     const project = activeProject
     if (chatBusy || !project) return
-    const pdf = Array.from(e.dataTransfer.files).find((f) => f.name.toLowerCase().endsWith('.pdf'))
-    if (!pdf) return
-    const path = window.ptnotes.pdf.getPathForFile(pdf)
-    if (!path) return
+    const dropped = Array.from(e.dataTransfer.files)
+    if (dropped.length === 0) return
     void (async () => {
-      try {
-        const savedPath = await window.ptnotes.pdf.copyToProject(project, path, pdf.name)
-        await refreshFiles()
-        const idx = Math.max(savedPath.lastIndexOf('/'), savedPath.lastIndexOf('\\'))
-        const fileName = idx === -1 ? savedPath : savedPath.slice(idx + 1)
-        const token = `file:${fileName} `
-        setInput((prev) => (prev ? `${prev.trimEnd()} ${token}` : token))
-        setMention(null)
-        requestAnimationFrame(() => {
-          const el = textareaRef.current
-          if (el) {
-            el.focus()
-            const pos = el.value.length
-            el.setSelectionRange(pos, pos)
-          }
-        })
-      } catch (err) {
-        console.error('Failed to add PDF to project:', err)
+      const tokens: string[] = []
+      for (const file of dropped) {
+        const path = window.ptnotes.files.getPathForFile(file)
+        if (!path) continue
+        try {
+          const savedPath = await window.ptnotes.files.copyToProject(project, path, file.name)
+          const idx = Math.max(savedPath.lastIndexOf('/'), savedPath.lastIndexOf('\\'))
+          const fileName = idx === -1 ? savedPath : savedPath.slice(idx + 1)
+          tokens.push(`file:${fileName}`)
+        } catch (err) {
+          console.error('Skipped unsupported file:', file.name, err)
+        }
       }
+      if (tokens.length === 0) {
+        window.alert(
+          'No supported files added. PDFs and text files (markdown, JSON, logs, YAML, plain text) can be added.'
+        )
+        return
+      }
+      await refreshFiles()
+      const insert = `${tokens.join(' ')} `
+      setInput((prev) => (prev ? `${prev.trimEnd()} ${insert}` : insert))
+      setMention(null)
+      requestAnimationFrame(() => {
+        const el = textareaRef.current
+        if (el) {
+          el.focus()
+          const pos = el.value.length
+          el.setSelectionRange(pos, pos)
+        }
+      })
     })()
   }
 
@@ -525,8 +536,9 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
               Working on: <strong>{activeProject}</strong>
             </p>
             <p className="chat-empty-hint">
-              Type @ to reference a note, ! to reference a todo, # to reference a file. Drop a PDF
-              to add it to the project&apos;s files.
+              Type @ to reference a note, ! to reference a todo, # to reference a file. Drop PDFs or
+              text files (markdown, JSON, logs, YAML, plain text) to add them to the project&apos;s
+              files.
             </p>
           </div>
         )}
@@ -540,7 +552,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                     key={a.id}
                     className="chat-attachment"
                     title={a.savedPath}
-                    onClick={() => void window.ptnotes.pdf.reveal(a.savedPath)}
+                    onClick={() => void window.ptnotes.files.reveal(a.savedPath)}
                   >
                     <span className="chat-attachment-icon">📎</span>
                     <span className="chat-attachment-name">{a.name}</span>
@@ -692,7 +704,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
       {dragActive && (
         <div className="chat-drop-overlay">
           <span className="chat-drop-icon">📄</span>
-          <span>Drop PDF to add to project files</span>
+          <span>Drop PDF or text files to add to project files</span>
         </div>
       )}
     </aside>

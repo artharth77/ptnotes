@@ -2,7 +2,7 @@ import type { PTNotesService } from '../service/PTNotesService'
 import { duckDuckGoSearch } from './search/duckduckgo'
 import { fetchWebPage } from './search/webFetch'
 import { slugify } from '../utils/slug'
-import { extractPdf } from './pdf'
+import { readFileAsText } from './reader'
 import type { ConfirmRequest } from '@shared/types'
 
 export interface ToolContext {
@@ -172,7 +172,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'read_file',
         description:
-          'Read the text content of a PDF file attached to a project (files live in the project files folder, referenced as `file:<name>`). Extracts the text locally and returns it, so the user does not need to drag and drop the file again.',
+          'Read the text content of a project file (PDF or any text file such as markdown, plain text, JSON, logs or YAML; files live in the project files folder, referenced as `file:<name>`). Extracts the text locally and returns it, so the user does not need to drag and drop the file again.',
         parameters: {
           type: 'object',
           properties: {
@@ -180,7 +180,10 @@ export const tools: PTTool[] = [
               type: 'string',
               description: 'Project name. Defaults to the current project.'
             },
-            name: { type: 'string', description: 'Name of the file, e.g. report.pdf' }
+            name: {
+              type: 'string',
+              description: 'Name of the file, e.g. report.pdf, notes.md, data.json or app.log'
+            }
           },
           required: ['name']
         }
@@ -201,7 +204,7 @@ export const tools: PTTool[] = [
         })
       }
       try {
-        const { text, pageCount, charCount, truncated } = await extractPdf(path)
+        const { text, pageCount, charCount, truncated } = await readFileAsText(path)
         return JSON.stringify({
           ok: true,
           project,

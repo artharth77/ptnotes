@@ -1,6 +1,6 @@
 import { promises as fs } from 'fs'
 import { createHash } from 'crypto'
-import { basename, join, relative, sep } from 'path'
+import { basename, extname, join, relative, sep } from 'path'
 import { app, shell } from 'electron'
 import type {
   ChatSessionMeta,
@@ -11,6 +11,7 @@ import type {
   Todo
 } from '@shared/types'
 import { slugify } from '../utils/slug'
+import { detectFileKind } from '../ai/reader'
 
 const TODO_HEADER = '# Todo\n\n'
 const WELCOME_ID = 'welcome'
@@ -370,11 +371,25 @@ export class PTNotesService {
     await fs.rm(this.chatDir(project), { recursive: true, force: true })
   }
 
-  async copyPdfToProject(project: string, sourcePath: string, fileName?: string): Promise<string> {
+  async copyFileToProject(project: string, sourcePath: string, fileName?: string): Promise<string> {
     const dir = this.filesDir(project)
     await fs.mkdir(dir, { recursive: true })
-    const base = fileName ? slugify(fileName.replace(/\.pdf$/i, '')) : slugify(sourcePath)
-    const name = `${base}.pdf`
+    const original = fileName || basename(sourcePath)
+    const kind = await detectFileKind(sourcePath)
+    const originalExt = extname(original)
+    const stem = originalExt ? original.slice(0, -originalExt.length) : original
+    const base = slugify(stem)
+    let ext: string
+    if (kind === 'pdf') {
+      ext = '.pdf'
+    } else if (kind === 'text') {
+      ext = originalExt.toLowerCase() || '.txt'
+    } else {
+      throw new Error(
+        `Unsupported file: "${original}" is a binary file. Only PDF files and text files can be added.`
+      )
+    }
+    const name = `${base}${ext}`
 
     const srcSize = (await fs.stat(sourcePath)).size
     const srcHash = await hashFile(sourcePath)
@@ -391,7 +406,7 @@ export class PTNotesService {
     let candidate = name
     let i = 2
     while (await this.pathExists(join(dir, candidate))) {
-      candidate = `${base}-${i++}.pdf`
+      candidate = `${base}-${i++}${ext}`
     }
     const dest = join(dir, candidate)
     await fs.copyFile(sourcePath, dest)
@@ -401,8 +416,10 @@ export class PTNotesService {
   async listFiles(project: string): Promise<string[]> {
     const dir = this.filesDir(project)
     try {
-      return (await fs.readdir(dir))
-        .filter((f) => f.toLowerCase().endsWith('.pdf'))
+      const entries = await fs.readdir(dir, { withFileTypes: true })
+      return entries
+        .filter((e) => e.isFile() && !e.name.startsWith('.'))
+        .map((e) => e.name)
         .sort((a, b) => a.localeCompare(b))
     } catch {
       return []

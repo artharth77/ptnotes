@@ -187,5 +187,54 @@ export interface AppSettings {
 ### Out of scope
 
 - OCR for scanned PDFs.
-- Drag & drop for other file types.
-- Multi-file drop in one gesture (single PDF per drop).
+
+---
+
+## Goal 3 — Multi-file drag & drop (.pdf, .md, .txt)
+
+Extend chat drag & drop to accept **multiple files** with **markdown (`.md`) and plain text
+(`.txt`)** support alongside PDFs.
+
+### Supported formats
+
+- `.pdf` → copied to `<project>/files/`; text extracted locally via `pdf-parse` (`read_file`).
+- `.md`  → copied to `<project>/files/`; read as plain text (`read_file`).
+- `.txt` → copied to `<project>/files/`; read as plain text (`read_file`).
+
+### Drop behavior (multi-file)
+
+- Dropping **multiple files in one gesture** is supported.
+- If **at least one** file is a supported type: every supported file is copied silently into
+  `<project>/files/` (**no popup**); unsupported files are skipped. All dropped supported files are
+  referenced in the chat input via `#` mentions (`file:<filename>`), one per file.
+- If **no** file in the drop is supported: show a popup alert to the user (no files copied, no
+  mention inserted).
+
+### `read_file` tool text extraction
+
+- `read_file` accepts `.pdf`, `.md`, and `.txt` passed via the `#` / `file:<filename>` mention.
+- `.pdf` → local `pdf-parse` extraction (existing).
+- `.md` / `.txt` → read the file's raw text directly (no PDF parsing). Same `MAX_PDF_CHARS`
+  truncation + `truncated` warning applies.
+
+### Implementation notes
+
+- Rename/generalize existing `pdf:copyToProject` / `pdf:extract` behind a generic `files:*` (or keep
+  `pdf:` prefix) IPC that accepts any supported extension.
+- `files:list` already globs `*` — update it to surface `.md`/`.txt` alongside `.pdf` for the `#`
+  picker.
+- Copy slugging stays Unicode-safe (see `slugify`); collisions reuse existing files by size + SHA-256.
+
+### Affected files
+
+- `src/main/ipc/pdf.ts` (multi-file copy + `.md`/`.txt` handling) — possibly rename to `files.ts`
+- `src/main/ai/tools.ts` (`read_file` supports `.md`/`.txt`)
+- `src/main/ai/pdf.ts` (text extraction for `.md`/`.txt`, or a shared reader)
+- `src/renderer/src/components/ChatDrawer.tsx` (multi-file drop handling + alert when nothing supported)
+- `src/preload/index.ts`, `src/preload/index.d.ts`
+
+### Validation
+
+- `npm run typecheck` / `npm run lint`.
+- Manual: drop multiple files mixing `.pdf`/`.md`/`.txt` → all copied, all `#`-mentioned, no popup;
+  drop only unsupported files → alert shown, nothing copied.

@@ -50,7 +50,7 @@ export type PdfAttachmentKind = 'extract' | 'upload'
 
 export interface ChatAttachment {
   id: string
-  kind: 'pdf'
+  kind: 'pdf' | 'text'
   name: string
   savedPath: string
   mode: PdfAttachmentKind

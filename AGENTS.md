@@ -51,7 +51,8 @@ Run `npm run typecheck` and `npm run lint` after any change.
 | Chat titles | Hybrid: local heuristic from first message immediately, refined by a background AI completion; manual rename supported; history popup shows title + message count |
 | Chat note mention | `@` opens note list → inserts `note:<notename>` → AI calls `read_note` |
 | Chat todo mention | `!` opens todo list → inserts `todo:<todotext>` (filterable by text) |
-| Chat file mention | `#` opens project file list (`files:list` → `<project>/files/*.pdf`) → inserts `file:<filename>` → AI calls `read_file` (local pdf-parse extraction) |
+| Chat file mention | `#` opens project file list (`files:list` → `<project>/files/*` for PDF + text) → inserts `file:<filename>` → AI calls `read_file` (content-based: pdf-parse for PDFs, raw text for any text file) |
+| Chat file drop | Multi-file drag & drop into the chat: every supported file is copied silently to `<project>/files/` (no popup) and referenced via `#` mentions; support is **content-based** (any text file plus PDFs, detected by content not extension) — non-PDF binary files are rejected; if none are added, an alert is shown |
 | Chat response rendering | Markdown via `react-markdown` + `remark-gfm` + `remark-breaks` (raw HTML escaped → XSS-safe) |
 | Web search | DuckDuckGo only (free, no API key) |
 | Page reading | Local cheerio parsing (private, no third-party service) |
@@ -63,7 +64,7 @@ Run `npm run typecheck` and `npm run lint` after any change.
 └── <ProjectName>/
     ├── notes/*.md          (one file per note)
     ├── TODO.md             (markdown checklist: `- [ ]` / `- [x]`)
-    ├── files/*.pdf         (PDF attachments copied on chat drop)
+    ├── files/*.{pdf,md,txt,json,log,yaml,yml} (attachments copied on chat drop)
     └── chat/*.json         (one file per chat session: messages + timestamps)
 ```
 
@@ -87,14 +88,14 @@ src/
 │   │   ├── todos.ts
 │   │   ├── chat.ts      # chat history persistence (list/read/write/delete/rename)
 │   │   ├── ai.ts        # chat session registry + ai:generateTitle (chat titles)
-│   │   ├── pdf.ts       # PDF attach/extract/upload (drag & drop into chat)
+│   │   ├── files.ts     # files:* attach/extract/list/reveal + pdf:upload (multi-file drop: .pdf/.md/.txt)
 │   │   └── settings.ts  # settings:get / settings:chooseRoot / settings:changeRoot
 │   └── ai/
 │       ├── client.ts    # OpenAI-compatible client (streaming)
 │       ├── tools.ts     # tool JSON schemas + executors (bind to PTNotesService)
 │       ├── chatSession.ts   # conversation state + tool-call loop
 │       ├── config.ts    # ai-provider.json load/save
-│       ├── pdf.ts       # local text extraction via pdf-parse (MAX_PDF_CHARS truncation)
+│       ├── reader.ts     # readFileAsText + detectFileKind: content-based (pdf-parse for PDFs, raw text for any text file) + MAX_PDF_CHARS truncation
 │       └── search/
 │           ├── duckduckgo.ts  # web_search (no key)
 │           └── webFetch.ts    # cheerio page extraction
@@ -156,8 +157,8 @@ src/
 - **Chat history:** `list`, `read`, `write`, `delete`, `rename`
 - **AI:** `send` (message → streamed reply), `getConfig`, `setConfig`, `generateTitle`, `stop`, `clear`, `confirmResponse`, `onStreamEvent` (token chunks + tool-call logs + confirm events)
 - **Settings:** `get` (returns `{ rootDir }`), `chooseRoot` (native folder picker), `changeRoot` (moves data + persists + returns new `{ rootDir }`)
-- **PDF:** `copyToProject` (copy dropped PDF into `<project>/files/`), `extract` (local text via pdf-parse → `{ text, pageCount, charCount, truncated }`), `supportsUpload` (returns the AI settings `uploadPdfEnabled` toggle — user-controlled), `upload` (raw PDF via provider Responses API `input_file` — uploads base64 through the Files API, falling back to inline `file_data`), `reveal` (`shell.showItemInFolder`)
-- **Files:** `list` (`<project>/files/*.pdf` for the chat `#` picker)
+- **PDF:** `supportsUpload` (returns the AI settings `uploadPdfEnabled` toggle — user-controlled), `upload` (raw PDF via provider Responses API `input_file` — uploads base64 through the Files API, falling back to inline `file_data`)
+- **Files:** `list` (`<project>/files/*` — PDF + any text file — for the chat `#` picker), `getPathForFile` (dropped file path via `webUtils`, never `File.path`), `copyToProject` (content-based: any text file + PDFs copied into `<project>/files/`; non-PDF binaries rejected), `extract` (local text → `{ text, pageCount, charCount, truncated }`; pdf-parse for `.pdf`, raw text for any text file), `reveal` (`shell.showItemInFolder`)
 
 ## AI chat feature
 
@@ -173,11 +174,13 @@ ChatPanel (renderer) ──send──▶ Main process
 - Chat operates on the **currently active project** by default.
 - Tool errors are returned to the model so it can self-correct.
 - Session is kept in memory per project (`sessions` map) so closing the drawer and reopening continues the same conversation.
+- Each `ai:send` call receives the renderer's current thread as `history` and the session is re-seeded from it, so reopening a historical chat (or switching sessions) keeps the correct model context — the AI never relies solely on in-memory accumulation.
 - System prompt is sent when a session starts; it includes the active project and instructs the AI that a `note:<notename>` message means it must call `read_note` for that note.
 - A `!` todo mention inserts `todo:<todotext>` which is sent to the model as-is.
 - A `#` file mention inserts `file:<filename>`; the system prompt instructs the AI that a
-  `file:<filename>` message means it must call `read_file` (extracts the PDF text locally via
-  `extractPdf`) before responding — so previously dropped PDFs can be reused without re-dragging.
+  `file:<filename>` message means it must call `read_file` (content-based local extraction;
+  `.pdf` via pdf-parse, any text file as raw text) before responding — so previously dropped
+  files can be reused without re-dragging.
 
 ### Tools (13 total)
 | Tool | Action |
@@ -192,22 +195,26 @@ ChatPanel (renderer) ──send──▶ Main process
 | `toggle_todo` | toggle a checklist item |
 | `delete_todo` | remove an item |
 | `list_todos` | model context |
-| `read_file` | extract text of a project PDF attachment locally via `extractPdf` |
+| `read_file` | extract text of a project file locally via `readFileAsText` (pdf-parse for `.pdf`, raw text for any text file) |
 | `web_search` | DuckDuckGo HTML search, no API key, Node fetch in main (user-agent header, rate-limit errors surfaced to model) |
 | `web_fetch` | direct fetch + cheerio local parse (strip scripts/styles/nav, extract title + readable text) — fully private |
 
 ### PDF attachments (drag & drop into chat)
 
-- Dropping a `.pdf` onto the chat drawer copies it silently into `<project>/files/<slug>.pdf`
-  (`copyPdfToProject`) with no dialog, refreshes the file list, and inserts `file:<filename>` into
-  the chat input so the user can reference the dropped PDF without sending anything to the AI. Chat
-  messages containing `file:<filename>` are handled by the `read_file` tool (local `pdf-parse`
-  extraction).
+- Dropping one or more files onto the chat drawer copies each **supported** file (any text file —
+  `.md`, `.txt`, `.json`, `.log`, `.yaml`, `.yml`, … — plus PDFs) silently into
+  `<project>/files/<slug><ext>` (`copyFileToProject`) with no dialog, refreshes the file list, and
+  inserts a `file:<filename>` mention per file into the chat input. Support is decided by **content**
+  (`detectFileKind`) not extension: text files of any extension are accepted, binaries are accepted
+  only if they are PDFs, and other binaries are rejected. Unsupported files in the drop are skipped;
+  if **none** of the dropped files are supported, an alert is shown and nothing is copied. Chat
+  messages containing `file:<filename>` are handled by the `read_file` tool (local `pdf-parse` for
+  `.pdf`, raw text for any text file).
 - If a file with the same name already exists in `files/` with the same size **and** SHA-256 hash,
   the existing file is reused instead of saving a new `-2` copy.
-- Long PDFs are truncated to `MAX_PDF_CHARS` with a `truncated` warning; scanned/image PDFs surface a
+- Long files are truncated to `MAX_PDF_CHARS` with a `truncated` warning; scanned/image PDFs surface a
   clear "No text found" error.
-- Renderer obtains the dropped file's path via preload `pdf.getPathForFile(file)` using Electron's
+- Renderer obtains each dropped file's path via preload `files.getPathForFile(file)` using Electron's
   `webUtils.getPathForFile` (never `File.path`).
 - Drop turns share the same per-project `ChatSession`; `createSessionRegistry` in `ipc/ai.ts` owns the
   session map + confirm/stop wiring used by `ai:send`.

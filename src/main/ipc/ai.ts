@@ -7,6 +7,7 @@ import { ChatSession, isLocalEndpoint } from '../ai/chatSession'
 import { createClient } from '../ai/client'
 import type {
   AIProviderConfig,
+  ChatMessage,
   ChatStreamEvent,
   ConfirmRequest,
   ConfirmResponse
@@ -131,8 +132,11 @@ export function registerAiIpc(registry: SessionRegistry, configStore: AIConfigSt
     registry.respond(resp)
   })
 
-  ipcMain.handle('ai:send', async (event: IpcMainInvokeEvent, project: string, text: string) => {
-    const session = registry.getSession(event, project)
-    await session.send(text)
-  })
+  ipcMain.handle(
+    'ai:send',
+    async (event: IpcMainInvokeEvent, project: string, text: string, history?: ChatMessage[]) => {
+      const session = registry.getSession(event, project)
+      await session.send(text, history)
+    }
+  )
 }
