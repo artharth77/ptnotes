@@ -155,7 +155,7 @@ src/
 - **Notes:** `list`, `read`, `save`, `create`, `rename`, `delete`
 - **Todos:** `read` (parse checklist), `save` (serialize `- [ ]`/`- [x]`), `toggle`, `deleteCompleted`, `reorder`
 - **Chat history:** `list`, `read`, `write`, `delete`, `rename`
-- **AI:** `send` (message → streamed reply), `getConfig`, `setConfig`, `generateTitle`, `stop`, `clear`, `confirmResponse`, `onStreamEvent` (token chunks + tool-call logs + confirm events)
+- **AI:** `send` (message → streamed reply), `getConfig`, `setConfig`, `listModels(baseUrl, apiKey)`, `generateTitle`, `stop`, `clear`, `confirmResponse`, `onStreamEvent` (token chunks + tool-call logs + confirm events)
 - **Settings:** `get` (returns `{ rootDir }`), `chooseRoot` (native folder picker), `changeRoot` (moves data + persists + returns new `{ rootDir }`)
 - **PDF:** `supportsUpload` (returns the AI settings `uploadPdfEnabled` toggle — user-controlled), `upload` (raw PDF via provider Responses API `input_file` — uploads base64 through the Files API, falling back to inline `file_data`)
 - **Files:** `list` (`<project>/files/*` — PDF + any text file — for the chat `#` picker), `getPathForFile` (dropped file path via `webUtils`, never `File.path`), `copyToProject` (content-based: any text file + PDFs copied into `<project>/files/`; non-PDF binaries rejected), `extract` (local text → `{ text, pageCount, charCount, truncated }`; pdf-parse for `.pdf`, raw text for any text file), `reveal` (`shell.showItemInFolder`)
@@ -236,8 +236,18 @@ Two-panel dialog (`.settings-layout` with `.settings-nav` + `.settings-pane`):
   folder picker. Selecting a new root prompts for explicit confirmation ("Move all project data…")
   before `PTNotesService.changeRootDir` moves every project dir + `.ptnotes-projects.json`, and the
   settings store persists the new root.
-- **AI Settings:** Base URL (default `https://api.openai.com/v1`), API key, model. No search provider
-  field (DuckDuckGo-only, keyless).
+- **AI Settings:** Base URL (default `https://api.openai.com/v1`), API key, model (default empty —
+  placeholder only, must be chosen), PDF upload toggle. No search provider field (DuckDuckGo-only,
+  keyless). The **Model** field is an editable custom combobox: free-text `<input>` with a
+  `Load models` button that calls `ai:listModels(baseUrl, apiKey)` (uses the in-dialog unsaved
+  values) against `GET {baseUrl}/models`, then shows a scrollable dropdown (~10 rows) of fetched
+  model ids that is filtered by typing; the typed value is never cleared on failure. The AI Selected
+  category is driven by store state (`settingsCategory`, opened via `openSettings('ai')`).
+- Model downloads auto-load silently when the AI pane opens (best-effort; failures hidden until
+  **Load models** is clicked).
+- When the AI isn't configured (empty model, or no API key for a remote provider), the chat panel
+  shows an **"AI not configured"** banner at the top with a button that opens **Settings → AI
+  Settings** (`ai:getConfig` → `aiReady` check in `ChatDrawer`).
 
 ### Example research flow
 > You: *"Research the latest Electron security best practices and save it as a note."*
