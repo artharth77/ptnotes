@@ -4,7 +4,7 @@ import { basename } from 'path'
 import type { IpcMainInvokeEvent } from 'electron'
 import type { PTNotesService } from '../service/PTNotesService'
 import { AIConfigStore } from '../ai/config'
-import { readFileAsText } from '../ai/pdf'
+import { readFileAsText } from '../ai/reader'
 import type { SessionRegistry } from './ai'
 import type { PdfExtractResult } from '@shared/types'
 

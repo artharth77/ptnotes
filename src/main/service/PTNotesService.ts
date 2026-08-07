@@ -1,6 +1,6 @@
 import { promises as fs } from 'fs'
 import { createHash } from 'crypto'
-import { basename, join, relative, sep } from 'path'
+import { basename, extname, join, relative, sep } from 'path'
 import { app, shell } from 'electron'
 import type {
   ChatSessionMeta,
@@ -10,8 +10,8 @@ import type {
   Project,
   Todo
 } from '@shared/types'
-import { SUPPORTED_FILE_EXTS, fileExt } from '@shared/types'
 import { slugify } from '../utils/slug'
+import { detectFileKind } from '../ai/reader'
 
 const TODO_HEADER = '# Todo\n\n'
 const WELCOME_ID = 'welcome'
@@ -375,13 +375,20 @@ export class PTNotesService {
     const dir = this.filesDir(project)
     await fs.mkdir(dir, { recursive: true })
     const original = fileName || basename(sourcePath)
-    const ext = fileExt(original)
-    if (!ext) {
+    const kind = await detectFileKind(sourcePath)
+    const originalExt = extname(original)
+    const stem = originalExt ? original.slice(0, -originalExt.length) : original
+    const base = slugify(stem)
+    let ext: string
+    if (kind === 'pdf') {
+      ext = '.pdf'
+    } else if (kind === 'text') {
+      ext = originalExt.toLowerCase() || '.txt'
+    } else {
       throw new Error(
-        `Unsupported file type: "${original}". Supported: ${SUPPORTED_FILE_EXTS.join(', ')}`
+        `Unsupported file: "${original}" is a binary file. Only PDF files and text files can be added.`
       )
     }
-    const base = slugify(original.slice(0, -ext.length))
     const name = `${base}${ext}`
 
     const srcSize = (await fs.stat(sourcePath)).size
@@ -409,8 +416,10 @@ export class PTNotesService {
   async listFiles(project: string): Promise<string[]> {
     const dir = this.filesDir(project)
     try {
-      return (await fs.readdir(dir))
-        .filter((f) => SUPPORTED_FILE_EXTS.some((ext) => f.toLowerCase().endsWith(ext)))
+      const entries = await fs.readdir(dir, { withFileTypes: true })
+      return entries
+        .filter((e) => e.isFile() && !e.name.startsWith('.'))
+        .map((e) => e.name)
         .sort((a, b) => a.localeCompare(b))
     } catch {
       return []

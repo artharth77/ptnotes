@@ -46,27 +46,11 @@ export interface ChatMessage {
   attachments?: ChatAttachment[]
 }
 
-export const SUPPORTED_FILE_EXTS = ['.pdf', '.md', '.txt'] as const
-export type SupportedFileExt = (typeof SUPPORTED_FILE_EXTS)[number]
-
-export function isSupportedFile(name: string): boolean {
-  const lower = name.toLowerCase()
-  return SUPPORTED_FILE_EXTS.some((ext) => lower.endsWith(ext))
-}
-
-export function fileExt(name: string): SupportedFileExt | '' {
-  const lower = name.toLowerCase()
-  for (const ext of SUPPORTED_FILE_EXTS) {
-    if (lower.endsWith(ext)) return ext
-  }
-  return ''
-}
-
 export type PdfAttachmentKind = 'extract' | 'upload'
 
 export interface ChatAttachment {
   id: string
-  kind: SupportedFileExt
+  kind: 'pdf' | 'text'
   name: string
   savedPath: string
   mode: PdfAttachmentKind

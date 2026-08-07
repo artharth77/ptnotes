@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom'
 import { useAppStore } from '../store/useAppStore'
 import { MarkdownContent } from './MarkdownContent'
 import type { ChatMessage, ChatSessionMeta, NoteMeta, Todo } from '@shared/types'
-import { isSupportedFile } from '@shared/types'
 
 const NO_SESSIONS: ChatSessionMeta[] = []
 
@@ -292,14 +291,11 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     setDragActive(false)
     const project = activeProject
     if (chatBusy || !project) return
-    const supported = Array.from(e.dataTransfer.files).filter((f) => isSupportedFile(f.name))
-    if (supported.length === 0) {
-      window.alert('No supported files dropped (PDF, markdown or plain text). Nothing was added.')
-      return
-    }
+    const dropped = Array.from(e.dataTransfer.files)
+    if (dropped.length === 0) return
     void (async () => {
       const tokens: string[] = []
-      for (const file of supported) {
+      for (const file of dropped) {
         const path = window.ptnotes.files.getPathForFile(file)
         if (!path) continue
         try {
@@ -308,10 +304,15 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
           const fileName = idx === -1 ? savedPath : savedPath.slice(idx + 1)
           tokens.push(`file:${fileName}`)
         } catch (err) {
-          console.error('Failed to add file to project:', err)
+          console.error('Skipped unsupported file:', file.name, err)
         }
       }
-      if (tokens.length === 0) return
+      if (tokens.length === 0) {
+        window.alert(
+          'No supported files added. PDFs and text files (markdown, JSON, logs, YAML, plain text) can be added.'
+        )
+        return
+      }
       await refreshFiles()
       const insert = `${tokens.join(' ')} `
       setInput((prev) => (prev ? `${prev.trimEnd()} ${insert}` : insert))
@@ -534,8 +535,9 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
               Working on: <strong>{activeProject}</strong>
             </p>
             <p className="chat-empty-hint">
-              Type @ to reference a note, ! to reference a todo, # to reference a file. Drop PDF,
-              markdown or text files to add them to the project&apos;s files.
+              Type @ to reference a note, ! to reference a todo, # to reference a file. Drop PDFs or
+              text files (markdown, JSON, logs, YAML, plain text) to add them to the project&apos;s
+              files.
             </p>
           </div>
         )}
@@ -701,7 +703,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
       {dragActive && (
         <div className="chat-drop-overlay">
           <span className="chat-drop-icon">📄</span>
-          <span>Drop PDF, markdown or text files to add to project files</span>
+          <span>Drop PDF or text files to add to project files</span>
         </div>
       )}
     </aside>
