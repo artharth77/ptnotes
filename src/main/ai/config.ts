@@ -6,7 +6,7 @@ import type { AIProviderConfig } from '@shared/types'
 const DEFAULT_CONFIG: AIProviderConfig = {
   baseUrl: 'https://api.openai.com/v1',
   apiKey: '',
-  model: 'gpt-4o-mini',
+  model: '',
   uploadPdfEnabled: true
 }
 
