@@ -77,6 +77,8 @@ const api = {
     generateTitle: (project: string, firstMessage: string): Promise<string> =>
       ipcRenderer.invoke('ai:generateTitle', project, firstMessage),
     getConfig: (): Promise<AIProviderConfig> => ipcRenderer.invoke('ai:getConfig'),
+    listModels: (baseUrl: string, apiKey: string): Promise<string[] | { error: string }> =>
+      ipcRenderer.invoke('ai:listModels', baseUrl, apiKey),
     setConfig: (config: AIProviderConfig): Promise<AIProviderConfig> =>
       ipcRenderer.invoke('ai:setConfig', config),
     onStreamEvent: (callback: (event: ChatStreamEvent) => void): (() => void) => {

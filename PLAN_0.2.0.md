@@ -238,3 +238,71 @@ Extend chat drag & drop to accept **multiple files** with **markdown (`.md`) and
 - `npm run typecheck` / `npm run lint`.
 - Manual: drop multiple files mixing `.pdf`/`.md`/`.txt` → all copied, all `#`-mentioned, no popup;
   drop only unsupported files → alert shown, nothing copied.
+
+---
+
+## Goal 4 — AI model list (fetch from provider + editable dropdown)
+
+### User flow
+
+1. User opens **Settings → AI Settings**, enters base URL + API key.
+2. Clicks **Load models** (or it auto-loads when the pane opens, best-effort).
+3. The **Model** field shows a dropdown of models fetched from `GET {baseUrl}/models`.
+4. The user can either pick a model from the dropdown **or** type free text (for providers without a
+   models endpoint, or custom model ids).
+5. Saving persists the chosen (typed or picked) model; chat uses it.
+
+### Decisions (locked)
+
+- Model field stays **free text** but gains a **dropdown** of provider models — editable combobox.
+- Uses the standard OpenAI-compatible `GET {baseUrl}/models` endpoint via the existing SDK
+  (`client.models.list()`).
+- **No new dependencies**; native `<input list>` + `<datalist>` for the combobox (plain CSS
+  convention).
+- Fetch uses the **in-dialog (unsaved)** base URL / API key so the user can test before saving.
+- Errors (bad URL / unauthorized / unreachable / unsupported endpoint) are surfaced in the dialog;
+  the field stays editable and the typed value is never cleared.
+
+### Technical design
+
+- **Main process (`src/main/ipc/ai.ts`):** new handler
+  `ai:listModels(baseUrl: string, apiKey: string)` → loads nothing from store; builds a client via
+  `createClient({ baseUrl, apiKey, model: '' })` and calls `client.models.list()`. Returns
+  `string[]` of model ids, or `{ error }` on failure. Local endpoints (LM Studio / Ollama) work the
+  same as `isLocalEndpoint`.
+- **Preload (`src/preload/index.ts`):** expose `ai.listModels(baseUrl, apiKey)` →
+  `ipcRenderer.invoke('ai:listModels', baseUrl, apiKey)`.
+- **Renderer (`SettingsDialog.tsx` → `AiSettingsPane`):** replace the Model `TextField` with an
+  editable combobox:
+  - Free-text input bound to `config.model` + `<datalist>` of fetched models (native dropdown
+    suggestions, never forces the value).
+  - **Load models** button (secondary, disabled when `baseUrl` empty) calls
+    `window.ptnotes.ai.listModels(config.baseUrl, config.apiKey)` with the current dialog values.
+  - Results cached in component state; "Loading…" indicator while fetching.
+  - On failure: show the returned error under the field; keep the text editable.
+  - Auto-load when the AI pane opens if a `baseUrl` is present (best-effort; failures silent until
+    Load is clicked).
+- **Styling:** minimal CSS for the combobox row (input + button side-by-side), following
+  `.form-label` / `.btn` conventions.
+
+### Affected files
+
+- `src/main/ipc/ai.ts` (add `ai:listModels`)
+- `src/main/ai/client.ts` (no change — `createClient` output already exposes `.models.list()`)
+- `src/preload/index.ts` (expose `listModels`; `index.d.ts` picks it up via `PTNotesApi`)
+- `src/renderer/src/components/SettingsDialog.tsx` (Model combobox + Load models + error display)
+- `src/renderer/src/assets/*.css` or global CSS (combobox row styling)
+
+### Validation
+
+- `npm run typecheck` / `npm run lint`.
+- Manual (any SDK-listable provider):
+  1. Open Settings → AI Settings, enter base URL + key, click **Load models**.
+  2. Dropdown lists available models; picking one fills the field; free typing also accepted.
+  3. Wrong/unauthorized key or no-models-endpoint provider → friendly error, field stays editable.
+  4. Saving persists the chosen model; chat uses it.
+
+### Out of scope
+
+- Automatic re-sync of models on every dialog open.
+- Model capability / context-size display from the models endpoint.

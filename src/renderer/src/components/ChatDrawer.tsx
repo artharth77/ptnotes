@@ -114,6 +114,8 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   )
   const newChat = useAppStore((s) => s.newChat)
   const openChat = useAppStore((s) => s.openChat)
+  const openSettings = useAppStore((s) => s.openSettings)
+  const settingsOpen = useAppStore((s) => s.settingsOpen)
   const loadChatSessions = useAppStore((s) => s.loadChatSessions)
   const getActiveSessionId = useAppStore((s) => s.getActiveSessionId)
   const chatTitle = useAppStore((s) =>
@@ -159,6 +161,21 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const prevBusy = useRef(false)
+
+  const [aiReady, setAiReady] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    window.ptnotes.ai.getConfig().then((cfg) => {
+      if (cancelled) return
+      const local = /localhost|127\.0\.0\.1/.test(cfg.baseUrl || '')
+      const key = (cfg.apiKey || '').trim()
+      setAiReady(!!cfg.model.trim() && (!!key || !!local || !cfg.baseUrl.trim()))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [settingsOpen])
 
   const list = useMemo(() => messages ?? [], [messages])
 
@@ -529,6 +546,17 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
       </div>
 
       <div className="chat-scroll" ref={scrollRef}>
+        {!aiReady && (
+          <div className="chat-ai-hint">
+            <div className="chat-ai-hint-title">AI not configured</div>
+            <p className="chat-ai-hint-text">
+              Set up an AI provider in Settings to use the chat assistant.
+            </p>
+            <button className="btn small primary" onClick={() => openSettings('ai')}>
+              AI Settings
+            </button>
+          </div>
+        )}
         {list.length === 0 && (
           <div className="chat-empty">
             <p>Ask me to create notes, manage todos, or research the web and save findings.</p>
