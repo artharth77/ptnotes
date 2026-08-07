@@ -29,6 +29,13 @@ All notable changes to PTNotes are documented in this file.
 - Replaced the single-panel AI Settings dialog with the two-panel **Settings** dialog.
 - Replaced the dependency-free `<datalist>` combobox with a custom model dropdown (scrolling + outside-click close).
 
+### Fixed
+
+- Reopening a past chat session (or switching sessions / New Chat) no longer loses the conversation context: the AI now continues from the messages shown in the chat. Previously only the in-memory session was sent, so loading a historical session reset the model's context and replies didn't follow the selected history.
+- Creating/renaming a note with a non-Latin title (e.g. Thai) no longer produces an "untitled" note: slugification now keeps Unicode letters and combining marks for all scripts, stripping only Latin combining accents.
+- Chat now displays an error message when the AI server cannot be reached. Previously the first message in a session could fail silently: the `error` stream event could arrive after `chatStreamProject` had already been reset to `null`, so the renderer dropped it. The handler now falls back to the active project so the error is always applied to the last assistant message. See [#1](https://github.com/artharth77/ptnotes/issues/1).
+- The "+ New Chat" button no longer wraps to a second line when the chat title is long: the header actions now stay fixed width while the title truncates with an ellipsis.
+
 ## [0.1.0] — 2026-08-05
 
 Initial release.
