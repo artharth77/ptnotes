@@ -65,11 +65,42 @@ function ThinkBox({ content }: { content: string }): React.JSX.Element {
   )
 }
 
+const USER_MSG_COLLAPSE_LIMIT = 400
+
+function noteIdFromToolCall(name: string, result?: string): string | null {
+  if (name !== 'create_note' && name !== 'update_note') return null
+  if (!result) return null
+  try {
+    const data = JSON.parse(result) as { ok?: boolean; note?: string }
+    return data.ok && data.note ? data.note : null
+  } catch {
+    return null
+  }
+}
+
+function UserBubble({ content }: { content: string }): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false)
+  const long = content.length > USER_MSG_COLLAPSE_LIMIT
+  const shown = long && !expanded ? content.slice(0, USER_MSG_COLLAPSE_LIMIT) : content
+  return (
+    <div className="chat-msg-content user-bubble">
+      {shown}
+      {long && (
+        <button className="chat-msg-more" onClick={() => setExpanded(!expanded)}>
+          {expanded ? 'Show less' : '… Show more'}
+        </button>
+      )}
+    </div>
+  )
+}
+
 export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   const activeProject = useAppStore((s) => s.activeProject)
   const activeNoteId = useAppStore((s) => s.activeNoteId)
   const notes = useAppStore((s) => s.notes)
   const todos = useAppStore((s) => s.todos)
+  const projectFiles = useAppStore((s) => s.projectFiles)
+  const refreshFiles = useAppStore((s) => s.refreshFiles)
   const messages = useAppStore((s) =>
     s.activeProject ? s.chatMessages[s.activeProject] : undefined
   )
@@ -83,6 +114,8 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   )
   const newChat = useAppStore((s) => s.newChat)
   const openChat = useAppStore((s) => s.openChat)
+  const openSettings = useAppStore((s) => s.openSettings)
+  const settingsOpen = useAppStore((s) => s.settingsOpen)
   const loadChatSessions = useAppStore((s) => s.loadChatSessions)
   const getActiveSessionId = useAppStore((s) => s.getActiveSessionId)
   const chatTitle = useAppStore((s) =>
@@ -119,22 +152,41 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   const [input, setInput] = useState('')
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({})
   const [mention, setMention] = useState<{
-    kind: 'note' | 'todo'
+    kind: 'note' | 'todo' | 'file'
     start: number
     query: string
   } | null>(null)
   const [mentionIndex, setMentionIndex] = useState(0)
+  const [dragActive, setDragActive] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const prevBusy = useRef(false)
 
+  const [aiReady, setAiReady] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    window.ptnotes.ai.getConfig().then((cfg) => {
+      if (cancelled) return
+      const local = /localhost|127\.0\.0\.1/.test(cfg.baseUrl || '')
+      const key = (cfg.apiKey || '').trim()
+      setAiReady(!!cfg.model.trim() && (!!key || !!local || !cfg.baseUrl.trim()))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [settingsOpen])
+
   const list = useMemo(() => messages ?? [], [messages])
 
-  const mentionItems = useMemo<(NoteMeta | Todo)[]>(() => {
+  const mentionItems = useMemo<(NoteMeta | Todo | string)[]>(() => {
     if (!mention) return []
     const q = mention.query.toLowerCase()
     if (mention.kind === 'todo') {
       return todos.filter((t) => t.text.toLowerCase().includes(q))
+    }
+    if (mention.kind === 'file') {
+      return projectFiles.filter((f) => f.toLowerCase().includes(q))
     }
     const filtered = notes.filter((n) => n.name.toLowerCase().includes(q))
     const active = notes.find((n) => n.id === activeNoteId)
@@ -142,9 +194,10 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
       return [active, ...filtered.filter((n) => n.id !== active.id)]
     }
     return filtered
-  }, [mention, notes, todos, activeNoteId])
+  }, [mention, notes, todos, projectFiles, activeNoteId])
 
-  const mentionName = (item: NoteMeta | Todo): string => ('name' in item ? item.name : item.text)
+  const mentionName = (item: NoteMeta | Todo | string): string =>
+    typeof item === 'string' ? item : 'name' in item ? item.name : item.text
 
   function focusInput(): void {
     const el = textareaRef.current
@@ -170,22 +223,33 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     const before = value.slice(0, sel)
     const at = before.lastIndexOf('@')
     const bang = before.lastIndexOf('!')
-    if (at > bang && !before.slice(at + 1).includes(' ')) {
-      setMention({ kind: 'note', start: at, query: before.slice(at + 1) })
-      setMentionIndex(0)
-    } else if (bang !== -1 && !before.slice(bang + 1).includes(' ')) {
-      setMention({ kind: 'todo', start: bang, query: before.slice(bang + 1) })
-      setMentionIndex(0)
-    } else {
+    const hash = before.lastIndexOf('#')
+    const last = Math.max(at, bang, hash)
+    if (last === -1) {
       setMention(null)
+      return
     }
+    const token = before.slice(last + 1)
+    if (token.includes(' ')) {
+      setMention(null)
+      return
+    }
+    if (last === at) setMention({ kind: 'note', start: last, query: token })
+    else if (last === bang) setMention({ kind: 'todo', start: last, query: token })
+    else setMention({ kind: 'file', start: last, query: token })
+    setMentionIndex(0)
   }
 
   function insertMention(name: string): void {
     if (!mention) return
     const before = input.slice(0, mention.start)
     const after = input.slice(mention.start + 1 + mention.query.length)
-    const token = mention.kind === 'todo' ? `todo:${name} ` : `note:${name} `
+    const token =
+      mention.kind === 'todo'
+        ? `todo:${name} `
+        : mention.kind === 'file'
+          ? `file:${name} `
+          : `note:${name} `
     setInput(`${before}${token}${after}`)
     setMention(null)
     requestAnimationFrame(() => {
@@ -204,6 +268,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     if (!text || !project || chatBusy) return
 
     const isFirstMessage = list.length === 0
+    const history = list
     const userMsg: ChatMessage = { id: uid(), role: 'user', content: text, toolCalls: [] }
     const assistantMsg: ChatMessage = { id: uid(), role: 'assistant', content: '', toolCalls: [] }
     appendChatMessage(project, userMsg)
@@ -216,7 +281,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     setChatBusy(true)
     setChatStreamProject(project)
     try {
-      await window.ptnotes.ai.send(project, text)
+      await window.ptnotes.ai.send(project, text, history)
     } finally {
       setChatBusy(false)
       setChatStreamProject(null)
@@ -225,6 +290,60 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     if (isFirstMessage) {
       void refineTitle(project, text)
     }
+  }
+
+  function onDragOver(e: React.DragEvent): void {
+    if (chatBusy || !activeProject) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+    setDragActive(true)
+  }
+
+  function onDragLeave(e: React.DragEvent): void {
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return
+    setDragActive(false)
+  }
+
+  function onDrop(e: React.DragEvent): void {
+    e.preventDefault()
+    setDragActive(false)
+    const project = activeProject
+    if (chatBusy || !project) return
+    const dropped = Array.from(e.dataTransfer.files)
+    if (dropped.length === 0) return
+    void (async () => {
+      const tokens: string[] = []
+      for (const file of dropped) {
+        const path = window.ptnotes.files.getPathForFile(file)
+        if (!path) continue
+        try {
+          const savedPath = await window.ptnotes.files.copyToProject(project, path, file.name)
+          const idx = Math.max(savedPath.lastIndexOf('/'), savedPath.lastIndexOf('\\'))
+          const fileName = idx === -1 ? savedPath : savedPath.slice(idx + 1)
+          tokens.push(`file:${fileName}`)
+        } catch (err) {
+          console.error('Skipped unsupported file:', file.name, err)
+        }
+      }
+      if (tokens.length === 0) {
+        window.alert(
+          'No supported files added. PDFs and text files (markdown, JSON, logs, YAML, plain text) can be added.'
+        )
+        return
+      }
+      await refreshFiles()
+      const insert = `${tokens.join(' ')} `
+      setInput((prev) => (prev ? `${prev.trimEnd()} ${insert}` : insert))
+      setMention(null)
+      requestAnimationFrame(() => {
+        const el = textareaRef.current
+        if (el) {
+          el.focus()
+          const pos = el.value.length
+          el.setSelectionRange(pos, pos)
+        }
+      })
+    })()
   }
 
   async function refineTitle(project: string, text: string): Promise<void> {
@@ -305,7 +424,13 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   }
 
   return (
-    <aside className="chat-drawer" style={width ? { width } : undefined}>
+    <aside
+      className="chat-drawer"
+      style={width ? { width } : undefined}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
       <div className="chat-header">
         <span className="chat-header-title" title={chatTitle || 'AI Assistant'}>
           {chatTitle || 'AI Assistant'}
@@ -421,18 +546,101 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
       </div>
 
       <div className="chat-scroll" ref={scrollRef}>
+        {!aiReady && (
+          <div className="chat-ai-hint">
+            <div className="chat-ai-hint-title">AI not configured</div>
+            <p className="chat-ai-hint-text">
+              Set up an AI provider in Settings to use the chat assistant.
+            </p>
+            <button className="btn small primary" onClick={() => openSettings('ai')}>
+              AI Settings
+            </button>
+          </div>
+        )}
         {list.length === 0 && (
           <div className="chat-empty">
             <p>Ask me to create notes, manage todos, or research the web and save findings.</p>
             <p className="chat-empty-project">
               Working on: <strong>{activeProject}</strong>
             </p>
-            <p className="chat-empty-hint">Type @ to reference a note, ! to reference a todo.</p>
+            <p className="chat-empty-hint">
+              Type @ to reference a note, ! to reference a todo, # to reference a file. Drop PDFs or
+              text files (markdown, JSON, logs, YAML, plain text) to add them to the project&apos;s
+              files.
+            </p>
           </div>
         )}
         {list.map((m) => (
           <div key={m.id} className={`chat-msg ${m.role}`}>
             <div className="chat-msg-label">{m.role === 'user' ? 'You' : 'Assistant'}</div>
+            {m.attachments && m.attachments.length > 0 && (
+              <div className="chat-attachments">
+                {(m.attachments ?? []).map((a) => (
+                  <button
+                    key={a.id}
+                    className="chat-attachment"
+                    title={a.savedPath}
+                    onClick={() => void window.ptnotes.files.reveal(a.savedPath)}
+                  >
+                    <span className="chat-attachment-icon">📎</span>
+                    <span className="chat-attachment-name">{a.name}</span>
+                    {typeof a.pageCount === 'number' && (
+                      <span className="chat-attachment-meta">{a.pageCount} pages</span>
+                    )}
+                    <span className="chat-attachment-mode">
+                      {a.mode === 'extract' ? 'Extracted' : 'Uploaded'}
+                    </span>
+                    {a.truncated && (
+                      <span
+                        className="chat-attachment-warn"
+                        title="PDF was truncated; the tail was cut off"
+                      >
+                        ⚠
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+            {m.role === 'assistant' && (m.toolCalls?.length ?? 0) > 0 && (
+              <div className="chat-tools">
+                {(m.toolCalls ?? []).map((tc) => (
+                  <div key={tc.id} className={`chat-tool ${tc.ok ? 'ok' : 'fail'}`}>
+                    <div className="chat-tool-header">
+                      <button
+                        className="chat-tool-toggle-btn"
+                        onClick={() =>
+                          setExpandedTools((prev) => ({ ...prev, [tc.id]: !prev[tc.id] }))
+                        }
+                      >
+                        <span className="chat-tool-name">
+                          {tc.ok ? '🛠' : '⚠️'} {tc.name}
+                        </span>
+                        <span className="chat-tool-toggle">{expandedTools[tc.id] ? '▲' : '▼'}</span>
+                      </button>
+                      {(() => {
+                        const noteId = noteIdFromToolCall(tc.name, tc.result)
+                        return noteId ? (
+                          <button
+                            className="chat-tool-note"
+                            title={`Open note: ${noteId}`}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              void openNote(noteId)
+                            }}
+                          >
+                            📄 {noteId}
+                          </button>
+                        ) : null
+                      })()}
+                    </div>
+                    {expandedTools[tc.id] && tc.result && (
+                      <pre className="chat-tool-result">{tc.result}</pre>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
             {m.content &&
               splitContent(m.content).map((part, i) => {
                 if (part.type === 'think') {
@@ -448,34 +656,15 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                     </div>
                   )
                 }
+                if (m.role === 'user') {
+                  return <UserBubble key={i} content={part.content} />
+                }
                 return (
                   <div key={i} className={`chat-msg-content ${m.error ? 'error' : ''}`}>
                     {part.content}
                   </div>
                 )
               })}
-            {m.role === 'assistant' && (m.toolCalls?.length ?? 0) > 0 && (
-              <div className="chat-tools">
-                {(m.toolCalls ?? []).map((tc) => (
-                  <div key={tc.id} className={`chat-tool ${tc.ok ? 'ok' : 'fail'}`}>
-                    <button
-                      className="chat-tool-header"
-                      onClick={() =>
-                        setExpandedTools((prev) => ({ ...prev, [tc.id]: !prev[tc.id] }))
-                      }
-                    >
-                      <span className="chat-tool-name">
-                        {tc.ok ? '🛠' : '⚠️'} {tc.name}
-                      </span>
-                      <span className="chat-tool-toggle">{expandedTools[tc.id] ? '▲' : '▼'}</span>
-                    </button>
-                    {expandedTools[tc.id] && tc.result && (
-                      <pre className="chat-tool-result">{tc.result}</pre>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
             {chatBusy &&
               m.id === list[list.length - 1]?.id &&
               m.role === 'assistant' &&
@@ -495,7 +684,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
           <div className="mention-popup">
             {mentionItems.map((item, i) => (
               <div
-                key={'name' in item ? item.name : item.text}
+                key={typeof item === 'string' ? item : 'name' in item ? item.name : item.text}
                 className={`mention-item ${i === mentionIndex ? 'active' : ''}`}
                 onMouseDown={(e) => {
                   e.preventDefault()
@@ -503,7 +692,9 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                 }}
                 onMouseEnter={() => setMentionIndex(i)}
               >
-                <span className="mention-icon">{mention?.kind === 'todo' ? '☑' : '📄'}</span>
+                <span className="mention-icon">
+                  {mention?.kind === 'todo' ? '☑' : mention?.kind === 'file' ? '📎' : '📄'}
+                </span>
                 {mentionName(item)}
               </div>
             ))}
@@ -513,7 +704,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
           ref={textareaRef}
           value={input}
           placeholder={
-            activeProject ? 'Ask the assistant… (@ note, ! todo)' : 'Select a project first'
+            activeProject ? 'Ask the assistant… (@ note, ! todo, # file)' : 'Select a project first'
           }
           disabled={!activeProject || chatBusy}
           rows={2}
@@ -537,6 +728,13 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
           </button>
         )}
       </div>
+
+      {dragActive && (
+        <div className="chat-drop-overlay">
+          <span className="chat-drop-icon">📄</span>
+          <span>Drop PDF or text files to add to project files</span>
+        </div>
+      )}
     </aside>
   )
 }

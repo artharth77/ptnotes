@@ -5,26 +5,112 @@ import type { PTNotesService } from '../service/PTNotesService'
 import { AIConfigStore } from '../ai/config'
 import { ChatSession, isLocalEndpoint } from '../ai/chatSession'
 import { createClient } from '../ai/client'
-import type { AIProviderConfig, ChatStreamEvent, ConfirmResponse } from '@shared/types'
+import type {
+  AIProviderConfig,
+  ChatMessage,
+  ChatStreamEvent,
+  ConfirmRequest,
+  ConfirmResponse
+} from '@shared/types'
 
 const CONFIRM_TIMEOUT_MS = 60_000
 
-export function registerAiIpc(service: PTNotesService): void {
-  const configStore = new AIConfigStore()
+export interface SessionRegistry {
+  getSession(event: IpcMainInvokeEvent, project: string): ChatSession
+  clear(project: string): void
+  stop(project: string): void
+  respond(resp: ConfirmResponse): void
+}
+
+export function createSessionRegistry(
+  service: PTNotesService,
+  configStore: AIConfigStore
+): SessionRegistry {
   const sessions = new Map<string, ChatSession>()
   const pendingConfirms = new Map<
     string,
     { resolve: (approved: boolean) => void; timer: NodeJS.Timeout }
   >()
 
+  return {
+    getSession(event, project) {
+      let session = sessions.get(project)
+      if (!session) {
+        const send = (evt: ChatStreamEvent): void => {
+          const win = BrowserWindow.fromWebContents(event.sender)
+          win?.webContents.send('ai:stream', evt)
+        }
+        session = new ChatSession(
+          () => configStore.load(),
+          {
+            service,
+            activeProject: project,
+            confirm: (req: Omit<ConfirmRequest, 'id'>) => {
+              const id = randomUUID()
+              const timer = setTimeout(() => {
+                const pending = pendingConfirms.get(id)
+                if (!pending) return
+                pendingConfirms.delete(id)
+                pending.resolve(false)
+              }, CONFIRM_TIMEOUT_MS)
+              const promise = new Promise<boolean>((resolve) => {
+                pendingConfirms.set(id, { resolve, timer })
+              })
+              send({ type: 'confirm', confirm: { id, ...req } })
+              return promise
+            }
+          },
+          send
+        )
+        sessions.set(project, session)
+      }
+      return session
+    },
+    clear(project) {
+      sessions.delete(project)
+    },
+    stop(project) {
+      sessions.get(project)?.stop()
+    },
+    respond(resp) {
+      const pending = pendingConfirms.get(resp.id)
+      if (!pending) return
+      clearTimeout(pending.timer)
+      pendingConfirms.delete(resp.id)
+      pending.resolve(resp.approved)
+    }
+  }
+}
+
+export type ListModelsResult = string[] | { error: string }
+
+export function registerAiIpc(registry: SessionRegistry, configStore: AIConfigStore): void {
   ipcMain.handle('ai:getConfig', async (): Promise<AIProviderConfig> => configStore.load())
+
+  ipcMain.handle(
+    'ai:listModels',
+    async (_e, baseUrl: string, apiKey: string): Promise<ListModelsResult> => {
+      if (!baseUrl) return { error: 'Base URL is required' }
+      try {
+        const client = createClient({ baseUrl, apiKey, model: '' })
+        const res = await client.models.list()
+        const ids = res.data
+          .map((m) => m.id)
+          .filter((id): id is string => typeof id === 'string')
+          .sort()
+        return ids
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  )
 
   ipcMain.handle('ai:setConfig', async (_e, config: AIProviderConfig): Promise<AIProviderConfig> =>
     configStore.save(config)
   )
 
   ipcMain.handle('ai:clear', async (_e, project: string): Promise<void> => {
-    sessions.delete(project)
+    registry.clear(project)
   })
 
   ipcMain.handle(
@@ -59,48 +145,18 @@ export function registerAiIpc(service: PTNotesService): void {
   )
 
   ipcMain.handle('ai:stop', async (_e, project: string): Promise<void> => {
-    sessions.get(project)?.stop()
+    registry.stop(project)
   })
 
   ipcMain.handle('ai:confirmResponse', async (_e, resp: ConfirmResponse): Promise<void> => {
-    const pending = pendingConfirms.get(resp.id)
-    if (!pending) return
-    clearTimeout(pending.timer)
-    pendingConfirms.delete(resp.id)
-    pending.resolve(resp.approved)
+    registry.respond(resp)
   })
 
-  ipcMain.handle('ai:send', async (event: IpcMainInvokeEvent, project: string, text: string) => {
-    let session = sessions.get(project)
-    if (!session) {
-      const send = (evt: ChatStreamEvent): void => {
-        const win = BrowserWindow.fromWebContents(event.sender)
-        win?.webContents.send('ai:stream', evt)
-      }
-      session = new ChatSession(
-        () => configStore.load(),
-        {
-          service,
-          activeProject: project,
-          confirm: (req) => {
-            const id = randomUUID()
-            const timer = setTimeout(() => {
-              const pending = pendingConfirms.get(id)
-              if (!pending) return
-              pendingConfirms.delete(id)
-              pending.resolve(false)
-            }, CONFIRM_TIMEOUT_MS)
-            const promise = new Promise<boolean>((resolve) => {
-              pendingConfirms.set(id, { resolve, timer })
-            })
-            send({ type: 'confirm', confirm: { id, ...req } })
-            return promise
-          }
-        },
-        send
-      )
-      sessions.set(project, session)
+  ipcMain.handle(
+    'ai:send',
+    async (event: IpcMainInvokeEvent, project: string, text: string, history?: ChatMessage[]) => {
+      const session = registry.getSession(event, project)
+      await session.send(text, history)
     }
-    await session.send(text)
-  })
+  )
 }

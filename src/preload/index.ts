@@ -1,13 +1,16 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type {
   AIProviderConfig,
+  ChatMessage,
   ChatSessionMeta,
   ChatStreamEvent,
   ChatThread,
   ConfirmResponse,
   CreateProjectResult,
+  StorageSettings,
   NoteMeta,
+  PdfExtractResult,
   Project,
   Todo
 } from '../shared/types'
@@ -65,8 +68,8 @@ const api = {
       ipcRenderer.invoke('chat:rename', project, sessionId, title)
   },
   ai: {
-    send: (project: string, text: string): Promise<void> =>
-      ipcRenderer.invoke('ai:send', project, text),
+    send: (project: string, text: string, history?: ChatMessage[]): Promise<void> =>
+      ipcRenderer.invoke('ai:send', project, text, history),
     stop: (project: string): Promise<void> => ipcRenderer.invoke('ai:stop', project),
     confirmResponse: (resp: ConfirmResponse): Promise<void> =>
       ipcRenderer.invoke('ai:confirmResponse', resp),
@@ -74,6 +77,8 @@ const api = {
     generateTitle: (project: string, firstMessage: string): Promise<string> =>
       ipcRenderer.invoke('ai:generateTitle', project, firstMessage),
     getConfig: (): Promise<AIProviderConfig> => ipcRenderer.invoke('ai:getConfig'),
+    listModels: (baseUrl: string, apiKey: string): Promise<string[] | { error: string }> =>
+      ipcRenderer.invoke('ai:listModels', baseUrl, apiKey),
     setConfig: (config: AIProviderConfig): Promise<AIProviderConfig> =>
       ipcRenderer.invoke('ai:setConfig', config),
     onStreamEvent: (callback: (event: ChatStreamEvent) => void): (() => void) => {
@@ -83,6 +88,25 @@ const api = {
         ipcRenderer.removeListener('ai:stream', listener)
       }
     }
+  },
+  settings: {
+    get: (): Promise<StorageSettings> => ipcRenderer.invoke('settings:get'),
+    chooseRoot: (): Promise<string | null> => ipcRenderer.invoke('settings:chooseRoot'),
+    changeRoot: (newRoot: string): Promise<StorageSettings> =>
+      ipcRenderer.invoke('settings:changeRoot', newRoot)
+  },
+  pdf: {
+    supportsUpload: (): Promise<boolean> => ipcRenderer.invoke('pdf:supportsUpload'),
+    upload: (project: string, path: string, prompt: string): Promise<void> =>
+      ipcRenderer.invoke('pdf:upload', project, path, prompt)
+  },
+  files: {
+    list: (project: string): Promise<string[]> => ipcRenderer.invoke('files:list', project),
+    getPathForFile: (file: File): string => webUtils.getPathForFile(file),
+    copyToProject: (project: string, sourcePath: string, fileName?: string): Promise<string> =>
+      ipcRenderer.invoke('files:copyToProject', project, sourcePath, fileName),
+    extract: (path: string): Promise<PdfExtractResult> => ipcRenderer.invoke('files:extract', path),
+    reveal: (path: string): Promise<void> => ipcRenderer.invoke('files:reveal', path)
   }
 }
 

@@ -57,6 +57,20 @@ await service.deleteNote('Work', 'meeting-decisions')
 notes = await service.listNotes('Work')
 assert.equal(notes.length, 1)
 
+// Non-Latin (Thai) note names keep their characters instead of "untitled"
+const thaiNote = await service.createNote('Work', 'บันทึกการประชุม')
+assert.equal(thaiNote.id, 'บันทึกการประชุม')
+notes = await service.listNotes('Work')
+assert.ok(
+  notes.some((n) => n.name === 'บันทึกการประชุม'),
+  'thai note name preserved'
+)
+const thaiRenamed = await service.renameNote('Work', 'บันทึกการประชุม', 'บันทึกใหม่')
+assert.equal(thaiRenamed.id, 'บันทึกใหม่')
+await service.deleteNote('Work', 'บันทึกใหม่')
+notes = await service.listNotes('Work')
+assert.equal(notes.length, 1)
+
 // Todos
 let todos = await service.listTodos('Work')
 assert.equal(todos.length, 0)
@@ -147,5 +161,33 @@ assert.equal(projects[0].pathExists, true)
 await service.deleteProject('Archive')
 projects = await service.listProjects()
 assert.equal(projects.length, 0)
+
+// PDF copy: identical upload (same name + size + hash) reuses existing file
+await service.createProject('Docs')
+const srcDir = join(ROOT, '_pdfsrc')
+await fs.mkdir(srcDir, { recursive: true })
+const pdfSrc = join(srcDir, 'report.pdf')
+const contentA = 'A'.repeat(200) + 'PDF-PART-1'
+await fs.writeFile(pdfSrc, contentA)
+const first = await service.copyFileToProject('Docs', pdfSrc, 'report.pdf')
+assert.equal(first, join(ROOT, 'Docs', 'files', 'report.pdf'))
+const reuse = await service.copyFileToProject('Docs', pdfSrc, 'report.pdf')
+assert.equal(reuse, first, 'identical file reuses existing copy')
+
+const pdfSrc2 = join(srcDir, 'report-v2.pdf')
+await fs.writeFile(pdfSrc2, 'B'.repeat(200) + 'PDF-PART-2')
+const second = await service.copyFileToProject('Docs', pdfSrc2, 'report-v2.pdf')
+assert.equal(second, join(ROOT, 'Docs', 'files', 'report-v2.pdf'))
+
+// same name + same size, but different hash -> must NOT reuse
+const pdfSrc3 = join(srcDir, 'report.pdf')
+await fs.writeFile(pdfSrc3, 'C'.repeat(200) + 'PDF-PART-1')
+const clash = await service.copyFileToProject('Docs', pdfSrc3, 'report.pdf')
+assert.equal(
+  clash,
+  join(ROOT, 'Docs', 'files', 'report-2.pdf'),
+  'same name+size but different hash gets a new file'
+)
+await service.deleteProject('Docs')
 
 console.log('ALL SERVICE TESTS PASSED')

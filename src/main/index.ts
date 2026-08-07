@@ -4,7 +4,11 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { PTNotesService } from './service/PTNotesService'
 import { registerProjectIpc, registerNoteIpc, registerTodoIpc, registerChatIpc } from './ipc'
-import { registerAiIpc } from './ipc/ai'
+import { registerAiIpc, createSessionRegistry } from './ipc/ai'
+import { registerFilesIpc } from './ipc/files'
+import { registerSettingsIpc } from './ipc/settings'
+import { SettingsStore } from './settings'
+import { AIConfigStore } from './ai/config'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -41,19 +45,25 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.ptnotes.app')
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  const service = new PTNotesService()
+  const settingsStore = new SettingsStore()
+  const settings = await settingsStore.load()
+  const service = new PTNotesService(settings.rootDir)
+  const configStore = new AIConfigStore()
+  const registry = createSessionRegistry(service, configStore)
   registerProjectIpc(service)
   registerNoteIpc(service)
   registerTodoIpc(service)
   registerChatIpc(service)
-  registerAiIpc(service)
+  registerAiIpc(registry, configStore)
+  registerFilesIpc(service, registry, configStore)
+  registerSettingsIpc(service, settingsStore)
 
   createWindow()
 

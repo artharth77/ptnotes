@@ -174,4 +174,70 @@ const thinkEvents = events.filter(
 assert.equal(thinkEvents.length, 1, 'reasoning_content wrapped in <think>')
 assert.match(finalContent, /<think>User wants a note\.<\/think>/, 'think block opened and closed')
 
+// ---- send(history): past conversation is included as model context ----
+let histReqMessages: unknown[] | null = null
+const histServer = http.createServer((req, res) => {
+  let body = ''
+  req.on('data', (d) => (body += d))
+  req.on('end', () => {
+    histReqMessages = JSON.parse(body).messages
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive'
+    })
+    res.write(
+      sse({
+        id: 'h',
+        object: 'chat.completion.chunk',
+        created: 1,
+        model: 't',
+        choices: [{ index: 0, delta: { role: 'assistant', content: 'ok' }, finish_reason: null }]
+      })
+    )
+    res.write(
+      sse({
+        id: 'h',
+        object: 'chat.completion.chunk',
+        created: 1,
+        model: 't',
+        choices: [{ index: 0, delta: {}, finish_reason: 'stop' }]
+      })
+    )
+    res.write('data: [DONE]\n\n')
+    res.end()
+  })
+})
+await new Promise<void>((r) => histServer.listen(0, '127.0.0.1', r))
+const histPort = (histServer.address() as { port: number }).port
+
+const history = [
+  { id: 'h1', role: 'user', content: 'Remember this context.', toolCalls: [] },
+  { id: 'h2', role: 'assistant', content: 'I remember.', toolCalls: [] }
+]
+const ctxEvents: unknown[] = []
+const ctxSession = new ChatSession(
+  async () => ({ baseUrl: `http://127.0.0.1:${histPort}/v1`, apiKey: '', model: 'test-model' }),
+  { service, activeProject: 'Test' },
+  (evt) => ctxEvents.push(evt)
+)
+await ctxSession.send('and my new question', history)
+histServer.close()
+
+assert.ok(histReqMessages, 'captured outgoing messages')
+const sentRoles = (histReqMessages as { role: string; content?: string }[]).map((m) => ({
+  role: m.role,
+  content: m.content ?? ''
+}))
+const sentUsers = sentRoles.filter((m) => m.role === 'user').map((m) => m.content)
+assert.ok(
+  sentUsers.some((c) => c.includes('Remember this context.')),
+  'history user message is included in model context'
+)
+assert.equal(
+  sentUsers[sentUsers.length - 1],
+  'and my new question',
+  'new message appended after history'
+)
+
 console.log('CHAT SESSION TEST PASSED')

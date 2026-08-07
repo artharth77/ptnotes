@@ -4,12 +4,17 @@ interface ModalProps {
   title: string
   onClose: () => void
   children: ReactNode
+  className?: string
 }
 
-export function Modal({ title, onClose, children }: ModalProps): React.JSX.Element {
+export function Modal({ title, onClose, children, className }: ModalProps): React.JSX.Element {
   return (
     <div className="modal-overlay">
-      <div className="modal" role="dialog" onClick={(e) => e.stopPropagation()}>
+      <div
+        className={`modal${className ? ` ${className}` : ''}`}
+        role="dialog"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="modal-header">
           <h2>{title}</h2>
           <button className="icon-btn" onClick={onClose} aria-label="Close">
@@ -28,6 +33,7 @@ export function TextField({
   onEnter,
   placeholder,
   autoFocus,
+  readOnly,
   type = 'text'
 }: {
   value: string
@@ -35,6 +41,7 @@ export function TextField({
   onEnter?: () => void
   placeholder?: string
   autoFocus?: boolean
+  readOnly?: boolean
   type?: string
 }): React.JSX.Element {
   return (
@@ -44,6 +51,7 @@ export function TextField({
       value={value}
       placeholder={placeholder}
       autoFocus={autoFocus}
+      readOnly={readOnly}
       onChange={(e) => onChange(e.target.value)}
       onKeyDown={(e) => {
         if (e.key === 'Enter') onEnter?.()

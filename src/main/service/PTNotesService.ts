@@ -1,5 +1,6 @@
 import { promises as fs } from 'fs'
-import { join } from 'path'
+import { createHash } from 'crypto'
+import { basename, extname, join, relative, sep } from 'path'
 import { app, shell } from 'electron'
 import type {
   ChatSessionMeta,
@@ -10,9 +11,11 @@ import type {
   Todo
 } from '@shared/types'
 import { slugify } from '../utils/slug'
+import { detectFileKind } from '../ai/reader'
 
 const TODO_HEADER = '# Todo\n\n'
 const WELCOME_ID = 'welcome'
+const REGISTRY_FILE = '.ptnotes-projects.json'
 const WELCOME_NOTE = `# Welcome to PTNotes
 
 This is your first note. Everything you write here is stored as markdown in:
@@ -27,7 +30,7 @@ This is your first note. Everything you write here is stored as markdown in:
 `
 
 export class PTNotesService {
-  private readonly rootDir: string
+  private rootDir: string
 
   constructor(rootDir?: string) {
     this.rootDir = rootDir ?? join(app.getPath('documents'), 'PTNotes')
@@ -41,6 +44,40 @@ export class PTNotesService {
     await fs.mkdir(this.rootDir, { recursive: true })
   }
 
+  async changeRootDir(newRoot: string): Promise<void> {
+    const target = newRoot.trim()
+    if (!target) throw new Error('New root path cannot be empty')
+    if (target === this.rootDir) {
+      throw new Error('New root path is the same as the current root')
+    }
+    if (isInside(target, this.rootDir) || isInside(this.rootDir, target)) {
+      throw new Error('New root path cannot be inside the current root folder')
+    }
+    await fs.mkdir(target, { recursive: true })
+    let entries: import('fs').Dirent[]
+    try {
+      entries = await fs.readdir(this.rootDir, { withFileTypes: true })
+    } catch {
+      entries = []
+    }
+    const dirs = entries.filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+    const registry = entries.find((e) => e.isFile() && e.name === REGISTRY_FILE)
+    for (const entry of dirs) {
+      const dest = join(target, entry.name)
+      if (await this.pathExists(dest)) throw new Error(`A folder already exists at ${dest}`)
+    }
+    if (registry && (await this.pathExists(join(target, registry.name)))) {
+      throw new Error(`A file already exists at ${join(target, registry.name)}`)
+    }
+    for (const entry of dirs) {
+      await fs.rename(join(this.rootDir, entry.name), join(target, entry.name))
+    }
+    if (registry) {
+      await fs.rename(join(this.rootDir, registry.name), join(target, registry.name))
+    }
+    this.rootDir = target
+  }
+
   private projectDir(name: string): string {
     return join(this.rootDir, validateProjectName(name))
   }
@@ -51,6 +88,10 @@ export class PTNotesService {
 
   private chatDir(name: string): string {
     return join(this.projectDir(name), 'chat')
+  }
+
+  private filesDir(name: string): string {
+    return join(this.projectDir(name), 'files')
   }
 
   private chatPath(project: string, sessionId: string): string {
@@ -66,7 +107,7 @@ export class PTNotesService {
   }
 
   private registryPath(): string {
-    return join(this.rootDir, '.ptnotes-projects.json')
+    return join(this.rootDir, REGISTRY_FILE)
   }
 
   private async loadRegistry(): Promise<string[]> {
@@ -330,6 +371,68 @@ export class PTNotesService {
     await fs.rm(this.chatDir(project), { recursive: true, force: true })
   }
 
+  async copyFileToProject(project: string, sourcePath: string, fileName?: string): Promise<string> {
+    const dir = this.filesDir(project)
+    await fs.mkdir(dir, { recursive: true })
+    const original = fileName || basename(sourcePath)
+    const kind = await detectFileKind(sourcePath)
+    const originalExt = extname(original)
+    const stem = originalExt ? original.slice(0, -originalExt.length) : original
+    const base = slugify(stem)
+    let ext: string
+    if (kind === 'pdf') {
+      ext = '.pdf'
+    } else if (kind === 'text') {
+      ext = originalExt.toLowerCase() || '.txt'
+    } else {
+      throw new Error(
+        `Unsupported file: "${original}" is a binary file. Only PDF files and text files can be added.`
+      )
+    }
+    const name = `${base}${ext}`
+
+    const srcSize = (await fs.stat(sourcePath)).size
+    const srcHash = await hashFile(sourcePath)
+
+    for (const f of await fs.readdir(dir).catch(() => [])) {
+      if (f !== name) continue
+      const p = join(dir, f)
+      const st = await fs.stat(p).catch(() => null)
+      if (st && st.size === srcSize && (await hashFile(p)) === srcHash) {
+        return p
+      }
+    }
+
+    let candidate = name
+    let i = 2
+    while (await this.pathExists(join(dir, candidate))) {
+      candidate = `${base}-${i++}${ext}`
+    }
+    const dest = join(dir, candidate)
+    await fs.copyFile(sourcePath, dest)
+    return dest
+  }
+
+  async listFiles(project: string): Promise<string[]> {
+    const dir = this.filesDir(project)
+    try {
+      const entries = await fs.readdir(dir, { withFileTypes: true })
+      return entries
+        .filter((e) => e.isFile() && !e.name.startsWith('.'))
+        .map((e) => e.name)
+        .sort((a, b) => a.localeCompare(b))
+    } catch {
+      return []
+    }
+  }
+
+  async projectFilePath(project: string, fileName: string): Promise<string | null> {
+    const base = basename(fileName)
+    if (base !== fileName) return null
+    const full = join(this.filesDir(project), base)
+    return (await this.pathExists(full)) ? full : null
+  }
+
   private async uniqueNoteId(project: string, base: string, exclude?: string): Promise<string> {
     let candidate = base
     let i = 2
@@ -469,6 +572,17 @@ function validateNoteId(id: string): string {
     throw new Error(`Invalid note id: ${id}`)
   }
   return id
+}
+
+function isInside(parent: string, child: string): boolean {
+  const rel = relative(parent, child)
+  return rel !== '' && !rel.startsWith('..') && !rel.startsWith(sep)
+}
+
+async function hashFile(path: string): Promise<string> {
+  const hash = createHash('sha256')
+  hash.update(await fs.readFile(path))
+  return hash.digest('hex')
 }
 
 function deriveTitle(thread: ChatThread): string {

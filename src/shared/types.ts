@@ -25,6 +25,16 @@ export interface AIProviderConfig {
   baseUrl: string
   apiKey: string
   model: string
+  uploadPdfEnabled?: boolean
+}
+
+export interface StorageSettings {
+  rootDir: string
+}
+
+export interface AppSettings {
+  storage: StorageSettings
+  ai: AIProviderConfig
 }
 
 export interface ChatMessage {
@@ -33,6 +43,27 @@ export interface ChatMessage {
   content: string
   toolCalls?: ToolCallInfo[]
   error?: boolean
+  attachments?: ChatAttachment[]
+}
+
+export type PdfAttachmentKind = 'extract' | 'upload'
+
+export interface ChatAttachment {
+  id: string
+  kind: 'pdf' | 'text'
+  name: string
+  savedPath: string
+  mode: PdfAttachmentKind
+  pageCount?: number
+  charCount?: number
+  truncated?: boolean
+}
+
+export interface PdfExtractResult {
+  text: string
+  pageCount: number
+  charCount: number
+  truncated: boolean
 }
 
 export interface ChatSessionMeta {

@@ -5,7 +5,7 @@ import { NoteList } from './components/NoteList'
 import { TodoPanel } from './components/TodoPanel'
 import { MarkdownEditor } from './components/MarkdownEditor'
 import { ChatDrawer } from './components/ChatDrawer'
-import { AISettingsDialog } from './components/AISettingsDialog'
+import { SettingsDialog } from './components/SettingsDialog'
 import { PromptModal, Modal } from './components/Modal'
 import { Resizer } from './components/Resizer'
 import type { Tab, ToolCallInfo } from '@shared/types'
@@ -207,11 +207,18 @@ function App(): React.JSX.Element {
           }
           break
         case 'error':
-          if (project) {
-            state.updateLastAssistantMessage(project, (m) => ({ ...m, error: true }))
+          {
+            const target = project ?? state.activeProject
+            if (target && evt.error) {
+              state.updateLastAssistantMessage(target, (m) => ({
+                ...m,
+                error: true,
+                content: m.content ? `${m.content}\n\n⚠️ ${evt.error}` : evt.error!
+              }))
+            }
+            state.setChatBusy(false)
+            state.setChatStreamProject(null)
           }
-          state.setChatBusy(false)
-          state.setChatStreamProject(null)
           break
         case 'confirm':
           if (evt.confirm) {
@@ -264,7 +271,7 @@ function App(): React.JSX.Element {
         </div>
       )}
 
-      {settingsOpen && <AISettingsDialog />}
+      {settingsOpen && <SettingsDialog />}
       <ConfirmDeleteDialog />
     </div>
   )

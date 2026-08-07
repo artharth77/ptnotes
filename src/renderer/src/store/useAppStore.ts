@@ -16,6 +16,7 @@ interface AppState {
   activeNoteId: string | null
   noteContent: string
   todos: Todo[]
+  projectFiles: string[]
   tab: Tab
   chatOpen: boolean
   chatMessages: Record<string, ChatMessage[]>
@@ -26,6 +27,7 @@ interface AppState {
   chatStreamProject: string | null
   confirmRequest: ConfirmRequest | null
   settingsOpen: boolean
+  settingsCategory: 'storage' | 'ai'
   sidebarVisible: boolean
   loading: boolean
 
@@ -35,9 +37,11 @@ interface AppState {
   recreateProject: (name: string) => Promise<void>
   renameProject: (oldName: string, newName: string) => Promise<void>
   deleteProject: (name: string) => Promise<void>
+  changeRoot: (newRoot: string) => Promise<void>
   selectProject: (name: string) => Promise<void>
   refreshNotes: () => Promise<void>
   refreshTodos: () => Promise<void>
+  refreshFiles: () => Promise<void>
   selectNote: (id: string) => Promise<void>
   saveNote: (content: string) => Promise<void>
   createNote: (title: string) => Promise<void>
@@ -52,6 +56,8 @@ interface AppState {
   setChatStreamProject: (project: string | null) => void
   setConfirmRequest: (req: ConfirmRequest | null) => void
   setSettingsOpen: (open: boolean) => void
+  setSettingsCategory: (category: 'storage' | 'ai') => void
+  openSettings: (category?: 'storage' | 'ai') => void
   setSidebarVisible: (visible: boolean) => void
   newChat: (project: string) => Promise<void>
   openChat: (project: string, sessionId: string) => Promise<void>
@@ -69,6 +75,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   activeNoteId: null,
   noteContent: '',
   todos: [],
+  projectFiles: [],
   tab: 'notes',
   chatOpen: false,
   chatMessages: {},
@@ -79,6 +86,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   chatStreamProject: null,
   confirmRequest: null,
   settingsOpen: false,
+  settingsCategory: 'storage',
   sidebarVisible: true,
   loading: false,
 
@@ -151,10 +159,24 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  async changeRoot(newRoot) {
+    await window.ptnotes.settings.changeRoot(newRoot)
+    await get().refreshProjects()
+    const active = get().activeProject
+    if (active) {
+      await get().selectProject(active)
+    }
+  },
+
   async selectProject(name) {
     localStorage.setItem('ptnotes:activeProject', name)
     set({ activeProject: name, activeNoteId: null, noteContent: '', loading: true })
-    await Promise.all([get().refreshNotes(), get().refreshTodos(), get().loadChatSessions(name)])
+    await Promise.all([
+      get().refreshNotes(),
+      get().refreshTodos(),
+      get().refreshFiles(),
+      get().loadChatSessions(name)
+    ])
     set((state) => {
       if (!state.chatSessionIds[name]) {
         return {
@@ -179,6 +201,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!project) return set({ todos: [] })
     const todos = await window.ptnotes.todos.list(project)
     set({ todos })
+  },
+
+  async refreshFiles() {
+    const project = get().activeProject
+    if (!project) return set({ projectFiles: [] })
+    const projectFiles = await window.ptnotes.files.list(project)
+    set({ projectFiles })
   },
 
   async selectNote(id) {
@@ -342,6 +371,14 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setSettingsOpen(settingsOpen) {
     set({ settingsOpen })
+  },
+
+  setSettingsCategory(settingsCategory) {
+    set({ settingsCategory })
+  },
+
+  openSettings(category) {
+    set({ settingsOpen: true, settingsCategory: category ?? get().settingsCategory })
   },
 
   setSidebarVisible(sidebarVisible) {
