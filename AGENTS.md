@@ -174,6 +174,7 @@ ChatPanel (renderer) ──send──▶ Main process
 - Chat operates on the **currently active project** by default.
 - Tool errors are returned to the model so it can self-correct.
 - Session is kept in memory per project (`sessions` map) so closing the drawer and reopening continues the same conversation.
+- Each `ai:send` call receives the renderer's current thread as `history` and the session is re-seeded from it, so reopening a historical chat (or switching sessions) keeps the correct model context — the AI never relies solely on in-memory accumulation.
 - System prompt is sent when a session starts; it includes the active project and instructs the AI that a `note:<notename>` message means it must call `read_note` for that note.
 - A `!` todo mention inserts `todo:<todotext>` which is sent to the model as-is.
 - A `#` file mention inserts `file:<filename>`; the system prompt instructs the AI that a

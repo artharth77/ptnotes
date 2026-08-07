@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type {
   AIProviderConfig,
+  ChatMessage,
   ChatSessionMeta,
   ChatStreamEvent,
   ChatThread,
@@ -67,8 +68,8 @@ const api = {
       ipcRenderer.invoke('chat:rename', project, sessionId, title)
   },
   ai: {
-    send: (project: string, text: string): Promise<void> =>
-      ipcRenderer.invoke('ai:send', project, text),
+    send: (project: string, text: string, history?: ChatMessage[]): Promise<void> =>
+      ipcRenderer.invoke('ai:send', project, text, history),
     stop: (project: string): Promise<void> => ipcRenderer.invoke('ai:stop', project),
     confirmResponse: (resp: ConfirmResponse): Promise<void> =>
       ipcRenderer.invoke('ai:confirmResponse', resp),

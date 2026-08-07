@@ -33,6 +33,10 @@
 
 ### Fixed
 
+- Reopening a past chat session (or switching sessions / New Chat) no longer loses the conversation
+  context: the AI now continues from the messages shown in the chat. Previously only the in-memory
+  session was sent, so loading a historical session reset the model's context and replies didn't
+  follow the selected history.
 - Creating/renaming a note with a non-Latin title (e.g. Thai) no longer produces an "untitled" note:
   slugification now keeps Unicode letters and combining marks for all scripts, stripping only Latin
   combining accents.

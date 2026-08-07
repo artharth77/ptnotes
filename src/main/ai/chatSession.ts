@@ -1,7 +1,7 @@
 import OpenAI from 'openai'
 import { randomUUID } from 'crypto'
 import { toFile } from 'openai/uploads'
-import type { AIProviderConfig, ChatStreamEvent } from '@shared/types'
+import type { AIProviderConfig, ChatMessage, ChatStreamEvent } from '@shared/types'
 import { tools, type ToolContext } from './tools'
 import { createClient } from './client'
 
@@ -42,7 +42,7 @@ Current date: ${currentDate}.`
 }
 
 export class ChatSession {
-  private readonly messages: SessionMessage[] = []
+  private messages: SessionMessage[] = []
   private readonly getConfig: () => Promise<AIProviderConfig>
   private readonly ctx: ToolContext
   private readonly emit: StreamEmitter
@@ -57,7 +57,7 @@ export class ChatSession {
     this.config = { baseUrl: '', apiKey: '', model: '' }
   }
 
-  async send(userText: string): Promise<void> {
+  async send(userText: string, history?: ChatMessage[]): Promise<void> {
     this.stopped = false
     this.abortController = undefined
     this.config = await this.getConfig()
@@ -72,6 +72,8 @@ export class ChatSession {
       this.emit({ type: 'error', error: 'AI model is not configured.' })
       return
     }
+
+    if (history && history.length > 0) this.loadContext(history)
 
     const date = new Date().toISOString().slice(0, 10)
     this.ensureSystemPrompt(date)
@@ -201,6 +203,49 @@ export class ChatSession {
 
   clear(): void {
     this.messages.length = 0
+  }
+
+  /**
+   * Seed the conversation from the renderer's displayed thread (e.g. after opening a
+   * historical session). Rebuilds the internal message list from persisted ChatMessages,
+   * preserving assistant tool calls and their results so context continues correctly.
+   */
+  loadContext(history: ChatMessage[]): void {
+    this.messages = ChatSession.fromPersisted(history)
+  }
+
+  private static fromPersisted(history: ChatMessage[]): SessionMessage[] {
+    const out: SessionMessage[] = []
+    for (const m of history) {
+      if (m.role === 'user') {
+        out.push({ role: 'user', content: m.content })
+        continue
+      }
+      if (m.role !== 'assistant') continue
+      const toolCalls = (m.toolCalls ?? [])
+        .filter((tc) => tc.id)
+        .map((tc) => ({
+          id: tc.id,
+          type: 'function' as const,
+          function: {
+            name: tc.name,
+            arguments: tc.args && Object.keys(tc.args).length > 0 ? JSON.stringify(tc.args) : '{}'
+          }
+        }))
+      const hasContent = m.content && m.content.trim().length > 0
+      if (!hasContent && toolCalls.length === 0) continue
+      out.push({
+        role: 'assistant',
+        content: hasContent ? m.content : null,
+        ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {})
+      })
+      for (const tc of m.toolCalls ?? []) {
+        if (tc.id && tc.result != null) {
+          out.push({ role: 'tool', tool_call_id: tc.id, content: tc.result })
+        }
+      }
+    }
+    return out
   }
 
   private ensureSystemPrompt(date: string): void {

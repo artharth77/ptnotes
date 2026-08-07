@@ -251,6 +251,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     if (!text || !project || chatBusy) return
 
     const isFirstMessage = list.length === 0
+    const history = list
     const userMsg: ChatMessage = { id: uid(), role: 'user', content: text, toolCalls: [] }
     const assistantMsg: ChatMessage = { id: uid(), role: 'assistant', content: '', toolCalls: [] }
     appendChatMessage(project, userMsg)
@@ -263,7 +264,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     setChatBusy(true)
     setChatStreamProject(project)
     try {
-      await window.ptnotes.ai.send(project, text)
+      await window.ptnotes.ai.send(project, text, history)
     } finally {
       setChatBusy(false)
       setChatStreamProject(null)
