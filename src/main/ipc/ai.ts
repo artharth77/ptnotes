@@ -82,8 +82,28 @@ export function createSessionRegistry(
   }
 }
 
+export type ListModelsResult = string[] | { error: string }
+
 export function registerAiIpc(registry: SessionRegistry, configStore: AIConfigStore): void {
   ipcMain.handle('ai:getConfig', async (): Promise<AIProviderConfig> => configStore.load())
+
+  ipcMain.handle(
+    'ai:listModels',
+    async (_e, baseUrl: string, apiKey: string): Promise<ListModelsResult> => {
+      if (!baseUrl) return { error: 'Base URL is required' }
+      try {
+        const client = createClient({ baseUrl, apiKey, model: '' })
+        const res = await client.models.list()
+        const ids = res.data
+          .map((m) => m.id)
+          .filter((id): id is string => typeof id === 'string')
+          .sort()
+        return ids
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  )
 
   ipcMain.handle('ai:setConfig', async (_e, config: AIProviderConfig): Promise<AIProviderConfig> =>
     configStore.save(config)

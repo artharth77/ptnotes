@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../store/useAppStore'
 import { Modal, TextField } from './Modal'
 import type { AIProviderConfig, StorageSettings } from '@shared/types'
@@ -12,6 +12,59 @@ function AiSettingsPane({
   config: AIProviderConfig
   setConfig: (c: AIProviderConfig) => void
 }): React.JSX.Element {
+  const [models, setModels] = useState<string[]>([])
+  const [loadingModels, setLoadingModels] = useState(false)
+  const [modelsError, setModelsError] = useState('')
+  const [modelOpen, setModelOpen] = useState(false)
+  const modelDropdownRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!modelOpen) return
+    const handler = (e: PointerEvent): void => {
+      if (modelDropdownRef.current && !modelDropdownRef.current.contains(e.target as Node)) {
+        setModelOpen(false)
+      }
+    }
+    document.addEventListener('pointerdown', handler)
+    return () => document.removeEventListener('pointerdown', handler)
+  }, [modelOpen])
+
+  const visibleModels = config.model.trim()
+    ? models.filter((m) => m.toLowerCase().includes(config.model.trim().toLowerCase()))
+    : models
+
+  async function loadModels(silent = false): Promise<void> {
+    if (!config.baseUrl.trim()) {
+      if (!silent) setModelsError('Enter a Base URL first.')
+      return
+    }
+    if (!silent) setLoadingModels(true)
+    if (!silent) setModelsError('')
+    try {
+      const res = await window.ptnotes.ai.listModels(config.baseUrl.trim(), config.apiKey)
+      if (Array.isArray(res)) {
+        setModels(res)
+        if (!silent) setModelsError('')
+      } else {
+        setModels([])
+        if (!silent) setModelsError(res.error)
+      }
+    } catch (err) {
+      if (!silent) setModelsError(err instanceof Error ? err.message : String(err))
+    } finally {
+      if (!silent) setLoadingModels(false)
+    }
+  }
+
+  useEffect(() => {
+    if (config.baseUrl.trim()) {
+      const id = setTimeout(() => void loadModels(true), 0)
+      return () => clearTimeout(id)
+    }
+    return undefined
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   return (
     <>
       <p className="hint">
@@ -37,11 +90,74 @@ function AiSettingsPane({
       </label>
       <label className="form-label">
         Model
-        <TextField
-          value={config.model}
-          onChange={(v) => setConfig({ ...config, model: v })}
-          placeholder="gpt-4o-mini"
-        />
+        <div className="model-combo">
+          <div className="model-dropdown" ref={modelDropdownRef}>
+            <div className="model-input-wrap">
+              <input
+                className="text-field"
+                value={config.model}
+                placeholder="gpt-4o-mini"
+                onChange={(e) => setConfig({ ...config, model: e.target.value })}
+                onFocus={() => setModelOpen(true)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') setModelOpen(false)
+                }}
+              />
+              {config.model && (
+                <button
+                  className="model-clear"
+                  aria-label="Clear model"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    setConfig({ ...config, model: '' })
+                    setModelOpen(true)
+                  }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+            {modelOpen && (
+              <div className="model-popup">
+                {visibleModels.length === 0 ? (
+                  <div className="model-popup-empty">
+                    {models.length === 0
+                      ? 'No models loaded — click "Load models".'
+                      : 'No matching models.'}
+                  </div>
+                ) : (
+                  visibleModels.map((m) => (
+                    <button
+                      key={m}
+                      className={`model-option ${config.model === m ? 'active' : ''}`}
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        setConfig({ ...config, model: m })
+                        setModelOpen(false)
+                      }}
+                    >
+                      {m}
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+          <button
+            className="btn"
+            onClick={() => void loadModels()}
+            disabled={!config.baseUrl.trim() || loadingModels}
+          >
+            {loadingModels ? 'Loading…' : 'Load models'}
+          </button>
+        </div>
+        {modelsError && <p className="form-error">{modelsError}</p>}
+        {!modelsError && models.length > 0 && (
+          <p className="hint">
+            {models.length} model{models.length === 1 ? '' : 's'} available — pick one or type any
+            custom id.
+          </p>
+        )}
       </label>
       <label className="checkbox-label">
         <input
