@@ -9,10 +9,12 @@ Markdown notes + todo lists + AI assistant, organized by project. Electron + Rea
 - **Todo lists** — markdown checklist per project with toggle, progress counts, **Show All** toggle, **Delete completed**, and drag & drop reorder.
 - **AI chat assistant** — collapsible right-side drawer with real-time streaming replies. Works with any OpenAI-compatible endpoint (OpenAI, OpenRouter, Groq, LM Studio, Ollama, …); base URL, API key, and model configured in-app.
 - **AI tools** — the assistant can create/update/read/delete/search notes, manage todos, search the web (DuckDuckGo, keyless), and read pages locally. Destructive actions (like note deletion) require your confirmation.
-- **Chat mentions** — type `@` to insert a note, `!` to insert a todo; the AI can link to your notes with clickable `[name](note:name)` links.
+- **File attachments** — drag & drop files into the chat; supported files (any text file plus PDFs, detected by content) are copied locally to the project and can be reused via `#` mentions. The assistant reads them locally with the `read_file` tool.
+- **Chat mentions** — type `@` to insert a note, `!` to insert a todo, `#` to attach a project file; the AI can link to your notes with clickable `[name](note:name)` links.
 - **Chat history** — each session is auto-saved to a JSON file; **New Chat** archives the current thread and a history picker lets you reopen, rename, or delete old sessions.
 - **Reasoning models** — `<think>` reasoning blocks (e.g. DeepSeek-R1) render in a separate collapsed-by-default bubble; a **Stop** button interrupts a running reply.
 - **Missing projects** — projects whose folders were deleted externally still appear in the list (marked in red) and can be recreated in place.
+- **Settings & storage** — a two-panel **Settings** dialog configures the project root (movable, with confirmation) and your AI provider, including an editable model combobox fed by `GET /models`.
 
 ## Tech stack
 
@@ -31,10 +33,11 @@ Data lives under `~/Documents/PTNotes/`:
 └── <ProjectName>/
     ├── notes/*.md          (one file per note)
     ├── TODO.md             (markdown checklist)
+    ├── files/*             (attachments dropped into the chat)
     └── chat/*.json         (one file per chat session)
 ```
 
-The folder on disk is the source of truth. App AI configuration (base URL, API key, model) is stored in Electron's `userData/ai-provider.json`, restricted to the owner's read/write and never bundled into the renderer.
+The folder on disk is the source of truth, and the project root is configurable via **Settings → Storage** (changing it moves all data). App AI configuration (base URL, API key, model) is stored in Electron's `userData/ai-provider.json`, restricted to the owner's read/write and never bundled into the renderer.
 
 ## Commands
 
@@ -75,4 +78,4 @@ $ npm run build:mac
 $ npm run build:linux
 ```
 
-Packaged artifacts are written to `dist/` (e.g. `dist/ptnotes-0.1.0.dmg`).
+Packaged artifacts are written to `dist/` (e.g. `dist/ptnotes-0.2.0.dmg`).
