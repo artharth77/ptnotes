@@ -1,10 +1,24 @@
 import { promises as fs } from 'fs'
+import { extname } from 'path'
 import { PDFParse } from 'pdf-parse'
 import type { PdfExtractResult } from '@shared/types'
 
 export const MAX_PDF_CHARS = 240_000
 
 const PDF_MAGIC = '%PDF-'
+
+export async function readFileAsText(path: string): Promise<PdfExtractResult> {
+  const ext = extname(path).toLowerCase()
+  if (ext === '.pdf') return extractPdf(path)
+  const text = await fs.readFile(path, 'utf8')
+  const truncated = text.length > MAX_PDF_CHARS
+  return {
+    text: truncated ? text.slice(0, MAX_PDF_CHARS) : text,
+    pageCount: 0,
+    charCount: text.length,
+    truncated
+  }
+}
 
 export async function extractPdf(path: string): Promise<PdfExtractResult> {
   const buffer = await fs.readFile(path)

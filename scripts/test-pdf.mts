@@ -62,7 +62,7 @@ const origLoad = (Module as { _load: (r: string, p: unknown, m: boolean) => unkn
 await fs.rm(ROOT, { recursive: true, force: true })
 
 const { PTNotesService } = await import('../src/main/service/PTNotesService')
-const { extractPdf, MAX_PDF_CHARS } = await import('../src/main/ai/pdf')
+const { extractPdf, readFileAsText, MAX_PDF_CHARS } = await import('../src/main/ai/pdf')
 const { ChatSession } = await import('../src/main/ai/chatSession')
 
 const service = new PTNotesService(ROOT)
@@ -91,16 +91,52 @@ const badPath = `${ROOT}/not-a-pdf.txt`
 await fs.writeFile(badPath, 'this is not a pdf')
 await assert.rejects(() => extractPdf(badPath), /not a valid PDF/)
 
+// ---- readFileAsText: markdown / plain text ----
+const mdPath = `${ROOT}/notes.md`
+await fs.writeFile(mdPath, '# Notes\n\nSome markdown content')
+let res2 = await readFileAsText(mdPath)
+assert.equal(res2.text, '# Notes\n\nSome markdown content')
+assert.equal(res2.pageCount, 0)
+assert.equal(res2.charCount, 30)
+assert.equal(res2.truncated, false)
+
+const longTxt = 'x'.repeat(MAX_PDF_CHARS + 100)
+const txtPath = `${ROOT}/long.txt`
+await fs.writeFile(txtPath, longTxt)
+res2 = await readFileAsText(txtPath)
+assert.equal(res2.truncated, true)
+assert.equal(res2.text.length, MAX_PDF_CHARS)
+assert.equal(res2.charCount, MAX_PDF_CHARS + 100)
+
+// ---- copyFileToProject: .md / .txt ----
+const mdSrc = `${ROOT}/My Notes.md`
+await fs.writeFile(mdSrc, '# Hello')
+const mdSaved = await service.copyFileToProject('Test', mdSrc, 'My Notes.md')
+assert.equal(mdSaved, `${ROOT}/Test/files/my-notes.md`)
+assert.equal(await fs.readFile(mdSaved, 'utf8'), '# Hello')
+const mdSaved2 = await service.copyFileToProject('Test', mdSrc, 'My Notes.md')
+assert.equal(mdSaved2, mdSaved, 'identical md reuses existing copy')
+const txtSrc = `${ROOT}/readme.txt`
+await fs.writeFile(txtSrc, 'plain text')
+const txtSaved = await service.copyFileToProject('Test', txtSrc, 'readme.txt')
+assert.equal(txtSaved, `${ROOT}/Test/files/readme.txt`)
+await assert.rejects(
+  () => service.copyFileToProject('Test', `${ROOT}/image.png`, 'image.png'),
+  /Unsupported file type/
+)
+assert.ok((await service.listFiles('Test')).includes('my-notes.md'), 'listFiles surfaces .md')
+assert.ok((await service.listFiles('Test')).includes('readme.txt'), 'listFiles surfaces .txt')
+
 // ---- copyPdfToProject ----
 const src = `${ROOT}/My Report.pdf`
 await fs.writeFile(src, '%PDF-1.4 source')
-const saved1 = await service.copyPdfToProject('Test', src, 'My Report.pdf')
+const saved1 = await service.copyFileToProject('Test', src, 'My Report.pdf')
 assert.equal(saved1, `${ROOT}/Test/files/my-report.pdf`)
 assert.equal(await fs.readFile(saved1, 'utf8'), '%PDF-1.4 source')
-const saved2 = await service.copyPdfToProject('Test', src, 'My Report.pdf')
+const saved2 = await service.copyFileToProject('Test', src, 'My Report.pdf')
 assert.equal(saved2, saved1, 'identical upload (same name+size+hash) reuses existing file')
 await fs.writeFile(src, '%PDF-1.4 changed')
-const saved3 = await service.copyPdfToProject('Test', src, 'My Report.pdf')
+const saved3 = await service.copyFileToProject('Test', src, 'My Report.pdf')
 assert.equal(saved3, `${ROOT}/Test/files/my-report-2.pdf`, 'changed content gets a new file')
 
 // ---- listFiles / projectFilePath / read_file tool ----
@@ -126,6 +162,15 @@ assert.match(rr.text, /Hello PDF content/)
 const rrMissing = JSON.parse(await readFileTool.execute({ name: 'nope.pdf' }, ctx))
 assert.equal(rrMissing.ok, false)
 assert.match(rrMissing.error, /not found/)
+
+const mdRead = JSON.parse(await readFileTool.execute({ name: 'my-notes.md' }, ctx))
+assert.equal(mdRead.ok, true)
+assert.equal(mdRead.pageCount, 0)
+assert.match(mdRead.text, /# Hello/)
+const txtRead = JSON.parse(await readFileTool.execute({ name: 'readme.txt' }, ctx))
+assert.equal(txtRead.ok, true)
+assert.equal(txtRead.pageCount, 0)
+assert.match(txtRead.text, /plain text/)
 
 // ---- uploadPdf: uploads via provider Files API (file_id) + streams ----
 const events: unknown[] = []

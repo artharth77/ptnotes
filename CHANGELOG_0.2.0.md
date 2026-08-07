@@ -26,6 +26,12 @@
   `@` for notes). Selecting a file inserts `file:<filename>`; the AI then calls the new `read_file`
   tool to extract the PDF text locally, so previously dropped files can be referenced again without
   re-dragging and re-dropping them.
+- Multi-file drag & drop: `.md` and `.txt` are now supported alongside `.pdf`. Dropping multiple files
+  in one gesture copies every supported file silently into `<project>/files/` (`copyFileToProject`) and
+  inserts a `file:<name>` mention per file; unsupported files are skipped. If none of the dropped files
+  are supported, an alert is shown and nothing is copied. The `read_file` tool reads `.md`/`.txt` as raw
+  text (same `MAX_PDF_CHARS` truncation + warning), and `files:list` now surfaces `.pdf`/`.md`/`.txt`
+  for the `#` picker.
 
 ### Fixed
 

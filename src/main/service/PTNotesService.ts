@@ -10,6 +10,7 @@ import type {
   Project,
   Todo
 } from '@shared/types'
+import { SUPPORTED_FILE_EXTS, fileExt } from '@shared/types'
 import { slugify } from '../utils/slug'
 
 const TODO_HEADER = '# Todo\n\n'
@@ -370,11 +371,18 @@ export class PTNotesService {
     await fs.rm(this.chatDir(project), { recursive: true, force: true })
   }
 
-  async copyPdfToProject(project: string, sourcePath: string, fileName?: string): Promise<string> {
+  async copyFileToProject(project: string, sourcePath: string, fileName?: string): Promise<string> {
     const dir = this.filesDir(project)
     await fs.mkdir(dir, { recursive: true })
-    const base = fileName ? slugify(fileName.replace(/\.pdf$/i, '')) : slugify(sourcePath)
-    const name = `${base}.pdf`
+    const original = fileName || basename(sourcePath)
+    const ext = fileExt(original)
+    if (!ext) {
+      throw new Error(
+        `Unsupported file type: "${original}". Supported: ${SUPPORTED_FILE_EXTS.join(', ')}`
+      )
+    }
+    const base = slugify(original.slice(0, -ext.length))
+    const name = `${base}${ext}`
 
     const srcSize = (await fs.stat(sourcePath)).size
     const srcHash = await hashFile(sourcePath)
@@ -391,7 +399,7 @@ export class PTNotesService {
     let candidate = name
     let i = 2
     while (await this.pathExists(join(dir, candidate))) {
-      candidate = `${base}-${i++}.pdf`
+      candidate = `${base}-${i++}${ext}`
     }
     const dest = join(dir, candidate)
     await fs.copyFile(sourcePath, dest)
@@ -402,7 +410,7 @@ export class PTNotesService {
     const dir = this.filesDir(project)
     try {
       return (await fs.readdir(dir))
-        .filter((f) => f.toLowerCase().endsWith('.pdf'))
+        .filter((f) => SUPPORTED_FILE_EXTS.some((ext) => f.toLowerCase().endsWith(ext)))
         .sort((a, b) => a.localeCompare(b))
     } catch {
       return []

@@ -5,7 +5,7 @@ import icon from '../../resources/icon.png?asset'
 import { PTNotesService } from './service/PTNotesService'
 import { registerProjectIpc, registerNoteIpc, registerTodoIpc, registerChatIpc } from './ipc'
 import { registerAiIpc, createSessionRegistry } from './ipc/ai'
-import { registerPdfIpc } from './ipc/pdf'
+import { registerFilesIpc } from './ipc/files'
 import { registerSettingsIpc } from './ipc/settings'
 import { SettingsStore } from './settings'
 import { AIConfigStore } from './ai/config'
@@ -62,7 +62,7 @@ app.whenReady().then(async () => {
   registerTodoIpc(service)
   registerChatIpc(service)
   registerAiIpc(registry, configStore)
-  registerPdfIpc(service, registry, configStore)
+  registerFilesIpc(service, registry, configStore)
   registerSettingsIpc(service, settingsStore)
 
   createWindow()

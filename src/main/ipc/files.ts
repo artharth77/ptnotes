@@ -4,19 +4,19 @@ import { basename } from 'path'
 import type { IpcMainInvokeEvent } from 'electron'
 import type { PTNotesService } from '../service/PTNotesService'
 import { AIConfigStore } from '../ai/config'
-import { extractPdf } from '../ai/pdf'
+import { readFileAsText } from '../ai/pdf'
 import type { SessionRegistry } from './ai'
 import type { PdfExtractResult } from '@shared/types'
 
-export function registerPdfIpc(
+export function registerFilesIpc(
   service: PTNotesService,
   registry: SessionRegistry,
   configStore: AIConfigStore
 ): void {
   ipcMain.handle(
-    'pdf:copyToProject',
+    'files:copyToProject',
     async (_e: IpcMainInvokeEvent, project: string, sourcePath: string, fileName?: string) => {
-      return service.copyPdfToProject(project, sourcePath, fileName)
+      return service.copyFileToProject(project, sourcePath, fileName)
     }
   )
 
@@ -25,11 +25,15 @@ export function registerPdfIpc(
   })
 
   ipcMain.handle(
-    'pdf:extract',
+    'files:extract',
     async (_e: IpcMainInvokeEvent, path: string): Promise<PdfExtractResult> => {
-      return extractPdf(path)
+      return readFileAsText(path)
     }
   )
+
+  ipcMain.handle('files:reveal', async (_e: IpcMainInvokeEvent, path: string): Promise<void> => {
+    shell.showItemInFolder(path)
+  })
 
   ipcMain.handle('pdf:supportsUpload', async (): Promise<boolean> => {
     const config = await configStore.load()
@@ -49,8 +53,4 @@ export function registerPdfIpc(
       await session.uploadPdf(prompt, basename(path), buffer.toString('base64'))
     }
   )
-
-  ipcMain.handle('pdf:reveal', async (_e: IpcMainInvokeEvent, path: string): Promise<void> => {
-    shell.showItemInFolder(path)
-  })
 }
