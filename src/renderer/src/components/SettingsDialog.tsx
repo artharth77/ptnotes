@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../store/useAppStore'
 import { Modal, TextField } from './Modal'
-import type { AIProviderConfig, StorageSettings } from '@shared/types'
+import type { AIProviderConfig, ModuleSettings, StorageSettings } from '@shared/types'
 
 function AiSettingsPane({
   config,
@@ -174,6 +174,57 @@ function AiSettingsPane({
   )
 }
 
+function ModulesPane({
+  modules,
+  setModules
+}: {
+  modules: ModuleSettings[] | null
+  setModules: (m: ModuleSettings[]) => void
+}): React.JSX.Element {
+  const [toggling, setToggling] = useState<string | null>(null)
+
+  async function toggle(m: ModuleSettings): Promise<void> {
+    setToggling(m.id)
+    try {
+      const next = await window.ptnotes.modules.setEnabled(m.id, !m.enabled)
+      setModules(next)
+    } finally {
+      setToggling(null)
+    }
+  }
+
+  return (
+    <>
+      <p className="hint">
+        Modules are background subagents the AI can start (e.g. to generate a PowerPoint). Disable a
+        module to hide it from the assistant and prevent it from being started.
+      </p>
+      {!modules ? (
+        <p className="hint">Loading…</p>
+      ) : modules.length === 0 ? (
+        <p className="hint">No modules registered.</p>
+      ) : (
+        <div className="module-settings-list">
+          {modules.map((m) => (
+            <label key={m.id} className={`module-settings-row${m.enabled ? '' : ' disabled'}`}>
+              <input
+                type="checkbox"
+                checked={m.enabled}
+                disabled={toggling === m.id}
+                onChange={() => void toggle(m)}
+              />
+              <span className="module-settings-info">
+                <span className="module-settings-name">{m.name}</span>
+                <span className="module-settings-desc">{m.summary}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      )}
+    </>
+  )
+}
+
 export function SettingsDialog(): React.JSX.Element {
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen)
   const changeRoot = useAppStore((s) => s.changeRoot)
@@ -181,6 +232,7 @@ export function SettingsDialog(): React.JSX.Element {
   const setSettingsCategory = useAppStore((s) => s.setSettingsCategory)
   const [storage, setStorage] = useState<StorageSettings | null>(null)
   const [aiConfig, setAiConfig] = useState<AIProviderConfig | null>(null)
+  const [modules, setModules] = useState<ModuleSettings[] | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [pendingRoot, setPendingRoot] = useState<string | null>(null)
@@ -189,6 +241,7 @@ export function SettingsDialog(): React.JSX.Element {
   useEffect(() => {
     void window.ptnotes.settings.get().then(setStorage)
     void window.ptnotes.ai.getConfig().then(setAiConfig)
+    void window.ptnotes.modules.listAvailable().then(setModules)
   }, [])
 
   async function chooseNewRoot(): Promise<void> {
@@ -252,6 +305,12 @@ export function SettingsDialog(): React.JSX.Element {
           >
             AI Settings
           </button>
+          <button
+            className={category === 'modules' ? 'active' : ''}
+            onClick={() => setSettingsCategory('modules')}
+          >
+            Modules
+          </button>
         </nav>
         <div className="settings-pane">
           {category === 'storage' ? (
@@ -266,13 +325,14 @@ export function SettingsDialog(): React.JSX.Element {
                 <TextField value={storage.rootDir} readOnly onChange={() => {}} />
               </label>
               <div className="modal-actions">
-                <button className="btn" onClick={() => setSettingsOpen(false)}>
-                  Close
-                </button>
                 <button className="btn primary" onClick={() => void chooseNewRoot()}>
                   Change…
                 </button>
               </div>
+            </>
+          ) : category === 'modules' ? (
+            <>
+              <ModulesPane modules={modules} setModules={setModules} />
             </>
           ) : (
             <>

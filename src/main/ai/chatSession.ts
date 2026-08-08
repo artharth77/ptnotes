@@ -2,7 +2,7 @@ import OpenAI from 'openai'
 import { randomUUID } from 'crypto'
 import { toFile } from 'openai/uploads'
 import type { AIProviderConfig, ChatMessage, ChatStreamEvent } from '@shared/types'
-import { tools, type ToolContext } from './tools'
+import { tools, type PTTool, type ToolContext } from './tools'
 import { createClient } from './client'
 
 type Role = 'system' | 'user' | 'assistant' | 'tool'
@@ -16,6 +16,10 @@ interface SessionMessage {
 }
 
 export type StreamEmitter = (event: ChatStreamEvent) => void
+
+/** Resolve the tool list to expose to the model. Re-evaluated on every turn so
+ * runtime state changes (e.g. enabled modules) take effect immediately. */
+export type ToolsProvider = () => Promise<PTTool[]>
 
 const MAX_TOOL_ITERATIONS = 12
 
@@ -49,12 +53,24 @@ export class ChatSession {
   private config: AIProviderConfig
   private stopped = false
   private abortController: AbortController | undefined
+  private readonly toolsProvider?: ToolsProvider
 
-  constructor(getConfig: () => Promise<AIProviderConfig>, ctx: ToolContext, emit: StreamEmitter) {
+  constructor(
+    getConfig: () => Promise<AIProviderConfig>,
+    ctx: ToolContext,
+    emit: StreamEmitter,
+    toolsProvider?: ToolsProvider
+  ) {
     this.getConfig = getConfig
     this.ctx = ctx
     this.emit = emit
+    this.toolsProvider = toolsProvider
     this.config = { baseUrl: '', apiKey: '', model: '' }
+  }
+
+  private async currentTools(): Promise<PTTool[]> {
+    const extra = this.toolsProvider ? await this.toolsProvider() : []
+    return extra.length > 0 ? [...tools, ...extra] : tools
   }
 
   async send(userText: string, history?: ChatMessage[]): Promise<void> {
@@ -271,11 +287,12 @@ export class ChatSession {
 
     let stream: AsyncIterable<OpenAI.Chat.ChatCompletionChunk>
     try {
+      const toolList = await this.currentTools()
       stream = await client.chat.completions.create(
         {
           model: this.config.model,
           messages: apiMessages,
-          tools: tools.map((t) => t.definition),
+          tools: toolList.map((t) => t.definition),
           stream: true
         },
         { signal }
@@ -383,7 +400,9 @@ export class ChatSession {
       args = {}
     }
 
-    const tool = tools.find((t) => t.definition.function.name === call.function.name)
+    const tool = (await this.currentTools()).find(
+      (t) => t.definition.function.name === call.function.name
+    )
     if (!tool) {
       const result = JSON.stringify({ ok: false, error: `Unknown tool: ${call.function.name}` })
       this.emitTool(call.function.name, args, false, result)

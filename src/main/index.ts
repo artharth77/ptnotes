@@ -7,6 +7,12 @@ import { registerProjectIpc, registerNoteIpc, registerTodoIpc, registerChatIpc }
 import { registerAiIpc, createSessionRegistry } from './ipc/ai'
 import { registerFilesIpc } from './ipc/files'
 import { registerSettingsIpc } from './ipc/settings'
+import { registerModulesIpc } from './ipc/modules'
+import { ModuleRegistry } from './modules/registry'
+import { ModuleRunManager } from './modules/runs'
+import { buildStartModuleTool } from './modules/tool'
+import type { PTTool } from './ai/tools'
+import { createPptxModule } from './modules/pptx'
 import { SettingsStore } from './settings'
 import { AIConfigStore } from './ai/config'
 
@@ -56,7 +62,27 @@ app.whenReady().then(async () => {
   const settings = await settingsStore.load()
   const service = new PTNotesService(settings.rootDir)
   const configStore = new AIConfigStore()
-  const registry = createSessionRegistry(service, configStore)
+
+  const moduleRegistry = new ModuleRegistry()
+  moduleRegistry.register(createPptxModule())
+  const moduleManager = new ModuleRunManager(
+    service,
+    configStore,
+    moduleRegistry,
+    (evt) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        win.webContents.send('modules:event', evt)
+      }
+    },
+    undefined,
+    settingsStore
+  )
+  const toolsProvider = async (): Promise<PTTool[]> => {
+    const current = await settingsStore.load()
+    return [buildStartModuleTool(moduleManager, moduleRegistry, current.disabledModules ?? [])]
+  }
+
+  const registry = createSessionRegistry(service, configStore, toolsProvider)
   registerProjectIpc(service)
   registerNoteIpc(service)
   registerTodoIpc(service)
@@ -64,6 +90,7 @@ app.whenReady().then(async () => {
   registerAiIpc(registry, configStore)
   registerFilesIpc(service, registry, configStore)
   registerSettingsIpc(service, settingsStore)
+  registerModulesIpc(moduleManager, settingsStore, moduleRegistry)
 
   createWindow()
 

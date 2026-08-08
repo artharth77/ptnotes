@@ -8,6 +8,9 @@ import type {
   ChatThread,
   ConfirmResponse,
   CreateProjectResult,
+  ModuleEvent,
+  ModuleRun,
+  ModuleSettings,
   StorageSettings,
   NoteMeta,
   PdfExtractResult,
@@ -107,6 +110,27 @@ const api = {
       ipcRenderer.invoke('files:copyToProject', project, sourcePath, fileName),
     extract: (path: string): Promise<PdfExtractResult> => ipcRenderer.invoke('files:extract', path),
     reveal: (path: string): Promise<void> => ipcRenderer.invoke('files:reveal', path)
+  },
+  modules: {
+    list: (project: string): Promise<ModuleRun[]> => ipcRenderer.invoke('modules:list', project),
+    listAvailable: (): Promise<ModuleSettings[]> => ipcRenderer.invoke('modules:listAvailable'),
+    setEnabled: (id: string, enabled: boolean): Promise<ModuleSettings[]> =>
+      ipcRenderer.invoke('modules:setEnabled', id, enabled),
+    stop: (project: string, runId: string): Promise<void> =>
+      ipcRenderer.invoke('modules:stop', project, runId),
+    reveal: (project: string, runId: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('modules:reveal', project, runId),
+    clearHistory: (project: string, deleteOutputFiles?: boolean): Promise<number> =>
+      ipcRenderer.invoke('modules:clearHistory', project, deleteOutputFiles),
+    deleteRun: (project: string, runId: string, deleteOutputFiles?: boolean): Promise<boolean> =>
+      ipcRenderer.invoke('modules:deleteRun', project, runId, deleteOutputFiles),
+    onEvent: (callback: (event: ModuleEvent) => void): (() => void) => {
+      const listener = (_e: unknown, event: ModuleEvent): void => callback(event)
+      ipcRenderer.on('modules:event', listener)
+      return () => {
+        ipcRenderer.removeListener('modules:event', listener)
+      }
+    }
   }
 }
 

@@ -3,6 +3,8 @@ import type {
   ChatMessage,
   ChatSessionMeta,
   ConfirmRequest,
+  ModuleEvent,
+  ModuleRun,
   NoteMeta,
   Project,
   Tab,
@@ -23,11 +25,12 @@ interface AppState {
   chatSessionIds: Record<string, string>
   chatSessions: Record<string, ChatSessionMeta[]>
   chatTitles: Record<string, string>
+  moduleRuns: Record<string, ModuleRun[]>
   chatBusy: boolean
   chatStreamProject: string | null
   confirmRequest: ConfirmRequest | null
   settingsOpen: boolean
-  settingsCategory: 'storage' | 'ai'
+  settingsCategory: 'storage' | 'ai' | 'modules'
   sidebarVisible: boolean
   loading: boolean
 
@@ -42,6 +45,8 @@ interface AppState {
   refreshNotes: () => Promise<void>
   refreshTodos: () => Promise<void>
   refreshFiles: () => Promise<void>
+  loadModules: (project: string) => Promise<void>
+  applyModuleEvent: (evt: ModuleEvent) => void
   selectNote: (id: string) => Promise<void>
   saveNote: (content: string) => Promise<void>
   createNote: (title: string) => Promise<void>
@@ -56,8 +61,8 @@ interface AppState {
   setChatStreamProject: (project: string | null) => void
   setConfirmRequest: (req: ConfirmRequest | null) => void
   setSettingsOpen: (open: boolean) => void
-  setSettingsCategory: (category: 'storage' | 'ai') => void
-  openSettings: (category?: 'storage' | 'ai') => void
+  setSettingsCategory: (category: 'storage' | 'ai' | 'modules') => void
+  openSettings: (category?: 'storage' | 'ai' | 'modules') => void
   setSidebarVisible: (visible: boolean) => void
   newChat: (project: string) => Promise<void>
   openChat: (project: string, sessionId: string) => Promise<void>
@@ -82,6 +87,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   chatSessionIds: {},
   chatSessions: {},
   chatTitles: {},
+  moduleRuns: {},
   chatBusy: false,
   chatStreamProject: null,
   confirmRequest: null,
@@ -175,6 +181,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().refreshNotes(),
       get().refreshTodos(),
       get().refreshFiles(),
+      get().loadModules(name),
       get().loadChatSessions(name)
     ])
     set((state) => {
@@ -208,6 +215,24 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!project) return set({ projectFiles: [] })
     const projectFiles = await window.ptnotes.files.list(project)
     set({ projectFiles })
+  },
+
+  async loadModules(project) {
+    const runs = await window.ptnotes.modules.list(project)
+    set((s) => ({ moduleRuns: { ...s.moduleRuns, [project]: runs } }))
+  },
+
+  applyModuleEvent(evt) {
+    set((s) => {
+      const list = s.moduleRuns[evt.project] ?? []
+      const idx = list.findIndex((r) => r.runId === evt.runId)
+      if (idx === -1) {
+        return { moduleRuns: { ...s.moduleRuns, [evt.project]: [evt.run, ...list] } }
+      }
+      const next = [...list]
+      next[idx] = evt.run
+      return { moduleRuns: { ...s.moduleRuns, [evt.project]: next } }
+    })
   },
 
   async selectNote(id) {

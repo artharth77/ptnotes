@@ -19,7 +19,7 @@ export interface Todo {
   done: boolean
 }
 
-export type Tab = 'notes' | 'todo'
+export type Tab = 'notes' | 'todo' | 'modules'
 
 export interface AIProviderConfig {
   baseUrl: string
@@ -30,6 +30,15 @@ export interface AIProviderConfig {
 
 export interface StorageSettings {
   rootDir: string
+  disabledModules?: string[]
+}
+
+/** A registered module's availability state shown in Settings ▸ Modules. */
+export interface ModuleSettings {
+  id: string
+  name: string
+  summary: string
+  enabled: boolean
 }
 
 export interface AppSettings {
@@ -44,6 +53,7 @@ export interface ChatMessage {
   toolCalls?: ToolCallInfo[]
   error?: boolean
   attachments?: ChatAttachment[]
+  moduleRunId?: string
 }
 
 export type PdfAttachmentKind = 'extract' | 'upload'
@@ -110,4 +120,56 @@ export interface ConfirmRequest {
 export interface ConfirmResponse {
   id: string
   approved: boolean
+}
+
+// ---- Modules (background subagent framework) ----
+
+export type ModuleStatus = 'queued' | 'planning' | 'running' | 'done' | 'failed' | 'cancelled'
+
+export type ModuleStepStatus = 'pending' | 'running' | 'done' | 'failed'
+
+export interface ModuleStepState {
+  id: string
+  name: string
+  status: ModuleStepStatus
+  detail?: string
+  updatedAt?: number
+}
+
+export interface ModuleInfo {
+  id: string
+  name: string
+  description: string
+}
+
+export interface ModuleRun {
+  runId: string
+  module: ModuleInfo
+  project: string
+  title: string
+  prompt: string
+  status: ModuleStatus
+  steps: ModuleStepState[]
+  currentStep?: number
+  createdAt: number
+  updatedAt: number
+  startedAt?: number
+  finishedAt?: number
+  outputFile?: string
+  summary?: string
+  error?: string
+}
+
+export type ModuleEventType = 'status' | 'step' | 'output' | 'error' | 'done'
+
+export interface ModuleEvent {
+  runId: string
+  project: string
+  type: ModuleEventType
+  run: ModuleRun
+  step?: ModuleStepState
+  stepIndex?: number
+  outputFile?: string
+  error?: string
+  summary?: string
 }

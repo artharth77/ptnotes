@@ -21,14 +21,26 @@ export class SettingsStore {
       const raw = await fs.readFile(this.filePath, 'utf8')
       const parsed = JSON.parse(raw) as Partial<StorageSettings>
       const rootDir = parsed.rootDir?.trim() || defaultSettings().rootDir
-      return { rootDir }
+      const disabledModules = Array.isArray(parsed.disabledModules)
+        ? parsed.disabledModules.filter((id): id is string => typeof id === 'string')
+        : []
+      return { rootDir, disabledModules }
     } catch {
       return defaultSettings()
     }
   }
 
   async save(settings: StorageSettings): Promise<StorageSettings> {
-    const next: StorageSettings = { rootDir: settings.rootDir.trim() || defaultSettings().rootDir }
+    const next: StorageSettings = {
+      rootDir: settings.rootDir.trim() || defaultSettings().rootDir,
+      disabledModules: Array.isArray(settings.disabledModules)
+        ? [
+            ...new Set(
+              settings.disabledModules.filter((id): id is string => typeof id === 'string')
+            )
+          ]
+        : []
+    }
     await fs.writeFile(this.filePath, JSON.stringify(next, null, 2), {
       encoding: 'utf8',
       mode: 0o600

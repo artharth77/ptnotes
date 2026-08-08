@@ -35,27 +35,27 @@ Run `npm run typecheck` and `npm run lint` after any change.
 
 ## Decisions (locked in)
 
-| Area | Decision |
-|---|---|
-| Interface | Desktop GUI (Electron) |
-| Editor | WYSIWYG rich text (TipTap) with markdown as source of truth |
-| Todo storage | Markdown checklist file (`TODO.md`) |
-| Stack | Electron + electron-vite + React 19 + TypeScript |
-| Project selector | Top bar: current project name dropdown + New Project button |
-| Project registry | Persistent known-project list so folders deleted externally still show (missing paths marked red) |
-| Chat placement | Collapsible right-side drawer |
-| AI streaming | Yes (real-time) |
-| Settings dialog | Two-panel dialog: **Storage** (project root path) + **AI Settings** (base URL, API key, model) |
-| Project root | Configurable via settings; default `~/Documents/PTNotes`; changing it moves all data + registry to the new location after confirmation |
-| Chat history | Persisted per session as JSON files under `<project>/chat/`; auto-saved per message; New Chat archives current thread; history picker can view/reopen old sessions |
-| Chat titles | Hybrid: local heuristic from first message immediately, refined by a background AI completion; manual rename supported; history popup shows title + message count |
-| Chat note mention | `@` opens note list → inserts `note:<notename>` → AI calls `read_note` |
-| Chat todo mention | `!` opens todo list → inserts `todo:<todotext>` (filterable by text) |
-| Chat file mention | `#` opens project file list (`files:list` → `<project>/files/*` for PDF + text) → inserts `file:<filename>` → AI calls `read_file` (content-based: pdf-parse for PDFs, raw text for any text file) |
-| Chat file drop | Multi-file drag & drop into the chat: every supported file is copied silently to `<project>/files/` (no popup) and referenced via `#` mentions; support is **content-based** (any text file plus PDFs, detected by content not extension) — non-PDF binary files are rejected; if none are added, an alert is shown |
-| Chat response rendering | Markdown via `react-markdown` + `remark-gfm` + `remark-breaks` (raw HTML escaped → XSS-safe) |
-| Web search | DuckDuckGo only (free, no API key) |
-| Page reading | Local cheerio parsing (private, no third-party service) |
+| Area                    | Decision                                                                                                                                                                                                                                                                                                            |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Interface               | Desktop GUI (Electron)                                                                                                                                                                                                                                                                                              |
+| Editor                  | WYSIWYG rich text (TipTap) with markdown as source of truth                                                                                                                                                                                                                                                         |
+| Todo storage            | Markdown checklist file (`TODO.md`)                                                                                                                                                                                                                                                                                 |
+| Stack                   | Electron + electron-vite + React 19 + TypeScript                                                                                                                                                                                                                                                                    |
+| Project selector        | Top bar: current project name dropdown + New Project button                                                                                                                                                                                                                                                         |
+| Project registry        | Persistent known-project list so folders deleted externally still show (missing paths marked red)                                                                                                                                                                                                                   |
+| Chat placement          | Collapsible right-side drawer                                                                                                                                                                                                                                                                                       |
+| AI streaming            | Yes (real-time)                                                                                                                                                                                                                                                                                                     |
+| Settings dialog         | Two-panel dialog: **Storage** (project root path) + **AI Settings** (base URL, API key, model)                                                                                                                                                                                                                      |
+| Project root            | Configurable via settings; default `~/Documents/PTNotes`; changing it moves all data + registry to the new location after confirmation                                                                                                                                                                              |
+| Chat history            | Persisted per session as JSON files under `<project>/chat/`; auto-saved per message; New Chat archives current thread; history picker can view/reopen old sessions                                                                                                                                                  |
+| Chat titles             | Hybrid: local heuristic from first message immediately, refined by a background AI completion; manual rename supported; history popup shows title + message count                                                                                                                                                   |
+| Chat note mention       | `@` opens note list → inserts `note:<notename>` → AI calls `read_note`                                                                                                                                                                                                                                              |
+| Chat todo mention       | `!` opens todo list → inserts `todo:<todotext>` (filterable by text)                                                                                                                                                                                                                                                |
+| Chat file mention       | `#` opens project file list (`files:list` → `<project>/files/*` for PDF + text) → inserts `file:<filename>` → AI calls `read_file` (content-based: pdf-parse for PDFs, raw text for any text file)                                                                                                                  |
+| Chat file drop          | Multi-file drag & drop into the chat: every supported file is copied silently to `<project>/files/` (no popup) and referenced via `#` mentions; support is **content-based** (any text file plus PDFs, detected by content not extension) — non-PDF binary files are rejected; if none are added, an alert is shown |
+| Chat response rendering | Markdown via `react-markdown` + `remark-gfm` + `remark-breaks` (raw HTML escaped → XSS-safe)                                                                                                                                                                                                                        |
+| Web search              | DuckDuckGo only (free, no API key)                                                                                                                                                                                                                                                                                  |
+| Page reading            | Local cheerio parsing (private, no third-party service)                                                                                                                                                                                                                                                             |
 
 ## On-disk layout
 
@@ -65,11 +65,12 @@ Run `npm run typecheck` and `npm run lint` after any change.
     ├── notes/*.md          (one file per note)
     ├── TODO.md             (markdown checklist: `- [ ]` / `- [x]`)
     ├── files/*.{pdf,md,txt,json,log,yaml,yml} (attachments copied on chat drop)
+    ├── modules/*.json        (module run state + prompts; kept out of the # file picker)
     └── chat/*.json         (one file per chat session: messages + timestamps)
 ```
 
 - App AI config stored in Electron `userData/ai-provider.json`, `chmod 600`, never in the renderer bundle.
-- App settings (project root path) stored in Electron `userData/ptnotes-settings.json`, `chmod 600`.
+- App settings (project root path + `disabledModules` module toggles) stored in Electron `userData/ptnotes-settings.json`, `chmod 600`.
 - Creating a project initializes folder + `TODO.md` + `welcome.md`.
 - `.ptnotes-projects.json` in the root dir is the persistent project registry so externally-deleted folders still show (missing paths flagged `pathExists: false`).
 
@@ -163,12 +164,14 @@ src/
 ## AI chat feature
 
 ### Flow
+
 ```
 ChatPanel (renderer) ──send──▶ Main process
    ▲                              │  chatSession
    │◀──── stream events ──────────┼─▶ OpenAI-compatible chat.completions (stream: true)
    │◀──── tool results ───────────┼─▶ tool executors → PTNotesService / search
 ```
+
 - Renderer never calls the network; API key stays in main process.
 - Tool-call loop: model requests tools → executor runs them → results fed back as `tool` messages → loop until final text reply.
 - Chat operates on the **currently active project** by default.
@@ -183,21 +186,22 @@ ChatPanel (renderer) ──send──▶ Main process
   files can be reused without re-dragging.
 
 ### Tools (13 total)
-| Tool | Action |
-|---|---|
-| `create_note` | new `.md` in project `notes/` |
-| `update_note` | overwrite / rename existing note |
-| `list_notes` | model context |
-| `read_note` | model context |
-| `search_notes` | search note titles + content, return matching names + snippet |
-| `delete_note` | delete one or more notes (requires user confirmation dialog) |
-| `create_todos` | append `- [ ]` items to `TODO.md` |
-| `toggle_todo` | toggle a checklist item |
-| `delete_todo` | remove an item |
-| `list_todos` | model context |
-| `read_file` | extract text of a project file locally via `readFileAsText` (pdf-parse for `.pdf`, raw text for any text file) |
-| `web_search` | DuckDuckGo HTML search, no API key, Node fetch in main (user-agent header, rate-limit errors surfaced to model) |
-| `web_fetch` | direct fetch + cheerio local parse (strip scripts/styles/nav, extract title + readable text) — fully private |
+
+| Tool           | Action                                                                                                          |
+| -------------- | --------------------------------------------------------------------------------------------------------------- |
+| `create_note`  | new `.md` in project `notes/`                                                                                   |
+| `update_note`  | overwrite / rename existing note                                                                                |
+| `list_notes`   | model context                                                                                                   |
+| `read_note`    | model context                                                                                                   |
+| `search_notes` | search note titles + content, return matching names + snippet                                                   |
+| `delete_note`  | delete one or more notes (requires user confirmation dialog)                                                    |
+| `create_todos` | append `- [ ]` items to `TODO.md`                                                                               |
+| `toggle_todo`  | toggle a checklist item                                                                                         |
+| `delete_todo`  | remove an item                                                                                                  |
+| `list_todos`   | model context                                                                                                   |
+| `read_file`    | extract text of a project file locally via `readFileAsText` (pdf-parse for `.pdf`, raw text for any text file)  |
+| `web_search`   | DuckDuckGo HTML search, no API key, Node fetch in main (user-agent header, rate-limit errors surfaced to model) |
+| `web_fetch`    | direct fetch + cheerio local parse (strip scripts/styles/nav, extract title + readable text) — fully private    |
 
 ### PDF attachments (drag & drop into chat)
 
@@ -231,7 +235,9 @@ ChatPanel (renderer) ──send──▶ Main process
   marks (`\p{M}`); only Latin combining accents (`\u0300-\u036f`) are stripped (see `slugify`).
 
 ### Settings dialog
+
 Two-panel dialog (`.settings-layout` with `.settings-nav` + `.settings-pane`):
+
 - **Storage:** shows the current project root path (read-only) + **Change…** button that opens a native
   folder picker. Selecting a new root prompts for explicit confirmation ("Move all project data…")
   before `PTNotesService.changeRootDir` moves every project dir + `.ptnotes-projects.json`, and the
@@ -243,6 +249,10 @@ Two-panel dialog (`.settings-layout` with `.settings-nav` + `.settings-pane`):
   values) against `GET {baseUrl}/models`, then shows a scrollable dropdown (~10 rows) of fetched
   model ids that is filtered by typing; the typed value is never cleared on failure. The AI Selected
   category is driven by store state (`settingsCategory`, opened via `openSettings('ai')`).
+- **Modules:** a toggle per registered module. Disabled modules are excluded from the `start_module`
+  tool description and refused by `ModuleRunManager.start`; the list comes from
+  `modules:listAvailable` / `modules:setEnabled`, persisted as `disabledModules` in
+  `ptnotes-settings.json`. Toggles apply immediately, no Save button.
 - Model downloads auto-load silently when the AI pane opens (best-effort; failures hidden until
   **Load models** is clicked).
 - When the AI isn't configured (empty model, or no API key for a remote provider), the chat panel
@@ -250,7 +260,9 @@ Two-panel dialog (`.settings-layout` with `.settings-nav` + `.settings-pane`):
   Settings** (`ai:getConfig` → `aiReady` check in `ChatDrawer`).
 
 ### Example research flow
-> You: *"Research the latest Electron security best practices and save it as a note."*
+
+> You: _"Research the latest Electron security best practices and save it as a note."_
+
 1. model calls `web_search("Electron security best practices 2026")`
 2. model calls `web_fetch` on top 2–3 results
 3. model synthesizes and calls `create_note`

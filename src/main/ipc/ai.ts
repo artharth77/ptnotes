@@ -4,6 +4,7 @@ import type { IpcMainInvokeEvent } from 'electron'
 import type { PTNotesService } from '../service/PTNotesService'
 import { AIConfigStore } from '../ai/config'
 import { ChatSession, isLocalEndpoint } from '../ai/chatSession'
+import type { ToolsProvider } from '../ai/chatSession'
 import { createClient } from '../ai/client'
 import type {
   AIProviderConfig,
@@ -24,7 +25,8 @@ export interface SessionRegistry {
 
 export function createSessionRegistry(
   service: PTNotesService,
-  configStore: AIConfigStore
+  configStore: AIConfigStore,
+  toolsProvider?: ToolsProvider
 ): SessionRegistry {
   const sessions = new Map<string, ChatSession>()
   const pendingConfirms = new Map<
@@ -60,7 +62,8 @@ export function createSessionRegistry(
               return promise
             }
           },
-          send
+          send,
+          toolsProvider
         )
         sessions.set(project, session)
       }
