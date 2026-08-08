@@ -325,9 +325,6 @@ export function SettingsDialog(): React.JSX.Element {
                 <TextField value={storage.rootDir} readOnly onChange={() => {}} />
               </label>
               <div className="modal-actions">
-                <button className="btn" onClick={() => setSettingsOpen(false)}>
-                  Close
-                </button>
                 <button className="btn primary" onClick={() => void chooseNewRoot()}>
                   Change…
                 </button>
@@ -336,11 +333,6 @@ export function SettingsDialog(): React.JSX.Element {
           ) : category === 'modules' ? (
             <>
               <ModulesPane modules={modules} setModules={setModules} />
-              <div className="modal-actions">
-                <button className="btn" onClick={() => setSettingsOpen(false)}>
-                  Close
-                </button>
-              </div>
             </>
           ) : (
             <>
