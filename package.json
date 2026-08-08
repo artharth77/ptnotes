@@ -1,6 +1,6 @@
 {
   "name": "ptnotes",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Markdown notes + todo lists + AI assistant, organized by project",
   "main": "./out/main/index.js",
   "author": "",
@@ -18,7 +18,7 @@
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "electron-vite build && electron-builder --mac",
     "build:linux": "electron-vite build && electron-builder --linux",
-    "test": "tsx --tsconfig tsconfig.node.json scripts/test-service.mts && tsx --tsconfig tsconfig.node.json scripts/test-ai.mts && tsx --tsconfig tsconfig.node.json scripts/test-chat.mts && tsx --tsconfig tsconfig.node.json scripts/test-markdown.mts && tsx --tsconfig tsconfig.node.json scripts/test-pdf.mts"
+    "test": "tsx --tsconfig tsconfig.node.json scripts/test-service.mts && tsx --tsconfig tsconfig.node.json scripts/test-ai.mts && tsx --tsconfig tsconfig.node.json scripts/test-chat.mts && tsx --tsconfig tsconfig.node.json scripts/test-markdown.mts && tsx --tsconfig tsconfig.node.json scripts/test-pdf.mts && tsx --tsconfig tsconfig.node.json scripts/test-modules.mts"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
@@ -26,6 +26,7 @@
     "cheerio": "^1.2.0",
     "openai": "^7.4.0",
     "pdf-parse": "^2.4.5",
+    "pptxgenjs": "^4.0.1",
     "react-markdown": "^10.1.0",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1"

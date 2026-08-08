@@ -6,6 +6,7 @@ import { TodoPanel } from './components/TodoPanel'
 import { MarkdownEditor } from './components/MarkdownEditor'
 import { ChatDrawer } from './components/ChatDrawer'
 import { SettingsDialog } from './components/SettingsDialog'
+import { ModulePanel } from './components/ModulePanel'
 import { PromptModal, Modal } from './components/Modal'
 import { Resizer } from './components/Resizer'
 import type { Tab, ToolCallInfo } from '@shared/types'
@@ -14,20 +15,26 @@ const SIDEBAR_MIN = 200
 const SIDEBAR_MAX = 560
 const CHAT_MIN = 280
 const CHAT_MAX = 720
+const NO_RUNS: never[] = []
 
 function SideTabs(): React.JSX.Element {
   const tab = useAppStore((s) => s.tab)
   const setTab = useAppStore((s) => s.setTab)
+  const moduleRuns = useAppStore((s) =>
+    s.activeProject ? (s.moduleRuns[s.activeProject] ?? NO_RUNS) : NO_RUNS
+  )
+  const modulesBusy = moduleRuns.some((r) => !['done', 'failed', 'cancelled'].includes(r.status))
 
   return (
     <div className="side-tabs">
-      {(['notes', 'todo'] as Tab[]).map((t) => (
+      {(['notes', 'todo', 'modules'] as Tab[]).map((t) => (
         <button
           key={t}
           className={`side-tab ${tab === t ? 'active' : ''}`}
           onClick={() => setTab(t)}
         >
-          {t === 'notes' ? 'Notes' : 'Todo'}
+          {t === 'notes' ? 'Notes' : t === 'todo' ? 'Todo' : 'Modules'}
+          {t === 'modules' && modulesBusy && <span className="side-tab-spinner" />}
         </button>
       ))}
     </div>
@@ -193,6 +200,22 @@ function App(): React.JSX.Element {
               ...m,
               toolCalls: [...(m.toolCalls ?? []), evt.toolCall!]
             }))
+            if (evt.toolCall.name === 'start_module') {
+              try {
+                const res = JSON.parse(evt.toolCall.result ?? '{}') as {
+                  ok?: boolean
+                  runId?: string
+                }
+                if (res.ok && res.runId) {
+                  state.updateLastAssistantMessage(project, (m) => ({
+                    ...m,
+                    moduleRunId: res.runId!
+                  }))
+                }
+              } catch {
+                // ignore unparseable start_module result
+              }
+            }
           }
           if (evt.toolCall) {
             if (NOTE_TOOLS.has(evt.toolCall.name)) {
@@ -229,6 +252,17 @@ function App(): React.JSX.Element {
     })
   }, [])
 
+  // Handle module run events: upsert run state in the store in real time
+  useEffect(() => {
+    return window.ptnotes.modules.onEvent((evt) => {
+      const state = useAppStore.getState()
+      state.applyModuleEvent(evt)
+      if (evt.type === 'output' || evt.type === 'done') {
+        void state.refreshFiles()
+      }
+    })
+  }, [])
+
   return (
     <div className="app">
       <TopBar />
@@ -240,7 +274,7 @@ function App(): React.JSX.Element {
             style={{ width: sidebarVisible ? sidebarWidth : 0 }}
           >
             <SideTabs />
-            <div className="sidebar-content">{tab === 'todo' ? <TodoPanel /> : <NoteList />}</div>
+            {tab === 'todo' ? <TodoPanel /> : tab === 'modules' ? <ModulePanel /> : <NoteList />}
           </aside>
           {sidebarVisible && <Resizer position="end" onResize={resizeSidebar} />}
           <main className="main-area">

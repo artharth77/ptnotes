@@ -228,6 +228,32 @@ body {
   font-size: 12px;
 }
 
+.module-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.module-clear-btn {
+  font-size: 11px;
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+
+.module-clear-btn:hover {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
+.confirm-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 0;
+  font-size: 12px;
+  cursor: pointer;
+}
+
 .icon-btn {
   border: none;
   background: transparent;
@@ -254,7 +280,7 @@ body {
 }
 
 .refresh-btn {
-  font-size: 24px;
+  font-size: 16px;
   padding: 3px 8px;
 }
 
@@ -461,6 +487,7 @@ body {
   font-weight: 500;
   cursor: pointer;
   border-bottom: 2px solid transparent;
+  position: relative;
 }
 
 .side-tab:hover {
@@ -1901,6 +1928,18 @@ body {
   vertical-align: -2px;
 }
 
+.side-tab-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-left: 6px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: chat-spin 0.8s linear infinite;
+  vertical-align: -1px;
+}
+
 .chat-input textarea {
   flex: 1;
   resize: none;
@@ -2032,4 +2071,309 @@ body {
   accent-color: var(--accent);
   width: 15px;
   height: 15px;
+}
+
+/* ---------- Modules ---------- */
+
+.module-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.module-list-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+}
+
+.module-section {
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.module-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.module-card {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.module-card.actions-clickable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.module-card.actions-clickable:hover {
+  border-color: var(--accent);
+}
+
+.module-card-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.25s ease;
+}
+
+.module-card-collapse.open {
+  grid-template-rows: 1fr;
+}
+
+.module-card-collapse > .module-card-collapse-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.module-card.compact {
+  padding: 8px;
+  font-size: 12px;
+}
+
+.module-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.module-card-name {
+  font-weight: 600;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.module-status {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.module-queued,
+.module-planning,
+.module-running {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.module-done {
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  color: var(--ok);
+}
+
+.module-failed {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+
+.module-cancelled {
+  background: var(--bg-hover);
+  color: var(--text-dim);
+}
+
+.module-card-title {
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.module-card-meta {
+  display: flex;
+  align-items: center;
+}
+
+.module-card-updated {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.module-card-error {
+  font-size: 12px;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+.module-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.module-steps-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.module-steps-progress-label {
+  flex: none;
+  white-space: nowrap;
+}
+
+.module-progress-bar {
+  flex: 1;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--bg-hover);
+  overflow: hidden;
+}
+
+.module-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.25s ease;
+}
+
+.module-steps-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.25s ease;
+}
+
+.module-steps-collapse.open {
+  grid-template-rows: 1fr;
+}
+
+.module-steps-collapse > .module-steps-list {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.module-steps-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.module-step {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+
+.module-step-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.module-step-icon {
+  flex: none;
+  width: 14px;
+  text-align: center;
+}
+
+.module-step-done {
+  color: var(--text-dim);
+}
+
+.module-step-done .module-step-icon {
+  color: var(--ok);
+}
+
+.module-step-running {
+  color: var(--text);
+}
+
+.module-step-running .module-step-icon {
+  color: var(--accent);
+}
+
+.module-step-failed .module-step-icon {
+  color: var(--danger);
+}
+
+.module-step-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.module-step-toggle {
+  flex: none;
+  border: none;
+  background: none;
+  padding: 0 2px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-dim);
+  cursor: pointer;
+  border-radius: 3px;
+  transition: transform 0.25s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.module-step-toggle.open {
+  transform: rotate(90deg);
+}
+
+.module-step-toggle:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.module-step-detail {
+  margin: 0 0 0 20px;
+  padding: 4px 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  background: var(--bg-hover);
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+}
+
+.module-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.module-card-actions .btn.small.ghost {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.module-card-actions .btn.small.ghost.module-output-missing,
+.module-card-actions .btn.small.ghost.module-output-missing:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.module-card-summary {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
 }

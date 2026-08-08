@@ -2,7 +2,7 @@ import OpenAI from 'openai'
 import { randomUUID } from 'crypto'
 import { toFile } from 'openai/uploads'
 import type { AIProviderConfig, ChatMessage, ChatStreamEvent } from '@shared/types'
-import { tools, type ToolContext } from './tools'
+import { tools, type PTTool, type ToolContext } from './tools'
 import { createClient } from './client'
 
 type Role = 'system' | 'user' | 'assistant' | 'tool'
@@ -49,11 +49,18 @@ export class ChatSession {
   private config: AIProviderConfig
   private stopped = false
   private abortController: AbortController | undefined
+  private readonly toolList: PTTool[]
 
-  constructor(getConfig: () => Promise<AIProviderConfig>, ctx: ToolContext, emit: StreamEmitter) {
+  constructor(
+    getConfig: () => Promise<AIProviderConfig>,
+    ctx: ToolContext,
+    emit: StreamEmitter,
+    extraTools?: PTTool[]
+  ) {
     this.getConfig = getConfig
     this.ctx = ctx
     this.emit = emit
+    this.toolList = extraTools && extraTools.length > 0 ? [...tools, ...extraTools] : tools
     this.config = { baseUrl: '', apiKey: '', model: '' }
   }
 
@@ -275,7 +282,7 @@ export class ChatSession {
         {
           model: this.config.model,
           messages: apiMessages,
-          tools: tools.map((t) => t.definition),
+          tools: this.toolList.map((t) => t.definition),
           stream: true
         },
         { signal }
@@ -383,7 +390,7 @@ export class ChatSession {
       args = {}
     }
 
-    const tool = tools.find((t) => t.definition.function.name === call.function.name)
+    const tool = this.toolList.find((t) => t.definition.function.name === call.function.name)
     if (!tool) {
       const result = JSON.stringify({ ok: false, error: `Unknown tool: ${call.function.name}` })
       this.emitTool(call.function.name, args, false, result)

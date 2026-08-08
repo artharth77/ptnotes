@@ -10,6 +10,7 @@ import type {
   Project,
   Todo
 } from '@shared/types'
+import type { ModuleInfo, ModuleRun } from '@shared/types'
 import { slugify } from '../utils/slug'
 import { detectFileKind } from '../ai/reader'
 
@@ -92,6 +93,10 @@ export class PTNotesService {
 
   private filesDir(name: string): string {
     return join(this.projectDir(name), 'files')
+  }
+
+  private modulesDir(name: string): string {
+    return join(this.projectDir(name), 'modules')
   }
 
   private chatPath(project: string, sessionId: string): string {
@@ -431,6 +436,123 @@ export class PTNotesService {
     if (base !== fileName) return null
     const full = join(this.filesDir(project), base)
     return (await this.pathExists(full)) ? full : null
+  }
+
+  // ---- Module run storage (JSON kept in <project>/modules/, out of the # file picker) ----
+
+  private moduleTempPath(project: string, runId: string): string {
+    return join(this.modulesDir(project), `${validateNoteId(runId)}.json`)
+  }
+
+  private modulePromptPath(project: string, runId: string): string {
+    return join(this.modulesDir(project), `${validateNoteId(runId)}.prompt.json`)
+  }
+
+  async writeModulePrompt(
+    project: string,
+    runId: string,
+    prompt: { runId: string; module: ModuleInfo; title: string; prompt: string }
+  ): Promise<void> {
+    const dir = this.modulesDir(project)
+    await fs.mkdir(dir, { recursive: true })
+    await fs.writeFile(
+      this.modulePromptPath(project, runId),
+      JSON.stringify(prompt, null, 2),
+      'utf8'
+    )
+  }
+
+  async writeModuleRun(project: string, runId: string, run: ModuleRun): Promise<void> {
+    const dir = this.modulesDir(project)
+    await fs.mkdir(dir, { recursive: true })
+    await fs.writeFile(this.moduleTempPath(project, runId), JSON.stringify(run, null, 2), 'utf8')
+  }
+
+  /** Read all persisted run snapshots for a project (used to list history across restarts). */
+  async listStoredModuleRuns(project: string): Promise<ModuleRun[]> {
+    const dir = this.modulesDir(project)
+    let entries: string[]
+    try {
+      entries = await fs.readdir(dir)
+    } catch {
+      return []
+    }
+    const runs: ModuleRun[] = []
+    for (const entry of entries) {
+      if (!entry.endsWith('.json') || entry.endsWith('.prompt.json')) continue
+      try {
+        const run = JSON.parse(await fs.readFile(join(dir, entry), 'utf8')) as ModuleRun
+        if (run && typeof run.runId === 'string' && Array.isArray(run.steps)) {
+          runs.push(run)
+        }
+      } catch {
+        // skip corrupt run file
+      }
+    }
+    runs.sort((a, b) => b.updatedAt - a.updatedAt)
+    return runs
+  }
+
+  /**
+   * Delete persisted run files whose status is terminal (history). Active
+   * runs stay. Optionally also delete each removed run's output file (only if
+   * it lives inside the project). Returns the number of runs removed.
+   */
+  async clearModuleHistoryRuns(
+    project: string,
+    excludeActive: string[],
+    deleteOutputFiles = false
+  ): Promise<number> {
+    const active = new Set(excludeActive)
+    const dir = this.modulesDir(project)
+    const outputDir = this.filesDir(project)
+    let entries: string[]
+    try {
+      entries = await fs.readdir(dir)
+    } catch {
+      return 0
+    }
+    let removed = 0
+    for (const entry of entries) {
+      if (!entry.endsWith('.json')) continue
+      const full = join(dir, entry)
+      let run: ModuleRun
+      try {
+        run = JSON.parse(await fs.readFile(full, 'utf8')) as ModuleRun
+      } catch {
+        continue
+      }
+      if (!run || typeof run.runId !== 'string' || active.has(run.runId)) continue
+      if (run.runId !== validateNoteId(run.runId)) continue
+      if (deleteOutputFiles && run.outputFile) {
+        const prefix = outputDir + sep
+        if (run.outputFile.startsWith(prefix)) {
+          await fs.rm(run.outputFile, { force: true })
+        }
+      }
+      await fs.rm(full, { force: true })
+      const prompt = join(dir, `${run.runId}.prompt.json`)
+      await fs.rm(prompt, { force: true })
+      removed++
+    }
+    return removed
+  }
+
+  /** Pick a non-colliding, safe path in <project>/files/ for a generated output file. */
+  async uniqueOutputPath(project: string, fileName: string): Promise<string> {
+    const dir = this.filesDir(project)
+    await fs.mkdir(dir, { recursive: true })
+    const original = basename(fileName).trim()
+    if (!original) throw new Error('Output file name is empty')
+    const ext = extname(original)
+    const stem = ext ? original.slice(0, -ext.length) : original
+    const base = slugify(stem)
+    let candidate = `${base}${ext}`
+    let i = 2
+    while (await this.pathExists(join(dir, candidate))) {
+      candidate = `${base}-${i++}${ext}`
+    }
+    return join(dir, candidate)
   }
 
   private async uniqueNoteId(project: string, base: string, exclude?: string): Promise<string> {

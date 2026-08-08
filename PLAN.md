@@ -8,7 +8,7 @@ This file tracks planned/ongoing work. Completed work lives in `AGENTS.md` (pres
 
 ### Concept
 
-A **Module** is a self-registering plugin that spawns a background "subagent" LLM session (a second, independent LLM loop) to perform long-running generation jobs (first one: PPTX). The main chat agent only does one thing: it writes a **full, self-contained prompt** to a file in `<project>/files/temp/`, calls a single generic `start_module` tool, gets back a `runId`, and returns to the user immediately. The subagent then runs in the background, plans its own steps, reports per-step status, and writes the final output — all trackable in a new **Modules** sidebar tab and via a live card in the chat.
+A **Module** is a self-registering plugin that spawns a background "subagent" LLM session (a second, independent LLM loop) to perform long-running generation jobs (first one: PPTX). The main chat agent only does one thing: it writes a **full, self-contained prompt** to a file in `<project>/modules/`, calls a single generic `start_module` tool, gets back a `runId`, and returns to the user immediately. The subagent then runs in the background, plans its own steps, reports per-step status, and writes the final output — all trackable in a new **Modules** sidebar tab and via a live card in the chat.
 
 New modules (docx, xlsx, …) later = drop a new folder into `src/main/modules/<id>/` and register it. **Zero core changes.**
 
@@ -30,7 +30,7 @@ renderer ◀── modules:event ◀──  │  ModuleRunner     │  (same bas
                                              <project>/files/<title>.pptx  (via pptxgenjs)
 ```
 
-- **`start_module`** is the only change to the main agent tool set. JSON schema stays `{ idModule, title, prompt }`; the *description* is generated from the registry so the agent learns about every registered module without code changes.
+- **`start_module`** is the only change to the main agent tool set. JSON schema stays `{ idModule, title, prompt }`; the _description_ is generated from the registry so the agent learns about every registered module without code changes.
 - The subagent gets **all 13 base tools + module-specific tools + 2 framework tools** (`set_plan`, `update_step`), sharing the same `ToolContext`. `confirm` (used by `delete_note`) resolves to `false` automatically in background runs.
 - All filesystem work stays in the **main process**; the renderer never touches disk.
 
@@ -38,19 +38,42 @@ renderer ◀── modules:event ◀──  │  ModuleRunner     │  (same bas
 
 ```ts
 export type ModuleStatus = 'queued' | 'planning' | 'running' | 'done' | 'failed' | 'cancelled'
-export interface ModuleStepState { id: string; name: string; status: 'pending'|'running'|'done'|'failed' }
-export interface ModuleInfo { id: string; name: string; description: string }
+export interface ModuleStepState {
+  id: string
+  name: string
+  status: 'pending' | 'running' | 'done' | 'failed'
+}
+export interface ModuleInfo {
+  id: string
+  name: string
+  description: string
+}
 export interface ModuleRun {
-  runId: string; module: ModuleInfo; project: string; title: string
-  prompt: string; status: ModuleStatus; steps: ModuleStepState[]
-  createdAt: number; updatedAt: number; startedAt?: number; finishedAt?: number
-  outputFile?: string; summary?: string; error?: string
+  runId: string
+  module: ModuleInfo
+  project: string
+  title: string
+  prompt: string
+  status: ModuleStatus
+  steps: ModuleStepState[]
+  createdAt: number
+  updatedAt: number
+  startedAt?: number
+  finishedAt?: number
+  outputFile?: string
+  summary?: string
+  error?: string
 }
 export interface ModuleEvent {
-  runId: string; project: string
-  type: 'status'|'step'|'output'|'error'|'done'
-  status?: ModuleStatus; step?: ModuleStepState; stepIndex?: number
-  outputFile?: string; error?: string; summary?: string
+  runId: string
+  project: string
+  type: 'status' | 'step' | 'output' | 'error' | 'done'
+  status?: ModuleStatus
+  step?: ModuleStepState
+  stepIndex?: number
+  outputFile?: string
+  error?: string
+  summary?: string
 }
 ```
 
@@ -64,9 +87,9 @@ export interface ModuleEvent {
 interface RegisteredModule {
   id: string
   name: string
-  description: string            // description = shown to main agent
-  systemPrompt?: string          // extra subagent instructions
-  tools: PTTool[]                // module-specific tool schemas + executors
+  description: string // description = shown to main agent
+  systemPrompt?: string // extra subagent instructions
+  tools: PTTool[] // module-specific tool schemas + executors
 }
 ```
 
@@ -74,19 +97,19 @@ interface RegisteredModule {
 
 **`src/main/modules/runner.ts`** — `ModuleRunner`: the background subagent loop, structurally a sibling of `ChatSession`:
 
-1. On start, writes the prompt file `<project>/files/temp/<runId>.json` (prompt authored by the main agent) and the initial run state, then emits events.
+1. On start, writes the prompt file `<project>/modules/<runId>.prompt.json` (prompt authored by the main agent) and the initial run state, then emits events.
 2. Streaming LLM loop (shared `AbortController`/`stop()` like `ChatSession`); tool list = base `tools` + module `tools` + framework tools.
 3. **Enforces planning first**: the first tool call must be `set_plan` (else a tool error is returned so the model self-corrects); then `update_step(index, 'running' | 'done' | 'failed')` drives per-step UI status.
 4. Tool execution dispatches to base tools (auto-false confirm) or module tools; tool errors flow back to the model for self-correction (same pattern as `executeTool`).
 5. On final reply: persist `run.json` (status done + `outputFile` captured from module tool results or runner path), emit `done`.
 6. Catch → persisted `failed` + error event; `stop()` aborts.
 
-**`src/main/modules/runs.ts`** — `ModuleRunManager`: in-memory map of active runs per project, `start()/stop()/get()`, persistence helpers (load/list all `*.run.json` under `files/temp/`), and a broadcaster that pushes `ModuleEvent`s to all windows on the `modules:event` channel.
+**`src/main/modules/runs.ts`** — `ModuleRunManager`: in-memory map of active runs per project, `start()/stop()/get()`, persistence helpers (load/list persisted `*.json` under `modules/`), and a broadcaster that pushes `ModuleEvent`s to all windows on the `modules:event` channel.
 
 ### First module: PPTX (`src/main/modules/pptx/`)
 
 - `index.ts` — `RegisteredModule` for `id: 'pptx'`:
-  - `description` (consumed by `start_module`): *"Generate a PowerPoint deck… provide a detailed outline/spec; the subagent plans steps, designs slides as JSON, and produces a real .pptx in the project files folder."*
+  - `description` (consumed by `start_module`): _"Generate a PowerPoint deck… provide a detailed outline/spec; the subagent plans steps, designs slides as JSON, and produces a real .pptx in the project files folder."_
   - `systemPrompt`: instructs the subagent to read any `file:<…>` / `note:<…>` inputs, design slides via supported layouts (title / bullets / section / two-column / table), then call `create_pptx_file`.
   - `tools`: `create_pptx_file({ design: <JSON string>, filename? })`
 - `builder.ts` — `buildPptx(design, outPath)`: JSON → `.pptx` via **`pptxgenjs`**, writing to `<project>/files/<slug>.pptx` (filename validated via existing `slugify` + a `files/`-safe dedupe helper; reuses `uniqueOutputPath`), returns `{ ok, path, pptxOutSize }` or `{ ok: false, error }`.
@@ -94,14 +117,14 @@ interface RegisteredModule {
 ### Main-agent integration (minimal)
 
 - `src/main/ai/tools.ts` — add one `start_module` tool (description built from `ModuleRegistry.list()`; args `{ id, title, prompt }`). Executor asks the module manager to `start(project, id, title, prompt)` and returns `{ ok: true, runId, module, title }` immediately (fire-and-forget).
-- `src/main/service/PTNotesService.ts` — add `files/temp` + output helpers: `moduleTempPath(project, runId)`, `writeModulePrompt`, `writeModuleRun`, `listModuleRuns`, `uniqueOutputPath(project, name)` (dedupe like `copyFileToProject`).
+- `src/main/service/PTNotesService.ts` — add `modules + output helpers: `moduleTempPath(project, runId)`, `writeModulePrompt`, `writeModuleRun`, `listModuleRuns`, `uniqueOutputPath(project, name)` (dedupe like `copyFileToProject`).
 - `src/main/index.ts` — build `ModuleRegistry`, register the pptx module, create `ModuleRunManager`, pass into `registerModulesIpc`.
 
 ### IPC + preload
 
 `src/main/ipc/modules.ts` + `registerModulesIpc(manager, service)`:
 
-- `modules:list(project)` → `ModuleRun[]` (in-memory active + persisted `*.run.json` under `files/temp/`)
+- `modules:list(project)` → `ModuleRun[]` (in-memory active + persisted `modules/*.json`)
 - `modules:stop(project, runId)`
 - `modules:reveal(project, runId)` → `shell.showItemInFolder(outputFile)`
 - `modules:onEvent` (channel `modules:event`) → pushed by the manager
@@ -119,19 +142,19 @@ Preload: add `window.ptnotes.modules.{ list, stop, reveal, onEvent }` (pattern m
 ### Persistence & temp layout
 
 ```
-<project>/files/temp/
+<project>/modules/
   <runId>.json          # full ModuleRun snapshot (persist history)
   <runId>.prompt.json   # prompt authored by the main agent (requirement)
 <project>/files/<title>.pptx   # final output (visible in # picker, read_file, reveal)
 ```
 
-`files/temp/*.run.json` are read on list, so completed runs are reviewable across restarts (like chat history).
+`modules/*.json` are read on list, so completed runs are reviewable across restarts (like chat history).
 
 ### Testing (`scripts/test-modules.mts`, wired into `npm run test`)
 
 - `test-pptx`: build a PPTX from a JSON design deterministically; assert file exists, size > 0, path in project `files/`; assert invalid design → `ok: false`.
 - `test-runner`: construct `ModuleRunner` with a fake "model" (injected completions returning `set_plan` then `update_step` then `create_pptx_file`), drive the loop, assert `run.status === 'done'`, step statuses, run.json written, events emitted in order.
-- `test-start-module`: `start_module` with a test module returns `{ ok, runId }`, prompt file written under `files/temp/`.
+- `test-start-module`: `start_module` with a test module returns `{ ok, runId }`, prompt file written under `modules/`.
 - Registry test: register + list shows a new module without core changes.
 
 ### Dependencies

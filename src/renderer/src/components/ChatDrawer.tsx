@@ -2,9 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useAppStore } from '../store/useAppStore'
 import { MarkdownContent } from './MarkdownContent'
-import type { ChatMessage, ChatSessionMeta, NoteMeta, Todo } from '@shared/types'
+import { ModuleCard } from './ModuleCard'
+import type { ChatMessage, ChatSessionMeta, ModuleRun, NoteMeta, Todo } from '@shared/types'
 
 const NO_SESSIONS: ChatSessionMeta[] = []
+const NO_MODULE_RUNS: ModuleRun[] = []
 
 function deriveLocalTitle(text: string): string {
   const clean = text.replace(/\s+/g, ' ').trim()
@@ -125,6 +127,9 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   const renameChat = useAppStore((s) => s.renameChat)
   const deleteChat = useAppStore((s) => s.deleteChat)
   const selectNote = useAppStore((s) => s.selectNote)
+  const moduleRuns = useAppStore((s) =>
+    s.activeProject ? (s.moduleRuns[s.activeProject] ?? NO_MODULE_RUNS) : NO_MODULE_RUNS
+  )
   const setTab = useAppStore((s) => s.setTab)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -665,6 +670,11 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                   </div>
                 )
               })}
+            {m.moduleRunId &&
+              (() => {
+                const run = moduleRuns.find((r) => r.runId === m.moduleRunId)
+                return run ? <ModuleCard run={run} compact defaultExpanded /> : null
+              })()}
             {chatBusy &&
               m.id === list[list.length - 1]?.id &&
               m.role === 'assistant' &&
