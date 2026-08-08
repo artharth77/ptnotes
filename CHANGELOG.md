@@ -19,9 +19,18 @@ All notable changes to PTNotes are documented in this file.
 - First module shipped: asks the subagent to design a deck, then `create_pptx_file` builds a real `.pptx` into the project `files/` folder via `pptxgenjs`.
 - Supports one-slide-per-section decks with cover, agenda, section/statement, bullet, two-column and table slide types, shared theme (fonts + palette) and shape/overflow-safe text via the theme class.
 
+#### Module settings & per-run management
+
+- New **Modules** category in Settings lists the installed modules with enable/disable toggles that apply immediately; disabled modules are hidden from the `start_module` tool description and refused if started.
+- The `start_module` tool schema is rebuilt on every chat turn from the current settings, so toggling a module updates the assistant's available-module list without a restart or session reset.
+- Per-run delete in the Modules tab: history cards show a hover delete button; a confirm dialog supports deleting the related output file.
+- Empty **Modules** tab links to **Settings → Modules** so users can find the enable/disable toggles.
+
 ### Changed
 
 - Chat sessions now accept an extended tool list: the module `start_module` tool is merged on top of the 12 base tools (base tool behavior unchanged).
+- The `start_module` tool is supplied by a `ToolsProvider` resolved on each model turn rather than a static list built at startup.
+- Modules IPC now accepts the settings store and module registry (read live enabled state), and exports `deleteRun` (`modules:deleteRun`).
 
 ### Fixed
 

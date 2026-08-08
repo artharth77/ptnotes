@@ -15,14 +15,18 @@ Markdown notes + todo lists + AI assistant, organized by project. Electron + Rea
 - **Background modules** — the assistant can launch long-running background subagents (Modules, e.g. PPTX/PowerPoint) that plan steps and generate a deliverable file autonomously. A **Modules** tab shows live status, per-step progress, and history; just ask e.g. *"make a PowerPoint about…"* to start one.
 - **Reasoning models** — `<think>` reasoning blocks (e.g. DeepSeek-R1) render in a separate collapsed-by-default bubble; a **Stop** button interrupts a running reply.
 - **Missing projects** — projects whose folders were deleted externally still appear in the list (marked in red) and can be recreated in place.
-- **Settings & storage** — a two-panel **Settings** dialog configures the project root (movable, with confirmation) and your AI provider, including an editable model combobox fed by `GET /models`.
+- **Settings** — a category-based **Settings** dialog covers storage, AI provider (with an editable model combobox fed by `GET /models`), and modules. See [Settings](#settings).
 
 ## Tech stack
 
 - Electron + electron-vite + React 19 + TypeScript
 - TipTap v3 for the WYSIWYG markdown editor
-- `openai` SDK (OpenAI-compatible endpoints) for the AI chat
+- `openai` SDK (OpenAI-compatible endpoints) for the AI chat and modules
+- `pdf-parse` for extracting text from PDFs (chat files, modules)
+- `pptxgenjs` for generating PowerPoint deliverables (modules)
+- `react-markdown` + `remark-gfm` for rendering chat responses
 - cheerio for local page reading
+- zustand for state management
 - Plain CSS, no UI framework
 
 ## Storage
@@ -40,6 +44,14 @@ Data lives under `~/Documents/PTNotes/`:
 ```
 
 The folder on disk is the source of truth, and the project root is configurable via **Settings → Storage** (changing it moves all data). App AI configuration (base URL, API key, model) is stored in Electron's `userData/ai-provider.json`, restricted to the owner's read/write and never bundled into the renderer.
+
+## Settings
+
+The **Settings** page (⚙ icon in the top bar) is organized by category:
+
+- **Storage** — shows the current project root and lets you change where all project data lives (with confirmation). Every project folder, notes, todos, chats, and the project registry are moved to the new location.
+- **AI Settings** — connects the assistant to any OpenAI-compatible provider: base URL, API key, and model (editable combobox of available models), plus an optional **PDF upload** toggle for sending PDFs as raw file attachments.
+- **Modules** — lists the installed background modules and their enable/disable toggles. Disabling a module hides it from the AI assistant and prevents it from being started; the toggles apply immediately.
 
 ## Commands
 
