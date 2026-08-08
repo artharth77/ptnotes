@@ -12,6 +12,7 @@ Markdown notes + todo lists + AI assistant, organized by project. Electron + Rea
 - **File attachments** — drag & drop files into the chat; supported files (any text file plus PDFs, detected by content) are copied locally to the project and can be reused via `#` mentions. The assistant reads them locally with the `read_file` tool.
 - **Chat mentions** — type `@` to insert a note, `!` to insert a todo, `#` to attach a project file; the AI can link to your notes with clickable `[name](note:name)` links.
 - **Chat history** — each session is auto-saved to a JSON file; **New Chat** archives the current thread and a history picker lets you reopen, rename, or delete old sessions.
+- **Background modules** — the assistant can launch long-running background subagents (Modules, e.g. PPTX/PowerPoint) that plan steps and generate a deliverable file autonomously. A **Modules** tab shows live status, per-step progress, and history; just ask e.g. *"make a PowerPoint about…"* to start one.
 - **Reasoning models** — `<think>` reasoning blocks (e.g. DeepSeek-R1) render in a separate collapsed-by-default bubble; a **Stop** button interrupts a running reply.
 - **Missing projects** — projects whose folders were deleted externally still appear in the list (marked in red) and can be recreated in place.
 - **Settings & storage** — a two-panel **Settings** dialog configures the project root (movable, with confirmation) and your AI provider, including an editable model combobox fed by `GET /models`.
@@ -33,7 +34,8 @@ Data lives under `~/Documents/PTNotes/`:
 └── <ProjectName>/
     ├── notes/*.md          (one file per note)
     ├── TODO.md             (markdown checklist)
-    ├── files/*             (attachments dropped into the chat)
+    ├── files/*             (attachments dropped into the chat, module outputs)
+    ├── modules/*.json      (module run state + prompts)
     └── chat/*.json         (one file per chat session)
 ```
 
@@ -42,7 +44,7 @@ The folder on disk is the source of truth, and the project root is configurable 
 ## Commands
 
 - `npm run dev` — development with HMR
-- `npm run test` — service / AI tools / chat session / markdown tests
+- `npm run test` — service / AI tools / chat session / markdown / modules tests
 - `npm run typecheck` — TypeScript checks (main + renderer)
 - `npm run lint` — ESLint
 - `npm run build` — typecheck + electron-vite production build
