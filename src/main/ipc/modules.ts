@@ -1,10 +1,48 @@
 import { ipcMain } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
 import type { ModuleRunManager } from '../modules/runs'
+import type { ModuleRegistry } from '../modules/registry'
+import type { SettingsStore } from '../settings'
+import type { ModuleSettings } from '@shared/types'
 
-export function registerModulesIpc(manager: ModuleRunManager): void {
+export function registerModulesIpc(
+  manager: ModuleRunManager,
+  settingsStore: SettingsStore,
+  registry: ModuleRegistry
+): void {
   ipcMain.handle('modules:list', async (_e: IpcMainInvokeEvent, project: string) =>
     manager.list(project)
+  )
+
+  ipcMain.handle('modules:listAvailable', async (): Promise<ModuleSettings[]> => {
+    const settings = await settingsStore.load()
+    const disabled = new Set(settings.disabledModules ?? [])
+    return registry.list().map((m) => ({
+      id: m.id,
+      name: m.name,
+      summary: m.summary,
+      enabled: !disabled.has(m.id)
+    }))
+  })
+
+  ipcMain.handle(
+    'modules:setEnabled',
+    async (_e: IpcMainInvokeEvent, id: string, enabled: boolean): Promise<ModuleSettings[]> => {
+      const settings = await settingsStore.load()
+      const disabled = new Set(settings.disabledModules ?? [])
+      if (enabled) {
+        disabled.delete(id)
+      } else {
+        disabled.add(id)
+      }
+      await settingsStore.save({ ...settings, disabledModules: [...disabled] })
+      return registry.list().map((m) => ({
+        id: m.id,
+        name: m.name,
+        summary: m.summary,
+        enabled: !disabled.has(m.id)
+      }))
+    }
   )
 
   ipcMain.handle(

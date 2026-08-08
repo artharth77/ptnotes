@@ -3,8 +3,13 @@ import type { ModuleRunManager } from './runs'
 import type { ModuleRegistry } from './registry'
 
 /** Build the single `start_module` tool exposed to the main chat agent. */
-export function buildStartModuleTool(manager: ModuleRunManager, registry: ModuleRegistry): PTTool {
-  const available = registry.list()
+export function buildStartModuleTool(
+  manager: ModuleRunManager,
+  registry: ModuleRegistry,
+  disabled: string[] = []
+): PTTool {
+  const disabledSet = new Set(disabled)
+  const available = registry.list().filter((m) => !disabledSet.has(m.id))
   const modulesDesc =
     available.length > 0
       ? available.map((m) => `- ${m.id}: ${m.description}`).join('\n')

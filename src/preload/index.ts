@@ -10,6 +10,7 @@ import type {
   CreateProjectResult,
   ModuleEvent,
   ModuleRun,
+  ModuleSettings,
   StorageSettings,
   NoteMeta,
   PdfExtractResult,
@@ -112,6 +113,9 @@ const api = {
   },
   modules: {
     list: (project: string): Promise<ModuleRun[]> => ipcRenderer.invoke('modules:list', project),
+    listAvailable: (): Promise<ModuleSettings[]> => ipcRenderer.invoke('modules:listAvailable'),
+    setEnabled: (id: string, enabled: boolean): Promise<ModuleSettings[]> =>
+      ipcRenderer.invoke('modules:setEnabled', id, enabled),
     stop: (project: string, runId: string): Promise<void> =>
       ipcRenderer.invoke('modules:stop', project, runId),
     reveal: (project: string, runId: string): Promise<{ ok: boolean; error?: string }> =>

@@ -30,6 +30,15 @@ export interface AIProviderConfig {
 
 export interface StorageSettings {
   rootDir: string
+  disabledModules?: string[]
+}
+
+/** A registered module's availability state shown in Settings ▸ Modules. */
+export interface ModuleSettings {
+  id: string
+  name: string
+  summary: string
+  enabled: boolean
 }
 
 export interface AppSettings {

@@ -323,6 +323,19 @@ export class ModuleRunner {
     step.updatedAt = Date.now()
     if (detailRaw) step.detail = String(detailRaw)
     if (status === 'running') this.run.currentStep = index - 1
+    // A later step finishing implies every earlier step already completed: if a step
+    // is marked done/failed while a previous step is left running/pending, promote
+    // those previous steps to done so the plan stays consistent.
+    if (status === 'done' || status === 'failed') {
+      for (let i = 0; i < index - 1; i++) {
+        const prev = this.run.steps[i]!
+        if (prev.status === 'running' || prev.status === 'pending') {
+          prev.status = 'done'
+          prev.updatedAt = Date.now()
+          this.notify(this.run, { type: 'step', step: prev, stepIndex: i })
+        }
+      }
+    }
     this.run.updatedAt = Date.now()
     this.notify(this.run, { type: 'step', step, stepIndex: index - 1 })
     return JSON.stringify({ ok: true, index: index - 1, status })

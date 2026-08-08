@@ -5,6 +5,7 @@ import OpenAI from 'openai'
 import type { AIProviderConfig, ModuleEvent, ModuleInfo, ModuleRun } from '@shared/types'
 import type { PTNotesService } from '../service/PTNotesService'
 import type { AIConfigStore } from '../ai/config'
+import type { SettingsStore } from '../settings'
 import { isLocalEndpoint } from '../ai/chatSession'
 import { ModuleRegistry } from './registry'
 import { ModuleRunner } from './runner'
@@ -28,19 +29,22 @@ export class ModuleRunManager {
   private readonly registry: ModuleRegistry
   private readonly broadcast: ModuleEventBroadcaster
   private readonly clientFn?: ModuleClientFactory
+  private readonly settingsStore?: SettingsStore
 
   constructor(
     service: PTNotesService,
     configStore: AIConfigStore,
     registry: ModuleRegistry,
     broadcast: ModuleEventBroadcaster = () => {},
-    clientFn?: ModuleClientFactory
+    clientFn?: ModuleClientFactory,
+    settingsStore?: SettingsStore
   ) {
     this.service = service
     this.configStore = configStore
     this.registry = registry
     this.broadcast = broadcast
     this.clientFn = clientFn
+    this.settingsStore = settingsStore
   }
 
   /** Start a background module run (fire-and-forget) for the given project. */
@@ -53,6 +57,15 @@ export class ModuleRunManager {
     const def = this.registry.get(moduleId)
     if (!def) {
       return { ok: false, error: `Unknown module: "${moduleId}".` }
+    }
+    if (this.settingsStore) {
+      const settings = await this.settingsStore.load()
+      if (settings.disabledModules?.includes(moduleId)) {
+        return {
+          ok: false,
+          error: `Module "${def.name}" is disabled. Enable it in Settings ▸ Modules and try again.`
+        }
+      }
     }
     const cleanTitle = String(title || '').trim()
     const cleanPrompt = String(prompt || '').trim()

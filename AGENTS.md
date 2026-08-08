@@ -70,7 +70,7 @@ Run `npm run typecheck` and `npm run lint` after any change.
 ```
 
 - App AI config stored in Electron `userData/ai-provider.json`, `chmod 600`, never in the renderer bundle.
-- App settings (project root path) stored in Electron `userData/ptnotes-settings.json`, `chmod 600`.
+- App settings (project root path + `disabledModules` module toggles) stored in Electron `userData/ptnotes-settings.json`, `chmod 600`.
 - Creating a project initializes folder + `TODO.md` + `welcome.md`.
 - `.ptnotes-projects.json` in the root dir is the persistent project registry so externally-deleted folders still show (missing paths flagged `pathExists: false`).
 
@@ -249,6 +249,10 @@ Two-panel dialog (`.settings-layout` with `.settings-nav` + `.settings-pane`):
   values) against `GET {baseUrl}/models`, then shows a scrollable dropdown (~10 rows) of fetched
   model ids that is filtered by typing; the typed value is never cleared on failure. The AI Selected
   category is driven by store state (`settingsCategory`, opened via `openSettings('ai')`).
+- **Modules:** a toggle per registered module. Disabled modules are excluded from the `start_module`
+  tool description and refused by `ModuleRunManager.start`; the list comes from
+  `modules:listAvailable` / `modules:setEnabled`, persisted as `disabledModules` in
+  `ptnotes-settings.json`. Toggles apply immediately, no Save button.
 - Model downloads auto-load silently when the AI pane opens (best-effort; failures hidden until
   **Load models** is clicked).
 - When the AI isn't configured (empty model, or no API key for a remote provider), the chat panel

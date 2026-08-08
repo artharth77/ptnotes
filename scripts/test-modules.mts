@@ -121,23 +121,29 @@ const script: { content?: string; tool_calls?: FakeToolCall[] }[] = [
   { content: 'Done. Generated quarterly-review.pptx.' }
 ]
 
-let callIndex = 0
-const fakeClientFactory = (): OpenAI => {
-  return {
-    chat: {
-      completions: {
-        create: async () => {
-          const entry = script[callIndex++] ?? script[script.length - 1]!
-          const message: Record<string, unknown> = {
-            role: 'assistant',
-            content: entry.content ?? ''
+const fakeClientFactory = makeScriptedClient(script)
+
+function makeScriptedClient(
+  scriptArr: { content?: string; tool_calls?: FakeToolCall[] }[]
+): (cfg: AIProviderConfig) => OpenAI {
+  let i = 0
+  return () => {
+    return {
+      chat: {
+        completions: {
+          create: async () => {
+            const entry = scriptArr[i++] ?? scriptArr[scriptArr.length - 1]!
+            const message: Record<string, unknown> = {
+              role: 'assistant',
+              content: entry.content ?? ''
+            }
+            if (entry.tool_calls) message.tool_calls = entry.tool_calls
+            return { choices: [{ message }] }
           }
-          if (entry.tool_calls) message.tool_calls = entry.tool_calls
-          return { choices: [{ message }] }
         }
       }
-    }
-  } as unknown as OpenAI
+    } as unknown as OpenAI
+  }
 }
 
 const eventTypes: string[] = []
@@ -209,5 +215,64 @@ assert.equal(
   false,
   'run file removed from disk'
 )
+
+// ---- disabled module enforcement ----
+const { SettingsStore } = await import('../src/main/settings')
+const settingsStore = new SettingsStore()
+await settingsStore.save({ rootDir: ROOT, disabledModules: ['pptx'] })
+const gatedManager = new ModuleRunManager(
+  service,
+  configStore,
+  registry,
+  () => {},
+  undefined,
+  settingsStore
+)
+const disabledStart = await gatedManager.start(
+  PROJECT,
+  'pptx',
+  'Blocked deck',
+  'This should be refused.'
+)
+assert.equal(disabledStart.ok, false, 'disabled module refused')
+await settingsStore.save({ rootDir: ROOT, disabledModules: [] })
+const reEnabled = await gatedManager.start(PROJECT, 'pptx', 'Now allowed', 'Should start.')
+assert.equal(reEnabled.ok, true, 're-enabled module accepted')
+const reRunId = reEnabled.ok ? reEnabled.runId : ''
+await waitFor(async () => {
+  const runs = await gatedManager.list(PROJECT)
+  return runs.some((r) => r.runId === reRunId && (r.status === 'done' || r.status === 'failed'))
+})
+
+// ---- step status cascade: later step done promotes earlier running/pending steps ----
+const cascadeScript: { content?: string; tool_calls?: FakeToolCall[] }[] = [
+  {
+    tool_calls: [step('f1', 'set_plan', { steps: ['Research', 'Draft', 'Generate'] })]
+  },
+  { tool_calls: [step('f2', 'update_step', { index: 1, status: 'running' })] },
+  // jump straight to step 3 done, leaving step 1 running and step 2 pending
+  { tool_calls: [step('f3', 'update_step', { index: 3, status: 'done' })] },
+  { content: 'Done.' }
+]
+const cascadeManager = new ModuleRunManager(
+  service,
+  configStore,
+  registry,
+  () => {},
+  makeScriptedClient(cascadeScript)
+)
+const cStart = await cascadeManager.start(PROJECT, 'pptx', 'Cascade deck', 'Use short steps.')
+assert.equal(cStart.ok, true, 'cascade run accepted')
+const cRunId = cStart.ok ? cStart.runId : ''
+await waitFor(async () => {
+  const runs = await cascadeManager.list(PROJECT)
+  return runs.some((r) => r.runId === cRunId && (r.status === 'done' || r.status === 'failed'))
+})
+const cRun = (await cascadeManager.list(PROJECT)).find((r) => r.runId === cRunId)
+assert.ok(cRun, 'cascade run exists')
+assert.equal(cRun!.status, 'done', 'cascade run finished')
+assert.equal(cRun!.steps[0]!.status, 'done', 'previous running step promoted to done')
+assert.equal(cRun!.steps[1]!.status, 'done', 'previous pending step promoted to done')
+assert.equal(cRun!.steps[2]!.status, 'done', 'target step stays done')
 
 console.log('MODULES TESTS PASSED')
