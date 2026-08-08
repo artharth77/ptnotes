@@ -122,6 +122,8 @@ const api = {
       ipcRenderer.invoke('modules:reveal', project, runId),
     clearHistory: (project: string, deleteOutputFiles?: boolean): Promise<number> =>
       ipcRenderer.invoke('modules:clearHistory', project, deleteOutputFiles),
+    deleteRun: (project: string, runId: string, deleteOutputFiles?: boolean): Promise<boolean> =>
+      ipcRenderer.invoke('modules:deleteRun', project, runId, deleteOutputFiles),
     onEvent: (callback: (event: ModuleEvent) => void): (() => void) => {
       const listener = (_e: unknown, event: ModuleEvent): void => callback(event)
       ipcRenderer.on('modules:event', listener)

@@ -538,6 +538,42 @@ export class PTNotesService {
     return removed
   }
 
+  /**
+   * Delete a single module run (history) and its prompt file. Optionally also
+   * delete its output file (only if it lives inside the project). Returns true
+   * if a run file was removed.
+   */
+  async deleteModuleRun(
+    project: string,
+    runId: string,
+    deleteOutputFiles = false
+  ): Promise<boolean> {
+    const runPath = this.moduleTempPath(project, runId)
+    const existed = await fs
+      .access(runPath)
+      .then(() => true)
+      .catch(() => false)
+    let run: ModuleRun | undefined
+    if (existed) {
+      try {
+        run = JSON.parse(await fs.readFile(runPath, 'utf8')) as ModuleRun
+      } catch {
+        run = undefined
+      }
+      if (deleteOutputFiles && run?.outputFile) {
+        const outputDir = this.filesDir(project)
+        const prefix = outputDir + sep
+        if (run.outputFile.startsWith(prefix)) {
+          await fs.rm(run.outputFile, { force: true })
+        }
+      }
+    }
+    const prompt = this.modulePromptPath(project, runId)
+    await fs.rm(prompt, { force: true })
+    await fs.rm(runPath, { force: true })
+    return existed
+  }
+
   /** Pick a non-colliding, safe path in <project>/files/ for a generated output file. */
   async uniqueOutputPath(project: string, fileName: string): Promise<string> {
     const dir = this.filesDir(project)

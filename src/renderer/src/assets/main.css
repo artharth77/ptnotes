@@ -2197,6 +2197,39 @@ body {
   gap: 6px;
 }
 
+.module-card-status-area {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.module-card-delete-btn {
+  opacity: 0;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+
+.module-card:hover .module-card-delete-btn {
+  opacity: 1;
+}
+
+.module-card-delete-btn:hover {
+  color: var(--danger);
+  background: var(--bg-hover);
+}
+
 .module-card-name {
   font-weight: 600;
   font-size: 12px;

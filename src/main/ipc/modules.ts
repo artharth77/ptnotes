@@ -65,4 +65,16 @@ export function registerModulesIpc(
       return manager.clearHistory(project, deleteOutputFiles)
     }
   )
+
+  ipcMain.handle(
+    'modules:deleteRun',
+    async (
+      _e: IpcMainInvokeEvent,
+      project: string,
+      runId: string,
+      deleteOutputFiles = false
+    ): Promise<boolean> => {
+      return manager.deleteRun(project, runId, deleteOutputFiles)
+    }
+  )
 }

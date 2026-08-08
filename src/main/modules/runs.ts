@@ -150,6 +150,19 @@ export class ModuleRunManager {
     return this.service.clearModuleHistoryRuns(project, [...running], deleteOutputFiles)
   }
 
+  /** Delete a single module run (history) and optionally its output file. */
+  async deleteRun(project: string, runId: string, deleteOutputFiles = false): Promise<boolean> {
+    const runner = this.active.get(runId)
+    if (runner) {
+      const status = runner.snapshot?.status
+      if (status && !['done', 'failed', 'cancelled'].includes(status)) {
+        return false
+      }
+      this.active.delete(runId)
+    }
+    return this.service.deleteModuleRun(project, runId, deleteOutputFiles)
+  }
+
   /** Combine live runs with persisted history for a project. */
   async list(project: string): Promise<ModuleRun[]> {
     const byId = new Map<string, ModuleRun>()

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useAppStore } from '../store/useAppStore'
 import type { ModuleRun, ModuleStepState } from '@shared/types'
+import { Modal } from './Modal'
 
 const STATUS_LABELS: Record<ModuleRun['status'], string> = {
   queued: 'Queued',
@@ -46,16 +47,33 @@ export function ModuleCard({
   defaultExpanded?: boolean
 }): React.JSX.Element {
   const activeProject = useAppStore((s) => s.activeProject)
+  const loadModules = useAppStore((s) => s.loadModules)
   const active = !['done', 'failed', 'cancelled'].includes(run.status)
   const doneSteps = run.steps.filter((s) => s.status === 'done' || s.status === 'failed').length
   const [showSteps, setShowSteps] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(defaultExpanded)
   const [revealError, setRevealError] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteOutputFiles, setDeleteOutputFiles] = useState(false)
 
   const pct = run.steps.length > 0 ? Math.round((doneSteps / run.steps.length) * 100) : 0
   const hasActions = Boolean(run.outputFile || run.summary)
   const toggleActions = (): void => {
     if (hasActions) setActionsOpen((v) => !v)
+  }
+
+  async function deleteRun(): Promise<void> {
+    if (!activeProject) return
+    setDeleting(true)
+    try {
+      await window.ptnotes.modules.deleteRun(activeProject, run.runId, deleteOutputFiles)
+      await loadModules(activeProject)
+    } finally {
+      setDeleting(false)
+      setConfirmDelete(false)
+      setDeleteOutputFiles(false)
+    }
   }
 
   return (
@@ -74,7 +92,26 @@ export function ModuleCard({
         <span className="module-card-name" title={run.module.name}>
           🧩 {run.module.name}
         </span>
-        <span className={`module-status module-${run.status}`}>{STATUS_LABELS[run.status]}</span>
+        {!active && (
+          <span className="module-card-status-area">
+            <button
+              className="module-card-delete-btn"
+              title="Delete this run"
+              onClick={(e) => {
+                e.stopPropagation()
+                setConfirmDelete(true)
+              }}
+            >
+              ✕
+            </button>
+            <span className={`module-status module-${run.status}`}>
+              {STATUS_LABELS[run.status]}
+            </span>
+          </span>
+        )}
+        {active && (
+          <span className={`module-status module-${run.status}`}>{STATUS_LABELS[run.status]}</span>
+        )}
       </div>
       <div className="module-card-meta">
         <span className="module-card-updated" title={new Date(run.updatedAt).toLocaleString()}>
@@ -158,6 +195,31 @@ export function ModuleCard({
           {run.summary && <div className="module-card-summary">{run.summary}</div>}
         </div>
       </div>
+      {confirmDelete && (
+        <Modal title="Delete module run" onClose={() => setConfirmDelete(false)}>
+          <p className="confirm-message">
+            Delete this run ({run.module.name} — &quot;{run.title}&quot;)?
+          </p>
+          <label className="confirm-checkbox">
+            <input
+              type="checkbox"
+              checked={deleteOutputFiles}
+              onChange={(e) => setDeleteOutputFiles(e.target.checked)}
+              disabled={!run.outputFile}
+            />
+            Also delete the related output file{run.outputFile ? '' : ' (no output file)'}
+          </label>
+          {!run.outputFile && <p className="hint">This run has no output file.</p>}
+          <div className="modal-actions">
+            <button className="btn" onClick={() => setConfirmDelete(false)} disabled={deleting}>
+              Cancel
+            </button>
+            <button className="btn danger" onClick={() => void deleteRun()} disabled={deleting}>
+              {deleting ? 'Deleting…' : 'Delete'}
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }
