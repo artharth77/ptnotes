@@ -2151,6 +2151,21 @@ body {
   color: var(--text-dim);
 }
 
+.inline-link {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.inline-link:hover {
+  color: var(--accent-strong, var(--accent));
+}
+
 .module-card {
   background: var(--bg-elev);
   border: 1px solid var(--border);

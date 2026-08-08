@@ -12,6 +12,7 @@ export function ModulePanel(): React.JSX.Element {
     s.activeProject ? (s.moduleRuns[s.activeProject] ?? NO_RUNS) : NO_RUNS
   )
   const loadModules = useAppStore((s) => s.loadModules)
+  const openSettings = useAppStore((s) => s.openSettings)
   const [confirmClear, setConfirmClear] = useState(false)
   const [clearing, setClearing] = useState(false)
   const [deleteOutputFiles, setDeleteOutputFiles] = useState(false)
@@ -59,6 +60,13 @@ export function ModulePanel(): React.JSX.Element {
             <p className="module-hint">
               Ask the AI assistant to generate something (e.g. &quot;make a PowerPoint about…&quot;)
               and it will run in the background here.
+            </p>
+            <p className="module-hint">
+              You can enable or disable modules in{' '}
+              <button className="inline-link" onClick={() => openSettings('modules')}>
+                Module settings
+              </button>
+              .
             </p>
           </div>
         )}
