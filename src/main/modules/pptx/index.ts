@@ -2,6 +2,7 @@ import { promises as fs } from 'fs'
 import { basename } from 'path'
 import type { PTTool, ToolContext } from '../../ai/tools'
 import type { RegisteredModule } from '../types'
+import { createLucideIconTools } from '../shared/createLucideIconTools'
 import { buildPptx } from './builder'
 
 const DESIGN_SCHEMA = `{
@@ -18,6 +19,8 @@ const DESIGN_SCHEMA = `{
       "left": ["..."] , "right": ["..."]         (two-column only)
       "statement": "Big centered text",            (section/statement only)
       "table": { "headers": ["A","B"], "rows": [["1","2"]] },   (table only)
+      "icon": "rocket" or { "name": "rocket", "size": 0.6, "color": "#ED7D31", "x": 8.5, "y": 0.3 },
+            (optional, any slide. Use search_lucide_icons to pick a canonical icon name.)
       "notes": "Speaker notes (optional)"
     }
   ]
@@ -105,7 +108,7 @@ export function createPptxModule(): RegisteredModule {
     description:
       "Creates a polished PowerPoint (.pptx) deck. When the user asks to make a presentation, slides, or a PowerPoint, prepare a DETAILED prompt: the deck's goal/audience, the slide-by-slide outline (titles + bullet content), any theme preference, and which files/notes to source from. The module subagent will plan steps, read any referenced note:/file: inputs, design the slides as JSON and produce a real .pptx saved to the project files folder.",
     systemPrompt:
-      'Design slides with clean, consistent layouts. Use layout "bullets" (with "title" and "body" bullet lines) for most content, "title" for the opening slide, "section" for divider slides, "two-column" for comparisons and "table" for tabular data. Prefer 3-6 bullets per slide, short phrases. Add speaker "notes" to important slides. Call create_pptx_file when the design is final.',
-    tools: [createPptxFileTool]
+      'Design slides with clean, consistent layouts. Use layout "bullets" (with "title" and "body" bullet lines) for most content, "title" for the opening slide, "section" for divider slides, "two-column" for comparisons and "table" for tabular data. Prefer 3-6 bullets per slide, short phrases. Add tasteful Lucide icons: call search_lucide_icons with a keyword for section, statement and title slides (and optionally a corner icon on content slides), then set the slide "icon" field with the returned canonical name. Add speaker "notes" to important slides. Call create_pptx_file when the design is final.',
+    tools: [...createLucideIconTools(), createPptxFileTool]
   }
 }

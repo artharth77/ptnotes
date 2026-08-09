@@ -106,6 +106,25 @@ Contract for `execute`:
   `uniqueOutputPath` slugifies the stem, rejects empty/unsafe names, and dedupes with `-2`, `-3`, … under the same `files/` folder.
 - Clean up the file on a failed build before returning the error JSON (see the PPTX tool for the pattern: build → on error `unlink` + return `{ ok:false }`).
 
+### Reusing shared tools
+
+`src/main/modules/shared/createLucideIconTools.ts` exports a ready-made tool-pack any module can
+opt into — no core/framework changes needed (the runner merges `module.tools`) and no duplication:
+
+```ts
+import { createLucideIconTools } from '../shared/createLucideIconTools'
+
+// Module that works with icons:
+tools: [...createLucideIconTools(), createSomeFileTool()]
+```
+
+It provides `search_lucide_icons` (keyword → canonical icon names + tags) and `get_lucide_icon`
+(name → SVG string or PNG data URI). The backing library `src/main/modules/shared/lucideIcons.ts`
+is format-agnostic: builders can call `getLucideIconSvg(...)` to embed SVG directly, or
+`lucideIconPngDataUri(...)` for a raster (the PPTX builder embeds icons as PNG so they render
+reliably in any slide viewer). Add `lucide-static` and `@resvg/resvg-js` to your module's deps
+when you use it.
+
 ## Registering the module
 
 Registration happens only in **`src/main/index.ts`**:

@@ -23,7 +23,9 @@
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
+    "@resvg/resvg-js": "^2.6.2",
     "cheerio": "^1.2.0",
+    "lucide-static": "^1.30.0",
     "openai": "^7.4.0",
     "pdf-parse": "^2.4.5",
     "pptxgenjs": "^4.0.1",

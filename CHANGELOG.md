@@ -2,6 +2,24 @@
 
 All notable changes to PTNotes are documented in this file.
 
+All notable changes to PTNotes are documented in this file.
+
+## [0.4.0] — 2026-08-09
+
+### Added
+
+#### Lucide icons in PPTX slides
+
+- New shared tool-pack (`src/main/modules/shared/lucideIcons.ts` + `createLucideIconTools.ts`) any module can reuse: `search_lucide_icons` (keyword → canonical icon names + tags) and `get_lucide_icon` (name → SVG string or PNG data URI).
+- Catalog is built from Lucide's `tags.json` (all 1764 canonical names) with fuzzy keyword scoring over names and tags; SVG rendering is cached and PNG rasterization uses `@resvg/resvg-js`.
+- PPTX slides now accept an optional `icon` field (Lucide canonical name or `{ name, size, color, x, y }`); icons are embedded as rasterized PNGs so they render reliably in any slide viewer, with a first-letter fallback when an icon can't be found.
+- The PPTX module subagent is prompted to pick tasteful icons for title/section/statement slides and optional corner icons on content slides.
+- Reusable shared tool imports for module authors documented in `docs/module-development.md` (no core/framework changes needed — the runner already merges `module.tools`).
+
+### Fixed
+
+- The chat `#` file mention now refreshes the project file list from disk the moment the picker opens, so files deleted outside the app (or since load) no longer show as stale cached entries.
+
 ## [0.3.0] — 2026-08-08
 
 ### Added

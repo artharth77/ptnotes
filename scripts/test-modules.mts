@@ -28,6 +28,8 @@ const { ModuleRegistry } = await import('../src/main/modules/registry')
 const { ModuleRunManager } = await import('../src/main/modules/runs')
 const { createPptxModule } = await import('../src/main/modules/pptx')
 const { buildPptx } = await import('../src/main/modules/pptx/builder')
+const { searchLucideIcons, getLucideIconSvg, lucideIconPngDataUri } =
+  await import('../src/main/modules/shared/lucideIcons')
 
 const service = new PTNotesService(ROOT)
 await service.createProject(PROJECT)
@@ -70,6 +72,58 @@ const bad1 = await buildPptx({ slides: [] }, '/tmp/should-not-exist.pptx')
 assert.equal(bad1.ok, false, 'empty slides rejected')
 const bad2 = await buildPptx('not-an-object', '/tmp/should-not-exist2.pptx')
 assert.equal(bad2.ok, false, 'non-object design rejected')
+
+// ---- shared Lucide icon library ----
+const hits = searchLucideIcons('chart')
+assert.ok(hits.length > 0 && hits[0]!.name.startsWith('chart'), 'search returns chart icons')
+const rocketHits = searchLucideIcons('rocket')
+assert.ok(
+  rocketHits.some((h) => h.name === 'rocket'),
+  'search finds the rocket icon'
+)
+const rocketSvg = getLucideIconSvg('rocket', '#ED7D31')
+assert.equal(rocketSvg.ok, true, 'rocket resolves')
+if (rocketSvg.ok) {
+  assert.ok(rocketSvg.svg.trimStart().startsWith('<svg'), 'returns svg source')
+  assert.ok(rocketSvg.svg.includes('stroke="#ED7D31"'), 'stroke color injected')
+}
+const rocketPng = lucideIconPngDataUri('rocket', { color: '#ED7D31', sizePx: 128 })
+assert.equal(rocketPng.ok, true, 'png renders')
+if (rocketPng.ok) {
+  const buf = Buffer.from(
+    rocketPng.dataUri.slice(rocketPng.dataUri.indexOf('base64,') + 7),
+    'base64'
+  )
+  assert.deepEqual([...buf.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47], 'png magic bytes')
+}
+assert.equal(getLucideIconSvg('no-such-icon-xyz').ok, false, 'unknown icon rejected')
+
+// ---- buildPptx with icons ----
+const iconDesign = {
+  title: 'Icon probe',
+  slides: [
+    { layout: 'title', title: 'Growth plan', icon: { name: 'trending-up', size: 1.0 } },
+    { layout: 'section', statement: 'Results', icon: 'trending-up' },
+    {
+      layout: 'bullets',
+      title: 'Details',
+      body: ['A', 'B'],
+      icon: { name: 'rocket', color: '#333333' }
+    }
+  ]
+}
+const iconOut = join(ROOT, 'probe-icons.pptx')
+const iconRes = await buildPptx(iconDesign, iconOut)
+assert.equal(iconRes.ok, true, 'icon design builds')
+if (iconRes.ok) assert.equal(iconRes.slideCount, 3)
+const iconStat = await fs.stat(iconOut)
+assert.ok(iconStat.size > 100, 'icon pptx file has content')
+
+const badIcon = await buildPptx(
+  { slides: [{ layout: 'bullets', title: 'x', icon: 'no-such-icon' }] },
+  join(ROOT, 'probe-bad-icon.pptx')
+)
+assert.equal(badIcon.ok, false, 'unknown icon name fails the build')
 
 // ---- simulate a full module run with a scripted model ----
 interface FakeToolCall {

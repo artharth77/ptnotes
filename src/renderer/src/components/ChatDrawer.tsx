@@ -241,7 +241,12 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     }
     if (last === at) setMention({ kind: 'note', start: last, query: token })
     else if (last === bang) setMention({ kind: 'todo', start: last, query: token })
-    else setMention({ kind: 'file', start: last, query: token })
+    else {
+      if (!mention || mention.kind !== 'file' || mention.start !== last) {
+        void refreshFiles()
+      }
+      setMention({ kind: 'file', start: last, query: token })
+    }
     setMentionIndex(0)
   }
 

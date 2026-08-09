@@ -1,4 +1,5 @@
 import PptxGenJS from 'pptxgenjs'
+import { lucideIconPngDataUri } from '../shared/lucideIcons'
 
 export type SlideLayout =
   'title' | 'bullets' | 'section' | 'statement' | 'two-column' | 'table' | 'blank'
@@ -6,6 +7,14 @@ export type SlideLayout =
 export interface PptxTableSpec {
   headers?: string[]
   rows?: string[][]
+}
+
+export interface PptxIconSpec {
+  name: string
+  size?: number
+  x?: number
+  y?: number
+  color?: string
 }
 
 export interface PptxSlideSpec {
@@ -17,6 +26,7 @@ export interface PptxSlideSpec {
   right?: string[]
   statement?: string
   table?: PptxTableSpec
+  icon?: string | PptxIconSpec
   notes?: string
 }
 
@@ -49,18 +59,72 @@ function bullets(lines: string[], t: Palette): BulletText[] {
   }))
 }
 
-function addHeader(slide: PptxGenJS.Slide, title: string, t: Palette): void {
+function addHeader(slide: PptxGenJS.Slide, title: string, t: Palette, shrinkForIcon = false): void {
+  const w = shrinkForIcon ? 7.3 : 8.8
   slide.addText(title, {
     x: 0.6,
     y: 0.35,
-    w: 8.8,
+    w,
     h: 0.8,
     fontFace: t.fontFace,
     fontSize: 28,
     bold: true,
     color: t.primary
   })
-  slide.addShape('line', { x: 0.6, y: 1.15, w: 8.8, h: 0, line: { color: t.accent, width: 2 } })
+  slide.addShape('line', { x: 0.6, y: 1.15, w, h: 0, line: { color: t.accent, width: 2 } })
+}
+
+interface SlideDims {
+  w: number
+  h: number
+}
+
+const SLIDE_16x9: SlideDims = { w: 10, h: 5.625 }
+const SLIDE_4x3: SlideDims = { w: 10, h: 7.5 }
+
+interface IconSpec {
+  name: string
+  size: number
+  x?: number
+  y?: number
+  color?: string
+}
+
+function parseIconSpec(
+  raw: string | PptxIconSpec | undefined,
+  defaultSize: number
+): IconSpec | null {
+  if (typeof raw === 'string') return raw.trim() ? { name: raw.trim(), size: defaultSize } : null
+  if (raw && typeof raw === 'object' && typeof raw.name === 'string' && raw.name.trim()) {
+    return {
+      name: raw.name.trim(),
+      size: typeof raw.size === 'number' && raw.size > 0 ? raw.size : defaultSize,
+      x: typeof raw.x === 'number' && raw.x >= 0 ? raw.x : undefined,
+      y: typeof raw.y === 'number' && raw.y >= 0 ? raw.y : undefined,
+      color: typeof raw.color === 'string' ? raw.color : undefined
+    }
+  }
+  return null
+}
+
+/** Rasterize a Lucide icon to PNG and stamp it onto the slide, or throw for the caller to surface. */
+async function placeIcon(
+  slide: PptxGenJS.Slide,
+  icon: IconSpec,
+  defaults: { x?: number; y?: number },
+  defaultColor?: string
+): Promise<void> {
+  const png = lucideIconPngDataUri(icon.name, { color: icon.color || defaultColor, sizePx: 512 })
+  if (!png.ok) throw new Error(png.error)
+  const size = icon.size
+  slide.addImage({
+    data: png.dataUri,
+    x: icon.x ?? defaults.x ?? 0,
+    y: icon.y ?? defaults.y ?? 0,
+    w: size,
+    h: size,
+    altText: icon.name
+  })
 }
 
 /** Convert a module-authored slide JSON into a real .pptx file. */
@@ -93,6 +157,10 @@ export async function buildPptx(spec: unknown, outPath: string): Promise<PptxBui
       const slide = pptx.addSlide()
       const layout = (s.layout as SlideLayout) || 'bullets'
       const title = typeof s.title === 'string' ? s.title : ''
+      const dims = design.slideSize === '4x3' ? SLIDE_4x3 : SLIDE_16x9
+      const iconDefault =
+        layout === 'title' ? 1.0 : layout === 'section' || layout === 'statement' ? 1.6 : 0.6
+      const icon = parseIconSpec(s.icon, iconDefault)
 
       switch (layout) {
         case 'title': {
@@ -118,12 +186,14 @@ export async function buildPptx(spec: unknown, outPath: string): Promise<PptxBui
               color: 'F5F5F5'
             })
           }
+          if (icon) await placeIcon(slide, icon, { x: (dims.w - icon.size) / 2, y: 4.5 }, 'FFFFFF')
           break
         }
         case 'section':
         case 'statement': {
           slide.background = { color: 'F2F6FC' }
           const text = (typeof s.statement === 'string' ? s.statement : title) || 'Section'
+          if (icon) await placeIcon(slide, icon, { x: (dims.w - icon.size) / 2, y: 0.8 }, t.accent)
           slide.addText(text, {
             x: 0.6,
             y: 2.4,
@@ -139,7 +209,7 @@ export async function buildPptx(spec: unknown, outPath: string): Promise<PptxBui
           break
         }
         case 'two-column': {
-          if (title) addHeader(slide, title, t)
+          if (title) addHeader(slide, title, t, Boolean(icon))
           const y0 = title ? 1.35 : 0.6
           slide.addText(bullets(s.left && s.left.length ? s.left.map(String) : [''], t), {
             x: 0.55,
@@ -155,10 +225,11 @@ export async function buildPptx(spec: unknown, outPath: string): Promise<PptxBui
             h: 4.6,
             valign: 'top'
           })
+          if (icon) await placeIcon(slide, icon, { x: dims.w - icon.size - 0.55, y: 0.3 }, t.accent)
           break
         }
         case 'table': {
-          if (title) addHeader(slide, title, t)
+          if (title) addHeader(slide, title, t, Boolean(icon))
           const table = s.table ?? {}
           const headers = Array.isArray(table.headers) ? table.headers.map(String) : []
           const rows = Array.isArray(table.rows)
@@ -189,6 +260,7 @@ export async function buildPptx(spec: unknown, outPath: string): Promise<PptxBui
             ),
             { x: 0.6, y: 1.6, w: 8.8, h: 0.6, colW: Array(cols).fill(8.8 / cols) }
           )
+          if (icon) await placeIcon(slide, icon, { x: dims.w - icon.size - 0.55, y: 0.3 }, t.accent)
           break
         }
         case 'blank': {
@@ -196,7 +268,7 @@ export async function buildPptx(spec: unknown, outPath: string): Promise<PptxBui
           break
         }
         default: {
-          if (title) addHeader(slide, title, t)
+          if (title) addHeader(slide, title, t, Boolean(icon))
           if (typeof s.subtitle === 'string' && s.subtitle) {
             slide.addText(s.subtitle, {
               x: 0.6,
@@ -225,6 +297,7 @@ export async function buildPptx(spec: unknown, outPath: string): Promise<PptxBui
             h: 4.3,
             valign: 'top'
           })
+          if (icon) await placeIcon(slide, icon, { x: dims.w - icon.size - 0.55, y: 0.3 }, t.accent)
           break
         }
       }
