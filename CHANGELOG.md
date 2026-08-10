@@ -16,8 +16,24 @@ All notable changes to PTNotes are documented in this file.
 - The PPTX module subagent is prompted to pick tasteful icons for title/section/statement slides and optional corner icons on content slides.
 - Reusable shared tool imports for module authors documented in `docs/module-development.md` (no core/framework changes needed — the runner already merges `module.tools`).
 
+#### Chart slides in PPTX presentations
+
+- New shared chart tool-pack (`createChartTools.ts` + `chart.ts` + `chartRenderer.ts` + `chart-render-worker.ts`) any module can reuse: `chart_preview` (dry-run validation, writes nothing) and `render_chart` (Chart.js-style JSON → rasterized PNG + sidecar JSON in `<project>/modules/temp/`).
+- Charts are drawn with **Chart.js** onto `@napi-rs/canvas` (prebuilt Node-API Skia binding, no rebuild) as pure-local, in-process rendering — no network, browsers, or CLI tools. Design validation caps the dataset/point counts and rejects oversized `options`.
+- Native rendering runs in an isolated Electron **utility process** (`chartRenderer.ts` forks `chart-render-worker.js`, with a plain-Node fallback for tests), so a Skia/native crash only fails the in-flight render tool instead of the app; `PTNOTES_CHART_WORKER` overrides the worker path in tests.
+- PPTX slides accept a new `chart` layout that embeds the rendered PNG; `chart_preview` → `render_chart` → `create_pptx_file` is the recommended flow, with optional slide `x/y/w/h` placement and automatic aspect-ratio scaling to fit the body area.
+- Temporary chart files (`modules/temp/*.png` + `*.json`) are deleted automatically once the deck is built (`cleanupModuleTempFiles`), keeping them out of the `#` file picker.
+- New `outputTool` field on `RegisteredModule`: if the subagent tries to finish without producing the deliverable file, the runner prompts it up to 2 times to call the output tool before failing the run instead of silently marking it done.
+- Reusable chart tool imports for module authors added to `docs/module-development.md`.
+
+#### Module run management
+
+- Failed module runs show a **↻ Retry** button (hover over the card) that re-runs the subagent from the same stored prompt via a new `modules:retry` IPC, resetting the run in place so the existing card resumes live progress.
+- The module progress bar turns **green** when a run completes successfully (`done`).
+
 ### Fixed
 
+- Module runs (and chat tool-call turns) no longer fail on local OpenAI-compatible endpoints such as Ollama with `400 invalid message content type: <nil>`: assistant messages with no visible text now send `content: ""` instead of `null`, which OpenAI tolerates but Ollama (Go `nil`) rejects.
 - The chat `#` file mention now refreshes the project file list from disk the moment the picker opens, so files deleted outside the app (or since load) no longer show as stale cached entries.
 
 ## [0.3.0] — 2026-08-08

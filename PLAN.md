@@ -79,56 +79,82 @@ npm run test
 
 ---
 
-## Goal 2: In-process graph toolset for PPTX embedding
+## Goal 2: In-process chart toolset for PPTX embedding
 
 ### Goal
 
-Give the **pptx** module the ability to render a graph (diagram / knowledge map) and place it on a slide as a rasterized PNG picture. Graph rendering is **pure in-process**: no external API calls, no CLI `exec`/`spawn`, no headless browser/apps. Layout math + SVG emission happen in TS; PNG rasterization uses `@resvg/resvg-js` (already a dependency); output files are written through the existing `PTNotesService` fs helpers. Built as a **shared tool-pack** (`createGraphTools()`) that the pptx module opts into — no core/framework changes required (the runner already merges `module.tools`).
+Give the **pptx** module the ability to render a **data chart** (bar, line, pie, doughnut, radar, polar area, scatter, bubble) and place it on a slide as a rasterized PNG picture. Chart rendering is **pure in-process**: no external API calls, no CLI `exec`/`spawn`, no headless browser/apps. The chart is drawn by **Chart.js** (pure JS) onto a Skia canvas via **`@napi-rs/canvas`** (prebuilt N-API native, zero system dependencies — the same packaging pattern as `@resvg/resvg-js`); PNG bytes are written through the existing `PTNotesService` fs helpers. Built as a **shared tool-pack** (`createChartTools()`) that the pptx module opts into — no core/framework changes required (the runner already merges `module.tools`).
+
+> This **replaces** the original Goal 2 "node–edge graph (diagram / knowledge map)" toolset. In practice the LLM reached for the graph tool to draw *data charts*, but the hand-rolled hierarchy/layered node-layout engine produced diagrams, not charts — so the toolset was renamed (`graph` → `chart`) and rebuilt around Chart.js, which owns all axis/scale/layout math itself. The old `graph.ts` / `createGraphTools.ts` files are deleted; **Goal 3 is re-baselined accordingly** (see note there).
 
 ### Decisions (locked in)
 
 | Decision | Choice |
 | --- | --- |
-| Graph kind | Model-authored diagram only (subagent passes a graph JSON design, like `create_pptx_file`) |
-| Deliverables | `<project>/files/<slug>.svg`, `.png`, and `.json` (raw graph + computed positions + metadata) |
-| Embedding | Rasterized PNG picture on the slide via `slide.addImage({ path })` (PowerPoint-reliable; the Goal 1 SVG-in-PowerPoint 2016+ caveat does not apply) |
-| Layouts | `hierarchy` (tree — levels by longest path from roots) and `layered` (DAG layering, graceful cycle fallback); `top-down` / `left-to-right` |
-| Node icons | Optional per-node `icon` (Lucide canonical name) inlined into the SVG via the existing `getLucideIconSvg` shared util |
-| Sharing | Opt-in composition: `createGraphTools(): PTTool[]` in `src/main/modules/shared/`; the pptx module merges it into its own `tools` |
-| Not chosen | Separate `graph` module (user asked to keep the toolset inside the PPTX module); external data sources / CLI layout engines (graphviz) / headless rendering |
-| Tool surface | `graph_layout` (dry-run preview, writes nothing) **and** `render_graph` (renders SVG + PNG + JSON, returns the PNG path for slide embedding) |
-| Run `outputFile` | `render_graph` deliberately omits the `{ path, file }` pair the runner's `captureOutput` watches, so a pptx run's `outputFile` is the final `.pptx`, not the intermediate graph PNG |
+| Chart kind | Model-authored Chart.js-style design JSON (subagent passes `{ type, data: { labels?, datasets }, options?, width?, height? }`, like `create_pptx_file`) |
+| Renderer | `chart.js` ^4 (pure JS, ~50 KB) drawn onto `@napi-rs/canvas` ^1 (Skia via Node-API, prebuilt binaries; works in Electron main and the plain-Node tsx test runner — no electron-rebuild needed since `electron-builder.yml` has `npmRebuild: false`) |
+| Not chosen | `chartjs-node-canvas`, whose dependency is the native `canvas` (node-canvas) addon — requires rebuilding against Electron's ABI plus system libs (cairo/pango), breaking the prebuilt-N-API-only packaging invariant |
+| Chart types | `bar`, `line`, `pie`, `doughnut`, `radar`, `polarArea`, `scatter`, `bubble` |
+| Deliverables | `<project>/files/<slug>.png` + `.json` (chart type, dims, dataset/point counts). No `.svg` — Chart.js rasterizes to pixels only, and the pptx slide only consumes the PNG |
+| Embedding | Rasterized PNG picture on the slide via `slide.addImage({ path })` (PowerPoint-reliable) |
+| Canvas sizing | `width`/`height` in the chart JSON (px, default 1200×675 to match 16:9), clamped 120–4000 |
+| Sharing | Opt-in composition: `createChartTools(): PTTool[]` in `src/main/modules/shared/`; the pptx module merges it into its own `tools` |
+| Tool surface | `chart_preview` (in-memory dry run, writes nothing) **and** `render_chart` (renders PNG + JSON, returns the PNG path for slide embedding) |
+| Run `outputFile` | `render_chart` deliberately omits the `{ path, file }` pair the runner's `captureOutput` watches, so a pptx run's `outputFile` is the final `.pptx`, not the intermediate chart PNG |
 
 ### Dependencies
 
-- None new. Reuses `@resvg/resvg-js` (already unpacked for Goal 1) and `getLucideIconSvg` from `src/main/modules/shared/lucideIcons.ts`.
+- `chart.js` ^4.4.0 (runtime)
+- `@napi-rs/canvas` ^1.0.0 (runtime; prebuilt Node-API ≥ 8 binary, no rebuild needed since `electron-builder.yml` has `npmRebuild: false`)
+
+### Packaging
+
+- `electron-builder.yml` → `asarUnpack`: append `**/node_modules/@napi-rs/**` so the native `.node` loads in the packaged app (same handling as `@resvg`).
 
 ### Files
 
-#### New: `src/main/modules/shared/graph.ts`
-Framework-agnostic graph engine (pure, no I/O):
+#### New: `src/main/modules/shared/chart.ts`
+Framework-agnostic chart engine (pure, no I/O):
 
-- Types: `GraphNode { id, label?, color?, shape?('box'|'ellipse'), icon?, width?, height? }`, `GraphEdge { source, target, label?, dashed? }`, `GraphDesign { title?, layout?('hierarchy'|'layered'), direction?('top-down'|'left-to-right'), nodes, edges? }`, resolved layout (per-node coordinates + bounding box + edge paths).
-- `validateGraph(design)` — unique non-empty node ids; ≤ 200 nodes; edges reference existing nodes; ≤ 500 edges; label/title length caps.
-- `layoutHierarchy` / `layoutLayered` — deterministic in-process layout (longest-path levels, no-crossing ordering; layered degrades gracefully on cycles).
-- Node sizing approximated from label length (no external text measurement); optional `icon` inlined via `getLucideIconSvg`.
-- `renderGraphSvg(layout)` → SVG string (arrow markers, box/ellipse nodes, curved edges, labels, theme colors); `renderGraphPng(svg, widthPx)` → PNG buffer via `Resvg` (same pattern as `lucideIcons`).
+- Types: `ChartType` (`'bar' | 'line' | 'pie' | 'doughnut' | 'radar' | 'polarArea' | 'scatter' | 'bubble'`), `ChartDataset { label?, data: (number | {x,y} | {x,y,r})[], color?, ... }`, `ChartDesign { type, data: { labels?, datasets }, options?, width?, height? }`.
+- `validateChart(raw)` — known chart type; non-empty `datasets`; ≤ 10 datasets; ≤ 500 points/dataset (≤ 50 for pie/doughnut/polarArea); data entries numeric (scatter/bubble use `{x,y}` / `{x,y,r}` object form); `width`/`height` clamped 120–4000.
+- `renderChartPng(design, { width?, height? }) → Buffer` — `createCanvas` → `getContext('2d')` → `new Chart(ctx, { ...data, options: { responsive:false, animation:false, devicePixelRatio:1, ...options } })` → `canvas.toBuffer('image/png')` → `chart.destroy()`. Throws on failure — the tool surfaces the error to the model.
 
-#### New: `src/main/modules/shared/createGraphTools.ts`
-`createGraphTools(): PTTool[]`:
+#### New: `src/main/modules/shared/createChartTools.ts`
+`createChartTools(): PTTool[]`:
 
-- `graph_layout` (`{ graph, layout?, direction? }`) → `{ ok: true, nodeCount, edgeCount, width, height, nodes: [{ id, x, y }] }` — preview only, no file write.
-- `render_graph` (`{ graph, layout?, direction?, filename?, pixelWidth? }`) → validates, lays out, writes `<project>/files/<slug>.svg` + `.png` + `.json` via `service.uniqueOutputPath`, returns `{ ok: true, png, svg, json, width, height, nodeCount, edgeCount }`. No `path`/`file` fields on purpose (see `outputFile` decision).
-- Tool descriptions state local/in-process only so the model does not attempt external renderers.
+- `chart_preview` (`{ chart }`) → `{ ok: true, chartType, width, height, datasetCount, pointCount }` — dry-run preview only, no file write.
+- `render_chart` (`{ chart, filename?, outWidth?, outHeight? }`) → validates, renders, writes `<project>/files/<slug>.png` + `.json` via `service.uniqueOutputPath`, returns `{ ok: true, png, json, chartType, width, height, datasetCount, pointCount }`. No `path`/`file` fields on purpose (see `outputFile` decision).
+- Tool descriptions list the 8 chart types and state local/in-process only so the model does not attempt external renderers.
+
+Example subagent flow:
+
+```ts
+// 1. preview (no files written)
+chart_preview({ chart: { type: 'bar', data: { labels: ['Q1','Q2','Q3'], datasets: [{ label: 'Sales', data: [4, 7, 3] }] } } })
+// → { ok: true, chartType: 'bar', width: 1200, height: 675, datasetCount: 1, pointCount: 3 }
+
+// 2. render (writes revenue-chart.png + .json)
+render_chart({ chart: { type: 'pie', data: { labels: ['A','B','C'], datasets: [{ data: [3, 5, 2] }] } }, filename: 'revenue-chart' })
+// → { ok: true, png: '/abs/<project>/files/revenue-chart.png', json: '/abs/<project>/files/revenue-chart.json', chartType: 'pie', width: 1200, height: 675, datasetCount: 1, pointCount: 3 }
+```
 
 #### Edit: `src/main/modules/pptx/builder.ts`
-- Add `'graph'` to `SlideLayout`; `PptxGraphSpec { png?: string; x?; y?; w?; h? }`; `PptxSlideSpec.graph?`.
-- New `graph` layout case: `slide.addImage({ path: png, x, y, w, h, altText })` with greedy default centered fill of the body area (title header on top). Missing `png` file → `{ ok: false, error: '…' }` so the subagent self-corrects.
+- Replace `'graph'` with `'chart'` in `SlideLayout`; `PptxGraphSpec` → `PptxChartSpec { png?: string; x?; y?; w?; h? }`; `PptxSlideSpec.graph?` → `.chart?`.
+- `parseGraphSpec` → `parseChartSpec`; new `chart` layout case: `slide.addImage({ path: png, x, y, w, h, altText })` with greedy default centered fill of the body area (title header on top). Missing `png` file → `{ ok: false, error: '…' }` so the subagent self-corrects.
 
 #### Edit: `src/main/modules/pptx/index.ts`
-- `tools: [...createGraphTools(), ...createLucideIconTools(), createPptxFileTool]`.
-- `DESIGN_SCHEMA` documents `layout: "graph"` + `graph: { png, x?, y?, w?, h? }`.
-- `systemPrompt`: instruct the subagent — build the graph JSON, call `graph_layout` to preview, call `render_graph` to get the PNG path, then set the slide `graph` field with that path; remind that rendering is local-only (no network/CLI/headless).
+- `tools: [...createChartTools(), ...createLucideIconTools(), createPptxFileTool]`.
+- `DESIGN_SCHEMA` documents `layout: "chart"` + `chart: { png, x?, y?, w?, h? }`.
+- `systemPrompt`: for data/comparison content instruct the subagent — author the Chart.js chart JSON (type, labels, datasets), call `chart_preview` to sanity-check, call `render_chart` to get the PNG path, then set the slide `chart` field with that path; remind that rendering is local-only (no network/CLI/headless).
+
+#### Edit: `scripts/test-modules.mts`
+- Shared-layer units: `validateChart` accepts valid bar/line/pie and rejects unknown types / empty datasets / oversize point counts; `renderChartPng` for bar + pie yields PNG magic bytes.
+- Tools: `chart_preview` returns dims + counts without writing; `render_chart` writes `.png` + `.json`, returns the `png` path, omits `path`/`file`, rejects invalid charts.
+- Builder: slide with `layout: 'chart'` + the rendered PNG builds; missing/relative png → `{ ok: false }`.
+
+#### Edit: `docs/module-development.md`
+- "Shared tools" section entry: reuse `createChartTools` (`chart.js` + `@napi-rs/canvas` deps) so future modules get preview/render charts with zero framework changes.
 
 ### Verification
 
@@ -142,37 +168,39 @@ npm run test
 
 ## Goal 3: Diagram / data flow toolset for PPTX embedding (separate toolset, shared engine)
 
+> **Note (re-baselined):** This section originally built on Goal 2's `graph.ts` node–edge engine. Goal 2 was since rebuilt as the Chart.js **chart** toolset and the node–edge engine was removed. When Goal 3 starts, the shared engine (validation / layout / SVG / PNG) must either be **restored from git history** (the deleted `src/main/modules/shared/graph.ts`) or rebuilt from scratch — the surface contract below (`createDiagramTools()`, `flow`/`hierarchy`/`layered` layouts, orthogonal edge routing, `.svg` + `.png` + `.json` deliverables) is otherwise unchanged, and the chart toolset stays untouched.
+
 ### Goal
 
-Give the **pptx** module the ability to render **flow / data flow diagrams** (process boxes, decision diamonds, start/end stadiums, I/O parallelograms, orthogonal connectors) and place them on a slide as a rasterized PNG picture — while **Goal 2's node–edge graph toolset stays untouched**. The diagram capability is a **second shared tool-pack** (`createDiagramTools()`) built **on top of the same shared graph engine** (`graph.ts`) so validation, layout, SVG emission and PNG rasterization are not duplicated. Still **pure in-process**: no external API, no CLI `exec`/`spawn`, no headless browser/apps.
+Give the **pptx** module the ability to render **flow / data flow diagrams** (process boxes, decision diamonds, start/end stadiums, I/O parallelograms, orthogonal connectors) and place them on a slide as a rasterized PNG picture — a **second shared tool-pack** (`createDiagramTools()`) distinct from Goal 2's chart toolset. Built on a shared node–edge engine so validation, layout, SVG emission and PNG rasterization are not duplicated. Still **pure in-process**: no external API, no CLI `exec`/`spawn`, no headless browser/apps.
 
 ### Decisions (locked in)
 
 | Decision | Choice |
 | --- | --- |
-| Toolset relation | New toolset, shared engine: `createDiagramTools()` reuses the `graph.ts` validation/layout/SVG/PNG guts; Goal 2's `graph_layout`/`render_graph` surface is unchanged |
+| Toolset relation | New toolset, shared engine: `createDiagramTools()` reuses the restored node–edge engine's validation/layout/SVG/PNG guts; the Goal 2 `chart_preview`/`render_chart` chart toolset is untouched |
 | Shapes | `process` (rectangle), `decision` (diamond), `stadium` (start/end pill), `io` (parallelogram); node auto-sizes from label length; optional Lucide `icon` per node |
-| Edge routing | **Orthogonal (elbow/right-angle) connectors** with arrowheads by default; curved Béziers remain the graph toolset default |
+| Edge routing | **Orthogonal (elbow/right-angle) connectors** with arrowheads by default; curved Béziers remain the diagram engine's default |
 | Layouts | New `flow` layout (longest-path linear chain, branch/merge ordering, back-edge loop) plus reuse of `hierarchy`/`layered`; `top-down` / `left-to-right` |
-| Deliverables | `<project>/files/<slug>.svg`, `.png`, `.json` (same scheme as Goal 2) |
+| Deliverables | `<project>/files/<slug>.svg`, `.png`, `.json` (same scheme as the old Goal 2) |
 | Embedding | Rasterized PNG picture on the slide via `slide.addImage({ path })`; the pptx module opts into both toolsets |
 | Sharing | Opt-in composition: `createDiagramTools(): PTTool[]` in `src/main/modules/shared/`; pptx module merges it into its own `tools` |
-| Not chosen | Merging diagram features into Goal 2's toolset (keeps `render_graph` focused); external layout engines (graphviz) / headless rendering |
+| Not chosen | Merging diagram features into Goal 2's chart toolset (keeps `render_diagram` focused); external layout engines (graphviz) / headless rendering |
 
 ### Dependencies
 
-- None new. Reuses `@resvg/resvg-js` and the Goal 2 engine helpers.
+- None new. Reuses `@resvg/resvg-js` and the restored node–edge engine helpers.
 
 ### Files
 
 #### Edit: `src/main/modules/shared/graph.ts`
-Backward-compatible extensions (Goal 2 unchanged):
+Backward-compatible extensions (the Goal 2 chart toolset is untouched):
 
 - `shape` gains `process | decision | stadium | io` alongside `box`/`ellipse`.
 - Rendering primitives for polygon (diamond), stadium (pills), parallelogram (I/O).
-- Orthogonal (elbow) edge path generator (diagram-mode default); Goal 2's curved Béziers stay the default for `render_graph`.
+- Orthogonal (elbow) edge path generator (diagram-mode default); curved Béziers stay the default for `render_diagram`.
 - New `flow` layout: longest-path ranking from sources, ordered branches/merges, and a back-edge pass to route loops.
-- Re-exported entry points so `createDiagramTools` composes without touching `createGraphTools`.
+- Re-exported entry points so `createDiagramTools` composes without any coupling to the Goal 2 chart toolset.
 
 #### New: `src/main/modules/shared/createDiagramTools.ts`
 `createDiagramTools(): PTTool[]`:
@@ -182,10 +210,10 @@ Backward-compatible extensions (Goal 2 unchanged):
 - Tool docs state local/in-process only (no network, CLI, headless).
 
 #### Edit: `src/main/modules/pptx/builder.ts`
-- Add `'diagram'` to `SlideLayout` (second picture-slot layout alongside `graph`), `PptGraphSpec`-style `slide.diagram: { png?, x?, y?, w?, h? }`, and a `diagram` case: `slide.addImage({ path, x, y, w, h, altText })` with a greedy centered body fill; missing file → clear `{ ok: false, error }`.
+- Add `'diagram'` to `SlideLayout` (second picture-slot layout alongside `chart`), `PptxChartSpec`-style `slide.diagram: { png?, x?, y?, w?, h? }`, and a `diagram` case: `slide.addImage({ path, x, y, w, h, altText })` with a greedy centered body fill; missing file → clear `{ ok: false, error }`.
 
 #### Edit: `src/main/modules/pptx/index.ts`
-- `tools: [...createGraphTools(), ...createDiagramTools(), ...createLucideIconTools(), createPptxFileTool]`.
+- `tools: [...createChartTools(), ...createDiagramTools(), ...createLucideIconTools(), createPptxFileTool]`.
 - `DESIGN_SCHEMA` documents `layout: "diagram"` + `diagram: { png, x?, y?, w?, h? }`.
 - `systemPrompt`: for flow/process content instruct the subagent — author the diagram JSON, `diagram_layout` to preview, `render_diagram` for the PNG path, then set the slide `diagram` field; remind local-only rendering.
 

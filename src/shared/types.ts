@@ -162,6 +162,9 @@ export interface ModuleRun {
 
 export type ModuleEventType = 'status' | 'step' | 'output' | 'error' | 'done'
 
+export type ModuleStartResult =
+  { ok: true; runId: string; module: ModuleInfo; title: string } | { ok: false; error: string }
+
 export interface ModuleEvent {
   runId: string
   project: string

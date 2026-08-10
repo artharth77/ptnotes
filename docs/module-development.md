@@ -45,12 +45,12 @@ Every module is a `RegisteredModule` (`src/main/modules/types.ts`):
 
 ```ts
 interface RegisteredModule {
-  id: string          // stable machine id, e.g. 'pptx' — used as start_module's `id` arg
-  name: string        // human-readable name, e.g. 'PowerPoint (PPTX)'
-  summary: string     // one-line UI summary
+  id: string // stable machine id, e.g. 'pptx' — used as start_module's `id` arg
+  name: string // human-readable name, e.g. 'PowerPoint (PPTX)'
+  summary: string // one-line UI summary
   description: string // LONG prompt shown to the main agent describing when/how to use this module
   systemPrompt: string // extra guidance injected into the module subagent's system prompt
-  tools: PTTool[]     // module-specific tools (PTTool from src/main/ai/tools.ts)
+  tools: PTTool[] // module-specific tools (PTTool from src/main/ai/tools.ts)
 }
 ```
 
@@ -83,7 +83,7 @@ interface PTTool {
     function: {
       name: string
       description: string
-      parameters: Record<string, unknown>   // JSON-Schema-ish
+      parameters: Record<string, unknown> // JSON-Schema-ish
     }
   }
   execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string>
@@ -125,13 +125,36 @@ is format-agnostic: builders can call `getLucideIconSvg(...)` to embed SVG direc
 reliably in any slide viewer). Add `lucide-static` and `@resvg/resvg-js` to your module's deps
 when you use it.
 
+`src/main/modules/shared/createChartTools.ts` exports a chart tool-pack for data-visualization
+modules:
+
+```ts
+import { createChartTools } from '../shared/createChartTools'
+
+// Module that renders data charts:
+tools: [...createChartTools(), createSomeFileTool()]
+```
+
+It provides `chart_preview` (dry-run, writes nothing) and `render_chart` (writes
+temporary `<project>/modules/temp/<slug>.png` + `.json` and returns the asset paths; the temp files
+are deleted automatically once a deck using them is built). Charts are drawn by `chart.js`
+(Chart.js-style config JSON: `{ type, data: { labels?, datasets }, options?, width?, height? }`)
+onto `@napi-rs/canvas` (prebuilt Node-API Skia binding — same no-rebuild packaging pattern as
+`@resvg/resvg-js`), isolated in an Electron utility process so a native crash can't take the app
+down. Add `chart.js` and `@napi-rs/canvas` to your module's deps, and make sure the
+app's `electron-builder.yml` `asarUnpack` includes `**/node_modules/@napi-rs/**`.
+
+The backing library `src/main/modules/shared/chart.ts` is format-agnostic too: `validateChart(raw)`
+normalizes/limits a design and `renderChartPng(design, size)` returns a PNG buffer, so a builder
+can render charts without going through the AI tool surface at all.
+
 ## Registering the module
 
 Registration happens only in **`src/main/index.ts`**:
 
 ```ts
 const moduleRegistry = new ModuleRegistry()
-moduleRegistry.register(createPptxModule())          // ← add yours here
+moduleRegistry.register(createPptxModule()) // ← add yours here
 moduleRegistry.register(createMyModule())
 ```
 
@@ -181,4 +204,7 @@ If you need UI to differ per module, extend `ModuleCard`/the `ModuleEvent` shape
 5. [ ] Registered in `src/main/index.ts` via `moduleRegistry.register(...)`.
 6. [ ] Builder unit tests + scripted full-run test in `scripts/test-modules.mts`.
 7. [ ] `npm run typecheck` and `npm run lint` pass.
+
+```
+
 ```

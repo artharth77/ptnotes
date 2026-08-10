@@ -53,6 +53,13 @@ export function registerModulesIpc(
   )
 
   ipcMain.handle(
+    'modules:retry',
+    async (_e: IpcMainInvokeEvent, project: string, runId: string) => {
+      return manager.retry(project, runId)
+    }
+  )
+
+  ipcMain.handle(
     'modules:reveal',
     async (_e: IpcMainInvokeEvent, project: string, runId: string) => {
       return manager.reveal(project, runId)

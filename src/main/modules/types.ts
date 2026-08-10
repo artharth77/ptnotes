@@ -15,6 +15,8 @@ export interface RegisteredModule {
   description: string
   /** Extra system-prompt guidance for the module's subagent. */
   systemPrompt: string
+  /** Name of the tool that produces the module's deliverable file (e.g. 'create_pptx_file'). */
+  outputTool?: string
   /** Module-specific tools added on top of the shared base tool set. */
   tools: PTTool[]
 }

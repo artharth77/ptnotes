@@ -11,6 +11,7 @@ import type {
   ModuleEvent,
   ModuleRun,
   ModuleSettings,
+  ModuleStartResult,
   StorageSettings,
   NoteMeta,
   PdfExtractResult,
@@ -118,6 +119,8 @@ const api = {
       ipcRenderer.invoke('modules:setEnabled', id, enabled),
     stop: (project: string, runId: string): Promise<void> =>
       ipcRenderer.invoke('modules:stop', project, runId),
+    retry: (project: string, runId: string): Promise<ModuleStartResult> =>
+      ipcRenderer.invoke('modules:retry', project, runId),
     reveal: (project: string, runId: string): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke('modules:reveal', project, runId),
     clearHistory: (project: string, deleteOutputFiles?: boolean): Promise<number> =>

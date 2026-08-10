@@ -1,8 +1,9 @@
 import PptxGenJS from 'pptxgenjs'
+import { readFileSync } from 'fs'
 import { lucideIconPngDataUri } from '../shared/lucideIcons'
 
 export type SlideLayout =
-  'title' | 'bullets' | 'section' | 'statement' | 'two-column' | 'table' | 'blank'
+  'title' | 'bullets' | 'section' | 'statement' | 'two-column' | 'table' | 'chart' | 'blank'
 
 export interface PptxTableSpec {
   headers?: string[]
@@ -17,6 +18,14 @@ export interface PptxIconSpec {
   color?: string
 }
 
+export interface PptxChartSpec {
+  png?: string
+  x?: number
+  y?: number
+  w?: number
+  h?: number
+}
+
 export interface PptxSlideSpec {
   layout?: SlideLayout | string
   title?: string
@@ -27,6 +36,7 @@ export interface PptxSlideSpec {
   statement?: string
   table?: PptxTableSpec
   icon?: string | PptxIconSpec
+  chart?: string | PptxChartSpec
   notes?: string
 }
 
@@ -125,6 +135,36 @@ async function placeIcon(
     h: size,
     altText: icon.name
   })
+}
+
+/** Read the intrinsic pixel size of a PNG file from its IHDR chunk, or null. */
+function pngDimensions(path: string): { w: number; h: number } | null {
+  try {
+    const buf = readFileSync(path)
+    if (buf.length < 24 || buf.readUInt32BE(0) !== 0x89504e47) return null
+    const w = buf.readUInt32BE(16)
+    const h = buf.readUInt32BE(20)
+    if (!(w > 0 && h > 0 && w <= 100000 && h <= 100000)) return null
+    return { w, h }
+  } catch {
+    return null
+  }
+}
+
+/** Normalize the "chart" slide spec (a png path string or an object of dimensions). */
+function parseChartSpec(raw: string | PptxChartSpec | undefined): PptxChartSpec | null {
+  if (!raw) return null
+  if (typeof raw === 'string') return raw.trim() ? { png: raw.trim() } : null
+  const g = raw as PptxChartSpec
+  const png = typeof g.png === 'string' && g.png.trim() ? g.png.trim() : ''
+  if (!png) return null
+  return {
+    png,
+    x: typeof g.x === 'number' && g.x >= 0 ? g.x : undefined,
+    y: typeof g.y === 'number' && g.y >= 0 ? g.y : undefined,
+    w: typeof g.w === 'number' && g.w > 0 ? g.w : undefined,
+    h: typeof g.h === 'number' && g.h > 0 ? g.h : undefined
+  }
 }
 
 /** Convert a module-authored slide JSON into a real .pptx file. */
@@ -261,6 +301,37 @@ export async function buildPptx(spec: unknown, outPath: string): Promise<PptxBui
             { x: 0.6, y: 1.6, w: 8.8, h: 0.6, colW: Array(cols).fill(8.8 / cols) }
           )
           if (icon) await placeIcon(slide, icon, { x: dims.w - icon.size - 0.55, y: 0.3 }, t.accent)
+          break
+        }
+        case 'chart': {
+          if (title) addHeader(slide, title, t)
+          const chart = parseChartSpec(s.chart)
+          if (!chart || !chart.png) {
+            return {
+              ok: false,
+              error:
+                'A slide with layout "chart" needs a "chart" field set to the PNG path from render_chart (the path string or { "png": path }).'
+            }
+          }
+          const px = pngDimensions(chart.png)
+          if (!px) {
+            return {
+              ok: false,
+              error: `Chart image not found or not a valid PNG: "${chart.png}". Call render_chart to produce the file first.`
+            }
+          }
+          const bodyX = 0.6
+          const bodyY = title ? 1.35 : 0.6
+          const bodyW = 8.8
+          const bodyH = dims.h - bodyY - 0.4
+          const targetW = chart.w ?? bodyW
+          const targetH = chart.h ?? bodyH
+          const scale = Math.min(targetW / px.w, targetH / px.h)
+          const w = px.w * scale
+          const h = px.h * scale
+          const x = chart.x ?? bodyX + (bodyW - w) / 2
+          const y = chart.y ?? bodyY + (bodyH - h) / 2
+          slide.addImage({ path: chart.png, x, y, w, h, altText: 'chart' })
           break
         }
         case 'blank': {

@@ -23,7 +23,9 @@
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
+    "@napi-rs/canvas": "^1.0.5",
     "@resvg/resvg-js": "^2.6.2",
+    "chart.js": "^4.5.1",
     "cheerio": "^1.2.0",
     "lucide-static": "^1.30.0",
     "openai": "^7.4.0",

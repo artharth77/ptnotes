@@ -12,6 +12,7 @@ files:
 asarUnpack:
   - resources/**
   - '**/node_modules/@resvg/**'
+  - '**/node_modules/@napi-rs/**'
 win:
   executableName: ptnotes
 nsis:

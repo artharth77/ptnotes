@@ -7,6 +7,7 @@ import type { PTNotesService } from '../service/PTNotesService'
 import type { RegisteredModule } from './types'
 
 const MAX_ITERATIONS = 30
+const MAX_FINISH_HINTS = 2
 
 type Role = 'system' | 'user' | 'assistant' | 'tool'
 
@@ -66,6 +67,7 @@ export class ModuleRunner {
   private abortController: AbortController | undefined
   private planned = false
   private plannedHintSent = false
+  private finishHintsSent = 0
 
   constructor(opts: ModuleRunnerOptions) {
     this.service = opts.service
@@ -181,7 +183,7 @@ export class ModuleRunner {
       // The model wants to finish with a text response.
       if (!this.planned && !this.plannedHintSent) {
         this.plannedHintSent = true
-        this.messages.push({ role: 'assistant', content: content || null })
+        this.messages.push({ role: 'assistant', content: content || '' })
         this.messages.push({
           role: 'user',
           content:
@@ -189,19 +191,28 @@ export class ModuleRunner {
         })
         return 'continue'
       }
-      if (content.trim()) {
-        this.run.summary = content.trim()
-        this.touch({ type: 'status', summary: content.trim() })
+      if (!this.module.outputTool || this.run.outputFile) {
+        return this.finish(content)
       }
-      this.run.status = 'done'
-      this.run.finishedAt = Date.now()
-      this.touch({ type: 'done', summary: this.run.summary })
+      // The module's deliverable file has not been created yet.
+      if (this.finishHintsSent < MAX_FINISH_HINTS) {
+        this.finishHintsSent++
+        this.messages.push({ role: 'assistant', content: content || '' })
+        this.messages.push({
+          role: 'user',
+          content: `You must not finish yet. The deliverable file for this task has not been created. Call the ${this.module.outputTool} tool with the completed design now, then output your final summary.`
+        })
+        return 'continue'
+      }
+      this.fail(
+        `The module finished without producing its output file. The ${this.module.outputTool} tool was never used successfully.`
+      )
       return 'done'
     }
 
     // Planning is mandatory as the first tool call.
     if (!this.planned && !called.some((c) => c.function?.name === 'set_plan')) {
-      this.messages.push({ role: 'assistant', content: null, tool_calls: called })
+      this.messages.push({ role: 'assistant', content: content || '', tool_calls: called })
       this.messages.push({
         role: 'tool',
         tool_call_id: called[0]?.id ?? 'call_unplanned',
@@ -214,7 +225,7 @@ export class ModuleRunner {
       return 'continue'
     }
 
-    this.messages.push({ role: 'assistant', content: content || null, tool_calls: called })
+    this.messages.push({ role: 'assistant', content: content || '', tool_calls: called })
     for (const call of called ?? []) {
       if (this.stopped) break
       const result = await this.executeTool(call, tools)
@@ -344,6 +355,30 @@ export class ModuleRunner {
   private touch(evt: ModuleNotifyEvent): void {
     this.run.updatedAt = Date.now()
     this.notify(this.run, evt)
+  }
+
+  /** Mark the run done with the model's final summary; tidy the step plan. */
+  private finish(content: string): 'done' {
+    if (content.trim()) {
+      this.run.summary = content.trim()
+      this.touch({ type: 'status', summary: content.trim() })
+    }
+    // The plan is complete: promote any steps left running/pending so the
+    // status badge and the step list stay consistent.
+    if (this.run.steps.length > 0) {
+      const now = Date.now()
+      for (const step of this.run.steps) {
+        if (step.status !== 'done' && step.status !== 'failed') {
+          step.status = 'done'
+          step.updatedAt = now
+        }
+      }
+      this.run.currentStep = this.run.steps.length - 1
+    }
+    this.run.status = 'done'
+    this.run.finishedAt = Date.now()
+    this.touch({ type: 'done', summary: this.run.summary })
+    return 'done'
   }
 
   private fail(message: string): void {

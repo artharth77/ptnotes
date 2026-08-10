@@ -2,7 +2,13 @@ import { randomUUID } from 'crypto'
 import { shell } from 'electron'
 import { promises as fs } from 'fs'
 import OpenAI from 'openai'
-import type { AIProviderConfig, ModuleEvent, ModuleInfo, ModuleRun } from '@shared/types'
+import type {
+  AIProviderConfig,
+  ModuleEvent,
+  ModuleInfo,
+  ModuleRun,
+  ModuleStartResult
+} from '@shared/types'
 import type { PTNotesService } from '../service/PTNotesService'
 import type { AIConfigStore } from '../ai/config'
 import type { SettingsStore } from '../settings'
@@ -12,9 +18,6 @@ import { ModuleRunner } from './runner'
 import type { ModuleNotifyEvent } from './runner'
 
 export type ModuleEventBroadcaster = (evt: ModuleEvent) => void
-
-export type ModuleStartResult =
-  { ok: true; runId: string; module: ModuleInfo; title: string } | { ok: false; error: string }
 
 export type ModuleClientFactory = (cfg: AIProviderConfig) => OpenAI
 
@@ -131,6 +134,74 @@ export class ModuleRunManager {
 
   stop(runId: string): void {
     this.active.get(runId)?.stop()
+  }
+
+  /** Re-run a previously failed module run, reusing its stored prompt. */
+  async retry(project: string, runId: string): Promise<ModuleStartResult> {
+    const run = (await this.list(project)).find((r) => r.runId === runId)
+    if (!run) {
+      return { ok: false, error: 'Module run not found.' }
+    }
+    if (run.status !== 'failed') {
+      return { ok: false, error: 'Only failed module runs can be retried.' }
+    }
+    const def = this.registry.get(run.module.id)
+    if (!def) {
+      return { ok: false, error: `Unknown module: "${run.module.id}".` }
+    }
+    if (this.settingsStore) {
+      const settings = await this.settingsStore.load()
+      if (settings.disabledModules?.includes(def.id)) {
+        return {
+          ok: false,
+          error: `Module "${def.name}" is disabled. Enable it in Settings ▸ Modules and try again.`
+        }
+      }
+    }
+    const cfg: AIProviderConfig = await this.configStore.load()
+    if (!cfg.model) {
+      return {
+        ok: false,
+        error: 'AI model is not configured. Open AI settings and choose a model.'
+      }
+    }
+    if (!cfg.apiKey && !isLocalEndpoint(cfg.baseUrl)) {
+      return { ok: false, error: 'AI is not configured. Open AI settings to set your API key.' }
+    }
+
+    const now = Date.now()
+    run.status = 'planning'
+    run.steps = []
+    run.currentStep = undefined
+    run.startedAt = undefined
+    run.finishedAt = undefined
+    run.outputFile = undefined
+    run.summary = undefined
+    run.error = undefined
+    run.updatedAt = now
+
+    await this.service.writeModuleRun(project, runId, run)
+    this.emit({ runId, project, type: 'status', run })
+
+    this.active.get(runId)?.stop()
+    const runner = new ModuleRunner({
+      service: this.service,
+      activeProject: project,
+      module: def,
+      run,
+      getConfig: () => this.configStore.load(),
+      createClientFn: this.clientFn,
+      notify: (snapshot, evt) => this.handleUpdate(snapshot, evt)
+    })
+    this.active.set(runId, runner)
+    void runner.start()
+
+    return {
+      ok: true,
+      runId,
+      module: { id: def.id, name: def.name, description: def.summary },
+      title: run.title
+    }
   }
 
   /** Delete persisted terminal runs for a project, keeping active runs. Returns count removed. */

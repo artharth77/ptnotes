@@ -66,6 +66,7 @@ Run `npm run typecheck` and `npm run lint` after any change.
     ├── TODO.md             (markdown checklist: `- [ ]` / `- [x]`)
     ├── files/*.{pdf,md,txt,json,log,yaml,yml} (attachments copied on chat drop)
     ├── modules/*.json        (module run state + prompts; kept out of the # file picker)
+    ├── modules/temp/*.{png,json}  (temp module/shared-tool output; deleted once the deck is built)
     └── chat/*.json         (one file per chat session: messages + timestamps)
 ```
 
@@ -100,6 +101,16 @@ src/
 │       └── search/
 │           ├── duckduckgo.ts  # web_search (no key)
 │           └── webFetch.ts    # cheerio page extraction
+│   └── modules/
+│       ├── registry.ts   # module registry (extensible)
+│       ├── runs.ts       # ModuleRunManager: start/list/stop + event broadcast
+│       ├── tool.ts       # start_module tool (main chat → module run)
+│       ├── pptx/         # PowerPoint module (design schema → buildPptx)
+│       └── shared/
+│           ├── chart.ts          # Chart.js design validation + in-process renderChartPng (@napi-rs/canvas)
+│           ├── chart-render-worker.ts  # utility-process entry (forks under Electron)
+│           ├── chartRenderer.ts  # isolates rendering in an Electron utilityProcess (native crashes contained; plain-Node fallback)
+│           └── createChartTools.ts  # chart_preview + render_chart tools
 ├── preload/             # contextBridge: window.ptnotes typed API + index.d.ts
 ├── renderer/            # React app
 │   ├── src/
@@ -124,6 +135,7 @@ src/
 - The renderer must **never** access the network or filesystem; all I/O goes through IPC to the main process.
 - The AI API key lives only in `userData/ai-provider.json` (chmod 600), read by the main process — never bundle it in the renderer.
 - Chat HTML is rendered via `react-markdown` with raw HTML escaped (XSS-safe); `<think>` blocks and user/error messages stay plain text.
+- Chart rasterization (Chart.js onto `@napi-rs/canvas`/skia) must stay isolated in the Electron **utility process** (`chart-render-worker.js`, spawned by `chartRenderer.ts`): a native segfault there must only fail the in-flight render tool, never crash the app. Module chart tools must call `renderChartIsolated`, never `renderChartPng` on the main process. The worker is a second `main` entry in `electron.vite.config.ts`; `PTNOTES_CHART_WORKER` env overrides its path for tests.
 
 ### Conventions
 
