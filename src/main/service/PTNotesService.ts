@@ -616,8 +616,8 @@ export class PTNotesService {
   }
 
   /**
-   * Delete temp module files (PNG + sibling .json) after a presentation has
-   * embedded them. Only removes files inside <project>/modules/temp/.
+   * Delete temp module files (PNG + its sibling .json/.svg) after a presentation
+   * has embedded them. Only removes files inside <project>/modules/temp/.
    */
   async cleanupModuleTempFiles(project: string, pngPaths: string[]): Promise<number> {
     const prefix = this.moduleTempDir(project) + sep
@@ -625,7 +625,8 @@ export class PTNotesService {
     const seen = new Set<string>()
     for (const p of pngPaths) {
       if (typeof p !== 'string' || !p.startsWith(prefix)) continue
-      for (const f of [p, p.replace(/\.png$/i, '.json')]) {
+      const siblings = [p, p.replace(/\.png$/i, '.json'), p.replace(/\.png$/i, '.svg')]
+      for (const f of siblings) {
         if (seen.has(f)) continue
         seen.add(f)
         try {

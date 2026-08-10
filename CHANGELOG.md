@@ -2,11 +2,19 @@
 
 All notable changes to PTNotes are documented in this file.
 
-All notable changes to PTNotes are documented in this file.
-
-## [0.4.0] — 2026-08-09
+## [0.4.0] — 2026-08-10
 
 ### Added
+
+#### Diagram slides in PPTX presentations
+
+- New shared diagram tool-pack (`createDiagramTools.ts` + `mermaid.ts` + `diagramRenderer.ts` + `diagram-render-worker.ts`) any module can reuse: `diagram_preview` (dry-run validation, writes nothing) and `render_diagram` (mermaid DSL source → rasterized PNG + SVG + sidecar JSON in `<project>/modules/temp/`).
+- Diagrams are authored as **mermaid DSL text** (`flowchart TD/LR`, `sequenceDiagram`, `stateDiagram-v2`, `classDiagram`, `erDiagram`, `pie`) and rendered by mermaid v11 on a jsdom/svgdom DOM shim (`isomorphic-mermaid`) — pure-local, in-process, no network, browsers (headless Chromium) or CLI tools. Mermaid owns all layout/edge-routing/shape math.
+- Rendering runs in an isolated Electron **utility process** (`diagramRenderer.ts` forks `diagram-render-worker.js`, with a plain-Node fallback for tests and `PTNOTES_DIAGRAM_WORKER` overriding the worker path), so a native `@resvg/resvg-js` crash or a heavy mermaid+DOM render only fails the in-flight render tool instead of the app.
+- The renderer isolates the DOM globals the shim installs (`window`/`document`) around each render, so nothing browser-like leaks back into the host (the OpenAI SDK refuses to run in a "browser-like" environment).
+- PPTX slides accept a new `diagram` layout that embeds the rendered PNG (same `x/y/w/h` placement and aspect-ratio scaling semantics as `chart`); `diagram_preview` → `render_diagram` → `create_pptx_file` is the recommended flow.
+- Temporary diagram files (`modules/temp/*.png` + `*.svg` + `*.json`) are deleted automatically once the deck is built (`cleanupModuleTempFiles` now also removes `.svg` siblings).
+- Reusable diagram tool imports for module authors added to `docs/module-development.md`.
 
 #### Lucide icons in PPTX slides
 

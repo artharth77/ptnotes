@@ -3,7 +3,15 @@ import { readFileSync } from 'fs'
 import { lucideIconPngDataUri } from '../shared/lucideIcons'
 
 export type SlideLayout =
-  'title' | 'bullets' | 'section' | 'statement' | 'two-column' | 'table' | 'chart' | 'blank'
+  | 'title'
+  | 'bullets'
+  | 'section'
+  | 'statement'
+  | 'two-column'
+  | 'table'
+  | 'chart'
+  | 'diagram'
+  | 'blank'
 
 export interface PptxTableSpec {
   headers?: string[]
@@ -26,6 +34,15 @@ export interface PptxChartSpec {
   h?: number
 }
 
+/** A picture slot fed by render_chart (chart) or render_diagram (diagram). */
+export interface PptxPictureSpec {
+  png?: string
+  x?: number
+  y?: number
+  w?: number
+  h?: number
+}
+
 export interface PptxSlideSpec {
   layout?: SlideLayout | string
   title?: string
@@ -37,6 +54,7 @@ export interface PptxSlideSpec {
   table?: PptxTableSpec
   icon?: string | PptxIconSpec
   chart?: string | PptxChartSpec
+  diagram?: string | PptxPictureSpec
   notes?: string
 }
 
@@ -151,11 +169,11 @@ function pngDimensions(path: string): { w: number; h: number } | null {
   }
 }
 
-/** Normalize the "chart" slide spec (a png path string or an object of dimensions). */
-function parseChartSpec(raw: string | PptxChartSpec | undefined): PptxChartSpec | null {
+/** Normalize a picture slot spec (a png path string or an object of placement). */
+function parsePictureSpec(raw: string | PptxPictureSpec | undefined): PptxPictureSpec | null {
   if (!raw) return null
   if (typeof raw === 'string') return raw.trim() ? { png: raw.trim() } : null
-  const g = raw as PptxChartSpec
+  const g = raw as PptxPictureSpec
   const png = typeof g.png === 'string' && g.png.trim() ? g.png.trim() : ''
   if (!png) return null
   return {
@@ -305,7 +323,7 @@ export async function buildPptx(spec: unknown, outPath: string): Promise<PptxBui
         }
         case 'chart': {
           if (title) addHeader(slide, title, t)
-          const chart = parseChartSpec(s.chart)
+          const chart = parsePictureSpec(s.chart)
           if (!chart || !chart.png) {
             return {
               ok: false,
@@ -332,6 +350,37 @@ export async function buildPptx(spec: unknown, outPath: string): Promise<PptxBui
           const x = chart.x ?? bodyX + (bodyW - w) / 2
           const y = chart.y ?? bodyY + (bodyH - h) / 2
           slide.addImage({ path: chart.png, x, y, w, h, altText: 'chart' })
+          break
+        }
+        case 'diagram': {
+          if (title) addHeader(slide, title, t)
+          const diagram = parsePictureSpec(s.diagram)
+          if (!diagram || !diagram.png) {
+            return {
+              ok: false,
+              error:
+                'A slide with layout "diagram" needs a "diagram" field set to the PNG path from render_diagram (the path string or { "png": path }).'
+            }
+          }
+          const px = pngDimensions(diagram.png)
+          if (!px) {
+            return {
+              ok: false,
+              error: `Diagram image not found or not a valid PNG: "${diagram.png}". Call render_diagram to produce the file first.`
+            }
+          }
+          const bodyX = 0.6
+          const bodyY = title ? 1.35 : 0.6
+          const bodyW = 8.8
+          const bodyH = dims.h - bodyY - 0.4
+          const targetW = diagram.w ?? bodyW
+          const targetH = diagram.h ?? bodyH
+          const scale = Math.min(targetW / px.w, targetH / px.h)
+          const w = px.w * scale
+          const h = px.h * scale
+          const x = diagram.x ?? bodyX + (bodyW - w) / 2
+          const y = diagram.y ?? bodyY + (bodyH - h) / 2
+          slide.addImage({ path: diagram.png, x, y, w, h, altText: 'diagram' })
           break
         }
         case 'blank': {

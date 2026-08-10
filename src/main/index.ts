@@ -12,6 +12,7 @@ import { ModuleRegistry } from './modules/registry'
 import { ModuleRunManager } from './modules/runs'
 import { buildStartModuleTool } from './modules/tool'
 import { shutdownChartRenderer } from './modules/shared/chartRenderer'
+import { shutdownDiagramRenderer } from './modules/shared/diagramRenderer'
 import type { PTTool } from './ai/tools'
 import { createPptxModule } from './modules/pptx'
 import { SettingsStore } from './settings'
@@ -108,4 +109,5 @@ app.on('window-all-closed', () => {
 
 app.on('will-quit', () => {
   shutdownChartRenderer()
+  shutdownDiagramRenderer()
 })

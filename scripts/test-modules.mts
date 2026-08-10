@@ -278,6 +278,160 @@ const missingPng = await buildPptx(
 )
 assert.equal(missingPng.ok, false, 'chart slide without a valid png fails the build')
 
+// ---- shared in-process mermaid diagram engine ----
+const { validateMermaid, renderMermaidSvg, svgBounds, svgToPng, renderMermaidPng } =
+  await import('../src/main/modules/shared/mermaid')
+const { createDiagramTools } = await import('../src/main/modules/shared/createDiagramTools')
+
+const flowSrc = `flowchart TD
+  A[Start] --> B{Decision}
+  B -->|Yes| C[OK]
+  B -->|No| D[Cancel]`
+
+const flowValidation = await validateMermaid(flowSrc)
+assert.equal(flowValidation.ok, true, 'valid flowchart accepted')
+assert.ok(
+  flowValidation.ok && /flowchart/.test(flowValidation.diagramType),
+  'flowchart diagram type detected'
+)
+assert.equal(
+  (await validateMermaid('this is not mermaid at all')).ok,
+  false,
+  'invalid mermaid rejected'
+)
+assert.equal((await validateMermaid('   ')).ok, false, 'empty diagram rejected')
+
+const flowSvg = await renderMermaidSvg(flowSrc)
+assert.ok(flowSvg.svg.trimStart().startsWith('<svg'), 'renderMermaidSvg returns svg source')
+const flowBounds = svgBounds(flowSvg.svg)
+assert.ok(flowBounds.width > 0 && flowBounds.height > 0, 'svgBounds reads the viewBox')
+
+const seqSrc = `sequenceDiagram
+  Alice->>John: Hello John, how are you?
+  John-->>Alice: Great!`
+const seqValidation = await validateMermaid(seqSrc)
+assert.ok(
+  seqValidation.ok && /sequence/.test(seqValidation.diagramType),
+  'sequence diagram accepted'
+)
+
+const flowPng = svgToPng(flowSvg.svg)
+assert.deepEqual(
+  [...flowPng.subarray(0, 4)],
+  [0x89, 0x50, 0x4e, 0x47],
+  'mermaid svg to png magic bytes'
+)
+assert.ok(flowPng.length > 100, 'mermaid png has content')
+
+const oneShot = await renderMermaidPng(flowSrc)
+assert.deepEqual(
+  [...oneShot.png.subarray(0, 4)],
+  [0x89, 0x50, 0x4e, 0x47],
+  'renderMermaidPng png magic bytes'
+)
+assert.ok(oneShot.diagramType.includes('flowchart'), 'renderMermaidPng reports the diagram type')
+assert.ok(oneShot.width > 0, 'renderMermaidPng reports width')
+
+// ---- diagram tools (preview + render) ----
+const diagramTools = Object.fromEntries(
+  createDiagramTools().map((t) => [t.definition.function.name, t])
+)
+const diagramPreview = await diagramTools['diagram_preview']!.execute(
+  { diagram: flowSrc },
+  { service, activeProject: PROJECT, confirm: async () => false }
+)
+const diagramPreviewParsed = JSON.parse(diagramPreview)
+assert.equal(diagramPreviewParsed.ok, true, 'diagram_preview succeeds')
+assert.ok(
+  /flowchart/.test(diagramPreviewParsed.diagramType),
+  'diagram_preview reports the diagram type'
+)
+assert.ok(
+  diagramPreviewParsed.width > 0 && diagramPreviewParsed.height > 0,
+  'diagram_preview reports dimensions'
+)
+
+const badDiagramPreview = await diagramTools['diagram_preview']!.execute(
+  { diagram: 'not a diagram!' },
+  { service, activeProject: PROJECT, confirm: async () => false }
+)
+assert.equal(JSON.parse(badDiagramPreview).ok, false, 'diagram_preview rejects invalid mermaid')
+
+const diagramRendered = await diagramTools['render_diagram']!.execute(
+  { diagram: flowSrc, filename: 'flow-diagram', pixelWidth: 800 },
+  { service, activeProject: PROJECT, confirm: async () => false }
+)
+const diagramRenderedParsed = JSON.parse(diagramRendered)
+assert.equal(diagramRenderedParsed.ok, true, 'render_diagram succeeds')
+assert.ok(
+  typeof diagramRenderedParsed.png === 'string' && diagramRenderedParsed.png.endsWith('.png'),
+  'render_diagram returns a png path'
+)
+assert.ok(
+  typeof diagramRenderedParsed.svg === 'string' && diagramRenderedParsed.svg.endsWith('.svg'),
+  'render_diagram returns an svg path'
+)
+assert.equal(diagramRenderedParsed.path, undefined, 'render_diagram deliberately omits path')
+assert.equal(diagramRenderedParsed.file, undefined, 'render_diagram deliberately omits file')
+await fs.access(diagramRenderedParsed.png)
+await fs.access(diagramRenderedParsed.svg)
+await fs.access(diagramRenderedParsed.json)
+
+const badDiagramTools = diagramTools['render_diagram']!.execute(
+  { diagram: 'garbage text' },
+  { service, activeProject: PROJECT, confirm: async () => false }
+)
+assert.equal(JSON.parse(await badDiagramTools).ok, false, 'render_diagram rejects invalid mermaid')
+
+// ---- buildPptx with a diagram slide ----
+const diagramDeck = {
+  title: 'Diagram probe',
+  slides: [
+    { layout: 'title', title: 'Order flow' },
+    {
+      layout: 'diagram',
+      title: 'Order decision flow',
+      diagram: { png: diagramRenderedParsed.png }
+    }
+  ]
+}
+const diagramOut = join(ROOT, 'probe-diagram.pptx')
+const diagramRes = await buildPptx(diagramDeck, diagramOut)
+assert.equal(diagramRes.ok, true, 'diagram slide builds')
+if (diagramRes.ok) assert.equal(diagramRes.slideCount, 2)
+const diagramStat = await fs.stat(diagramOut)
+assert.ok(diagramStat.size > 100, 'diagram pptx has content')
+
+assert.ok(
+  diagramRenderedParsed.png.includes('/modules/temp/'),
+  'render_diagram png lands in <project>/modules/temp/'
+)
+
+const pptxDeckDiagram = await pptxTools['create_pptx_file']!.execute(
+  { filename: 'diagram-deck-cleanup', design: JSON.stringify(diagramDeck) },
+  { service, activeProject: PROJECT, confirm: async () => false }
+)
+const deckDiagramParsed = JSON.parse(pptxDeckDiagram)
+assert.equal(deckDiagramParsed.ok, true, 'create_pptx_file with a diagram slide succeeds')
+await assert.rejects(
+  fs.access(diagramRenderedParsed.png),
+  'temp diagram png deleted after the deck is built'
+)
+await assert.rejects(
+  fs.access(diagramRenderedParsed.svg),
+  'temp diagram svg deleted after the deck is built'
+)
+await assert.rejects(
+  fs.access(diagramRenderedParsed.json),
+  'temp diagram json deleted after the deck is built'
+)
+
+const missingDiagramPng = await buildPptx(
+  { slides: [{ layout: 'diagram', title: 'x', diagram: { png: '/tmp/does-not-exist.png' } }] },
+  join(ROOT, 'probe-bad-diagram.pptx')
+)
+assert.equal(missingDiagramPng.ok, false, 'diagram slide without a valid png fails the build')
+
 // ---- simulate a full module run with a scripted model ----
 interface FakeToolCall {
   id: string

@@ -27,6 +27,7 @@
     "@resvg/resvg-js": "^2.6.2",
     "chart.js": "^4.5.1",
     "cheerio": "^1.2.0",
+    "isomorphic-mermaid": "^0.1.1",
     "lucide-static": "^1.30.0",
     "openai": "^7.4.0",
     "pdf-parse": "^2.4.5",
