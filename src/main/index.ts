@@ -11,6 +11,8 @@ import { registerModulesIpc } from './ipc/modules'
 import { ModuleRegistry } from './modules/registry'
 import { ModuleRunManager } from './modules/runs'
 import { buildStartModuleTool } from './modules/tool'
+import { shutdownChartRenderer } from './modules/shared/chartRenderer'
+import { shutdownDiagramRenderer } from './modules/shared/diagramRenderer'
 import type { PTTool } from './ai/tools'
 import { createPptxModule } from './modules/pptx'
 import { SettingsStore } from './settings'
@@ -103,4 +105,9 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
+})
+
+app.on('will-quit', () => {
+  shutdownChartRenderer()
+  shutdownDiagramRenderer()
 })

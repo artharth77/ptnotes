@@ -591,6 +591,55 @@ export class PTNotesService {
     return join(dir, candidate)
   }
 
+  // ---- Temporary module output (<project>/modules/temp/) ----
+
+  /** Directory for temporary module/shared tool files, kept out of the # file picker. */
+  moduleTempDir(project: string): string {
+    return join(this.modulesDir(project), 'temp')
+  }
+
+  /** Pick a non-colliding, safe temp path inside <project>/modules/temp/. */
+  async uniqueModuleTempPath(project: string, fileName: string): Promise<string> {
+    const dir = this.moduleTempDir(project)
+    await fs.mkdir(dir, { recursive: true })
+    const original = basename(fileName).trim()
+    if (!original) throw new Error('Temp file name is empty')
+    const ext = extname(original)
+    const stem = ext ? original.slice(0, -ext.length) : original
+    const base = slugify(stem) || 'temp'
+    let candidate = `${base}${ext}`
+    let i = 2
+    while (await this.pathExists(join(dir, candidate))) {
+      candidate = `${base}-${i++}${ext}`
+    }
+    return join(dir, candidate)
+  }
+
+  /**
+   * Delete temp module files (PNG + its sibling .json/.svg) after a presentation
+   * has embedded them. Only removes files inside <project>/modules/temp/.
+   */
+  async cleanupModuleTempFiles(project: string, pngPaths: string[]): Promise<number> {
+    const prefix = this.moduleTempDir(project) + sep
+    let removed = 0
+    const seen = new Set<string>()
+    for (const p of pngPaths) {
+      if (typeof p !== 'string' || !p.startsWith(prefix)) continue
+      const siblings = [p, p.replace(/\.png$/i, '.json'), p.replace(/\.png$/i, '.svg')]
+      for (const f of siblings) {
+        if (seen.has(f)) continue
+        seen.add(f)
+        try {
+          await fs.unlink(f)
+          removed++
+        } catch {
+          // ignore missing/already-removed files
+        }
+      }
+    }
+    return removed
+  }
+
   private async uniqueNoteId(project: string, base: string, exclude?: string): Promise<string> {
     let candidate = base
     let i = 2

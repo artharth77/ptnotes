@@ -1,11 +1,46 @@
 import PptxGenJS from 'pptxgenjs'
+import { readFileSync } from 'fs'
+import { lucideIconPngDataUri } from '../shared/lucideIcons'
 
 export type SlideLayout =
-  'title' | 'bullets' | 'section' | 'statement' | 'two-column' | 'table' | 'blank'
+  | 'title'
+  | 'bullets'
+  | 'section'
+  | 'statement'
+  | 'two-column'
+  | 'table'
+  | 'chart'
+  | 'diagram'
+  | 'blank'
 
 export interface PptxTableSpec {
   headers?: string[]
   rows?: string[][]
+}
+
+export interface PptxIconSpec {
+  name: string
+  size?: number
+  x?: number
+  y?: number
+  color?: string
+}
+
+export interface PptxChartSpec {
+  png?: string
+  x?: number
+  y?: number
+  w?: number
+  h?: number
+}
+
+/** A picture slot fed by render_chart (chart) or render_diagram (diagram). */
+export interface PptxPictureSpec {
+  png?: string
+  x?: number
+  y?: number
+  w?: number
+  h?: number
 }
 
 export interface PptxSlideSpec {
@@ -17,6 +52,9 @@ export interface PptxSlideSpec {
   right?: string[]
   statement?: string
   table?: PptxTableSpec
+  icon?: string | PptxIconSpec
+  chart?: string | PptxChartSpec
+  diagram?: string | PptxPictureSpec
   notes?: string
 }
 
@@ -49,18 +87,102 @@ function bullets(lines: string[], t: Palette): BulletText[] {
   }))
 }
 
-function addHeader(slide: PptxGenJS.Slide, title: string, t: Palette): void {
+function addHeader(slide: PptxGenJS.Slide, title: string, t: Palette, shrinkForIcon = false): void {
+  const w = shrinkForIcon ? 7.3 : 8.8
   slide.addText(title, {
     x: 0.6,
     y: 0.35,
-    w: 8.8,
+    w,
     h: 0.8,
     fontFace: t.fontFace,
     fontSize: 28,
     bold: true,
     color: t.primary
   })
-  slide.addShape('line', { x: 0.6, y: 1.15, w: 8.8, h: 0, line: { color: t.accent, width: 2 } })
+  slide.addShape('line', { x: 0.6, y: 1.15, w, h: 0, line: { color: t.accent, width: 2 } })
+}
+
+interface SlideDims {
+  w: number
+  h: number
+}
+
+const SLIDE_16x9: SlideDims = { w: 10, h: 5.625 }
+const SLIDE_4x3: SlideDims = { w: 10, h: 7.5 }
+
+interface IconSpec {
+  name: string
+  size: number
+  x?: number
+  y?: number
+  color?: string
+}
+
+function parseIconSpec(
+  raw: string | PptxIconSpec | undefined,
+  defaultSize: number
+): IconSpec | null {
+  if (typeof raw === 'string') return raw.trim() ? { name: raw.trim(), size: defaultSize } : null
+  if (raw && typeof raw === 'object' && typeof raw.name === 'string' && raw.name.trim()) {
+    return {
+      name: raw.name.trim(),
+      size: typeof raw.size === 'number' && raw.size > 0 ? raw.size : defaultSize,
+      x: typeof raw.x === 'number' && raw.x >= 0 ? raw.x : undefined,
+      y: typeof raw.y === 'number' && raw.y >= 0 ? raw.y : undefined,
+      color: typeof raw.color === 'string' ? raw.color : undefined
+    }
+  }
+  return null
+}
+
+/** Rasterize a Lucide icon to PNG and stamp it onto the slide, or throw for the caller to surface. */
+async function placeIcon(
+  slide: PptxGenJS.Slide,
+  icon: IconSpec,
+  defaults: { x?: number; y?: number },
+  defaultColor?: string
+): Promise<void> {
+  const png = lucideIconPngDataUri(icon.name, { color: icon.color || defaultColor, sizePx: 512 })
+  if (!png.ok) throw new Error(png.error)
+  const size = icon.size
+  slide.addImage({
+    data: png.dataUri,
+    x: icon.x ?? defaults.x ?? 0,
+    y: icon.y ?? defaults.y ?? 0,
+    w: size,
+    h: size,
+    altText: icon.name
+  })
+}
+
+/** Read the intrinsic pixel size of a PNG file from its IHDR chunk, or null. */
+function pngDimensions(path: string): { w: number; h: number } | null {
+  try {
+    const buf = readFileSync(path)
+    if (buf.length < 24 || buf.readUInt32BE(0) !== 0x89504e47) return null
+    const w = buf.readUInt32BE(16)
+    const h = buf.readUInt32BE(20)
+    if (!(w > 0 && h > 0 && w <= 100000 && h <= 100000)) return null
+    return { w, h }
+  } catch {
+    return null
+  }
+}
+
+/** Normalize a picture slot spec (a png path string or an object of placement). */
+function parsePictureSpec(raw: string | PptxPictureSpec | undefined): PptxPictureSpec | null {
+  if (!raw) return null
+  if (typeof raw === 'string') return raw.trim() ? { png: raw.trim() } : null
+  const g = raw as PptxPictureSpec
+  const png = typeof g.png === 'string' && g.png.trim() ? g.png.trim() : ''
+  if (!png) return null
+  return {
+    png,
+    x: typeof g.x === 'number' && g.x >= 0 ? g.x : undefined,
+    y: typeof g.y === 'number' && g.y >= 0 ? g.y : undefined,
+    w: typeof g.w === 'number' && g.w > 0 ? g.w : undefined,
+    h: typeof g.h === 'number' && g.h > 0 ? g.h : undefined
+  }
 }
 
 /** Convert a module-authored slide JSON into a real .pptx file. */
@@ -93,6 +215,10 @@ export async function buildPptx(spec: unknown, outPath: string): Promise<PptxBui
       const slide = pptx.addSlide()
       const layout = (s.layout as SlideLayout) || 'bullets'
       const title = typeof s.title === 'string' ? s.title : ''
+      const dims = design.slideSize === '4x3' ? SLIDE_4x3 : SLIDE_16x9
+      const iconDefault =
+        layout === 'title' ? 1.0 : layout === 'section' || layout === 'statement' ? 1.6 : 0.6
+      const icon = parseIconSpec(s.icon, iconDefault)
 
       switch (layout) {
         case 'title': {
@@ -118,12 +244,14 @@ export async function buildPptx(spec: unknown, outPath: string): Promise<PptxBui
               color: 'F5F5F5'
             })
           }
+          if (icon) await placeIcon(slide, icon, { x: (dims.w - icon.size) / 2, y: 4.5 }, 'FFFFFF')
           break
         }
         case 'section':
         case 'statement': {
           slide.background = { color: 'F2F6FC' }
           const text = (typeof s.statement === 'string' ? s.statement : title) || 'Section'
+          if (icon) await placeIcon(slide, icon, { x: (dims.w - icon.size) / 2, y: 0.8 }, t.accent)
           slide.addText(text, {
             x: 0.6,
             y: 2.4,
@@ -139,7 +267,7 @@ export async function buildPptx(spec: unknown, outPath: string): Promise<PptxBui
           break
         }
         case 'two-column': {
-          if (title) addHeader(slide, title, t)
+          if (title) addHeader(slide, title, t, Boolean(icon))
           const y0 = title ? 1.35 : 0.6
           slide.addText(bullets(s.left && s.left.length ? s.left.map(String) : [''], t), {
             x: 0.55,
@@ -155,10 +283,11 @@ export async function buildPptx(spec: unknown, outPath: string): Promise<PptxBui
             h: 4.6,
             valign: 'top'
           })
+          if (icon) await placeIcon(slide, icon, { x: dims.w - icon.size - 0.55, y: 0.3 }, t.accent)
           break
         }
         case 'table': {
-          if (title) addHeader(slide, title, t)
+          if (title) addHeader(slide, title, t, Boolean(icon))
           const table = s.table ?? {}
           const headers = Array.isArray(table.headers) ? table.headers.map(String) : []
           const rows = Array.isArray(table.rows)
@@ -189,6 +318,69 @@ export async function buildPptx(spec: unknown, outPath: string): Promise<PptxBui
             ),
             { x: 0.6, y: 1.6, w: 8.8, h: 0.6, colW: Array(cols).fill(8.8 / cols) }
           )
+          if (icon) await placeIcon(slide, icon, { x: dims.w - icon.size - 0.55, y: 0.3 }, t.accent)
+          break
+        }
+        case 'chart': {
+          if (title) addHeader(slide, title, t)
+          const chart = parsePictureSpec(s.chart)
+          if (!chart || !chart.png) {
+            return {
+              ok: false,
+              error:
+                'A slide with layout "chart" needs a "chart" field set to the PNG path from render_chart (the path string or { "png": path }).'
+            }
+          }
+          const px = pngDimensions(chart.png)
+          if (!px) {
+            return {
+              ok: false,
+              error: `Chart image not found or not a valid PNG: "${chart.png}". Call render_chart to produce the file first.`
+            }
+          }
+          const bodyX = 0.6
+          const bodyY = title ? 1.35 : 0.6
+          const bodyW = 8.8
+          const bodyH = dims.h - bodyY - 0.4
+          const targetW = chart.w ?? bodyW
+          const targetH = chart.h ?? bodyH
+          const scale = Math.min(targetW / px.w, targetH / px.h)
+          const w = px.w * scale
+          const h = px.h * scale
+          const x = chart.x ?? bodyX + (bodyW - w) / 2
+          const y = chart.y ?? bodyY + (bodyH - h) / 2
+          slide.addImage({ path: chart.png, x, y, w, h, altText: 'chart' })
+          break
+        }
+        case 'diagram': {
+          if (title) addHeader(slide, title, t)
+          const diagram = parsePictureSpec(s.diagram)
+          if (!diagram || !diagram.png) {
+            return {
+              ok: false,
+              error:
+                'A slide with layout "diagram" needs a "diagram" field set to the PNG path from render_diagram (the path string or { "png": path }).'
+            }
+          }
+          const px = pngDimensions(diagram.png)
+          if (!px) {
+            return {
+              ok: false,
+              error: `Diagram image not found or not a valid PNG: "${diagram.png}". Call render_diagram to produce the file first.`
+            }
+          }
+          const bodyX = 0.6
+          const bodyY = title ? 1.35 : 0.6
+          const bodyW = 8.8
+          const bodyH = dims.h - bodyY - 0.4
+          const targetW = diagram.w ?? bodyW
+          const targetH = diagram.h ?? bodyH
+          const scale = Math.min(targetW / px.w, targetH / px.h)
+          const w = px.w * scale
+          const h = px.h * scale
+          const x = diagram.x ?? bodyX + (bodyW - w) / 2
+          const y = diagram.y ?? bodyY + (bodyH - h) / 2
+          slide.addImage({ path: diagram.png, x, y, w, h, altText: 'diagram' })
           break
         }
         case 'blank': {
@@ -196,7 +388,7 @@ export async function buildPptx(spec: unknown, outPath: string): Promise<PptxBui
           break
         }
         default: {
-          if (title) addHeader(slide, title, t)
+          if (title) addHeader(slide, title, t, Boolean(icon))
           if (typeof s.subtitle === 'string' && s.subtitle) {
             slide.addText(s.subtitle, {
               x: 0.6,
@@ -225,6 +417,7 @@ export async function buildPptx(spec: unknown, outPath: string): Promise<PptxBui
             h: 4.3,
             valign: 'top'
           })
+          if (icon) await placeIcon(slide, icon, { x: dims.w - icon.size - 0.55, y: 0.3 }, t.accent)
           break
         }
       }

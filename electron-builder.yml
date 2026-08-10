@@ -11,6 +11,8 @@ files:
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
 asarUnpack:
   - resources/**
+  - '**/node_modules/@resvg/**'
+  - '**/node_modules/@napi-rs/**'
 win:
   executableName: ptnotes
 nsis:

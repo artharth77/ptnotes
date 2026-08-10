@@ -45,12 +45,12 @@ Every module is a `RegisteredModule` (`src/main/modules/types.ts`):
 
 ```ts
 interface RegisteredModule {
-  id: string          // stable machine id, e.g. 'pptx' — used as start_module's `id` arg
-  name: string        // human-readable name, e.g. 'PowerPoint (PPTX)'
-  summary: string     // one-line UI summary
+  id: string // stable machine id, e.g. 'pptx' — used as start_module's `id` arg
+  name: string // human-readable name, e.g. 'PowerPoint (PPTX)'
+  summary: string // one-line UI summary
   description: string // LONG prompt shown to the main agent describing when/how to use this module
   systemPrompt: string // extra guidance injected into the module subagent's system prompt
-  tools: PTTool[]     // module-specific tools (PTTool from src/main/ai/tools.ts)
+  tools: PTTool[] // module-specific tools (PTTool from src/main/ai/tools.ts)
 }
 ```
 
@@ -83,7 +83,7 @@ interface PTTool {
     function: {
       name: string
       description: string
-      parameters: Record<string, unknown>   // JSON-Schema-ish
+      parameters: Record<string, unknown> // JSON-Schema-ish
     }
   }
   execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string>
@@ -106,13 +106,75 @@ Contract for `execute`:
   `uniqueOutputPath` slugifies the stem, rejects empty/unsafe names, and dedupes with `-2`, `-3`, … under the same `files/` folder.
 - Clean up the file on a failed build before returning the error JSON (see the PPTX tool for the pattern: build → on error `unlink` + return `{ ok:false }`).
 
+### Reusing shared tools
+
+`src/main/modules/shared/createLucideIconTools.ts` exports a ready-made tool-pack any module can
+opt into — no core/framework changes needed (the runner merges `module.tools`) and no duplication:
+
+```ts
+import { createLucideIconTools } from '../shared/createLucideIconTools'
+
+// Module that works with icons:
+tools: [...createLucideIconTools(), createSomeFileTool()]
+```
+
+It provides `search_lucide_icons` (keyword → canonical icon names + tags) and `get_lucide_icon`
+(name → SVG string or PNG data URI). The backing library `src/main/modules/shared/lucideIcons.ts`
+is format-agnostic: builders can call `getLucideIconSvg(...)` to embed SVG directly, or
+`lucideIconPngDataUri(...)` for a raster (the PPTX builder embeds icons as PNG so they render
+reliably in any slide viewer). Add `lucide-static` and `@resvg/resvg-js` to your module's deps
+when you use it.
+
+`src/main/modules/shared/createChartTools.ts` exports a chart tool-pack for data-visualization
+modules:
+
+```ts
+import { createChartTools } from '../shared/createChartTools'
+
+// Module that renders data charts:
+tools: [...createChartTools(), createSomeFileTool()]
+```
+
+It provides `chart_preview` (dry-run, writes nothing) and `render_chart` (writes
+temporary `<project>/modules/temp/<slug>.png` + `.json` and returns the asset paths; the temp files
+are deleted automatically once a deck using them is built). Charts are drawn by `chart.js`
+(Chart.js-style config JSON: `{ type, data: { labels?, datasets }, options?, width?, height? }`)
+onto `@napi-rs/canvas` (prebuilt Node-API Skia binding — same no-rebuild packaging pattern as
+`@resvg/resvg-js`), isolated in an Electron utility process so a native crash can't take the app
+down. Add `chart.js` and `@napi-rs/canvas` to your module's deps, and make sure the
+app's `electron-builder.yml` `asarUnpack` includes `**/node_modules/@napi-rs/**`.
+
+The backing library `src/main/modules/shared/chart.ts` is format-agnostic too: `validateChart(raw)`
+normalizes/limits a design and `renderChartPng(design, size)` returns a PNG buffer, so a builder
+can render charts without going through the AI tool surface at all.
+
+`src/main/modules/shared/createDiagramTools.ts` exports a diagram tool-pack for flow/process
+modules:
+
+```ts
+import { createDiagramTools } from '../shared/createDiagramTools'
+
+// Module that renders flow / sequence / relationship diagrams:
+tools: [...createDiagramTools(), createSomeFileTool()]
+```
+
+It provides `diagram_preview` (dry-run, writes nothing) and `render_diagram` (writes temporary
+`<project>/modules/temp/<slug>.png` + `.svg` + `.json` and returns the asset paths; the temp files
+are deleted automatically once a deck using them is built). Diagrams are authored as **mermaid DSL
+source text** (`flowchart TD/LR`, `sequenceDiagram`, `stateDiagram-v2`, `classDiagram`, `erDiagram`,
+`pie`) and rendered by mermaid v11 on a jsdom/svgdom DOM shim (`isomorphic-mermaid`; no headless
+browser) in an isolated Electron utility process, rasterized by `@resvg/resvg-js`. Add
+`isomorphic-mermaid` to your module's deps. The backing library `src/main/modules/shared/mermaid.ts`
+is format-agnostic too: `validateMermaid(src)`, `renderMermaidSvg(src)`, `svgBounds(svg)` and
+`svgToPng(svg, width)` let a builder render diagrams without the AI tool surface.
+
 ## Registering the module
 
 Registration happens only in **`src/main/index.ts`**:
 
 ```ts
 const moduleRegistry = new ModuleRegistry()
-moduleRegistry.register(createPptxModule())          // ← add yours here
+moduleRegistry.register(createPptxModule()) // ← add yours here
 moduleRegistry.register(createMyModule())
 ```
 
@@ -162,4 +224,7 @@ If you need UI to differ per module, extend `ModuleCard`/the `ModuleEvent` shape
 5. [ ] Registered in `src/main/index.ts` via `moduleRegistry.register(...)`.
 6. [ ] Builder unit tests + scripted full-run test in `scripts/test-modules.mts`.
 7. [ ] `npm run typecheck` and `npm run lint` pass.
+
+```
+
 ```

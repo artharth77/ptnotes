@@ -252,7 +252,7 @@ export class ChatSession {
       if (!hasContent && toolCalls.length === 0) continue
       out.push({
         role: 'assistant',
-        content: hasContent ? m.content : null,
+        content: hasContent ? m.content : '',
         ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {})
       })
       for (const tc of m.toolCalls ?? []) {
@@ -369,7 +369,7 @@ export class ChatSession {
         })
       )
 
-      this.messages.push({ role: 'assistant', content: content || null, tool_calls: completed })
+      this.messages.push({ role: 'assistant', content: content || '', tool_calls: completed })
       this.emit({ type: 'message-end', messageId })
 
       for (const call of completed) {

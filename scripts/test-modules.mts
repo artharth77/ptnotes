@@ -28,6 +28,8 @@ const { ModuleRegistry } = await import('../src/main/modules/registry')
 const { ModuleRunManager } = await import('../src/main/modules/runs')
 const { createPptxModule } = await import('../src/main/modules/pptx')
 const { buildPptx } = await import('../src/main/modules/pptx/builder')
+const { searchLucideIcons, getLucideIconSvg, lucideIconPngDataUri } =
+  await import('../src/main/modules/shared/lucideIcons')
 
 const service = new PTNotesService(ROOT)
 await service.createProject(PROJECT)
@@ -70,6 +72,365 @@ const bad1 = await buildPptx({ slides: [] }, '/tmp/should-not-exist.pptx')
 assert.equal(bad1.ok, false, 'empty slides rejected')
 const bad2 = await buildPptx('not-an-object', '/tmp/should-not-exist2.pptx')
 assert.equal(bad2.ok, false, 'non-object design rejected')
+
+// ---- shared Lucide icon library ----
+const hits = searchLucideIcons('chart')
+assert.ok(hits.length > 0 && hits[0]!.name.startsWith('chart'), 'search returns chart icons')
+const rocketHits = searchLucideIcons('rocket')
+assert.ok(
+  rocketHits.some((h) => h.name === 'rocket'),
+  'search finds the rocket icon'
+)
+const rocketSvg = getLucideIconSvg('rocket', '#ED7D31')
+assert.equal(rocketSvg.ok, true, 'rocket resolves')
+if (rocketSvg.ok) {
+  assert.ok(rocketSvg.svg.trimStart().startsWith('<svg'), 'returns svg source')
+  assert.ok(rocketSvg.svg.includes('stroke="#ED7D31"'), 'stroke color injected')
+}
+const rocketPng = lucideIconPngDataUri('rocket', { color: '#ED7D31', sizePx: 128 })
+assert.equal(rocketPng.ok, true, 'png renders')
+if (rocketPng.ok) {
+  const buf = Buffer.from(
+    rocketPng.dataUri.slice(rocketPng.dataUri.indexOf('base64,') + 7),
+    'base64'
+  )
+  assert.deepEqual([...buf.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47], 'png magic bytes')
+}
+assert.equal(getLucideIconSvg('no-such-icon-xyz').ok, false, 'unknown icon rejected')
+
+// ---- buildPptx with icons ----
+const iconDesign = {
+  title: 'Icon probe',
+  slides: [
+    { layout: 'title', title: 'Growth plan', icon: { name: 'trending-up', size: 1.0 } },
+    { layout: 'section', statement: 'Results', icon: 'trending-up' },
+    {
+      layout: 'bullets',
+      title: 'Details',
+      body: ['A', 'B'],
+      icon: { name: 'rocket', color: '#333333' }
+    }
+  ]
+}
+const iconOut = join(ROOT, 'probe-icons.pptx')
+const iconRes = await buildPptx(iconDesign, iconOut)
+assert.equal(iconRes.ok, true, 'icon design builds')
+if (iconRes.ok) assert.equal(iconRes.slideCount, 3)
+const iconStat = await fs.stat(iconOut)
+assert.ok(iconStat.size > 100, 'icon pptx file has content')
+
+const badIcon = await buildPptx(
+  { slides: [{ layout: 'bullets', title: 'x', icon: 'no-such-icon' }] },
+  join(ROOT, 'probe-bad-icon.pptx')
+)
+assert.equal(badIcon.ok, false, 'unknown icon name fails the build')
+
+// ---- shared in-process chart engine ----
+const { validateChart, renderChartPng } = await import('../src/main/modules/shared/chart')
+const { createChartTools } = await import('../src/main/modules/shared/createChartTools')
+
+const barDesign = {
+  type: 'bar',
+  data: {
+    labels: ['Q1', 'Q2', 'Q3'],
+    datasets: [{ label: 'Sales', data: [4, 7, 3], backgroundColor: '#1F4CA8' }]
+  }
+}
+const cv = validateChart(barDesign)
+assert.equal(cv.ok, true, 'valid chart accepted')
+assert.equal(
+  validateChart({ type: 'pie', data: { datasets: [{ data: [1, 2, 3] }] } }).ok,
+  true,
+  'pie chart accepted with numeric data'
+)
+assert.equal(
+  validateChart({ type: 'nope', data: { datasets: [{ data: [1] }] } }).ok,
+  false,
+  'unknown chart type rejected'
+)
+assert.equal(
+  validateChart({ type: 'bar', data: { datasets: [] } }).ok,
+  false,
+  'empty datasets rejected'
+)
+assert.equal(
+  validateChart({ type: 'bar', data: { datasets: [{ data: Array(600).fill(1) }] } }).ok,
+  false,
+  'oversized dataset rejected'
+)
+assert.equal(
+  validateChart({ type: 'scatter', data: { datasets: [{ data: [{ x: 1, y: 2 }] }] } }).ok,
+  true,
+  'scatter accepts {x,y} points'
+)
+assert.equal(
+  validateChart({ type: 'scatter', data: { datasets: [{ data: [1, 2, 3] }] } }).ok,
+  false,
+  'scatter rejects plain numbers'
+)
+
+if (cv.ok) {
+  const png = renderChartPng(cv.design, { width: 640, height: 360 })
+  assert.deepEqual([...png.subarray(0, 4)], [0x89, 0x50, 0x4e, 0x47], 'bar chart png magic bytes')
+  assert.ok(png.length > 100, 'bar chart png has content')
+}
+
+const pieChecked = validateChart({
+  type: 'pie',
+  data: { labels: ['A', 'B'], datasets: [{ data: [3, 5] }] }
+})
+assert.equal(pieChecked.ok, true, 'pie chart accepted')
+if (pieChecked.ok) {
+  const piePng = renderChartPng(pieChecked.design)
+  assert.deepEqual(
+    [...piePng.subarray(0, 4)],
+    [0x89, 0x50, 0x4e, 0x47],
+    'pie chart png magic bytes'
+  )
+}
+
+// ---- chart tools (preview + render) ----
+const chartTools = Object.fromEntries(
+  createChartTools().map((t) => [t.definition.function.name, t])
+)
+const preview = await chartTools['chart_preview']!.execute(
+  { chart: barDesign, outWidth: 640 },
+  { service, activeProject: PROJECT, confirm: async () => false }
+)
+const previewParsed = JSON.parse(preview)
+assert.equal(previewParsed.ok, true, 'chart_preview succeeds')
+assert.equal(previewParsed.chartType, 'bar', 'chart_preview reports the chart type')
+assert.equal(previewParsed.width, 640, 'chart_preview honors outWidth')
+assert.equal(previewParsed.pointCount, 3, 'chart_preview reports point count')
+
+const rendered = await chartTools['render_chart']!.execute(
+  { chart: barDesign, filename: 'sales-bar', outWidth: 800 },
+  { service, activeProject: PROJECT, confirm: async () => false }
+)
+const renderedParsed = JSON.parse(rendered)
+assert.equal(renderedParsed.ok, true, 'render_chart succeeds')
+assert.ok(
+  typeof renderedParsed.png === 'string' && renderedParsed.png.endsWith('.png'),
+  'render_chart returns a png path'
+)
+assert.equal(renderedParsed.path, undefined, 'render_chart deliberately omits path')
+assert.equal(renderedParsed.file, undefined, 'render_chart deliberately omits file')
+await fs.access(renderedParsed.png)
+await fs.access(renderedParsed.json)
+
+const badChartTools = chartTools['render_chart']!.execute(
+  { chart: { type: 'pie', data: { datasets: [] } } },
+  { service, activeProject: PROJECT, confirm: async () => false }
+)
+assert.equal(JSON.parse(await badChartTools).ok, false, 'render_chart rejects invalid charts')
+
+// ---- buildPptx with a chart slide ----
+const chartDeck = {
+  title: 'Chart probe',
+  slides: [
+    { layout: 'title', title: 'Sales overview' },
+    {
+      layout: 'chart',
+      title: 'Quarterly sales',
+      chart: { png: renderedParsed.png }
+    }
+  ]
+}
+const chartOut = join(ROOT, 'probe-chart.pptx')
+const chartRes = await buildPptx(chartDeck, chartOut)
+assert.equal(chartRes.ok, true, 'chart slide builds')
+if (chartRes.ok) assert.equal(chartRes.slideCount, 2)
+const chartStat = await fs.stat(chartOut)
+assert.ok(chartStat.size > 100, 'chart pptx has content')
+
+const afterChart = await service.listFiles(PROJECT)
+assert.ok(
+  !afterChart.includes('sales-bar.png'),
+  'chart temp png stays out of the project files folder'
+)
+assert.ok(
+  renderedParsed.png.includes('/modules/temp/'),
+  'render_chart png lands in <project>/modules/temp/'
+)
+
+const pptxTools = Object.fromEntries(
+  createPptxModule().tools.map((t) => [t.definition.function.name, t])
+)
+const deckResult = await pptxTools['create_pptx_file']!.execute(
+  { filename: 'chart-deck-cleanup', design: JSON.stringify(chartDeck) },
+  { service, activeProject: PROJECT, confirm: async () => false }
+)
+const deckParsed = JSON.parse(deckResult)
+assert.equal(deckParsed.ok, true, 'create_pptx_file with a chart slide succeeds')
+assert.ok(deckParsed.file?.endsWith('.pptx'), 'create_pptx_file returns the deck file name')
+await assert.rejects(
+  fs.access(renderedParsed.png),
+  'temp chart png deleted after the deck is built'
+)
+await assert.rejects(
+  fs.access(renderedParsed.json),
+  'temp chart json deleted after the deck is built'
+)
+
+const missingPng = await buildPptx(
+  { slides: [{ layout: 'chart', title: 'x', chart: { png: '/tmp/does-not-exist.png' } }] },
+  join(ROOT, 'probe-bad-chart.pptx')
+)
+assert.equal(missingPng.ok, false, 'chart slide without a valid png fails the build')
+
+// ---- shared in-process mermaid diagram engine ----
+const { validateMermaid, renderMermaidSvg, svgBounds, svgToPng, renderMermaidPng } =
+  await import('../src/main/modules/shared/mermaid')
+const { createDiagramTools } = await import('../src/main/modules/shared/createDiagramTools')
+
+const flowSrc = `flowchart TD
+  A[Start] --> B{Decision}
+  B -->|Yes| C[OK]
+  B -->|No| D[Cancel]`
+
+const flowValidation = await validateMermaid(flowSrc)
+assert.equal(flowValidation.ok, true, 'valid flowchart accepted')
+assert.ok(
+  flowValidation.ok && /flowchart/.test(flowValidation.diagramType),
+  'flowchart diagram type detected'
+)
+assert.equal(
+  (await validateMermaid('this is not mermaid at all')).ok,
+  false,
+  'invalid mermaid rejected'
+)
+assert.equal((await validateMermaid('   ')).ok, false, 'empty diagram rejected')
+
+const flowSvg = await renderMermaidSvg(flowSrc)
+assert.ok(flowSvg.svg.trimStart().startsWith('<svg'), 'renderMermaidSvg returns svg source')
+const flowBounds = svgBounds(flowSvg.svg)
+assert.ok(flowBounds.width > 0 && flowBounds.height > 0, 'svgBounds reads the viewBox')
+
+const seqSrc = `sequenceDiagram
+  Alice->>John: Hello John, how are you?
+  John-->>Alice: Great!`
+const seqValidation = await validateMermaid(seqSrc)
+assert.ok(
+  seqValidation.ok && /sequence/.test(seqValidation.diagramType),
+  'sequence diagram accepted'
+)
+
+const flowPng = svgToPng(flowSvg.svg)
+assert.deepEqual(
+  [...flowPng.subarray(0, 4)],
+  [0x89, 0x50, 0x4e, 0x47],
+  'mermaid svg to png magic bytes'
+)
+assert.ok(flowPng.length > 100, 'mermaid png has content')
+
+const oneShot = await renderMermaidPng(flowSrc)
+assert.deepEqual(
+  [...oneShot.png.subarray(0, 4)],
+  [0x89, 0x50, 0x4e, 0x47],
+  'renderMermaidPng png magic bytes'
+)
+assert.ok(oneShot.diagramType.includes('flowchart'), 'renderMermaidPng reports the diagram type')
+assert.ok(oneShot.width > 0, 'renderMermaidPng reports width')
+
+// ---- diagram tools (preview + render) ----
+const diagramTools = Object.fromEntries(
+  createDiagramTools().map((t) => [t.definition.function.name, t])
+)
+const diagramPreview = await diagramTools['diagram_preview']!.execute(
+  { diagram: flowSrc },
+  { service, activeProject: PROJECT, confirm: async () => false }
+)
+const diagramPreviewParsed = JSON.parse(diagramPreview)
+assert.equal(diagramPreviewParsed.ok, true, 'diagram_preview succeeds')
+assert.ok(
+  /flowchart/.test(diagramPreviewParsed.diagramType),
+  'diagram_preview reports the diagram type'
+)
+assert.ok(
+  diagramPreviewParsed.width > 0 && diagramPreviewParsed.height > 0,
+  'diagram_preview reports dimensions'
+)
+
+const badDiagramPreview = await diagramTools['diagram_preview']!.execute(
+  { diagram: 'not a diagram!' },
+  { service, activeProject: PROJECT, confirm: async () => false }
+)
+assert.equal(JSON.parse(badDiagramPreview).ok, false, 'diagram_preview rejects invalid mermaid')
+
+const diagramRendered = await diagramTools['render_diagram']!.execute(
+  { diagram: flowSrc, filename: 'flow-diagram', pixelWidth: 800 },
+  { service, activeProject: PROJECT, confirm: async () => false }
+)
+const diagramRenderedParsed = JSON.parse(diagramRendered)
+assert.equal(diagramRenderedParsed.ok, true, 'render_diagram succeeds')
+assert.ok(
+  typeof diagramRenderedParsed.png === 'string' && diagramRenderedParsed.png.endsWith('.png'),
+  'render_diagram returns a png path'
+)
+assert.ok(
+  typeof diagramRenderedParsed.svg === 'string' && diagramRenderedParsed.svg.endsWith('.svg'),
+  'render_diagram returns an svg path'
+)
+assert.equal(diagramRenderedParsed.path, undefined, 'render_diagram deliberately omits path')
+assert.equal(diagramRenderedParsed.file, undefined, 'render_diagram deliberately omits file')
+await fs.access(diagramRenderedParsed.png)
+await fs.access(diagramRenderedParsed.svg)
+await fs.access(diagramRenderedParsed.json)
+
+const badDiagramTools = diagramTools['render_diagram']!.execute(
+  { diagram: 'garbage text' },
+  { service, activeProject: PROJECT, confirm: async () => false }
+)
+assert.equal(JSON.parse(await badDiagramTools).ok, false, 'render_diagram rejects invalid mermaid')
+
+// ---- buildPptx with a diagram slide ----
+const diagramDeck = {
+  title: 'Diagram probe',
+  slides: [
+    { layout: 'title', title: 'Order flow' },
+    {
+      layout: 'diagram',
+      title: 'Order decision flow',
+      diagram: { png: diagramRenderedParsed.png }
+    }
+  ]
+}
+const diagramOut = join(ROOT, 'probe-diagram.pptx')
+const diagramRes = await buildPptx(diagramDeck, diagramOut)
+assert.equal(diagramRes.ok, true, 'diagram slide builds')
+if (diagramRes.ok) assert.equal(diagramRes.slideCount, 2)
+const diagramStat = await fs.stat(diagramOut)
+assert.ok(diagramStat.size > 100, 'diagram pptx has content')
+
+assert.ok(
+  diagramRenderedParsed.png.includes('/modules/temp/'),
+  'render_diagram png lands in <project>/modules/temp/'
+)
+
+const pptxDeckDiagram = await pptxTools['create_pptx_file']!.execute(
+  { filename: 'diagram-deck-cleanup', design: JSON.stringify(diagramDeck) },
+  { service, activeProject: PROJECT, confirm: async () => false }
+)
+const deckDiagramParsed = JSON.parse(pptxDeckDiagram)
+assert.equal(deckDiagramParsed.ok, true, 'create_pptx_file with a diagram slide succeeds')
+await assert.rejects(
+  fs.access(diagramRenderedParsed.png),
+  'temp diagram png deleted after the deck is built'
+)
+await assert.rejects(
+  fs.access(diagramRenderedParsed.svg),
+  'temp diagram svg deleted after the deck is built'
+)
+await assert.rejects(
+  fs.access(diagramRenderedParsed.json),
+  'temp diagram json deleted after the deck is built'
+)
+
+const missingDiagramPng = await buildPptx(
+  { slides: [{ layout: 'diagram', title: 'x', diagram: { png: '/tmp/does-not-exist.png' } }] },
+  join(ROOT, 'probe-bad-diagram.pptx')
+)
+assert.equal(missingDiagramPng.ok, false, 'diagram slide without a valid png fails the build')
 
 // ---- simulate a full module run with a scripted model ----
 interface FakeToolCall {
@@ -252,6 +613,17 @@ const cascadeScript: { content?: string; tool_calls?: FakeToolCall[] }[] = [
   { tool_calls: [step('f2', 'update_step', { index: 1, status: 'running' })] },
   // jump straight to step 3 done, leaving step 1 running and step 2 pending
   { tool_calls: [step('f3', 'update_step', { index: 3, status: 'done' })] },
+  {
+    tool_calls: [
+      step('f4', 'create_pptx_file', {
+        filename: 'cascade-deck',
+        design: JSON.stringify({
+          title: 'Cascade',
+          slides: [{ layout: 'title', title: 'Cascade' }]
+        })
+      })
+    ]
+  },
   { content: 'Done.' }
 ]
 const cascadeManager = new ModuleRunManager(
@@ -274,5 +646,32 @@ assert.equal(cRun!.status, 'done', 'cascade run finished')
 assert.equal(cRun!.steps[0]!.status, 'done', 'previous running step promoted to done')
 assert.equal(cRun!.steps[1]!.status, 'done', 'previous pending step promoted to done')
 assert.equal(cRun!.steps[2]!.status, 'done', 'target step stays done')
+
+// ---- premature finish without the output tool is not silently "done" ----
+const prematureScript: { content?: string; tool_calls?: FakeToolCall[] }[] = [
+  {
+    tool_calls: [step('p1', 'set_plan', { steps: ['Research', 'Draft', 'Generate'] })]
+  },
+  { content: 'I have all the data, here is my summary.' }
+]
+const prematureManager = new ModuleRunManager(
+  service,
+  configStore,
+  registry,
+  () => {},
+  makeScriptedClient(prematureScript)
+)
+const pStart = await prematureManager.start(PROJECT, 'pptx', 'No output deck', 'Do the work.')
+assert.equal(pStart.ok, true, 'premature run accepted')
+const pRunId = pStart.ok ? pStart.runId : ''
+await waitFor(async () => {
+  const runs = await prematureManager.list(PROJECT)
+  return runs.some((r) => r.runId === pRunId && (r.status === 'done' || r.status === 'failed'))
+})
+const pRun = (await prematureManager.list(PROJECT)).find((r) => r.runId === pRunId)
+assert.ok(pRun, 'premature run exists')
+assert.equal(pRun!.status, 'failed', 'run without an output file ends failed, not done')
+assert.ok(!pRun!.outputFile, 'no output file produced')
+assert.match(pRun!.error ?? '', /output file/, 'failure mentions the missing output file')
 
 console.log('MODULES TESTS PASSED')

@@ -94,6 +94,18 @@ export function ModuleCard({
         </span>
         {!active && (
           <span className="module-card-status-area">
+            {run.status === 'failed' && (
+              <button
+                className="module-card-retry-btn"
+                title="Retry this module run"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (activeProject) void window.ptnotes.modules.retry(activeProject, run.runId)
+                }}
+              >
+                ↻
+              </button>
+            )}
             <button
               className="module-card-delete-btn"
               title="Delete this run"
@@ -129,7 +141,10 @@ export function ModuleCard({
               {doneSteps}/{run.steps.length} steps
             </span>
             <div className="module-progress-bar">
-              <div className="module-progress-fill" style={{ width: `${pct}%` }} />
+              <div
+                className={`module-progress-fill${run.status === 'done' ? ' done' : ''}`}
+                style={{ width: `${pct}%` }}
+              />
             </div>
             <button
               className={`module-step-toggle${showSteps ? ' open' : ''}`}

@@ -9,6 +9,15 @@ export default defineConfig({
       alias: {
         '@shared': resolve('src/shared')
       }
+    },
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve('src/main/index.ts'),
+          'chart-render-worker': resolve('src/main/modules/shared/chart-render-worker.ts'),
+          'diagram-render-worker': resolve('src/main/modules/shared/diagram-render-worker.ts')
+        }
+      }
     }
   },
   preload: {
