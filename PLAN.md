@@ -166,56 +166,78 @@ npm run test
 
 ---
 
-## Goal 3: Diagram / data flow toolset for PPTX embedding (separate toolset, shared engine)
+## Goal 3: Diagram / data flow toolset for PPTX embedding via mermaid (in-process, no headless browser)
 
-> **Note (re-baselined):** This section originally built on Goal 2's `graph.ts` node–edge engine. Goal 2 was since rebuilt as the Chart.js **chart** toolset and the node–edge engine was removed. When Goal 3 starts, the shared engine (validation / layout / SVG / PNG) must either be **restored from git history** (the deleted `src/main/modules/shared/graph.ts`) or rebuilt from scratch — the surface contract below (`createDiagramTools()`, `flow`/`hierarchy`/`layered` layouts, orthogonal edge routing, `.svg` + `.png` + `.json` deliverables) is otherwise unchanged, and the chart toolset stays untouched.
+> **Note (re-baselined):** This section originally built on Goal 2's `graph.ts` node–edge engine. Goal 2 was since rebuilt as the Chart.js **chart** toolset and the node–edge engine was removed. Goal 3 now uses **mermaid v11** as the diagram engine instead of restoring hand-rolled layout code (the deleted `src/main/modules/shared/graph.ts`): mermaid owns node layout, orthogonal edge routing, shape rendering and (in its DSL) start/end stadiums and I/O parallelograms, and — crucially — the model authors **mermaid DSL text** (`flowchart`, `sequenceDiagram`, …) rather than bespoke node/edge JSON. The surface contract changes to the mermaid input below; the Goal 2 chart toolset stays untouched.
 
 ### Goal
 
-Give the **pptx** module the ability to render **flow / data flow diagrams** (process boxes, decision diamonds, start/end stadiums, I/O parallelograms, orthogonal connectors) and place them on a slide as a rasterized PNG picture — a **second shared tool-pack** (`createDiagramTools()`) distinct from Goal 2's chart toolset. Built on a shared node–edge engine so validation, layout, SVG emission and PNG rasterization are not duplicated. Still **pure in-process**: no external API, no CLI `exec`/`spawn`, no headless browser/apps.
+Give the **pptx** module the ability to render **flow / data flow diagrams** (flowchart process/decision/stadium/I-O shapes, sequence/states/ER) from **mermaid DSL text** and place them on a slide as a rasterized PNG picture — a **second shared tool-pack** (`createDiagramTools()`) distinct from Goal 2's chart toolset. Still **pure in-process / no headless browser**: mermaid runs against a jsdom/svgdom DOM shim (not Chromium, no CLI `exec`/`spawn`), emits SVG, and the existing `@resvg/resvg-js` rasterizes to PNG.
 
 ### Decisions (locked in)
 
 | Decision | Choice |
 | --- | --- |
-| Toolset relation | New toolset, shared engine: `createDiagramTools()` reuses the restored node–edge engine's validation/layout/SVG/PNG guts; the Goal 2 `chart_preview`/`render_chart` chart toolset is untouched |
-| Shapes | `process` (rectangle), `decision` (diamond), `stadium` (start/end pill), `io` (parallelogram); node auto-sizes from label length; optional Lucide `icon` per node |
-| Edge routing | **Orthogonal (elbow/right-angle) connectors** with arrowheads by default; curved Béziers remain the diagram engine's default |
-| Layouts | New `flow` layout (longest-path linear chain, branch/merge ordering, back-edge loop) plus reuse of `hierarchy`/`layered`; `top-down` / `left-to-right` |
-| Deliverables | `<project>/files/<slug>.svg`, `.png`, `.json` (same scheme as the old Goal 2) |
-| Embedding | Rasterized PNG picture on the slide via `slide.addImage({ path })`; the pptx module opts into both toolsets |
+| Toolset relation | New toolset, mermaid engine: `createDiagramTools()` renders mermaid DSL → SVG → PNG; the Goal 2 `chart_preview`/`render_chart` chart toolset is untouched |
+| Input | Model-authored **mermaid DSL source** (`flowchart TD/LR`, `sequenceDiagram`, `stateDiagram-v2`, `classDiagram`, `erDiagram`, `pie`) — mermaid handles all layout/routing/shape math, so the model authors text, not graph JSON |
+| DOM shim | `isomorphic-mermaid` (wraps mermaid + jsdom + svgdom + dompurify, top-level `mermaid.render(id, src) → { svg }`); ESM-only → dynamic `await import()` from CJS |
+| SVG labels | `htmlLabels: false` + `securityLevel: 'loose'` so labels are SVG `<text>` (resvg cannot rasterize `<foreignObject>`/HTML labels) |
+| Rasterization | Reuses existing `@resvg/resvg-js` (already a dep, already `asarUnpack`'d); no new native deps, no `npmRebuild` |
+| Process isolation | New dedicated Electron **utility process** `diagram-render-worker.js` (a `main` entry in `electron.vite.config.ts`, spawned by `diagramRenderer.ts`): mermaid parsing + DOM rendering + resvg run isolated; a native crash / hang only fails the in-flight render tool. Plain-Node in-process fallback for tsx tests |
+| Deliverables | `<project>/modules/temp/<slug>.png` + `.svg` + `.json` (diagramType, width, height) via `uniqueModuleTempPath`; temp files deleted once the deck is built |
+| Embedding | Rasterized PNG on the slide via `slide.addImage({ path })`; the pptx module opts into both toolsets |
 | Sharing | Opt-in composition: `createDiagramTools(): PTTool[]` in `src/main/modules/shared/`; pptx module merges it into its own `tools` |
-| Not chosen | Merging diagram features into Goal 2's chart toolset (keeps `render_diagram` focused); external layout engines (graphviz) / headless rendering |
+| Tool surface | `diagram_preview` (in-memory dry run, writes nothing) **and** `render_diagram` (renders PNG + SVG + JSON, returns the PNG path for slide embedding) |
+| Supported diagrams | `flowchart` (TD/LR), `sequenceDiagram`, `stateDiagram-v2`, `classDiagram`, `erDiagram`, `pie` — flowchart/sequence are the well-tested render targets under jsdom |
+| Run `outputFile` | `render_diagram` deliberately omits the `{ path, file }` pair (same as `render_chart`), so a pptx run's `outputFile` is the final `.pptx`, not the intermediate diagram PNG |
+| Not chosen | Restoring the rewritten `graph.ts` node–edge engine; `@mermaid-js/mermaid-cli` + puppeteer (headless browser, breaks invariants); gantt diagrams (known zero-width `viewBox` bug under jsdom) |
 
 ### Dependencies
 
-- None new. Reuses `@resvg/resvg-js` and the restored node–edge engine helpers.
+- `isomorphic-mermaid` (runtime; pure JS — pulls `mermaid`, plus `jsdom`/`svgdom`/`dompurify`).
 
 ### Files
 
-#### Edit: `src/main/modules/shared/graph.ts`
-Backward-compatible extensions (the Goal 2 chart toolset is untouched):
+#### New: `src/main/modules/shared/mermaid.ts`
+Framework-agnostic diagram engine (pure functions, no I/O):
 
-- `shape` gains `process | decision | stadium | io` alongside `box`/`ellipse`.
-- Rendering primitives for polygon (diamond), stadium (pills), parallelogram (I/O).
-- Orthogonal (elbow) edge path generator (diagram-mode default); curved Béziers stay the default for `render_diagram`.
-- New `flow` layout: longest-path ranking from sources, ordered branches/merges, and a back-edge pass to route loops.
-- Re-exported entry points so `createDiagramTools` composes without any coupling to the Goal 2 chart toolset.
+- `validateMermaid(src)` — `mermaid.parse(src)` (fast, no DOM) → returns the diagram type or the mermaid parse error for the model to self-correct.
+- `renderMermaidSvg(src)` — lazy `await import('isomorphic-mermaid')`, initialize `{ startOnLoad:false, securityLevel:'loose', htmlLabels:false, flowchart:{ htmlLabels:false } }`, `render(id, src)` → `{ svg }`.
+- `svgToPng(svg, { width? })` — `new Resvg(svg, { fitTo })` → PNG buffer.
+- `svgBounds(svg)` — parse `viewBox`/`width`/`height` for the meta JSON.
+
+#### New: `src/main/modules/shared/diagram-render-worker.ts`
+Electron utility-process entry (mirrors `chart-render-worker.ts`): receives `{ type:'render', reqId, src, width? }`, returns `{ ok, png, svg, width, height, diagramType }`.
+
+#### New: `src/main/modules/shared/diagramRenderer.ts`
+`renderDiagramIsolated(src, size?)` — forks `diagram-render-worker.js` (or in-process fallback on plain Node, like `chartRenderer.ts`), timeout + kill on hang, `PTNOTES_DIAGRAM_WORKER` env override for tests.
 
 #### New: `src/main/modules/shared/createDiagramTools.ts`
 `createDiagramTools(): PTTool[]`:
 
-- `diagram_layout` (`{ diagram, layout?: 'flow'|'hierarchy'|'layered', direction? }`) → dry-run preview: `{ ok, nodeCount, edgeCount, width, height, nodes: [{ id, shape, x, y }] }`.
-- `render_diagram` (`{ diagram, layout?, direction?, filename?, pixelWidth? }`) → renders `<project>/files/<slug>.svg` + `.png` + `.json` via `service.uniqueOutputPath`, returns `{ ok, png, svg, json, width, height, nodeCount, edgeCount }` and deliberately omits the `{ path, file }` pair so a pptx run keeps `outputFile` = final `.pptx`.
-- Tool docs state local/in-process only (no network, CLI, headless).
+- `diagram_preview` (`{ diagram }`) → dry-run: render in memory → `{ ok:true, diagramType, width, height }`; writes nothing. Docs list supported diagram types + local-only rendering.
+- `render_diagram` (`{ diagram, filename?, pixelWidth? }`) → writes `<project>/modules/temp/<slug>.png` + `.svg` + `.json`, returns `{ ok:true, diagramType, png, svg, json, width, height }`; no `path`/`file` fields on purpose (see `outputFile` decision).
+- Tool docs list the supported diagram types, require **SVG-only labels** (`htmlLabels:false`), and state local/in-process/no-headless rendering.
 
 #### Edit: `src/main/modules/pptx/builder.ts`
-- Add `'diagram'` to `SlideLayout` (second picture-slot layout alongside `chart`), `PptxChartSpec`-style `slide.diagram: { png?, x?, y?, w?, h? }`, and a `diagram` case: `slide.addImage({ path, x, y, w, h, altText })` with a greedy centered body fill; missing file → clear `{ ok: false, error }`.
+- Add `'diagram'` to `SlideLayout` (second picture-slot layout alongside `chart`), `PptxChartSpec`-style `slide.diagram: { png?, x?, y?, w?, h? }` (or a bare png path string), and a `diagram` case: `slide.addImage({ path, x, y, w, h, altText })` with a greedy centered body fill via `pngDimensions`; missing/invalid file → clear `{ ok: false, error }`.
 
 #### Edit: `src/main/modules/pptx/index.ts`
-- `tools: [...createChartTools(), ...createDiagramTools(), ...createLucideIconTools(), createPptxFileTool]`.
+- `tools: [...createDiagramTools(), ...createChartTools(), ...createLucideIconTools(), createPptxFileTool]`.
 - `DESIGN_SCHEMA` documents `layout: "diagram"` + `diagram: { png, x?, y?, w?, h? }`.
-- `systemPrompt`: for flow/process content instruct the subagent — author the diagram JSON, `diagram_layout` to preview, `render_diagram` for the PNG path, then set the slide `diagram` field; remind local-only rendering.
+- Extend `collectChartPngPaths` to also collect `diagram`-slot pngs for temp cleanup after the build.
+- `systemPrompt`: for flow/process/sequence content instruct the subagent — author the diagram in **mermaid DSL**, call `diagram_preview` to sanity-check, call `render_diagram` to get the PNG path, then set the slide `diagram` field; remind local-only (no network/CLI/headless browser).
+
+#### Edit: `electron.vite.config.ts`
+- Append `'diagram-render-worker': resolve('src/main/modules/shared/diagram-render-worker.ts')` to the main build's `rollupOptions.input` (mirroring the chart worker).
+
+#### Edit: `scripts/test-modules.mts`
+- Shared-layer units: `validateMermaid` accepts valid flowchart/sequence and rejects invalid mermaid; `renderMermaidSvg` yields an `<svg…`; `svgToPng` yields PNG magic bytes; `svgBounds` reads the viewBox.
+- Tools: `diagram_preview` returns type + dims without writing; `render_diagram` writes `.png` + `.svg` + `.json`, returns the `png` path, omits `path`/`file`, surfaces mermaid parse errors.
+- Builder: slide with `layout: 'diagram'` + a rendered PNG embeds; missing/relative png → `{ ok: false }`.
+
+#### Edit: `docs/module-development.md`
+- "Shared tools" section entry: reuse `createDiagramTools` (`isomorphic-mermaid`, in-process) so future modules get preview/render diagrams from mermaid DSL with zero framework changes.
 
 ### Verification
 
