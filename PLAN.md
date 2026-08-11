@@ -5,6 +5,75 @@ a self-contained plan; the current in-work goal is at the top.
 
 ---
 
+# Goal 3 (next) — DOCX module (Word documents, mirror of the PPTX module)
+
+## Objective
+
+Add a **Word (DOCX)** module identical in shape to the existing `pptx` module: a background
+subagent (started via `start_module`) plans steps, authors a JSON document design, reuses the
+shared chart/diagram/infographic/icon tool-packs, and calls `create_docx_file` to save
+`<project>/files/<slug>.docx`. Everything downstream (module card, reveal pills, history
+overlay, Settings → Modules toggle, `outputFiles` capture, `modules:*` IPC) is
+registry-driven and generic — **no renderer / preload / IPC / shared-types changes needed**.
+
+## Decisions (locked in)
+
+| Decision | Choice |
+| -------- | ------ |
+| Rendering engine | `docx` npm package (v9.7.1, pure-JS OOXML builder, MIT, ~4.8M weekly downloads — the Word analog of `pptxgenjs`) |
+| Runtime location | In-process main process (pure JS, no native deps → **no utility-process worker**; consistent with `pptxgenjs`) |
+| Design schema | JSON **block** model (Word is page-flow, not slide-based): title-page / heading / paragraph / bullets / numbered / table / quote / callout / chart / diagram / infographic / divider / page-break |
+| Shared tools | Reuse `createDiagramTools`, `createChartTools`, `createInfographicTools`, `createLucideIconTools` |
+| Deliverable | Single `.docx` in `<project>/files/` via `uniqueOutputPath`; temp images cleaned by `collectChartPngPaths` + `cleanupModuleTempFiles` |
+| Tests | New `scripts/test-docx.mts` following the `test-modules.mts` harness; wired into the `test` script |
+
+## Key facts from research
+
+- Module contract in `src/main/modules/types.ts`; runner merges
+  `[...baseTools, ...module.tools, set_plan, update_step]` and feeds the module def's
+  `description` into the main chat `start_module` tool.
+- `pptx/index.ts` (`createPptxFileTool`) is the template: resolve project → parse design JSON
+  → stem from `filename`/`title` → `ctx.service.uniqueOutputPath(project, '<stem>.docx')` →
+  builder → on failure unlink output; on success `collectChartPngPaths(design)` →
+  `cleanupModuleTempFiles`, return `{ ok, path, file }` so `runner.captureOutput` picks it up.
+- `pptx/builder.ts` provides the `pngDimensions` IHDR helper + `placePicture` aspect-ratio
+  fitting pattern to reuse for embedding chart/diagram/infographic PNGs into the document.
+- `docx` supports everything needed: `Document`/`Packer.toBuffer`, `Paragraph`/`TextRun`,
+  `HeadingLevel`, bullet + `numbering` config for lists, `Table`/`TableRow`/`TableCell`
+  (`WidthType.PERCENTAGE`), `ImageRun({ type: 'png', data, transformation })`, `PageBreak`,
+  borders/shading, `Footer` + `footerReference`, page size/orientation + margins.
+- Deliverable lands in `<project>/files/`; `.docx` is a binary zip so it behaves like `.pptx`
+  (not in the `#` file picker, not `read_file`-able) — acceptable, it is an external deliverable.
+
+## Implementation steps (summary)
+
+1. Add `"docx": "^9.7.1"` to `package.json` dependencies.
+2. `src/main/modules/docx/builder.ts` — `buildDocx(design, outPath)` → `{ ok, path, blockCount } | { ok: false, error }`:
+   - Validate object + non-empty `blocks`.
+   - Page geometry from `orientation` (`portrait`|`landscape`) + `margins` (`normal` 1" / `narrow` 0.5" / `wide` 1.25") via `convertInchesToTwip`.
+   - Per block: `title-page` (centered primary title + accent subtitle + optional Lucide icon `ImageRun`, then `PageBreak`), `heading` (`HEADING_1..6`, primary H1), `paragraph`, `bullets`/`numbered` (level 1 for tab-indented sub-items), `table` (full-width, primary-shaded header row, alternating fills), `quote`/`callout` (shaded + accent border), `divider`, `page-break`, and `chart`/`diagram`/`infographic` image blocks (intrinsic-size fit into usable page width, aspect-preserved, centered, optional `width` in inches + caption).
+   - Optional `footer` text + page number via `Footer`/`footerReference`.
+   - `Packer.toBuffer` → `fs.writeFile`; errors wrapped as `Could not build the document: …`.
+3. `src/main/modules/docx/index.ts` — `collectChartPngPaths` (copy from pptx), `DESIGN_SCHEMA` in the tool description, `createDocxFileTool` (`create_docx_file`: `project?`/`document` required/`filename?`), and `createDocxModule()`:
+   - `id: 'docx'`, `name: 'Word (DOCX)'`, `summary`, `description` (for `start_module`), `systemPrompt` guiding document structure (headings → paragraphs → bullets → tables → quote/callout; one image type per concern; Lucide icon for the title page; linear readable flow; don't invent data).
+   - `outputTool: 'create_docx_file'`, `tools: [...createDiagramTools(), ...createChartTools(), ...createInfographicTools(), ...createLucideIconTools(), createDocxFileTool]`.
+4. Register in `src/main/index.ts`: `moduleRegistry.register(createDocxModule())` next to pptx/infographic.
+5. `scripts/test-docx.mts` (new, harness copied from `test-modules.mts`):
+   - `buildDocx` unit tests (valid block design → non-trivial `.docx` zip `PK` magic + size; reject empty blocks / non-object).
+   - Embed chart/diagram/infographic PNGs → builds; `create_docx_file` deletes temp files (`assert.rejects(fs.access(...))`).
+   - Full scripted run (`set_plan` → `update_step` → `create_docx_file` → done): `outputFile.endsWith('.docx')`, `outputFiles.length === 1`, file in `files/`, events broadcast, persisted, `deleteRun` removes output.
+   - Premature finish without output tool → `failed`.
+   - Wire `tsx --tsconfig tsconfig.node.json scripts/test-docx.mts &&` into the `test` script.
+6. Docs: `AGENTS.md` (architecture tree + on-disk layout `module deliverables (.pptx, .svg/.png, .docx)`) and `CHANGELOG.md`.
+
+## Risks to verify during implementation
+
+- `docx` numbering config shape for `numbered` blocks (decimal `NumberFormat.DECIMAL`, `%1.` text).
+- `ImageRun` pixel-vs-EMU sizing when embedding rasterized PNGs (compute usable page width in px correctly).
+- `Footer` requires explicit `footerReference` in section properties.
+
+---
+
 # Goal 1 — Module chat history (read-only overlay)
 
 ## Objective

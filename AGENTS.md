@@ -16,6 +16,7 @@ PTNotes is a desktop app (Electron) for markdown notes, todo task lists, and an 
 - cheerio (local HTML → text parsing for `web_fetch`)
 - `isomorphic-mermaid` (mermaid v11 + jsdom/svgdom/dompurify DOM shim) for in-process module diagram rendering (flowchart/sequence/state/ER/pie/gantt DSL → SVG)
 - `@antv/infographic` (SSR entry via `linkedom`) for in-process module infographic rendering (DSL/JSON design → SVG, ~276 built-in templates)
+- `docx` (pure-JS OOXML builder) for in-process module Word-document rendering (JSON block design → .docx)
 - Plain CSS (no UI framework), `react-markdown` + `remark-gfm` + `remark-breaks` for chat rendering
 - electron-builder for packaging (optional)
 
@@ -66,7 +67,7 @@ Run `npm run typecheck` and `npm run lint` after any change.
 └── <ProjectName>/
     ├── notes/*.md          (one file per note)
     ├── TODO.md             (markdown checklist: `- [ ]` / `- [x]`)
-    ├── files/*.{pdf,md,txt,json,log,yaml,yml} (attachments copied on chat drop) + module deliverables (.pptx, .svg/.png)
+    ├── files/*.{pdf,md,txt,json,log,yaml,yml} (attachments copied on chat drop) + module deliverables (.pptx, .svg/.png, .docx)
     ├── modules/*.json        (module run state + prompts; kept out of the # file picker)
     ├── modules/*.chat.json   (per-run subagent transcript, read-only history overlay)
     ├── modules/temp/*.{png,svg,json}  (temp module/shared-tool output; deleted once the deck is built)
@@ -111,6 +112,7 @@ src/
 │       ├── tool.ts       # start_module tool (main chat → module run)
 │       ├── pptx/         # PowerPoint module (design schema → buildPptx)
 │       ├── infographic/  # standalone infographic module (design schema → create_infographic_file; reuses the shared tool-pack)
+│       ├── docx/         # Word document module (design schema → buildDocx; reuses the shared tool-pack)
 │       └── shared/
 │           ├── chart.ts          # Chart.js design validation + in-process renderChartPng (@napi-rs/canvas)
 │           ├── chart-render-worker.ts  # utility-process entry (forks under Electron)

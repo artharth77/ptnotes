@@ -6,6 +6,15 @@ All notable changes to PTNotes are documented in this file.
 
 ### Added
 
+#### Word documents (DOCX module)
+
+- New **Word (DOCX) module** mirroring the PPTX module: the background subagent plans steps, reads any referenced `note:`/`file:` inputs, authors a JSON block design and calls `create_docx_file` to save a ready-to-open `<project>/files/<slug>.docx`.
+- The design is a linear **block model** (`title-page`, `heading` level 1–6, `paragraph`, `bullets`, `numbered`, `table`, `quote`, `callout`, `chart`, `diagram`, `infographic`, `divider`, `page-break`) with optional portrait/landscape orientation, `normal`/`narrow`/`wide` margins, a theme palette (`primary`/`accent`/`fontFace`) and an optional footer with page numbers.
+- Rendered in-process by the pure-JS `docx` OOXML builder (no native deps, so no utility-process worker is needed — consistent with `pptxgenjs`).
+- Reuses the shared tool-packs: `render_chart`/`render_diagram`/`render_infographic` PNGs are embedded as full-width, aspect-preserving pictures with optional captions; Lucide icons rasterize onto the title page; temp render files (`<project>/modules/temp/*`) are cleaned up once the document is built (`collectChartPngPaths` + `cleanupModuleTempFiles`).
+- Registered in the module registry so it appears in the Modules tab, `start_module` and Settings → Modules; the generic module card / history overlay / reveal pills require no renderer changes.
+- New test suite `scripts/test-docx.mts` (wired into `npm test`): builder unit tests, embedded chart/diagram/infographic blocks + temp-file cleanup, full scripted subagent run, disabled-module gate, and premature-finish failure.
+
 #### Module run chat history
 
 - Every module run now records its subagent conversation (system prompt, user prompt, assistant turns, tool calls with results) as a read-only transcript.
