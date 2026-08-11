@@ -61,6 +61,14 @@ The **Settings** page (⚙ icon in the top bar) is organized by category:
 - **AI Settings** — connects the assistant to any OpenAI-compatible provider: base URL, API key, and model (editable combobox of available models), plus an optional **PDF upload** toggle for sending PDFs as raw file attachments.
 - **Modules** — lists the installed background modules and their enable/disable toggles. Disabling a module hides it from the AI assistant and prevents it from being started; the toggles apply immediately.
 
+## Screenshots
+
+*Note with AI chat*
+![AI chat](assets/screenshot-1-chat-th.png)
+
+*Module run log*
+![Module run log](assets/screenshot-2-module-log-th.png)
+
 ## Commands
 
 - `npm run dev` — development with HMR
@@ -68,10 +76,6 @@ The **Settings** page (⚙ icon in the top bar) is organized by category:
 - `npm run typecheck` — TypeScript checks (main + renderer)
 - `npm run lint` — ESLint
 - `npm run build` — typecheck + electron-vite production build
-
-## Recommended IDE Setup
-
-- [VSCode](https://code.visualstudio.com/) + [ESLint](https://marketplace.visualstudio.com/items?itemName=dbaeumer.vscode-eslint) + [Prettier](https://marketplace.visualstudio.com/items?itemName=esbenp.prettier-vscode)
 
 ## Project Setup
 
@@ -100,4 +104,4 @@ $ npm run build:mac
 $ npm run build:linux
 ```
 
-Packaged artifacts are written to `dist/` (e.g. `dist/ptnotes-0.2.0.dmg`).
+Packaged artifacts are written to `dist/` (e.g. `dist/ptnotes-0.5.0.dmg`).
