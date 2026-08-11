@@ -854,6 +854,10 @@ assert.ok(
   'each step has a status-change timestamp'
 )
 assert.ok(run!.outputFile && run!.outputFile.endsWith('.pptx'), 'output file captured')
+assert.ok(
+  Array.isArray(run!.outputFiles) && run!.outputFiles.length === 1,
+  'single-output module records exactly one outputFiles entry'
+)
 const outStat = await fs.stat(run!.outputFile!)
 assert.ok(outStat.size > 100, 'output pptx exists on disk')
 assert.ok(eventTypes.includes('step'), 'step events were broadcast')
@@ -936,6 +940,14 @@ assert.ok(
   infoRun!.outputFile && infoRun!.outputFile.endsWith('.svg'),
   'infographic output file captured'
 )
+assert.ok(
+  Array.isArray(infoRun!.outputFiles) && infoRun!.outputFiles.length === 2,
+  'infographic module records BOTH .svg and .png outputs'
+)
+assert.ok(
+  infoRun!.outputFiles!.every((p) => p.endsWith('.svg') || p.endsWith('.png')),
+  'multi-file output list contains only svg/png deliverables'
+)
 const infoOutStat = await fs.stat(infoRun!.outputFile!)
 assert.ok(infoOutStat.size > 100, 'infographic output svg exists on disk')
 const infoFiles = await service.listFiles(PROJECT)
@@ -943,8 +955,18 @@ assert.ok(
   infoFiles.includes('standalone-infographic.svg'),
   'standalone infographic module delivers into <project>/files/'
 )
+assert.ok(
+  infoFiles.includes('standalone-infographic.png'),
+  'standalone infographic module delivers the matching .png alongside the .svg'
+)
 const infoDel = await infoManager.deleteRun(PROJECT, infoRunId, true)
 assert.equal(infoDel, true, 'infographic run deletable')
+const infoFilesAfterDel = await service.listFiles(PROJECT)
+assert.ok(
+  !infoFilesAfterDel.includes('standalone-infographic.svg') &&
+    !infoFilesAfterDel.includes('standalone-infographic.png'),
+  'deleting the run with deleteOutputFiles removes BOTH the .svg and .png'
+)
 
 // ---- disabled module enforcement ----
 const { SettingsStore } = await import('../src/main/settings')

@@ -155,7 +155,10 @@ export interface ModuleRun {
   updatedAt: number
   startedAt?: number
   finishedAt?: number
+  /** Primary output file (first produced). Kept for backwards compatibility. */
   outputFile?: string
+  /** Every deliverable file the run produced (in order). */
+  outputFiles?: string[]
   summary?: string
   error?: string
 }
@@ -185,6 +188,7 @@ export interface ModuleEvent {
   step?: ModuleStepState
   stepIndex?: number
   outputFile?: string
+  outputFiles?: string[]
   error?: string
   summary?: string
 }

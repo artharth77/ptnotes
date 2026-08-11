@@ -50,7 +50,12 @@ export function ModuleCard({
   const [deleteOutputFiles, setDeleteOutputFiles] = useState(false)
 
   const pct = run.steps.length > 0 ? Math.round((doneSteps / run.steps.length) * 100) : 0
-  const hasActions = Boolean(run.outputFile || run.summary)
+  const outputFiles = run.outputFiles?.length
+    ? run.outputFiles
+    : run.outputFile
+      ? [run.outputFile]
+      : []
+  const hasActions = Boolean(outputFiles.length > 0 || run.summary)
   const toggleActions = (): void => {
     if (hasActions) setActionsOpen((v) => !v)
   }
@@ -175,22 +180,23 @@ export function ModuleCard({
       <div className={`module-card-collapse${actionsOpen ? ' open' : ''}`}>
         <div className="module-card-collapse-inner">
           <div className="module-card-actions">
-            {run.outputFile && (
+            {outputFiles.map((file) => (
               <button
+                key={file}
                 className={`btn small ghost${revealError ? ' module-output-missing' : ''}`}
                 title={revealError || 'Reveal output file'}
                 onClick={(e) => {
                   e.stopPropagation()
                   if (!activeProject) return
-                  void window.ptnotes.modules.reveal(activeProject, run.runId).then((res) => {
+                  void window.ptnotes.modules.reveal(activeProject, run.runId, file).then((res) => {
                     setRevealError(res.ok ? '' : (res.error ?? 'File not found.'))
                   })
                 }}
               >
                 {revealError ? '⚠ ' : '📄 '}
-                {run.outputFile.split(/[\\/]/).pop()}
+                {file.split(/[\\/]/).pop()}
               </button>
-            )}
+            ))}
             {active && (
               <button
                 className="btn small danger"
@@ -217,11 +223,12 @@ export function ModuleCard({
               type="checkbox"
               checked={deleteOutputFiles}
               onChange={(e) => setDeleteOutputFiles(e.target.checked)}
-              disabled={!run.outputFile}
+              disabled={outputFiles.length === 0}
             />
-            Also delete the related output file{run.outputFile ? '' : ' (no output file)'}
+            Also delete the related output file{outputFiles.length === 1 ? '' : 's'}
+            {outputFiles.length === 0 ? ' (no output files)' : ` (${outputFiles.length})`}
           </label>
-          {!run.outputFile && <p className="hint">This run has no output file.</p>}
+          {outputFiles.length === 0 && <p className="hint">This run has no output files.</p>}
           <div className="modal-actions">
             <button className="btn" onClick={() => setConfirmDelete(false)} disabled={deleting}>
               Cancel

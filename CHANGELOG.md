@@ -28,6 +28,7 @@ All notable changes to PTNotes are documented in this file.
 - Validation rejects unknown templates, malformed syntax and empty data blocks (the SSR entry otherwise hangs for its 10s internal timeout on a render that never completes).
 - PPTX slides accept a new `infographic` layout that embeds the rendered PNG (same `x/y/w/h` placement and aspect-ratio scaling semantics as `chart`/`diagram`); temporary infographic files (`modules/temp/*.png` + `*.svg` + `*.json`) are deleted automatically once the deck is built (`collectChartPngPaths` now also collects `infographic` keys).
 - New **standalone `infographic` module**: the subagent picks a template, authors the design and calls `create_infographic_file` to save the final deliverable as `<project>/files/<slug>.svg` (primary vector output) + a matching `.png`; registered in the module registry so it appears in the Modules tab, `start_module` and Settings → Modules.
+- Module runs now record **multiple output files**: a run tracks every deliverable in `outputFiles` (output tools can return a `files` array alongside `path`/`file`), the module card shows one 📄 reveal pill per file, `modules:reveal` accepts an optional `filePath` to reveal a specific file, and `deleteRun`/`clearHistory` with the delete-output option removes all of them. The infographic module delivers both `.svg` + `.png` as separate pills.
 
 ## [0.4.0] — 2026-08-10
 

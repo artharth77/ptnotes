@@ -558,10 +558,10 @@ export class PTNotesService {
       }
       if (!run || typeof run.runId !== 'string' || active.has(run.runId)) continue
       if (run.runId !== validateNoteId(run.runId)) continue
-      if (deleteOutputFiles && run.outputFile) {
+      if (deleteOutputFiles) {
         const prefix = outputDir + sep
-        if (run.outputFile.startsWith(prefix)) {
-          await fs.rm(run.outputFile, { force: true })
+        for (const out of outputFilesOf(run)) {
+          if (out.startsWith(prefix)) await fs.rm(out, { force: true })
         }
       }
       await fs.rm(full, { force: true })
@@ -596,11 +596,11 @@ export class PTNotesService {
       } catch {
         run = undefined
       }
-      if (deleteOutputFiles && run?.outputFile) {
+      if (deleteOutputFiles) {
         const outputDir = this.filesDir(project)
         const prefix = outputDir + sep
-        if (run.outputFile.startsWith(prefix)) {
-          await fs.rm(run.outputFile, { force: true })
+        for (const out of outputFilesOf(run)) {
+          if (out.startsWith(prefix)) await fs.rm(out, { force: true })
         }
       }
     }
@@ -817,6 +817,13 @@ function validateNoteId(id: string): string {
     throw new Error(`Invalid note id: ${id}`)
   }
   return id
+}
+
+/** All output files of a run: the `outputFiles` list, or the legacy `outputFile`. */
+function outputFilesOf(run: ModuleRun | undefined): string[] {
+  if (!run) return []
+  if (Array.isArray(run.outputFiles) && run.outputFiles.length > 0) return run.outputFiles
+  return run.outputFile ? [run.outputFile] : []
 }
 
 function isInside(parent: string, child: string): boolean {

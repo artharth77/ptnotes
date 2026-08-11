@@ -93,6 +93,7 @@ const createInfographicFileTool: PTTool = {
         project,
         path: svgPath,
         file: basename(svgPath),
+        files: [svgPath, pngPath],
         png: pngPath,
         template: out.template,
         width: out.width,

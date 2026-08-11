@@ -61,8 +61,8 @@ export function registerModulesIpc(
 
   ipcMain.handle(
     'modules:reveal',
-    async (_e: IpcMainInvokeEvent, project: string, runId: string) => {
-      return manager.reveal(project, runId)
+    async (_e: IpcMainInvokeEvent, project: string, runId: string, filePath?: string) => {
+      return manager.reveal(project, runId, filePath)
     }
   )
 

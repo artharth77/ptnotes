@@ -86,6 +86,7 @@ export interface ModuleNotifyEvent {
   step?: ModuleStepState
   stepIndex?: number
   outputFile?: string
+  outputFiles?: string[]
   error?: string
   summary?: string
 }
@@ -344,16 +345,36 @@ export class ModuleRunner {
     }
   }
 
-  /** Track the first successful tool result that produced an output file path. */
+  /** Track every successful tool result that produced an output file path. */
   private captureOutput(result: string): void {
-    if (this.run.outputFile) return
     try {
-      const parsed = JSON.parse(result) as { ok?: boolean; path?: string; file?: string }
-      if (parsed.ok && typeof parsed.path === 'string' && typeof parsed.file === 'string') {
-        this.run.outputFile = parsed.path
-        this.run.updatedAt = Date.now()
-        this.notify(this.run, { type: 'output', outputFile: parsed.path })
+      const parsed = JSON.parse(result) as {
+        ok?: boolean
+        path?: string
+        file?: string
+        files?: string[]
       }
+      if (!parsed.ok || typeof parsed.path !== 'string' || typeof parsed.file !== 'string') return
+      const list = this.run.outputFiles ?? []
+      const collected = [parsed.path]
+      if (Array.isArray(parsed.files)) {
+        for (const f of parsed.files) {
+          if (typeof f === 'string' && f.trim() && !collected.includes(f)) collected.push(f)
+        }
+      }
+      const merged = [...list]
+      for (const p of collected) {
+        if (p && !merged.includes(p)) merged.push(p)
+      }
+      if (merged.length === list.length) return
+      this.run.outputFiles = merged
+      this.run.outputFile = merged[0]
+      this.run.updatedAt = Date.now()
+      this.notify(this.run, {
+        type: 'output',
+        outputFile: merged[0],
+        outputFiles: merged
+      })
     } catch {
       // not a JSON tool result
     }

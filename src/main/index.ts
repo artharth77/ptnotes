@@ -20,6 +20,8 @@ import { createInfographicModule } from './modules/infographic'
 import { SettingsStore } from './settings'
 import { AIConfigStore } from './ai/config'
 
+app.setName('PTNotes')
+
 let mainWindow: BrowserWindow | null = null
 
 function createWindow(): void {
@@ -57,6 +59,10 @@ function createWindow(): void {
 
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.ptnotes.app')
+
+  if (process.platform === 'darwin' && !app.isPackaged && app.dock) {
+    app.dock.setIcon(icon)
+  }
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
