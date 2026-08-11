@@ -15,6 +15,7 @@ PTNotes is a desktop app (Electron) for markdown notes, todo task lists, and an 
 - `openai` npm SDK with `baseURL` override (works with OpenAI, OpenRouter, Groq, LM Studio, Ollama, etc.)
 - cheerio (local HTML → text parsing for `web_fetch`)
 - `isomorphic-mermaid` (mermaid v11 + jsdom/svgdom/dompurify DOM shim) for in-process module diagram rendering (flowchart/sequence/state/ER/pie/gantt DSL → SVG)
+- `@antv/infographic` (SSR entry via `linkedom`) for in-process module infographic rendering (DSL/JSON design → SVG, ~276 built-in templates)
 - Plain CSS (no UI framework), `react-markdown` + `remark-gfm` + `remark-breaks` for chat rendering
 - electron-builder for packaging (optional)
 
@@ -65,7 +66,7 @@ Run `npm run typecheck` and `npm run lint` after any change.
 └── <ProjectName>/
     ├── notes/*.md          (one file per note)
     ├── TODO.md             (markdown checklist: `- [ ]` / `- [x]`)
-    ├── files/*.{pdf,md,txt,json,log,yaml,yml} (attachments copied on chat drop)
+    ├── files/*.{pdf,md,txt,json,log,yaml,yml} (attachments copied on chat drop) + module deliverables (.pptx, .svg/.png)
     ├── modules/*.json        (module run state + prompts; kept out of the # file picker)
     ├── modules/*.chat.json   (per-run subagent transcript, read-only history overlay)
     ├── modules/temp/*.{png,svg,json}  (temp module/shared-tool output; deleted once the deck is built)
@@ -109,6 +110,7 @@ src/
 │       ├── runner.ts     # subagent loop; persists a read-only transcript to <project>/modules/<runId>.chat.json each turn (removed on run delete/retry)
 │       ├── tool.ts       # start_module tool (main chat → module run)
 │       ├── pptx/         # PowerPoint module (design schema → buildPptx)
+│       ├── infographic/  # standalone infographic module (design schema → create_infographic_file; reuses the shared tool-pack)
 │       └── shared/
 │           ├── chart.ts          # Chart.js design validation + in-process renderChartPng (@napi-rs/canvas)
 │           ├── chart-render-worker.ts  # utility-process entry (forks under Electron)
@@ -117,7 +119,11 @@ src/
 │           ├── mermaid.ts        # mermaid DSL validation + renderMermaidSvg + svgToPng via @resvg (DOM shim; no headless browser)
 │           ├── diagram-render-worker.ts # utility-process entry (forks under Electron)
 │           ├── diagramRenderer.ts # isolates mermaid+DOM rendering in an Electron utilityProcess (failures contained; plain-Node fallback)
-│           └── createDiagramTools.ts # diagram_preview + render_diagram tools
+│           ├── createDiagramTools.ts # diagram_preview + render_diagram tools
+│           ├── infographic.ts    # @antv/infographic DSL/JSON validation + renderInfographicSvg + svgToPng via @resvg (linkedom SSR; no network)
+│           ├── infographic-render-worker.ts # utility-process entry (forks under Electron)
+│           ├── infographicRenderer.ts # isolates infographic SSR+DOM rendering in an Electron utilityProcess (failures contained; plain-Node fallback)
+│           └── createInfographicTools.ts # list_infographic_templates + infographic_preview + render_infographic tools
 ├── preload/             # contextBridge: window.ptnotes typed API + index.d.ts
 ├── renderer/            # React app
 │   ├── src/
@@ -145,6 +151,7 @@ src/
 - Chat HTML is rendered via `react-markdown` with raw HTML escaped (XSS-safe); `<think>` blocks and user/error messages stay plain text.
 - Chart rasterization (Chart.js onto `@napi-rs/canvas`/skia) must stay isolated in the Electron **utility process** (`chart-render-worker.js`, spawned by `chartRenderer.ts`): a native segfault there must only fail the in-flight render tool, never crash the app. Module chart tools must call `renderChartIsolated`, never `renderChartPng` on the main process. The worker is a second `main` entry in `electron.vite.config.ts`; `PTNOTES_CHART_WORKER` env overrides its path for tests.
 - Diagram rendering (mermaid DSL → SVG via the jsdom/svgdom shim, rasterized by `@resvg/resvg-js`) must stay isolated in the Electron **utility process** (`diagram-render-worker.js`, spawned by `diagramRenderer.ts`): heavy DOM parsing and any native crash there must only fail the in-flight render tool, never crash the app. Module diagram tools must call `renderDiagramIsolated`, never render mermaid on the main process. The worker is a `main` entry in `electron.vite.config.ts`; `PTNOTES_DIAGRAM_WORKER` env overrides its path for tests. Mermaid is ESM-only, so it is always loaded via dynamic `import()`.
+- Infographic rendering (`@antv/infographic` SSR entry onto a `linkedom` DOM shim, rasterized by `@resvg/resvg-js`) must stay isolated in the Electron **utility process** (`infographic-render-worker.js`, spawned by `infographicRenderer.ts`): the SSR renderer installs browser-like globals (`window`/`document`/DOM classes) that it never restores, so the shared renderer snapshots/restores those globals around every render, and a heavy SSR/DOM render or native crash must only fail the in-flight render tool, never crash the app. Module infographic tools must call `renderInfographicIsolated`, never render on the main process. The worker is a `main` entry in `electron.vite.config.ts`; `PTNOTES_INFOGRAPHIC_WORKER` env overrides its path for tests. The SSR renderer only completes when the design has a `data` block — `icon`/`illus` fields are stripped (offline validation) so the worker never queries the package's remote icon service.
 
 ### Conventions
 

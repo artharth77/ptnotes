@@ -13,8 +13,10 @@ import { ModuleRunManager } from './modules/runs'
 import { buildStartModuleTool } from './modules/tool'
 import { shutdownChartRenderer } from './modules/shared/chartRenderer'
 import { shutdownDiagramRenderer } from './modules/shared/diagramRenderer'
+import { shutdownInfographicRenderer } from './modules/shared/infographicRenderer'
 import type { PTTool } from './ai/tools'
 import { createPptxModule } from './modules/pptx'
+import { createInfographicModule } from './modules/infographic'
 import { SettingsStore } from './settings'
 import { AIConfigStore } from './ai/config'
 
@@ -67,6 +69,7 @@ app.whenReady().then(async () => {
 
   const moduleRegistry = new ModuleRegistry()
   moduleRegistry.register(createPptxModule())
+  moduleRegistry.register(createInfographicModule())
   const moduleManager = new ModuleRunManager(
     service,
     configStore,
@@ -110,4 +113,5 @@ app.on('window-all-closed', () => {
 app.on('will-quit', () => {
   shutdownChartRenderer()
   shutdownDiagramRenderer()
+  shutdownInfographicRenderer()
 })

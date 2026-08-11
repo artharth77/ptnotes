@@ -28,6 +28,7 @@ const { ModuleRegistry } = await import('../src/main/modules/registry')
 const { ModuleRunManager } = await import('../src/main/modules/runs')
 const { createPptxModule } = await import('../src/main/modules/pptx')
 const { buildPptx } = await import('../src/main/modules/pptx/builder')
+const { createInfographicModule } = await import('../src/main/modules/infographic')
 const { searchLucideIcons, getLucideIconSvg, lucideIconPngDataUri } =
   await import('../src/main/modules/shared/lucideIcons')
 
@@ -470,6 +471,274 @@ const missingDiagramPng = await buildPptx(
 )
 assert.equal(missingDiagramPng.ok, false, 'diagram slide without a valid png fails the build')
 
+// ---- shared in-process @antv/infographic engine ----
+const {
+  validateInfographic,
+  renderInfographicSvg,
+  svgBounds: infoSvgBounds,
+  svgToPng: infoSvgToPng,
+  renderInfographicPng,
+  listInfographicTemplates,
+  stripXmlProcessingInstructions,
+  replaceForeignObjectText
+} = await import('../src/main/modules/shared/infographic')
+const { createInfographicTools } = await import('../src/main/modules/shared/createInfographicTools')
+
+const infoDsl = `infographic list-column-simple-vertical-arrow
+data
+  title Product rollout
+  lists
+    - label Research
+      desc Market sizing
+    - label Build
+      desc Core features
+    - label Launch
+      desc Public release
+`
+const infoDslChecked = await validateInfographic(infoDsl)
+assert.equal(infoDslChecked.ok, true, 'valid infographic DSL accepted')
+assert.ok(
+  infoDslChecked.ok && infoDslChecked.template === 'list-column-simple-vertical-arrow',
+  'infographic DSL template detected'
+)
+assert.equal(
+  (await validateInfographic('this is not infographic syntax')).ok,
+  false,
+  'invalid infographic DSL rejected'
+)
+assert.equal(
+  (await validateInfographic({ template: 'no-such-template', data: { lists: [{ label: 'A' }] } }))
+    .ok,
+  false,
+  'unknown infographic template rejected'
+)
+assert.equal(
+  (await validateInfographic({ template: 'list-column-simple-vertical-arrow', data: {} })).ok,
+  false,
+  'infographic without data rejected'
+)
+
+const infoObjChecked = await validateInfographic({
+  template: 'list-column-simple-vertical-arrow',
+  data: { title: 'X', lists: [{ label: 'a', icon: 'rocket' }] },
+  icon: 'stripped'
+})
+assert.equal(infoObjChecked.ok, true, 'infographic object form accepted')
+if (infoObjChecked.ok) {
+  const stripped = infoObjChecked.renderArgs as {
+    data: { lists: { icon?: unknown }[] }
+    icon?: unknown
+  }
+  assert.equal(stripped.icon, undefined, 'top-level icon stripped (offline rendering)')
+  assert.equal(stripped.data.lists[0]?.icon, undefined, 'item icon stripped (offline rendering)')
+}
+
+const tpls = await listInfographicTemplates()
+assert.ok(tpls.length > 100, `infographic template catalog has ${tpls.length} entries`)
+assert.ok(
+  tpls.some((t) => t.name === 'list-column-simple-vertical-arrow'),
+  'infographic catalog lists a known template'
+)
+
+const infoSvg = await renderInfographicSvg(infoDsl)
+assert.ok(
+  infoSvg.svg.trimStart().startsWith('<?xml') || infoSvg.svg.includes('<svg'),
+  'infographic svg rendered'
+)
+const infoBounds = infoSvgBounds(infoSvg.svg)
+assert.ok(infoBounds.width > 0 && infoBounds.height > 0, 'infographic svgBounds read the size')
+const infoPng1 = infoSvgToPng(infoSvg.svg, 800)
+assert.deepEqual(
+  [...infoPng1.subarray(0, 4)],
+  [0x89, 0x50, 0x4e, 0x47],
+  'infographic svg to png magic bytes'
+)
+assert.ok(infoPng1.length > 100, 'infographic png has content')
+assert.ok(
+  infoPng1.length > 4000,
+  'infographic png is not empty of text (foreignObject → <text> conversion)'
+)
+const infoConvertedSvg = replaceForeignObjectText(stripXmlProcessingInstructions(infoSvg.svg))
+assert.equal(
+  infoConvertedSvg.includes('<foreignObject'),
+  false,
+  'all infographic foreignObject text blocks rewritten to <text>'
+)
+assert.ok(
+  (infoConvertedSvg.match(/<text\b/g) || []).length >= 6,
+  'infographic png text nodes (title + list labels/descs) present after conversion'
+)
+assert.ok(
+  infoConvertedSvg.includes('Product rollout') && infoConvertedSvg.includes('>Research<'),
+  'infographic converted <text> preserves the original strings'
+)
+assert.equal(
+  replaceForeignObjectText('<svg><rect/></svg>'),
+  '<svg><rect/></svg>',
+  'replaceForeignObjectText leaves SVGs without foreignObject untouched'
+)
+assert.equal(
+  stripXmlProcessingInstructions(infoSvg.svg).startsWith('<?xml'),
+  false,
+  'infographic xml processing instructions stripped'
+)
+
+const infoOneShot = await renderInfographicPng(infoDsl, 720)
+assert.deepEqual(
+  [...infoOneShot.png.subarray(0, 4)],
+  [0x89, 0x50, 0x4e, 0x47],
+  'renderInfographicPng png magic bytes'
+)
+assert.ok(
+  infoOneShot.template === 'list-column-simple-vertical-arrow',
+  'render reports the template'
+)
+assert.ok(infoOneShot.width > 0 && infoOneShot.height > 0, 'render reports infographic size')
+
+// ---- infographic tools (templates + preview + render) ----
+const infographicTools = Object.fromEntries(
+  createInfographicTools().map((t) => [t.definition.function.name, t])
+)
+const tplList = await infographicTools['list_infographic_templates']!.execute(
+  { category: 'sequence', query: 'timeline', limit: 20 },
+  { service, activeProject: PROJECT, confirm: async () => false }
+)
+const tplListParsed = JSON.parse(tplList)
+assert.equal(tplListParsed.ok, true, 'list_infographic_templates succeeds')
+assert.ok(tplListParsed.total > 0, 'list_infographic_templates finds timeline templates')
+assert.ok(
+  tplListParsed.templates.every((t: { category: string }) => t.category === 'sequence'),
+  'list_infographic_templates honors the category filter'
+)
+
+const infoPreview = await infographicTools['infographic_preview']!.execute(
+  { infographic: infoDsl, pixelWidth: 640 },
+  { service, activeProject: PROJECT, confirm: async () => false }
+)
+const infoPreviewParsed = JSON.parse(infoPreview)
+assert.equal(infoPreviewParsed.ok, true, 'infographic_preview succeeds')
+assert.equal(
+  infoPreviewParsed.template,
+  'list-column-simple-vertical-arrow',
+  'infographic_preview reports the template'
+)
+assert.ok(
+  infoPreviewParsed.width > 0 && infoPreviewParsed.height > 0,
+  'infographic_preview reports dimensions'
+)
+
+const badInfoPreview = await infographicTools['infographic_preview']!.execute(
+  { infographic: { template: 'nope', data: { lists: [{ label: 'A' }] } } },
+  { service, activeProject: PROJECT, confirm: async () => false }
+)
+assert.equal(JSON.parse(badInfoPreview).ok, false, 'infographic_preview rejects unknown templates')
+
+const infoRendered = await infographicTools['render_infographic']!.execute(
+  { infographic: infoDsl, filename: 'rollout-timeline', pixelWidth: 800 },
+  { service, activeProject: PROJECT, confirm: async () => false }
+)
+const infoRenderedParsed = JSON.parse(infoRendered)
+assert.equal(infoRenderedParsed.ok, true, 'render_infographic succeeds')
+assert.ok(
+  typeof infoRenderedParsed.png === 'string' && infoRenderedParsed.png.endsWith('.png'),
+  'render_infographic returns a png path'
+)
+assert.ok(
+  typeof infoRenderedParsed.svg === 'string' && infoRenderedParsed.svg.endsWith('.svg'),
+  'render_infographic returns an svg path'
+)
+assert.equal(infoRenderedParsed.path, undefined, 'render_infographic deliberately omits path')
+assert.equal(infoRenderedParsed.file, undefined, 'render_infographic deliberately omits file')
+await fs.access(infoRenderedParsed.png)
+await fs.access(infoRenderedParsed.svg)
+await fs.access(infoRenderedParsed.json)
+
+assert.ok(
+  infoRenderedParsed.png.includes('/modules/temp/'),
+  'render_infographic png lands in <project>/modules/temp/'
+)
+
+// ---- buildPptx with an infographic slide ----
+const infoDeck = {
+  title: 'Infographic probe',
+  slides: [
+    { layout: 'title', title: 'Rollout plan' },
+    {
+      layout: 'infographic',
+      title: 'Rollout timeline',
+      infographic: { png: infoRenderedParsed.png }
+    }
+  ]
+}
+const infoOut = join(ROOT, 'probe-infographic.pptx')
+const infoRes = await buildPptx(infoDeck, infoOut)
+assert.equal(infoRes.ok, true, 'infographic slide builds')
+if (infoRes.ok) assert.equal(infoRes.slideCount, 2)
+const infoStat = await fs.stat(infoOut)
+assert.ok(infoStat.size > 100, 'infographic pptx has content')
+
+const pptxDeckInfographic = await pptxTools['create_pptx_file']!.execute(
+  { filename: 'infographic-deck-cleanup', design: JSON.stringify(infoDeck) },
+  { service, activeProject: PROJECT, confirm: async () => false }
+)
+const deckInfographicParsed = JSON.parse(pptxDeckInfographic)
+assert.equal(deckInfographicParsed.ok, true, 'create_pptx_file with an infographic slide succeeds')
+await assert.rejects(
+  fs.access(infoRenderedParsed.png),
+  'temp infographic png deleted after the deck is built'
+)
+await assert.rejects(
+  fs.access(infoRenderedParsed.svg),
+  'temp infographic svg deleted after the deck is built'
+)
+await assert.rejects(
+  fs.access(infoRenderedParsed.json),
+  'temp infographic json deleted after the deck is built'
+)
+
+const missingInfoPng = await buildPptx(
+  { slides: [{ layout: 'infographic', title: 'x', infographic: { png: '/tmp/info.png' } }] },
+  join(ROOT, 'probe-bad-infographic.pptx')
+)
+assert.equal(missingInfoPng.ok, false, 'infographic slide without a valid png fails the build')
+
+// ---- standalone infographic module: create_infographic_file ----
+const infoModuleTools = Object.fromEntries(
+  createInfographicModule().tools.map((t) => [t.definition.function.name, t])
+)
+assert.equal(
+  infoModuleTools['create_infographic_file'] !== undefined,
+  true,
+  'infographic module exposes create_infographic_file'
+)
+const infoFile = await infoModuleTools['create_infographic_file']!.execute(
+  { infographic: infoDsl, filename: 'rollout-infographic', pixelWidth: 900 },
+  { service, activeProject: PROJECT, confirm: async () => false }
+)
+const infoFileParsed = JSON.parse(infoFile)
+assert.equal(infoFileParsed.ok, true, 'create_infographic_file succeeds')
+assert.ok(
+  typeof infoFileParsed.path === 'string' && infoFileParsed.path.endsWith('.svg'),
+  'create_infographic_file returns the .svg deliverable path'
+)
+assert.equal(typeof infoFileParsed.file, 'string', 'create_infographic_file returns the file name')
+assert.ok(
+  typeof infoFileParsed.png === 'string' && infoFileParsed.png.endsWith('.png'),
+  'create_infographic_file reports the .png path'
+)
+await fs.access(infoFileParsed.png)
+const afterInfoFile = await service.listFiles(PROJECT)
+assert.ok(
+  afterInfoFile.includes(infoFileParsed.file),
+  'infographic deliverable is in the project files folder'
+)
+
+const badInfoFile = await infoModuleTools['create_infographic_file']!.execute(
+  { infographic: { template: 'nope', data: { lists: [{ label: 'A' }] } } },
+  { service, activeProject: PROJECT, confirm: async () => false }
+)
+assert.equal(JSON.parse(badInfoFile).ok, false, 'create_infographic_file rejects unknown templates')
+
 // ---- simulate a full module run with a scripted model ----
 interface FakeToolCall {
   id: string
@@ -615,6 +884,68 @@ assert.equal(
   'run file removed from disk'
 )
 
+// ---- full infographic module run (scripted model → create_infographic_file) ----
+const infoScript: { content?: string; tool_calls?: FakeToolCall[] }[] = [
+  {
+    tool_calls: [
+      step('i1', 'set_plan', { steps: ['Pick a template', 'Author the design', 'Build the file'] })
+    ]
+  },
+  { tool_calls: [step('i2', 'update_step', { index: 1, status: 'done' })] },
+  {
+    tool_calls: [
+      step('i3', 'list_infographic_templates', { query: 'arrow' }),
+      step('i4', 'infographic_preview', { infographic: infoDsl })
+    ]
+  },
+  {
+    tool_calls: [
+      step('i5', 'create_infographic_file', {
+        filename: 'standalone-infographic',
+        infographic: infoDsl
+      })
+    ]
+  },
+  { content: 'Done. Saved standalone-infographic.svg to the project files.' }
+]
+const infoRegistry = new ModuleRegistry()
+infoRegistry.register(createInfographicModule())
+const infoManager = new ModuleRunManager(
+  service,
+  configStore,
+  infoRegistry,
+  () => {},
+  makeScriptedClient(infoScript)
+)
+const infoStart = await infoManager.start(
+  PROJECT,
+  'infographic',
+  'Launch infographic',
+  'Build a rollout timeline infographic.'
+)
+assert.equal(infoStart.ok, true, 'infographic module run accepted')
+const infoRunId = infoStart.ok ? infoStart.runId : ''
+await waitFor(async () => {
+  const runs = await infoManager.list(PROJECT)
+  return runs.some((r) => r.runId === infoRunId && (r.status === 'done' || r.status === 'failed'))
+})
+const infoRun = (await infoManager.list(PROJECT)).find((r) => r.runId === infoRunId)
+assert.ok(infoRun, 'infographic run exists')
+assert.equal(infoRun!.status, 'done', 'infographic run finished done')
+assert.ok(
+  infoRun!.outputFile && infoRun!.outputFile.endsWith('.svg'),
+  'infographic output file captured'
+)
+const infoOutStat = await fs.stat(infoRun!.outputFile!)
+assert.ok(infoOutStat.size > 100, 'infographic output svg exists on disk')
+const infoFiles = await service.listFiles(PROJECT)
+assert.ok(
+  infoFiles.includes('standalone-infographic.svg'),
+  'standalone infographic module delivers into <project>/files/'
+)
+const infoDel = await infoManager.deleteRun(PROJECT, infoRunId, true)
+assert.equal(infoDel, true, 'infographic run deletable')
+
 // ---- disabled module enforcement ----
 const { SettingsStore } = await import('../src/main/settings')
 const settingsStore = new SettingsStore()
@@ -642,6 +973,25 @@ await waitFor(async () => {
   const runs = await gatedManager.list(PROJECT)
   return runs.some((r) => r.runId === reRunId && (r.status === 'done' || r.status === 'failed'))
 })
+
+// infographic module honors the same disabled gate
+const infoGatedManager = new ModuleRunManager(
+  service,
+  configStore,
+  infoRegistry,
+  () => {},
+  undefined,
+  settingsStore
+)
+await settingsStore.save({ rootDir: ROOT, disabledModules: ['infographic'] })
+const infoDisabledStart = await infoGatedManager.start(
+  PROJECT,
+  'infographic',
+  'Blocked infographic',
+  'Should be refused.'
+)
+assert.equal(infoDisabledStart.ok, false, 'disabled infographic module refused')
+await settingsStore.save({ rootDir: ROOT, disabledModules: [] })
 
 // ---- step status cascade: later step done promotes earlier running/pending steps ----
 const cascadeScript: { content?: string; tool_calls?: FakeToolCall[] }[] = [

@@ -19,6 +19,16 @@ All notable changes to PTNotes are documented in this file.
 
 - The mermaid diagram tool-pack now accepts `gantt` diagrams alongside flowchart/sequence/state/class/ER/pie. Gantt includes need an SVG `viewBox` from `parentElement.offsetWidth`, which the svgdom DOM shim doesn't support, so a tiny `parentElement` polyfill (delegating to `parentNode`) plus a fixed `useWidth`/`useMaxWidth: false` config lets gantt render in-process; rasterization and the isolated utility-process path are unchanged.
 
+#### Infographic rendering (@antv/infographic)
+
+- New shared infographic tool-pack any module can reuse (`createInfographicTools.ts` + `infographic.ts` + `infographicRenderer.ts` + `infographic-render-worker.ts`): `list_infographic_templates` (the ~276 built-in catalog, filterable by category/query, with per-category data-shape hints), `infographic_preview` (dry-run validation, writes nothing) and `render_infographic` (design → rasterized PNG + SVG + sidecar JSON in `<project>/modules/temp/`).
+- Designs are authored as **@antv/infographic DSL** (an `infographic <template>` first line followed by `data` / `design` / `theme` blocks) or as a JSON `{ "template", "data", ... }` object, and rendered by the package's node SSR entry (`@antv/infographic/ssr` → `renderToString` on a `linkedom` DOM shim), rasterized by `@resvg/resvg-js` — pure-local, in-process, no network, browsers or CLI tools. Layout families: lists, sequences/timelines/roadmaps, comparisons/SWOT, relations/networks, hierarchies/mindmaps, charts (pie), word clouds.
+- The SSR entry installs browser-like globals (`window`/`document`/DOM classes/`requestAnimationFrame`) and never restores them, so the renderer snapshots and restores those globals around every render; model-supplied `icon`/`illus` fields are stripped (validation) so the offline renderer never hits the package's remote icon service.
+- Rendering runs in an isolated Electron **utility process** (`infographicRenderer.ts` forks `infographic-render-worker.js`, with a plain-Node fallback for tests and `PTNOTES_INFOGRAPHIC_WORKER` overriding the worker path), so a heavy SSR/DOM render or native crash only fails the in-flight render tool instead of the app.
+- Validation rejects unknown templates, malformed syntax and empty data blocks (the SSR entry otherwise hangs for its 10s internal timeout on a render that never completes).
+- PPTX slides accept a new `infographic` layout that embeds the rendered PNG (same `x/y/w/h` placement and aspect-ratio scaling semantics as `chart`/`diagram`); temporary infographic files (`modules/temp/*.png` + `*.svg` + `*.json`) are deleted automatically once the deck is built (`collectChartPngPaths` now also collects `infographic` keys).
+- New **standalone `infographic` module**: the subagent picks a template, authors the design and calls `create_infographic_file` to save the final deliverable as `<project>/files/<slug>.svg` (primary vector output) + a matching `.png`; registered in the module registry so it appears in the Modules tab, `start_module` and Settings → Modules.
+
 ## [0.4.0] — 2026-08-10
 
 ### Added

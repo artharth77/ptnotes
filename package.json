@@ -21,6 +21,7 @@
     "test": "tsx --tsconfig tsconfig.node.json scripts/test-service.mts && tsx --tsconfig tsconfig.node.json scripts/test-ai.mts && tsx --tsconfig tsconfig.node.json scripts/test-chat.mts && tsx --tsconfig tsconfig.node.json scripts/test-markdown.mts && tsx --tsconfig tsconfig.node.json scripts/test-pdf.mts && tsx --tsconfig tsconfig.node.json scripts/test-modules.mts"
   },
   "dependencies": {
+    "@antv/infographic": "^0.2.19",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@napi-rs/canvas": "^1.0.5",

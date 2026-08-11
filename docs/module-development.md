@@ -168,6 +168,30 @@ browser) in an isolated Electron utility process, rasterized by `@resvg/resvg-js
 is format-agnostic too: `validateMermaid(src)`, `renderMermaidSvg(src)`, `svgBounds(svg)` and
 `svgToPng(svg, width)` let a builder render diagrams without the AI tool surface.
 
+`src/main/modules/shared/createInfographicTools.ts` exports an infographic tool-pack for
+one-pager/visual-report modules:
+
+```ts
+import { createInfographicTools } from '../shared/createInfographicTools'
+
+// Module that renders infographics:
+tools: [...createInfographicTools(), createSomeFileTool()]
+```
+
+It provides `list_infographic_templates` (the ~276 built-in catalog, filterable by
+category/query, with per-category data-shape hints), `infographic_preview` (dry-run, writes
+nothing) and `render_infographic` (writes temporary `<project>/modules/temp/<slug>.png` +
+`.svg` + `.json` and returns the asset paths; the temp files are deleted automatically once a
+deck using them is built). Designs are authored as **@antv/infographic DSL text** (an
+`infographic <template>` first line followed by `data` / `design` / `theme` blocks) or a JSON
+`{ template, data, ... }` object, rendered by the package's node SSR entry
+(`@antv/infographic/ssr` → `renderToString` on a `linkedom` DOM shim; no network — `icon` /
+`illus` fields are stripped offline) in an isolated Electron utility process, rasterized by
+`@resvg/resvg-js`. Add `@antv/infographic` to your module's deps. The backing library
+`src/main/modules/shared/infographic.ts` is format-agnostic too: `parseInfographicDesign(raw)`,
+`validateInfographicDesign(parsed)`, `renderInfographicSvg(parsed)`, `svgBounds(svg)` and
+`svgToPng(svg, width)` let a builder render infographics without the AI tool surface.
+
 ## Registering the module
 
 Registration happens only in **`src/main/index.ts`**:
