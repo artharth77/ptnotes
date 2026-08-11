@@ -2,6 +2,12 @@
 
 All notable changes to PTNotes are documented in this file.
 
+## [0.5.1] — 2026-08-12
+
+### Fixed
+
+- **Packaged infographic module crash (Windows/macOS/Linux)**: `@antv/layout` ships ESM files that import from their own nested `node_modules` (e.g. `@antv/layout/lib/node_modules/tslib/tslib.es6.js`), but electron-builder unconditionally drops any folder named `node_modules` inside a package, so those imports broke at runtime with `Cannot find module ... @antv\layout\lib\node_modules\tslib\tslib.es6.js` when creating an infographic from a packaged build. A `files` `from`/`to` entry in `electron-builder.yml` now force-copies the package's nested `node_modules` into the asar so the `@antv/infographic` SSR chain resolves correctly.
+
 ## [0.5.0] — 2026-08-11
 
 ### Added
