@@ -67,6 +67,7 @@ Run `npm run typecheck` and `npm run lint` after any change.
     ├── TODO.md             (markdown checklist: `- [ ]` / `- [x]`)
     ├── files/*.{pdf,md,txt,json,log,yaml,yml} (attachments copied on chat drop)
     ├── modules/*.json        (module run state + prompts; kept out of the # file picker)
+    ├── modules/*.chat.json   (per-run subagent transcript, read-only history overlay)
     ├── modules/temp/*.{png,svg,json}  (temp module/shared-tool output; deleted once the deck is built)
     └── chat/*.json         (one file per chat session: messages + timestamps)
 ```
@@ -104,7 +105,8 @@ src/
 │           └── webFetch.ts    # cheerio page extraction
 │   └── modules/
 │       ├── registry.ts   # module registry (extensible)
-│       ├── runs.ts       # ModuleRunManager: start/list/stop + event broadcast
+│       ├── runs.ts       # ModuleRunManager: start/list/stop + event broadcast + readChat (live in-memory transcript or persisted .chat.json)
+│       ├── runner.ts     # subagent loop; persists a read-only transcript to <project>/modules/<runId>.chat.json each turn (removed on run delete/retry)
 │       ├── tool.ts       # start_module tool (main chat → module run)
 │       ├── pptx/         # PowerPoint module (design schema → buildPptx)
 │       └── shared/
@@ -129,6 +131,7 @@ src/
 │   │   │   ├── MarkdownEditor.tsx   # TipTap WYSIWYG + markdown sync + auto-save
 │   │   │   ├── MarkdownContent.tsx  # react-markdown chat rendering + note: link handling
 │   │   │   ├── ChatDrawer.tsx       # right drawer, streaming, mentions, history, titles
+│   │   │   ├── ModuleHistoryOverlay.tsx # read-only transcript overlay for module runs (💬 button on ModuleCard)
 │   │   │   └── SettingsDialog.tsx  # two-panel Settings (Storage + AI Settings)
 │   └── ...
 └── shared/
@@ -178,6 +181,7 @@ src/
 - **Settings:** `get` (returns `{ rootDir }`), `chooseRoot` (native folder picker), `changeRoot` (moves data + persists + returns new `{ rootDir }`)
 - **PDF:** `supportsUpload` (returns the AI settings `uploadPdfEnabled` toggle — user-controlled), `upload` (raw PDF via provider Responses API `input_file` — uploads base64 through the Files API, falling back to inline `file_data`)
 - **Files:** `list` (`<project>/files/*` — PDF + any text file — for the chat `#` picker), `getPathForFile` (dropped file path via `webUtils`, never `File.path`), `copyToProject` (content-based: any text file + PDFs copied into `<project>/files/`; non-PDF binaries rejected), `extract` (local text → `{ text, pageCount, charCount, truncated }`; pdf-parse for `.pdf`, raw text for any text file), `reveal` (`shell.showItemInFolder`)
+- **Modules:** `list`, `listAvailable`, `setEnabled`, `start`, `startModule`, `stop`, `retry`, `reveal`, `deleteRun`, `clearHistory`, `readChat` (per-run subagent transcript: live in-memory for active runs, persisted `<project>/modules/<runId>.chat.json` otherwise)
 
 ## AI chat feature
 

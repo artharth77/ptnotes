@@ -4,6 +4,7 @@ import { promises as fs } from 'fs'
 import OpenAI from 'openai'
 import type {
   AIProviderConfig,
+  ModuleChatMessage,
   ModuleEvent,
   ModuleInfo,
   ModuleRun,
@@ -182,6 +183,7 @@ export class ModuleRunManager {
 
     await this.service.writeModuleRun(project, runId, run)
     this.emit({ runId, project, type: 'status', run })
+    await this.service.writeModuleChat(project, runId, []).catch(() => {})
 
     this.active.get(runId)?.stop()
     const runner = new ModuleRunner({
@@ -262,6 +264,15 @@ export class ModuleRunManager {
     }
     shell.showItemInFolder(run.outputFile)
     return { ok: true }
+  }
+
+  /** Read a module run's conversation transcript: live from the runner, else disk. */
+  async readChat(project: string, runId: string): Promise<ModuleChatMessage[]> {
+    const runner = this.active.get(runId)
+    if (runner && runner.snapshot?.project === project) {
+      return runner.transcript
+    }
+    return this.service.readModuleChat(project, runId)
   }
 
   private handleUpdate(run: ModuleRun, evt: ModuleNotifyEvent): void {

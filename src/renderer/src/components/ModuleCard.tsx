@@ -2,15 +2,7 @@ import { useState } from 'react'
 import { useAppStore } from '../store/useAppStore'
 import type { ModuleRun, ModuleStepState } from '@shared/types'
 import { Modal } from './Modal'
-
-const STATUS_LABELS: Record<ModuleRun['status'], string> = {
-  queued: 'Queued',
-  planning: 'Planning',
-  running: 'Running',
-  done: 'Done',
-  failed: 'Failed',
-  cancelled: 'Cancelled'
-}
+import { STATUS_LABELS } from './moduleStatus'
 
 function stepIcon(step: ModuleStepState): string {
   switch (step.status) {
@@ -92,20 +84,30 @@ export function ModuleCard({
         <span className="module-card-name" title={run.module.name}>
           🧩 {run.module.name}
         </span>
-        {!active && (
-          <span className="module-card-status-area">
-            {run.status === 'failed' && (
-              <button
-                className="module-card-retry-btn"
-                title="Retry this module run"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  if (activeProject) void window.ptnotes.modules.retry(activeProject, run.runId)
-                }}
-              >
-                ↻
-              </button>
-            )}
+        <span className="module-card-status-area">
+          <button
+            className="module-card-history-btn"
+            title="View module chat history"
+            onClick={(e) => {
+              e.stopPropagation()
+              useAppStore.getState().setModuleHistoryRunId(run.runId)
+            }}
+          >
+            💬
+          </button>
+          {!active && run.status === 'failed' && (
+            <button
+              className="module-card-retry-btn"
+              title="Retry this module run"
+              onClick={(e) => {
+                e.stopPropagation()
+                if (activeProject) void window.ptnotes.modules.retry(activeProject, run.runId)
+              }}
+            >
+              ↻
+            </button>
+          )}
+          {!active && (
             <button
               className="module-card-delete-btn"
               title="Delete this run"
@@ -116,14 +118,9 @@ export function ModuleCard({
             >
               ✕
             </button>
-            <span className={`module-status module-${run.status}`}>
-              {STATUS_LABELS[run.status]}
-            </span>
-          </span>
-        )}
-        {active && (
+          )}
           <span className={`module-status module-${run.status}`}>{STATUS_LABELS[run.status]}</span>
-        )}
+        </span>
       </div>
       <div className="module-card-meta">
         <span className="module-card-updated" title={new Date(run.updatedAt).toLocaleString()}>

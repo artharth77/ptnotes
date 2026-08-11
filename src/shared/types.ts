@@ -160,6 +160,18 @@ export interface ModuleRun {
   error?: string
 }
 
+/** A message in a module run's subagent conversation transcript (read-only history). */
+export interface ModuleChatMessage {
+  id: string
+  role: 'system' | 'user' | 'assistant' | 'tool'
+  content: string | null
+  ts?: number
+  /** Tool name for role === 'tool' (also merged into toolCalls for rendering). */
+  name?: string
+  /** Tool calls made by an assistant turn. */
+  toolCalls?: ToolCallInfo[]
+}
+
 export type ModuleEventType = 'status' | 'step' | 'output' | 'error' | 'done'
 
 export type ModuleStartResult =

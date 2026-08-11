@@ -3,7 +3,7 @@ import type { IpcMainInvokeEvent } from 'electron'
 import type { ModuleRunManager } from '../modules/runs'
 import type { ModuleRegistry } from '../modules/registry'
 import type { SettingsStore } from '../settings'
-import type { ModuleSettings } from '@shared/types'
+import type { ModuleChatMessage, ModuleSettings } from '@shared/types'
 
 export function registerModulesIpc(
   manager: ModuleRunManager,
@@ -83,5 +83,11 @@ export function registerModulesIpc(
     ): Promise<boolean> => {
       return manager.deleteRun(project, runId, deleteOutputFiles)
     }
+  )
+
+  ipcMain.handle(
+    'modules:readChat',
+    async (_e: IpcMainInvokeEvent, project: string, runId: string): Promise<ModuleChatMessage[]> =>
+      manager.readChat(project, runId)
   )
 }

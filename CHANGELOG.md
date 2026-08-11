@@ -2,6 +2,19 @@
 
 All notable changes to PTNotes are documented in this file.
 
+## [0.5.0] — 2026-08-11
+
+### Added
+
+#### Module run chat history
+
+- Every module run now records its subagent conversation (system prompt, user prompt, assistant turns, tool calls with results) as a read-only transcript.
+- Transcripts persist to `<project>/modules/<runId>.chat.json` as the run progresses (auto-saved per turn) and are cleaned up when a run is deleted or retried; live runs stream from the in-memory session.
+- New **💬 history button** on each module card opens a read-only overlay docked over the chat panel showing the transcript: collapsed-by-default `<think>` reasoning blocks, collapsible tool-call bubbles (with 📄 note pills for `create_note`/`update_note`), user-message collapse, and the system prompt in a collapsible box.
+- The overlay also shows the run's live step tracker and status; it polls while the run is still active, and closes with Esc or the backdrop.
+- New IPC channel `modules:readChat` (preload `window.ptnotes.modules.readChat`).
+- Shared chat-bubble rendering extracted into `chatBubbles.tsx` / `chatContent.ts` / `moduleStatus.ts` (reused by both the chat drawer and the overlay).
+
 ## [0.4.0] — 2026-08-10
 
 ### Added

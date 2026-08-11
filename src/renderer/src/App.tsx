@@ -7,6 +7,7 @@ import { MarkdownEditor } from './components/MarkdownEditor'
 import { ChatDrawer } from './components/ChatDrawer'
 import { SettingsDialog } from './components/SettingsDialog'
 import { ModulePanel } from './components/ModulePanel'
+import { ModuleHistoryOverlay } from './components/ModuleHistoryOverlay'
 import { PromptModal, Modal } from './components/Modal'
 import { Resizer } from './components/Resizer'
 import type { Tab, ToolCallInfo } from '@shared/types'
@@ -307,6 +308,7 @@ function App(): React.JSX.Element {
 
       {settingsOpen && <SettingsDialog />}
       <ConfirmDeleteDialog />
+      <ModuleHistoryOverlay />
     </div>
   )
 }
