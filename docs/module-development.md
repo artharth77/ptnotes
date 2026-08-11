@@ -38,6 +38,11 @@ Key rules enforced by the runner (`src/main/modules/runner.ts`):
   { "ok": true, "path": "/abs/path/to/file.pptx", "file": "file.pptx" }
   ```
   The runner captures this as the run's `outputFile` (used by the reveal / clear-history / summary features). `ok:false` plus an `error` field is treated as a tool failure.
+- A tool can produce **multiple deliverables** in one call by adding a `files` array alongside `path`/`file`:
+  ```json
+  { "ok": true, "path": "/abs/path/to/a.svg", "file": "a.svg", "files": ["/abs/path/to/a.svg", "/abs/path/to/a.png"] }
+  ```
+  Every entry lands in the run's `outputFiles` (the card shows one 📄 reveal pill per file; the first entry is the primary `outputFile`). `clearHistory`/`deleteRun` with the "delete output files" option removes all of them.
 
 ## Module interface
 
@@ -162,11 +167,35 @@ It provides `diagram_preview` (dry-run, writes nothing) and `render_diagram` (wr
 `<project>/modules/temp/<slug>.png` + `.svg` + `.json` and returns the asset paths; the temp files
 are deleted automatically once a deck using them is built). Diagrams are authored as **mermaid DSL
 source text** (`flowchart TD/LR`, `sequenceDiagram`, `stateDiagram-v2`, `classDiagram`, `erDiagram`,
-`pie`) and rendered by mermaid v11 on a jsdom/svgdom DOM shim (`isomorphic-mermaid`; no headless
+`pie`, `gantt`) and rendered by mermaid v11 on a jsdom/svgdom DOM shim (`isomorphic-mermaid`; no headless
 browser) in an isolated Electron utility process, rasterized by `@resvg/resvg-js`. Add
 `isomorphic-mermaid` to your module's deps. The backing library `src/main/modules/shared/mermaid.ts`
 is format-agnostic too: `validateMermaid(src)`, `renderMermaidSvg(src)`, `svgBounds(svg)` and
 `svgToPng(svg, width)` let a builder render diagrams without the AI tool surface.
+
+`src/main/modules/shared/createInfographicTools.ts` exports an infographic tool-pack for
+one-pager/visual-report modules:
+
+```ts
+import { createInfographicTools } from '../shared/createInfographicTools'
+
+// Module that renders infographics:
+tools: [...createInfographicTools(), createSomeFileTool()]
+```
+
+It provides `list_infographic_templates` (the ~276 built-in catalog, filterable by
+category/query, with per-category data-shape hints), `infographic_preview` (dry-run, writes
+nothing) and `render_infographic` (writes temporary `<project>/modules/temp/<slug>.png` +
+`.svg` + `.json` and returns the asset paths; the temp files are deleted automatically once a
+deck using them is built). Designs are authored as **@antv/infographic DSL text** (an
+`infographic <template>` first line followed by `data` / `design` / `theme` blocks) or a JSON
+`{ template, data, ... }` object, rendered by the package's node SSR entry
+(`@antv/infographic/ssr` → `renderToString` on a `linkedom` DOM shim; no network — `icon` /
+`illus` fields are stripped offline) in an isolated Electron utility process, rasterized by
+`@resvg/resvg-js`. Add `@antv/infographic` to your module's deps. The backing library
+`src/main/modules/shared/infographic.ts` is format-agnostic too: `parseInfographicDesign(raw)`,
+`validateInfographicDesign(parsed)`, `renderInfographicSvg(parsed)`, `svgBounds(svg)` and
+`svgToPng(svg, width)` let a builder render infographics without the AI tool surface.
 
 ## Registering the module
 
@@ -210,7 +239,7 @@ The Modules tab and the chat card are **generic** — they render whatever the f
 
 - Steps appear as a list with `✔` (done), `…` (running), `✕` (failed), `·` (pending).
 - Progress bar reflects `done + failed` / total steps.
-- A run's `summary` (set by the subagent's final text) and `outputFile` show in the expanded action area (click the card to toggle).
+- A run's `summary` (set by the subagent's final text) and its output files (one 📄 reveal pill per file in `outputFiles`, falling back to `outputFile`) show in the expanded action area (click the card to toggle).
 - `detail` on any step shows as collapsible text under that step.
 
 If you need UI to differ per module, extend `ModuleCard`/the `ModuleEvent` shape — but prefer keeping the module logic backend-only.

@@ -2,6 +2,43 @@
 
 All notable changes to PTNotes are documented in this file.
 
+## [0.5.0] — 2026-08-11
+
+### Added
+
+#### Word documents (DOCX module)
+
+- New **Word (DOCX) module** mirroring the PPTX module: the background subagent plans steps, reads any referenced `note:`/`file:` inputs, authors a JSON block design and calls `create_docx_file` to save a ready-to-open `<project>/files/<slug>.docx`.
+- The design is a linear **block model** (`title-page`, `heading` level 1–6, `paragraph`, `bullets`, `numbered`, `table`, `quote`, `callout`, `chart`, `diagram`, `infographic`, `divider`, `page-break`) with optional portrait/landscape orientation, `normal`/`narrow`/`wide` margins, a theme palette (`primary`/`accent`/`fontFace`) and an optional footer with page numbers.
+- Rendered in-process by the pure-JS `docx` OOXML builder (no native deps, so no utility-process worker is needed — consistent with `pptxgenjs`).
+- Reuses the shared tool-packs: `render_chart`/`render_diagram`/`render_infographic` PNGs are embedded as full-width, aspect-preserving pictures with optional captions; Lucide icons rasterize onto the title page; temp render files (`<project>/modules/temp/*`) are cleaned up once the document is built (`collectChartPngPaths` + `cleanupModuleTempFiles`).
+- Registered in the module registry so it appears in the Modules tab, `start_module` and Settings → Modules; the generic module card / history overlay / reveal pills require no renderer changes.
+- New test suite `scripts/test-docx.mts` (wired into `npm test`): builder unit tests, embedded chart/diagram/infographic blocks + temp-file cleanup, full scripted subagent run, disabled-module gate, and premature-finish failure.
+
+#### Module run chat history
+
+- Every module run now records its subagent conversation (system prompt, user prompt, assistant turns, tool calls with results) as a read-only transcript.
+- Transcripts persist to `<project>/modules/<runId>.chat.json` as the run progresses (auto-saved per turn) and are cleaned up when a run is deleted or retried; live runs stream from the in-memory session.
+- New **💬 history button** on each module card opens a read-only overlay docked over the chat panel showing the transcript: collapsed-by-default `<think>` reasoning blocks, collapsible tool-call bubbles (with 📄 note pills for `create_note`/`update_note`), user-message collapse, and the system prompt in a collapsible box.
+- The overlay also shows the run's live step tracker and status; it polls while the run is still active, and closes with Esc or the backdrop.
+- New IPC channel `modules:readChat` (preload `window.ptnotes.modules.readChat`).
+- Shared chat-bubble rendering extracted into `chatBubbles.tsx` / `chatContent.ts` / `moduleStatus.ts` (reused by both the chat drawer and the overlay).
+
+#### Gantt diagrams
+
+- The mermaid diagram tool-pack now accepts `gantt` diagrams alongside flowchart/sequence/state/class/ER/pie. Gantt includes need an SVG `viewBox` from `parentElement.offsetWidth`, which the svgdom DOM shim doesn't support, so a tiny `parentElement` polyfill (delegating to `parentNode`) plus a fixed `useWidth`/`useMaxWidth: false` config lets gantt render in-process; rasterization and the isolated utility-process path are unchanged.
+
+#### Infographic rendering (@antv/infographic)
+
+- New shared infographic tool-pack any module can reuse (`createInfographicTools.ts` + `infographic.ts` + `infographicRenderer.ts` + `infographic-render-worker.ts`): `list_infographic_templates` (the ~276 built-in catalog, filterable by category/query, with per-category data-shape hints), `infographic_preview` (dry-run validation, writes nothing) and `render_infographic` (design → rasterized PNG + SVG + sidecar JSON in `<project>/modules/temp/`).
+- Designs are authored as **@antv/infographic DSL** (an `infographic <template>` first line followed by `data` / `design` / `theme` blocks) or as a JSON `{ "template", "data", ... }` object, and rendered by the package's node SSR entry (`@antv/infographic/ssr` → `renderToString` on a `linkedom` DOM shim), rasterized by `@resvg/resvg-js` — pure-local, in-process, no network, browsers or CLI tools. Layout families: lists, sequences/timelines/roadmaps, comparisons/SWOT, relations/networks, hierarchies/mindmaps, charts (pie), word clouds.
+- The SSR entry installs browser-like globals (`window`/`document`/DOM classes/`requestAnimationFrame`) and never restores them, so the renderer snapshots and restores those globals around every render; model-supplied `icon`/`illus` fields are stripped (validation) so the offline renderer never hits the package's remote icon service.
+- Rendering runs in an isolated Electron **utility process** (`infographicRenderer.ts` forks `infographic-render-worker.js`, with a plain-Node fallback for tests and `PTNOTES_INFOGRAPHIC_WORKER` overriding the worker path), so a heavy SSR/DOM render or native crash only fails the in-flight render tool instead of the app.
+- Validation rejects unknown templates, malformed syntax and empty data blocks (the SSR entry otherwise hangs for its 10s internal timeout on a render that never completes).
+- PPTX slides accept a new `infographic` layout that embeds the rendered PNG (same `x/y/w/h` placement and aspect-ratio scaling semantics as `chart`/`diagram`); temporary infographic files (`modules/temp/*.png` + `*.svg` + `*.json`) are deleted automatically once the deck is built (`collectChartPngPaths` now also collects `infographic` keys).
+- New **standalone `infographic` module**: the subagent picks a template, authors the design and calls `create_infographic_file` to save the final deliverable as `<project>/files/<slug>.svg` (primary vector output) + a matching `.png`; registered in the module registry so it appears in the Modules tab, `start_module` and Settings → Modules.
+- Module runs now record **multiple output files**: a run tracks every deliverable in `outputFiles` (output tools can return a `files` array alongside `path`/`file`), the module card shows one 📄 reveal pill per file, `modules:reveal` accepts an optional `filePath` to reveal a specific file, and `deleteRun`/`clearHistory` with the delete-output option removes all of them. The infographic module delivers both `.svg` + `.png` as separate pills.
+
 ## [0.4.0] — 2026-08-10
 
 ### Added

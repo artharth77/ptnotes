@@ -155,9 +155,24 @@ export interface ModuleRun {
   updatedAt: number
   startedAt?: number
   finishedAt?: number
+  /** Primary output file (first produced). Kept for backwards compatibility. */
   outputFile?: string
+  /** Every deliverable file the run produced (in order). */
+  outputFiles?: string[]
   summary?: string
   error?: string
+}
+
+/** A message in a module run's subagent conversation transcript (read-only history). */
+export interface ModuleChatMessage {
+  id: string
+  role: 'system' | 'user' | 'assistant' | 'tool'
+  content: string | null
+  ts?: number
+  /** Tool name for role === 'tool' (also merged into toolCalls for rendering). */
+  name?: string
+  /** Tool calls made by an assistant turn. */
+  toolCalls?: ToolCallInfo[]
 }
 
 export type ModuleEventType = 'status' | 'step' | 'output' | 'error' | 'done'
@@ -173,6 +188,7 @@ export interface ModuleEvent {
   step?: ModuleStepState
   stepIndex?: number
   outputFile?: string
+  outputFiles?: string[]
   error?: string
   summary?: string
 }

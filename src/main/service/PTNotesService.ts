@@ -10,7 +10,7 @@ import type {
   Project,
   Todo
 } from '@shared/types'
-import type { ModuleInfo, ModuleRun } from '@shared/types'
+import type { ModuleChatMessage, ModuleInfo, ModuleRun } from '@shared/types'
 import { slugify } from '../utils/slug'
 import { detectFileKind } from '../ai/reader'
 
@@ -448,6 +448,10 @@ export class PTNotesService {
     return join(this.modulesDir(project), `${validateNoteId(runId)}.prompt.json`)
   }
 
+  private moduleChatPath(project: string, runId: string): string {
+    return join(this.modulesDir(project), `${validateNoteId(runId)}.chat.json`)
+  }
+
   async writeModulePrompt(
     project: string,
     runId: string,
@@ -466,6 +470,36 @@ export class PTNotesService {
     const dir = this.modulesDir(project)
     await fs.mkdir(dir, { recursive: true })
     await fs.writeFile(this.moduleTempPath(project, runId), JSON.stringify(run, null, 2), 'utf8')
+  }
+
+  /** Persist a module run's subagent conversation transcript. */
+  async writeModuleChat(
+    project: string,
+    runId: string,
+    messages: ModuleChatMessage[]
+  ): Promise<void> {
+    const dir = this.modulesDir(project)
+    await fs.mkdir(dir, { recursive: true })
+    await fs.writeFile(
+      this.moduleChatPath(project, runId),
+      JSON.stringify(messages, null, 2),
+      'utf8'
+    )
+  }
+
+  /** Read a persisted module run transcript; returns [] on missing/corrupt file. */
+  async readModuleChat(project: string, runId: string): Promise<ModuleChatMessage[]> {
+    try {
+      const raw = await fs.readFile(this.moduleChatPath(project, runId), 'utf8')
+      const messages = JSON.parse(raw)
+      if (!Array.isArray(messages)) return []
+      return messages.filter(
+        (m): m is ModuleChatMessage =>
+          !!m && typeof m === 'object' && ['system', 'user', 'assistant', 'tool'].includes(m.role)
+      )
+    } catch {
+      return []
+    }
   }
 
   /** Read all persisted run snapshots for a project (used to list history across restarts). */
@@ -524,15 +558,17 @@ export class PTNotesService {
       }
       if (!run || typeof run.runId !== 'string' || active.has(run.runId)) continue
       if (run.runId !== validateNoteId(run.runId)) continue
-      if (deleteOutputFiles && run.outputFile) {
+      if (deleteOutputFiles) {
         const prefix = outputDir + sep
-        if (run.outputFile.startsWith(prefix)) {
-          await fs.rm(run.outputFile, { force: true })
+        for (const out of outputFilesOf(run)) {
+          if (out.startsWith(prefix)) await fs.rm(out, { force: true })
         }
       }
       await fs.rm(full, { force: true })
       const prompt = join(dir, `${run.runId}.prompt.json`)
       await fs.rm(prompt, { force: true })
+      const chat = join(dir, `${run.runId}.chat.json`)
+      await fs.rm(chat, { force: true })
       removed++
     }
     return removed
@@ -560,16 +596,18 @@ export class PTNotesService {
       } catch {
         run = undefined
       }
-      if (deleteOutputFiles && run?.outputFile) {
+      if (deleteOutputFiles) {
         const outputDir = this.filesDir(project)
         const prefix = outputDir + sep
-        if (run.outputFile.startsWith(prefix)) {
-          await fs.rm(run.outputFile, { force: true })
+        for (const out of outputFilesOf(run)) {
+          if (out.startsWith(prefix)) await fs.rm(out, { force: true })
         }
       }
     }
     const prompt = this.modulePromptPath(project, runId)
     await fs.rm(prompt, { force: true })
+    const chat = this.moduleChatPath(project, runId)
+    await fs.rm(chat, { force: true })
     await fs.rm(runPath, { force: true })
     return existed
   }
@@ -779,6 +817,13 @@ function validateNoteId(id: string): string {
     throw new Error(`Invalid note id: ${id}`)
   }
   return id
+}
+
+/** All output files of a run: the `outputFiles` list, or the legacy `outputFile`. */
+function outputFilesOf(run: ModuleRun | undefined): string[] {
+  if (!run) return []
+  if (Array.isArray(run.outputFiles) && run.outputFiles.length > 0) return run.outputFiles
+  return run.outputFile ? [run.outputFile] : []
 }
 
 function isInside(parent: string, child: string): boolean {

@@ -15,7 +15,10 @@ export default defineConfig({
         input: {
           index: resolve('src/main/index.ts'),
           'chart-render-worker': resolve('src/main/modules/shared/chart-render-worker.ts'),
-          'diagram-render-worker': resolve('src/main/modules/shared/diagram-render-worker.ts')
+          'diagram-render-worker': resolve('src/main/modules/shared/diagram-render-worker.ts'),
+          'infographic-render-worker': resolve(
+            'src/main/modules/shared/infographic-render-worker.ts'
+          )
         }
       }
     }

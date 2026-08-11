@@ -2,8 +2,32 @@ import { ipcMain } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
 import type { ModuleRunManager } from '../modules/runs'
 import type { ModuleRegistry } from '../modules/registry'
+import type { RegisteredModule } from '../modules/types'
 import type { SettingsStore } from '../settings'
-import type { ModuleSettings } from '@shared/types'
+import type { ModuleChatMessage, ModuleSettings } from '@shared/types'
+
+const MODULE_DISPLAY_ORDER = ['docx', 'pptx', 'infographic']
+
+/** Sort modules for the Settings ▸ Modules list (known ids first, unknowns after in registry order). */
+function orderedModules(registry: ModuleRegistry): RegisteredModule[] {
+  return [...registry.list()].sort((a, b) => {
+    const ia = MODULE_DISPLAY_ORDER.indexOf(a.id)
+    const ib = MODULE_DISPLAY_ORDER.indexOf(b.id)
+    return (
+      (ia === -1 ? MODULE_DISPLAY_ORDER.length : ia) -
+      (ib === -1 ? MODULE_DISPLAY_ORDER.length : ib)
+    )
+  })
+}
+
+function toSettings(registry: ModuleRegistry, disabled: Set<string>): ModuleSettings[] {
+  return orderedModules(registry).map((m) => ({
+    id: m.id,
+    name: m.name,
+    summary: m.summary,
+    enabled: !disabled.has(m.id)
+  }))
+}
 
 export function registerModulesIpc(
   manager: ModuleRunManager,
@@ -16,13 +40,7 @@ export function registerModulesIpc(
 
   ipcMain.handle('modules:listAvailable', async (): Promise<ModuleSettings[]> => {
     const settings = await settingsStore.load()
-    const disabled = new Set(settings.disabledModules ?? [])
-    return registry.list().map((m) => ({
-      id: m.id,
-      name: m.name,
-      summary: m.summary,
-      enabled: !disabled.has(m.id)
-    }))
+    return toSettings(registry, new Set(settings.disabledModules ?? []))
   })
 
   ipcMain.handle(
@@ -36,12 +54,7 @@ export function registerModulesIpc(
         disabled.add(id)
       }
       await settingsStore.save({ ...settings, disabledModules: [...disabled] })
-      return registry.list().map((m) => ({
-        id: m.id,
-        name: m.name,
-        summary: m.summary,
-        enabled: !disabled.has(m.id)
-      }))
+      return toSettings(registry, disabled)
     }
   )
 
@@ -61,8 +74,8 @@ export function registerModulesIpc(
 
   ipcMain.handle(
     'modules:reveal',
-    async (_e: IpcMainInvokeEvent, project: string, runId: string) => {
-      return manager.reveal(project, runId)
+    async (_e: IpcMainInvokeEvent, project: string, runId: string, filePath?: string) => {
+      return manager.reveal(project, runId, filePath)
     }
   )
 
@@ -83,5 +96,11 @@ export function registerModulesIpc(
     ): Promise<boolean> => {
       return manager.deleteRun(project, runId, deleteOutputFiles)
     }
+  )
+
+  ipcMain.handle(
+    'modules:readChat',
+    async (_e: IpcMainInvokeEvent, project: string, runId: string): Promise<ModuleChatMessage[]> =>
+      manager.readChat(project, runId)
   )
 }

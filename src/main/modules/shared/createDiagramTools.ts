@@ -12,7 +12,7 @@ import { slugify } from '../../utils/slug'
  */
 
 const MERMAID_DIAGRAM_TYPES =
-  'flowchart (TD or LR), sequenceDiagram, stateDiagram-v2, classDiagram, erDiagram, pie'
+  'flowchart (TD or LR), sequenceDiagram, stateDiagram-v2, classDiagram, erDiagram, pie, gantt'
 
 function diagramOf(args: Record<string, unknown>): { src: string; error?: string } {
   const raw = args.diagram

@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import { useAppStore } from '../store/useAppStore'
 import { MarkdownContent } from './MarkdownContent'
 import { ModuleCard } from './ModuleCard'
+import { splitContent } from './chatContent'
+import { ThinkBox, UserBubble } from './chatBubbles'
 import type { ChatMessage, ChatSessionMeta, ModuleRun, NoteMeta, Todo } from '@shared/types'
 
 const NO_SESSIONS: ChatSessionMeta[] = []
@@ -22,53 +24,6 @@ function uid(): string {
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
-interface ContentPart {
-  type: 'think' | 'text'
-  content: string
-}
-
-function splitContent(content: string): ContentPart[] {
-  const parts: ContentPart[] = []
-  let index = 0
-  while (index < content.length) {
-    const open = content.indexOf('<think', index)
-    if (open === -1) {
-      const rest = content.slice(index)
-      if (rest.trim()) parts.push({ type: 'text', content: rest })
-      break
-    }
-    if (open > index) {
-      const pre = content.slice(index, open)
-      if (pre.trim()) parts.push({ type: 'text', content: pre })
-    }
-    const close = content.indexOf('</think>', open)
-    if (close === -1) {
-      const rest = content.slice(open).replace(/^<think\b[^>]*>\s*/, '')
-      if (rest.trim()) parts.push({ type: 'think', content: rest.trim() })
-      break
-    }
-    const inner = content.slice(open, close).replace(/^<think\b[^>]*>\s*/, '')
-    if (inner.trim()) parts.push({ type: 'think', content: inner.trim() })
-    index = close + '</think>'.length
-  }
-  return parts
-}
-
-function ThinkBox({ content }: { content: string }): React.JSX.Element {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className={`think-box ${open ? 'open' : ''}`}>
-      <button className="think-header" onClick={() => setOpen(!open)}>
-        <span>💭 Thinking</span>
-        <span className="think-toggle">{open ? '▲' : '▼'}</span>
-      </button>
-      {open && <div className="think-body">{content}</div>}
-    </div>
-  )
-}
-
-const USER_MSG_COLLAPSE_LIMIT = 400
-
 function noteIdFromToolCall(name: string, result?: string): string | null {
   if (name !== 'create_note' && name !== 'update_note') return null
   if (!result) return null
@@ -78,22 +33,6 @@ function noteIdFromToolCall(name: string, result?: string): string | null {
   } catch {
     return null
   }
-}
-
-function UserBubble({ content }: { content: string }): React.JSX.Element {
-  const [expanded, setExpanded] = useState(false)
-  const long = content.length > USER_MSG_COLLAPSE_LIMIT
-  const shown = long && !expanded ? content.slice(0, USER_MSG_COLLAPSE_LIMIT) : content
-  return (
-    <div className="chat-msg-content user-bubble">
-      {shown}
-      {long && (
-        <button className="chat-msg-more" onClick={() => setExpanded(!expanded)}>
-          {expanded ? 'Show less' : '… Show more'}
-        </button>
-      )}
-    </div>
-  )
 }
 
 export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {

@@ -1,5 +1,12 @@
 import OpenAI from 'openai'
-import type { AIProviderConfig, ModuleEventType, ModuleRun, ModuleStepState } from '@shared/types'
+import type {
+  AIProviderConfig,
+  ModuleChatMessage,
+  ModuleEventType,
+  ModuleRun,
+  ModuleStepState,
+  ToolCallInfo
+} from '@shared/types'
 import { tools as baseTools, type PTTool, type ToolContext } from '../ai/tools'
 import { createClient } from '../ai/client'
 import { isLocalEndpoint } from '../ai/chatSession'
@@ -18,11 +25,68 @@ interface SessionMessage {
   tool_call_id?: string
 }
 
+function toToolArgs(args: string | undefined): Record<string, unknown> {
+  if (!args) return {}
+  try {
+    const parsed = JSON.parse(args) as unknown
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {}
+  } catch {
+    return {}
+  }
+}
+
+function toolResultOk(content: string | null): boolean {
+  if (!content) return false
+  try {
+    const parsed = JSON.parse(content) as { ok?: unknown }
+    return !!(parsed && typeof parsed === 'object' && parsed.ok === true)
+  } catch {
+    return false
+  }
+}
+
+/** Map the in-memory session messages to a persisted read-only transcript. */
+function toTranscript(messages: SessionMessage[]): ModuleChatMessage[] {
+  const out: ModuleChatMessage[] = []
+  const callById = new Map<string, ToolCallInfo>()
+  const ts = Date.now()
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i]
+    const id = `m${i}`
+    if (m.role === 'system') {
+      out.push({ id, role: 'system', content: m.content, ts })
+    } else if (m.role === 'user') {
+      out.push({ id, role: 'user', content: m.content, ts })
+    } else if (m.role === 'assistant') {
+      const toolCalls: ToolCallInfo[] = (m.tool_calls ?? []).map((tc) => {
+        const info: ToolCallInfo = {
+          id: tc.id,
+          name: tc.function?.name ?? '',
+          args: toToolArgs(tc.function?.arguments),
+          ok: false
+        }
+        callById.set(tc.id, info)
+        return info
+      })
+      out.push({ id, role: 'assistant', content: m.content, toolCalls, ts })
+    } else {
+      const call = m.tool_call_id ? callById.get(m.tool_call_id) : undefined
+      if (call) {
+        call.ok = toolResultOk(m.content)
+        call.result = m.content ?? undefined
+      }
+      out.push({ id, role: 'tool', name: call?.name ?? '', content: m.content, ts })
+    }
+  }
+  return out
+}
+
 export interface ModuleNotifyEvent {
   type: ModuleEventType
   step?: ModuleStepState
   stepIndex?: number
   outputFile?: string
+  outputFiles?: string[]
   error?: string
   summary?: string
 }
@@ -87,6 +151,20 @@ export class ModuleRunner {
     return this.run
   }
 
+  /** Current conversation transcript, as exposed for the read-only history overlay. */
+  get transcript(): ModuleChatMessage[] {
+    return toTranscript(this.messages)
+  }
+
+  /** Persist the latest transcript to <project>/modules/<runId>.chat.json (best-effort). */
+  private persistChat(): void {
+    void this.service
+      .writeModuleChat(this.activeProject, this.run.runId, toTranscript(this.messages))
+      .catch(() => {
+        // persistence is best-effort; the in-memory transcript still serves live reads
+      })
+  }
+
   stop(): void {
     this.stopped = true
     this.abortController?.abort()
@@ -117,12 +195,14 @@ export class ModuleRunner {
     })
     this.messages.push({ role: 'user', content: this.run.prompt })
     this.touch({ type: 'status' })
+    this.persistChat()
 
     const client = this.clientFn(this.config)
     try {
       for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
         if (this.stopped) break
         const next = await this.runTurn(client)
+        this.persistChat()
         if (next === 'done') break
       }
     } catch (err) {
@@ -135,6 +215,7 @@ export class ModuleRunner {
     if (this.stopped && this.run.status !== 'done' && this.run.status !== 'failed') {
       this.run.status = 'cancelled'
       this.touch({ type: 'status' })
+      this.persistChat()
     }
   }
 
@@ -264,16 +345,36 @@ export class ModuleRunner {
     }
   }
 
-  /** Track the first successful tool result that produced an output file path. */
+  /** Track every successful tool result that produced an output file path. */
   private captureOutput(result: string): void {
-    if (this.run.outputFile) return
     try {
-      const parsed = JSON.parse(result) as { ok?: boolean; path?: string; file?: string }
-      if (parsed.ok && typeof parsed.path === 'string' && typeof parsed.file === 'string') {
-        this.run.outputFile = parsed.path
-        this.run.updatedAt = Date.now()
-        this.notify(this.run, { type: 'output', outputFile: parsed.path })
+      const parsed = JSON.parse(result) as {
+        ok?: boolean
+        path?: string
+        file?: string
+        files?: string[]
       }
+      if (!parsed.ok || typeof parsed.path !== 'string' || typeof parsed.file !== 'string') return
+      const list = this.run.outputFiles ?? []
+      const collected = [parsed.path]
+      if (Array.isArray(parsed.files)) {
+        for (const f of parsed.files) {
+          if (typeof f === 'string' && f.trim() && !collected.includes(f)) collected.push(f)
+        }
+      }
+      const merged = [...list]
+      for (const p of collected) {
+        if (p && !merged.includes(p)) merged.push(p)
+      }
+      if (merged.length === list.length) return
+      this.run.outputFiles = merged
+      this.run.outputFile = merged[0]
+      this.run.updatedAt = Date.now()
+      this.notify(this.run, {
+        type: 'output',
+        outputFile: merged[0],
+        outputFiles: merged
+      })
     } catch {
       // not a JSON tool result
     }
@@ -359,6 +460,7 @@ export class ModuleRunner {
 
   /** Mark the run done with the model's final summary; tidy the step plan. */
   private finish(content: string): 'done' {
+    this.persistChat()
     if (content.trim()) {
       this.run.summary = content.trim()
       this.touch({ type: 'status', summary: content.trim() })
@@ -382,6 +484,7 @@ export class ModuleRunner {
   }
 
   private fail(message: string): void {
+    this.persistChat()
     this.run.status = 'failed'
     this.run.finishedAt = Date.now()
     this.run.error = message

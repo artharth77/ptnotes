@@ -8,6 +8,7 @@ import type {
   ChatThread,
   ConfirmResponse,
   CreateProjectResult,
+  ModuleChatMessage,
   ModuleEvent,
   ModuleRun,
   ModuleSettings,
@@ -121,12 +122,18 @@ const api = {
       ipcRenderer.invoke('modules:stop', project, runId),
     retry: (project: string, runId: string): Promise<ModuleStartResult> =>
       ipcRenderer.invoke('modules:retry', project, runId),
-    reveal: (project: string, runId: string): Promise<{ ok: boolean; error?: string }> =>
-      ipcRenderer.invoke('modules:reveal', project, runId),
+    reveal: (
+      project: string,
+      runId: string,
+      filePath?: string
+    ): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('modules:reveal', project, runId, filePath),
     clearHistory: (project: string, deleteOutputFiles?: boolean): Promise<number> =>
       ipcRenderer.invoke('modules:clearHistory', project, deleteOutputFiles),
     deleteRun: (project: string, runId: string, deleteOutputFiles?: boolean): Promise<boolean> =>
       ipcRenderer.invoke('modules:deleteRun', project, runId, deleteOutputFiles),
+    readChat: (project: string, runId: string): Promise<ModuleChatMessage[]> =>
+      ipcRenderer.invoke('modules:readChat', project, runId),
     onEvent: (callback: (event: ModuleEvent) => void): (() => void) => {
       const listener = (_e: unknown, event: ModuleEvent): void => callback(event)
       ipcRenderer.on('modules:event', listener)

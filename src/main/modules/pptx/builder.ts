@@ -11,6 +11,7 @@ export type SlideLayout =
   | 'table'
   | 'chart'
   | 'diagram'
+  | 'infographic'
   | 'blank'
 
 export interface PptxTableSpec {
@@ -34,7 +35,7 @@ export interface PptxChartSpec {
   h?: number
 }
 
-/** A picture slot fed by render_chart (chart) or render_diagram (diagram). */
+/** A picture slot fed by render_chart (chart), render_diagram (diagram) or render_infographic (infographic). */
 export interface PptxPictureSpec {
   png?: string
   x?: number
@@ -55,6 +56,7 @@ export interface PptxSlideSpec {
   icon?: string | PptxIconSpec
   chart?: string | PptxChartSpec
   diagram?: string | PptxPictureSpec
+  infographic?: string | PptxPictureSpec
   notes?: string
 }
 
@@ -183,6 +185,32 @@ function parsePictureSpec(raw: string | PptxPictureSpec | undefined): PptxPictur
     w: typeof g.w === 'number' && g.w > 0 ? g.w : undefined,
     h: typeof g.h === 'number' && g.h > 0 ? g.h : undefined
   }
+}
+
+/** Fit a picture into the slide body area, preserving its aspect ratio. Throws if the PNG is unreadable. */
+function placePicture(
+  slide: PptxGenJS.Slide,
+  spec: PptxPictureSpec,
+  title: string,
+  dims: SlideDims,
+  altText: string
+): void {
+  const px = pngDimensions(spec.png || '')
+  if (!px) {
+    throw new Error(`Image not found or not a valid PNG: "${spec.png}". Render the image first.`)
+  }
+  const bodyX = 0.6
+  const bodyY = title ? 1.35 : 0.6
+  const bodyW = 8.8
+  const bodyH = dims.h - bodyY - 0.4
+  const targetW = spec.w ?? bodyW
+  const targetH = spec.h ?? bodyH
+  const scale = Math.min(targetW / px.w, targetH / px.h)
+  const w = px.w * scale
+  const h = px.h * scale
+  const x = spec.x ?? bodyX + (bodyW - w) / 2
+  const y = spec.y ?? bodyY + (bodyH - h) / 2
+  slide.addImage({ path: spec.png, x, y, w, h, altText })
 }
 
 /** Convert a module-authored slide JSON into a real .pptx file. */
@@ -331,25 +359,7 @@ export async function buildPptx(spec: unknown, outPath: string): Promise<PptxBui
                 'A slide with layout "chart" needs a "chart" field set to the PNG path from render_chart (the path string or { "png": path }).'
             }
           }
-          const px = pngDimensions(chart.png)
-          if (!px) {
-            return {
-              ok: false,
-              error: `Chart image not found or not a valid PNG: "${chart.png}". Call render_chart to produce the file first.`
-            }
-          }
-          const bodyX = 0.6
-          const bodyY = title ? 1.35 : 0.6
-          const bodyW = 8.8
-          const bodyH = dims.h - bodyY - 0.4
-          const targetW = chart.w ?? bodyW
-          const targetH = chart.h ?? bodyH
-          const scale = Math.min(targetW / px.w, targetH / px.h)
-          const w = px.w * scale
-          const h = px.h * scale
-          const x = chart.x ?? bodyX + (bodyW - w) / 2
-          const y = chart.y ?? bodyY + (bodyH - h) / 2
-          slide.addImage({ path: chart.png, x, y, w, h, altText: 'chart' })
+          placePicture(slide, chart, title, dims, 'chart')
           break
         }
         case 'diagram': {
@@ -362,25 +372,20 @@ export async function buildPptx(spec: unknown, outPath: string): Promise<PptxBui
                 'A slide with layout "diagram" needs a "diagram" field set to the PNG path from render_diagram (the path string or { "png": path }).'
             }
           }
-          const px = pngDimensions(diagram.png)
-          if (!px) {
+          placePicture(slide, diagram, title, dims, 'diagram')
+          break
+        }
+        case 'infographic': {
+          if (title) addHeader(slide, title, t)
+          const infographic = parsePictureSpec(s.infographic)
+          if (!infographic || !infographic.png) {
             return {
               ok: false,
-              error: `Diagram image not found or not a valid PNG: "${diagram.png}". Call render_diagram to produce the file first.`
+              error:
+                'A slide with layout "infographic" needs an "infographic" field set to the PNG path from render_infographic (the path string or { "png": path }).'
             }
           }
-          const bodyX = 0.6
-          const bodyY = title ? 1.35 : 0.6
-          const bodyW = 8.8
-          const bodyH = dims.h - bodyY - 0.4
-          const targetW = diagram.w ?? bodyW
-          const targetH = diagram.h ?? bodyH
-          const scale = Math.min(targetW / px.w, targetH / px.h)
-          const w = px.w * scale
-          const h = px.h * scale
-          const x = diagram.x ?? bodyX + (bodyW - w) / 2
-          const y = diagram.y ?? bodyY + (bodyH - h) / 2
-          slide.addImage({ path: diagram.png, x, y, w, h, altText: 'diagram' })
+          placePicture(slide, infographic, title, dims, 'infographic')
           break
         }
         case 'blank': {

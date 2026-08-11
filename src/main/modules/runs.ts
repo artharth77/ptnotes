@@ -4,6 +4,7 @@ import { promises as fs } from 'fs'
 import OpenAI from 'openai'
 import type {
   AIProviderConfig,
+  ModuleChatMessage,
   ModuleEvent,
   ModuleInfo,
   ModuleRun,
@@ -176,12 +177,14 @@ export class ModuleRunManager {
     run.startedAt = undefined
     run.finishedAt = undefined
     run.outputFile = undefined
+    run.outputFiles = undefined
     run.summary = undefined
     run.error = undefined
     run.updatedAt = now
 
     await this.service.writeModuleRun(project, runId, run)
     this.emit({ runId, project, type: 'status', run })
+    await this.service.writeModuleChat(project, runId, []).catch(() => {})
 
     this.active.get(runId)?.stop()
     const runner = new ModuleRunner({
@@ -247,21 +250,45 @@ export class ModuleRunManager {
     return [...byId.values()].sort((a, b) => b.updatedAt - a.updatedAt)
   }
 
-  async reveal(project: string, runId: string): Promise<{ ok: boolean; error?: string }> {
+  /**
+   * Reveal a module run's output file in the OS file manager. Pass `filePath`
+   * to reveal a specific file from the run's outputFiles; otherwise the
+   * primary output file is revealed.
+   */
+  async reveal(
+    project: string,
+    runId: string,
+    filePath?: string
+  ): Promise<{ ok: boolean; error?: string }> {
     const run = (await this.list(project)).find((r) => r.runId === runId)
-    if (!run?.outputFile) {
+    const outputs = run?.outputFiles?.length
+      ? run.outputFiles
+      : run?.outputFile
+        ? [run.outputFile]
+        : []
+    if (outputs.length === 0) {
       return { ok: false, error: 'No output file recorded for this run.' }
     }
+    const target = filePath && outputs.includes(filePath) ? filePath : outputs[0]
     try {
-      await fs.access(run.outputFile)
+      await fs.access(target)
     } catch {
       return {
         ok: false,
-        error: `File not found: ${run.outputFile.split(/[\\/]/).pop()} (${run.outputFile})`
+        error: `File not found: ${target.split(/[\\/]/).pop()} (${target})`
       }
     }
-    shell.showItemInFolder(run.outputFile)
+    shell.showItemInFolder(target)
     return { ok: true }
+  }
+
+  /** Read a module run's conversation transcript: live from the runner, else disk. */
+  async readChat(project: string, runId: string): Promise<ModuleChatMessage[]> {
+    const runner = this.active.get(runId)
+    if (runner && runner.snapshot?.project === project) {
+      return runner.transcript
+    }
+    return this.service.readModuleChat(project, runId)
   }
 
   private handleUpdate(run: ModuleRun, evt: ModuleNotifyEvent): void {
@@ -276,6 +303,7 @@ export class ModuleRunManager {
       ...(evt.step ? { step: evt.step } : {}),
       ...(evt.stepIndex !== undefined ? { stepIndex: evt.stepIndex } : {}),
       ...(evt.outputFile ? { outputFile: evt.outputFile } : {}),
+      ...(evt.outputFiles ? { outputFiles: evt.outputFiles } : {}),
       ...(evt.error ? { error: evt.error } : {}),
       ...(evt.summary ? { summary: evt.summary } : {})
     })

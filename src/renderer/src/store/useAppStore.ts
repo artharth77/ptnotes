@@ -26,6 +26,7 @@ interface AppState {
   chatSessions: Record<string, ChatSessionMeta[]>
   chatTitles: Record<string, string>
   moduleRuns: Record<string, ModuleRun[]>
+  moduleHistoryRunId: string | null
   chatBusy: boolean
   chatStreamProject: string | null
   confirmRequest: ConfirmRequest | null
@@ -47,6 +48,7 @@ interface AppState {
   refreshFiles: () => Promise<void>
   loadModules: (project: string) => Promise<void>
   applyModuleEvent: (evt: ModuleEvent) => void
+  setModuleHistoryRunId: (runId: string | null) => void
   selectNote: (id: string) => Promise<void>
   saveNote: (content: string) => Promise<void>
   createNote: (title: string) => Promise<void>
@@ -88,6 +90,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   chatSessions: {},
   chatTitles: {},
   moduleRuns: {},
+  moduleHistoryRunId: null,
   chatBusy: false,
   chatStreamProject: null,
   confirmRequest: null,
@@ -152,7 +155,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       return {
         projects,
         chatMessages,
-        chatStreamProject: state.chatStreamProject === name ? null : state.chatStreamProject
+        chatStreamProject: state.chatStreamProject === name ? null : state.chatStreamProject,
+        moduleHistoryRunId: state.activeProject === name ? null : state.moduleHistoryRunId
       }
     })
     if (get().activeProject === name) {
@@ -176,7 +180,13 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async selectProject(name) {
     localStorage.setItem('ptnotes:activeProject', name)
-    set({ activeProject: name, activeNoteId: null, noteContent: '', loading: true })
+    set({
+      activeProject: name,
+      activeNoteId: null,
+      noteContent: '',
+      loading: true,
+      moduleHistoryRunId: null
+    })
     await Promise.all([
       get().refreshNotes(),
       get().refreshTodos(),
@@ -233,6 +243,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       next[idx] = evt.run
       return { moduleRuns: { ...s.moduleRuns, [evt.project]: next } }
     })
+  },
+
+  setModuleHistoryRunId(moduleHistoryRunId) {
+    set({ moduleHistoryRunId })
   },
 
   async selectNote(id) {

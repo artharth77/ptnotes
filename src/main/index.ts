@@ -13,10 +13,15 @@ import { ModuleRunManager } from './modules/runs'
 import { buildStartModuleTool } from './modules/tool'
 import { shutdownChartRenderer } from './modules/shared/chartRenderer'
 import { shutdownDiagramRenderer } from './modules/shared/diagramRenderer'
+import { shutdownInfographicRenderer } from './modules/shared/infographicRenderer'
 import type { PTTool } from './ai/tools'
 import { createPptxModule } from './modules/pptx'
+import { createInfographicModule } from './modules/infographic'
+import { createDocxModule } from './modules/docx'
 import { SettingsStore } from './settings'
 import { AIConfigStore } from './ai/config'
+
+app.setName('PTNotes')
 
 let mainWindow: BrowserWindow | null = null
 
@@ -56,6 +61,10 @@ function createWindow(): void {
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.ptnotes.app')
 
+  if (process.platform === 'darwin' && !app.isPackaged && app.dock) {
+    app.dock.setIcon(icon)
+  }
+
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
   })
@@ -67,6 +76,8 @@ app.whenReady().then(async () => {
 
   const moduleRegistry = new ModuleRegistry()
   moduleRegistry.register(createPptxModule())
+  moduleRegistry.register(createInfographicModule())
+  moduleRegistry.register(createDocxModule())
   const moduleManager = new ModuleRunManager(
     service,
     configStore,
@@ -110,4 +121,5 @@ app.on('window-all-closed', () => {
 app.on('will-quit', () => {
   shutdownChartRenderer()
   shutdownDiagramRenderer()
+  shutdownInfographicRenderer()
 })
