@@ -14,7 +14,7 @@ PTNotes is a desktop app (Electron) for markdown notes, todo task lists, and an 
 - zustand (app state)
 - `openai` npm SDK with `baseURL` override (works with OpenAI, OpenRouter, Groq, LM Studio, Ollama, etc.)
 - cheerio (local HTML → text parsing for `web_fetch`)
-- `isomorphic-mermaid` (mermaid v11 + jsdom/svgdom/dompurify DOM shim) for in-process module diagram rendering (flowchart/sequence/state/ER DSL → SVG)
+- `isomorphic-mermaid` (mermaid v11 + jsdom/svgdom/dompurify DOM shim) for in-process module diagram rendering (flowchart/sequence/state/ER/pie/gantt DSL → SVG)
 - Plain CSS (no UI framework), `react-markdown` + `remark-gfm` + `remark-breaks` for chat rendering
 - electron-builder for packaging (optional)
 

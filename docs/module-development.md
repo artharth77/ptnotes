@@ -162,7 +162,7 @@ It provides `diagram_preview` (dry-run, writes nothing) and `render_diagram` (wr
 `<project>/modules/temp/<slug>.png` + `.svg` + `.json` and returns the asset paths; the temp files
 are deleted automatically once a deck using them is built). Diagrams are authored as **mermaid DSL
 source text** (`flowchart TD/LR`, `sequenceDiagram`, `stateDiagram-v2`, `classDiagram`, `erDiagram`,
-`pie`) and rendered by mermaid v11 on a jsdom/svgdom DOM shim (`isomorphic-mermaid`; no headless
+`pie`, `gantt`) and rendered by mermaid v11 on a jsdom/svgdom DOM shim (`isomorphic-mermaid`; no headless
 browser) in an isolated Electron utility process, rasterized by `@resvg/resvg-js`. Add
 `isomorphic-mermaid` to your module's deps. The backing library `src/main/modules/shared/mermaid.ts`
 is format-agnostic too: `validateMermaid(src)`, `renderMermaidSvg(src)`, `svgBounds(svg)` and

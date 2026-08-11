@@ -377,6 +377,44 @@ await fs.access(diagramRenderedParsed.png)
 await fs.access(diagramRenderedParsed.svg)
 await fs.access(diagramRenderedParsed.json)
 
+// ---- gantt diagram support ----
+const ganttSrc = `gantt
+  title A Gantt Diagram
+  dateFormat YYYY-MM-DD
+  section Section
+    A task :a1, 2024-01-01, 30d
+    Another task :after a1, 20d`
+
+const ganttValidation = await validateMermaid(ganttSrc)
+assert.ok(
+  ganttValidation.ok && ganttValidation.diagramType === 'gantt',
+  'gantt diagram type detected'
+)
+const ganttSvg = await renderMermaidSvg(ganttSrc)
+assert.ok(ganttSvg.svg.trimStart().startsWith('<svg'), 'renderMermaidSvg renders gantt')
+const ganttBounds = svgBounds(ganttSvg.svg)
+assert.ok(ganttBounds.width > 0 && ganttBounds.height > 0, 'gantt svgBounds reads the viewBox')
+
+const ganttPreview = await diagramTools['diagram_preview']!.execute(
+  { diagram: ganttSrc },
+  { service, activeProject: PROJECT, confirm: async () => false }
+)
+const ganttPreviewParsed = JSON.parse(ganttPreview)
+assert.equal(ganttPreviewParsed.ok, true, 'gantt diagram_preview succeeds')
+assert.equal(ganttPreviewParsed.diagramType, 'gantt', 'gantt diagram_preview reports the type')
+assert.ok(
+  ganttPreviewParsed.width > 0 && ganttPreviewParsed.height > 0,
+  'gantt diagram_preview reports dimensions'
+)
+
+const ganttOneShot = await renderMermaidPng(ganttSrc)
+assert.deepEqual(
+  [...ganttOneShot.png.subarray(0, 4)],
+  [0x89, 0x50, 0x4e, 0x47],
+  'gantt renderMermaidPng png magic bytes'
+)
+assert.ok(ganttOneShot.diagramType === 'gantt', 'gantt renderMermaidPng reports the type')
+
 const badDiagramTools = diagramTools['render_diagram']!.execute(
   { diagram: 'garbage text' },
   { service, activeProject: PROJECT, confirm: async () => false }

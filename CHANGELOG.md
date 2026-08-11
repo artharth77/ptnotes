@@ -15,6 +15,10 @@ All notable changes to PTNotes are documented in this file.
 - New IPC channel `modules:readChat` (preload `window.ptnotes.modules.readChat`).
 - Shared chat-bubble rendering extracted into `chatBubbles.tsx` / `chatContent.ts` / `moduleStatus.ts` (reused by both the chat drawer and the overlay).
 
+#### Gantt diagrams
+
+- The mermaid diagram tool-pack now accepts `gantt` diagrams alongside flowchart/sequence/state/class/ER/pie. Gantt includes need an SVG `viewBox` from `parentElement.offsetWidth`, which the svgdom DOM shim doesn't support, so a tiny `parentElement` polyfill (delegating to `parentNode`) plus a fixed `useWidth`/`useMaxWidth: false` config lets gantt render in-process; rasterization and the isolated utility-process path are unchanged.
+
 ## [0.4.0] — 2026-08-10
 
 ### Added

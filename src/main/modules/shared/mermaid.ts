@@ -13,7 +13,7 @@ import { Resvg } from '@resvg/resvg-js'
  */
 
 export type MermaidDiagramType =
-  'flowchart' | 'sequence' | 'stateDiagram-v2' | 'classDiagram' | 'erDiagram' | 'pie'
+  'flowchart' | 'sequence' | 'stateDiagram-v2' | 'classDiagram' | 'erDiagram' | 'pie' | 'gantt'
 
 const SUPPORTED_TYPES: MermaidDiagramType[] = [
   'flowchart',
@@ -21,7 +21,8 @@ const SUPPORTED_TYPES: MermaidDiagramType[] = [
   'stateDiagram-v2',
   'classDiagram',
   'erDiagram',
-  'pie'
+  'pie',
+  'gantt'
 ]
 
 export type MermaidValidationResult =
@@ -83,6 +84,35 @@ let mermaidPromise: Promise<MermaidModule> | null = null
 let renderCounter = 0
 
 /**
+ * Mermaid's gantt diagram reads `elem.parentElement.offsetWidth` to size the
+ * timeline. svgdom (the DOM shim) has no `parentElement` property at all, so
+ * that access throws before the `useWidth` fallback can run. Add a minimal
+ * `parentElement` getter (delegating to svgdom's existing `parentNode`) on the
+ * shared Node prototype; `offsetWidth` then simply returns undefined (no
+ * layout in svgdom), which mermaid handles by falling back to its fixed width.
+ */
+function installParentElementPolyfill(): void {
+  const g = globalThis as Record<string, unknown>
+  const doc = g.document as { createElement?: (t: string) => unknown } | undefined
+  if (!doc?.createElement) return
+  const probe = doc.createElement('div')
+  if (!probe || typeof probe !== 'object') return
+  let proto = Object.getPrototypeOf(probe)
+  while (proto && !('parentNode' in proto)) {
+    const next = Object.getPrototypeOf(proto)
+    if (!next || next === Object.prototype) break
+    proto = next
+  }
+  if (!proto || Object.getOwnPropertyDescriptor(proto, 'parentElement')) return
+  Object.defineProperty(proto, 'parentElement', {
+    configurable: true,
+    get(this: { parentNode?: unknown }): unknown {
+      return this.parentNode ?? null
+    }
+  })
+}
+
+/**
  * DOM globals the isomorphic-mermaid shim installs; we isolate them around each
  * render. Not `navigator`: in Node 21+ it is a read-only global getter, and the
  * shim never touches it — only `window`/`document` need isolation.
@@ -119,7 +149,10 @@ function loadMermaid(): Promise<MermaidModule> {
         startOnLoad: false,
         securityLevel: 'loose',
         htmlLabels: false,
-        flowchart: { htmlLabels: false }
+        flowchart: { htmlLabels: false },
+        // The svgdom DOM shim has no layout ("offsetWidth" is undefined), so
+        // gantt must render at a fixed width (see installParentElementPolyfill).
+        gantt: { useMaxWidth: false, useWidth: 1200 }
       })
       return mermaid
     })
@@ -135,6 +168,7 @@ function loadMermaid(): Promise<MermaidModule> {
 async function withMermaidDom<T>(fn: () => Promise<T>): Promise<T> {
   await loadMermaid()
   writeGlobals(shimGlobals)
+  installParentElementPolyfill()
   try {
     return await fn()
   } finally {
@@ -155,7 +189,7 @@ export async function validateMermaid(src: string): Promise<MermaidValidationRes
     if (diagramType === 'unknown') {
       return {
         ok: false,
-        error: 'No diagram type detected. Use flowchart, sequence, state, class, ER or pie.'
+        error: 'No diagram type detected. Use flowchart, sequence, state, class, ER, pie or gantt.'
       }
     }
     return { ok: true, diagramType }
