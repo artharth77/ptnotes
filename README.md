@@ -12,7 +12,7 @@ Markdown notes + todo lists + AI assistant, organized by project. Electron + Rea
 - **File attachments** — drag & drop files into the chat; supported files (any text file plus PDFs, detected by content) are copied locally to the project and can be reused via `#` mentions. The assistant reads them locally with the `read_file` tool.
 - **Chat mentions** — type `@` to insert a note, `!` to insert a todo, `#` to attach a project file; the AI can link to your notes with clickable `[name](note:name)` links.
 - **Chat history** — each session is auto-saved to a JSON file; **New Chat** archives the current thread and a history picker lets you reopen, rename, or delete old sessions.
-- **Background modules** — the assistant can launch long-running background subagents (Modules, e.g. PPTX/PowerPoint or Infographic) that plan steps and generate a deliverable file autonomously. A **Modules** tab shows live status and per-step progress; click the 💬 button on any run to open a read-only overlay of the module's full conversation (its system prompt, tool calls, and reasoning). Just ask e.g. *"make a PowerPoint about…"* or *"make an infographic about…"* to start one.
+- **Background modules** — the assistant can launch long-running background subagents (Modules, e.g. PPTX/PowerPoint, Word/DOCX, or Infographic) that plan steps and generate a deliverable file autonomously. A **Modules** tab shows live status and per-step progress; click the 💬 button on any run to open a read-only overlay of the module's full conversation (its system prompt, tool calls, and reasoning). Just ask e.g. *"make a PowerPoint about…"*, *"write a Word document about…"*, or *"make an infographic about…"* to start one.
 - **Reasoning models** — `<think>` reasoning blocks (e.g. DeepSeek-R1) render in a separate collapsed-by-default bubble; a **Stop** button interrupts a running reply.
 - **Missing projects** — projects whose folders were deleted externally still appear in the list (marked in red) and can be recreated in place.
 - **Settings** — a category-based **Settings** dialog covers storage, AI provider (with an editable model combobox fed by `GET /models`), and modules. See [Settings](#settings).
@@ -24,6 +24,7 @@ Markdown notes + todo lists + AI assistant, organized by project. Electron + Rea
 - `openai` SDK (OpenAI-compatible endpoints) for the AI chat and modules
 - `pdf-parse` for extracting text from PDFs (chat files, modules)
 - `pptxgenjs` for generating PowerPoint deliverables (modules)
+- `docx` for generating Word document deliverables (modules)
 - Chart.js + `@napi-rs/canvas` for in-process chart rendering (modules)
 - Mermaid + `isomorphic-mermaid` for in-process diagram rendering (modules)
 - `@antv/infographic` for in-process infographic rendering (modules)
