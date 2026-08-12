@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { mdiDotsVertical, mdiTrashCanOutline } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
 import { ModuleCard } from './ModuleCard'
 import { Modal } from './Modal'
+import { MdiIcon } from './MdiIcon'
 
 const NO_RUNS: never[] = []
 
@@ -16,10 +18,32 @@ export function ModulePanel(): React.JSX.Element {
   const [confirmClear, setConfirmClear] = useState(false)
   const [clearing, setClearing] = useState(false)
   const [deleteOutputFiles, setDeleteOutputFiles] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (activeProject) void loadModules(activeProject)
   }, [activeProject, loadModules])
+
+  useEffect(() => {
+    if (!menuOpen) return
+    function onClick(e: MouseEvent): void {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [menuOpen])
+
+  function toggleMenu(e: React.MouseEvent): void {
+    if (menuOpen) {
+      setMenuOpen(false)
+      return
+    }
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    setMenuPos({ x: rect.right, y: rect.bottom })
+    setMenuOpen(true)
+  }
 
   const activeRuns = runs.filter((r) => !['done', 'failed', 'cancelled'].includes(r.status))
   const doneRuns = runs.filter((r) => ['done', 'failed', 'cancelled'].includes(r.status))
@@ -41,18 +65,41 @@ export function ModulePanel(): React.JSX.Element {
     <div className="module-panel">
       <div className="list-header">
         <span>Modules</span>
-        <div className="module-header-actions">
-          {doneRuns.length > 0 && (
-            <button
-              className="btn small ghost danger module-clear-btn"
-              title="Delete all finished module runs"
-              onClick={() => setConfirmClear(true)}
-            >
-              Clear all
-            </button>
-          )}
-        </div>
+        <button
+          className="icon-btn todo-menu-btn"
+          title="Module options"
+          onClick={toggleMenu}
+          aria-expanded={menuOpen}
+        >
+          <MdiIcon path={mdiDotsVertical} size={16} />
+        </button>
       </div>
+      {menuOpen && menuPos && (
+        <>
+          <div className="menu-overlay" onClick={() => setMenuOpen(false)} />
+          <div
+            ref={menuRef}
+            className="note-menu"
+            style={{ left: menuPos.x, top: menuPos.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className="note-menu-item danger"
+              disabled={doneRuns.length === 0}
+              title="Delete all finished module runs"
+              onClick={() => {
+                setConfirmClear(true)
+                setMenuOpen(false)
+              }}
+            >
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiTrashCanOutline} size={16} />
+              </span>
+              Delete all
+            </button>
+          </div>
+        </>
+      )}
       <div className="list-scroll module-list-scroll">
         {runs.length === 0 && (
           <div className="list-empty">
@@ -79,7 +126,7 @@ export function ModulePanel(): React.JSX.Element {
         ))}
       </div>
       {confirmClear && (
-        <Modal title="Clear module history" onClose={() => setConfirmClear(false)}>
+        <Modal title="Delete module history" onClose={() => setConfirmClear(false)}>
           <p className="confirm-message">
             Delete all {doneRuns.length} finished module runs (done / failed / cancelled)? Active
             runs are kept.

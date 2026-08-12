@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
+import {
+  mdiDotsVertical,
+  mdiFolderOpenOutline,
+  mdiPencil,
+  mdiRefresh,
+  mdiTrashCanOutline
+} from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
 import { Modal, TextField } from './Modal'
+import { MdiIcon } from './MdiIcon'
 
 function formatDate(ms: number): string {
   if (!ms) return ''
@@ -24,6 +32,7 @@ export function NoteList(): React.JSX.Element {
   const [filter, setFilter] = useState('')
   const [menuFor, setMenuFor] = useState<string | null>(null)
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
   const filteredNotes = notes.filter((note) =>
@@ -57,9 +66,13 @@ export function NoteList(): React.JSX.Element {
 
   async function handleDelete(id: string): Promise<void> {
     setMenuFor(null)
-    if (window.confirm(`Delete note "${id}"?`)) {
-      await deleteNote(id)
-    }
+    setConfirmDeleteId(id)
+  }
+
+  async function doDelete(): Promise<void> {
+    if (!confirmDeleteId) return
+    await deleteNote(confirmDeleteId)
+    setConfirmDeleteId(null)
   }
 
   async function handleReveal(id: string): Promise<void> {
@@ -107,7 +120,7 @@ export function NoteList(): React.JSX.Element {
             title="Refresh notes list"
             onClick={() => void refreshNotes()}
           >
-            ⟳
+            <MdiIcon path={mdiRefresh} size={16} />
           </button>
           <button className="btn small" onClick={() => setCreating(true)}>
             + New
@@ -134,7 +147,7 @@ export function NoteList(): React.JSX.Element {
                 title="More actions"
                 onClick={(e) => openMenu(e, note.id)}
               >
-                ⋮
+                <MdiIcon path={mdiDotsVertical} size={16} />
               </button>
             </span>
           </div>
@@ -163,16 +176,25 @@ export function NoteList(): React.JSX.Element {
                       setMenuFor(null)
                     }}
                   >
-                    <span className="note-menu-icon">✎</span> Rename
+                    <span className="note-menu-icon">
+                      <MdiIcon path={mdiPencil} size={15} />
+                    </span>{' '}
+                    Rename
                   </button>
                   <button className="note-menu-item" onClick={() => void handleReveal(menuFor)}>
-                    <span className="note-menu-icon">📂</span> Show in Folder
+                    <span className="note-menu-icon">
+                      <MdiIcon path={mdiFolderOpenOutline} size={15} />
+                    </span>{' '}
+                    Show in Folder
                   </button>
                   <button
                     className="note-menu-item danger"
                     onClick={() => void handleDelete(menuFor)}
                   >
-                    <span className="note-menu-icon">🗑</span> Delete
+                    <span className="note-menu-icon">
+                      <MdiIcon path={mdiTrashCanOutline} size={15} />
+                    </span>{' '}
+                    Delete
                   </button>
                 </>
               )
@@ -224,6 +246,22 @@ export function NoteList(): React.JSX.Element {
               disabled={!name.trim()}
             >
               Rename
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {confirmDeleteId && (
+        <Modal title="Delete Note" onClose={() => setConfirmDeleteId(null)}>
+          <p className="confirm-message">
+            Delete note &quot;{confirmDeleteId}&quot;? This cannot be undone.
+          </p>
+          <div className="modal-actions">
+            <button className="btn" onClick={() => setConfirmDeleteId(null)}>
+              Cancel
+            </button>
+            <button className="btn danger" onClick={() => void doDelete()}>
+              Delete
             </button>
           </div>
         </Modal>

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { mdiFolderOpenOutline, mdiPencil, mdiTrashCanOutline } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
 import { Modal, TextField } from './Modal'
+import { MdiIcon } from './MdiIcon'
 
 export function ProjectDropdown(): React.JSX.Element {
   const projects = useAppStore((s) => s.projects)
@@ -90,7 +92,9 @@ export function ProjectDropdown(): React.JSX.Element {
   return (
     <div className="project-dropdown" ref={ref}>
       <button className="project-switcher" onClick={toggleDropdown}>
-        <span className="project-icon">📁</span>
+        <span className="project-icon">
+          <MdiIcon path={mdiFolderOpenOutline} size={16} />
+        </span>
         <span className={`project-name ${activeMissing ? 'missing' : ''}`}>
           {activeProject ?? 'Select a project'}
         </span>
@@ -130,7 +134,7 @@ export function ProjectDropdown(): React.JSX.Element {
                     setRenaming(p.name)
                   }}
                 >
-                  ✎
+                  <MdiIcon path={mdiPencil} size={14} />
                 </button>
                 <button
                   className="icon-btn small danger"
@@ -140,7 +144,7 @@ export function ProjectDropdown(): React.JSX.Element {
                     void handleDelete(p.name)
                   }}
                 >
-                  🗑
+                  <MdiIcon path={mdiTrashCanOutline} size={14} />
                 </button>
               </span>
             </div>

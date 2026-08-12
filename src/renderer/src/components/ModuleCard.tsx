@@ -1,7 +1,10 @@
 import { useState } from 'react'
+import { mdiChatProcessingOutline } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
 import type { ModuleRun, ModuleStepState } from '@shared/types'
 import { Modal } from './Modal'
+import { MdiIcon } from './MdiIcon'
+import { fileTypeIcon } from './contentIcons'
 import { STATUS_LABELS } from './moduleStatus'
 
 function stepIcon(step: ModuleStepState): string {
@@ -98,7 +101,7 @@ export function ModuleCard({
               useAppStore.getState().setModuleHistoryRunId(run.runId)
             }}
           >
-            💬
+            <MdiIcon path={mdiChatProcessingOutline} size={16} />
           </button>
           {!active && run.status === 'failed' && (
             <button
@@ -193,8 +196,9 @@ export function ModuleCard({
                   })
                 }}
               >
-                {revealError ? '⚠ ' : '📄 '}
-                {file.split(/[\\/]/).pop()}
+                {revealError ? '⚠ ' : null}
+                <MdiIcon path={fileTypeIcon(file)} size={16} />
+                <span className="module-output-name">{file.split(/[\\/]/).pop()}</span>
               </button>
             ))}
             {active && (

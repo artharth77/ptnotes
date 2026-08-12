@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
+import { mdiToggleSwitch, mdiToggleSwitchOffOutline } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
 import { Modal, TextField } from './Modal'
+import { MdiIcon } from './MdiIcon'
 import type { AIProviderConfig, ModuleSettings, StorageSettings } from '@shared/types'
 
 function AiSettingsPane({
@@ -206,18 +208,22 @@ function ModulesPane({
       ) : (
         <div className="module-settings-list">
           {modules.map((m) => (
-            <label key={m.id} className={`module-settings-row${m.enabled ? '' : ' disabled'}`}>
-              <input
-                type="checkbox"
-                checked={m.enabled}
-                disabled={toggling === m.id}
-                onChange={() => void toggle(m)}
-              />
+            <div key={m.id} className={`module-settings-row${m.enabled ? '' : ' disabled'}`}
+              aria-pressed={m.enabled}
+              onClick={() => void toggle(m)}
+            >
               <span className="module-settings-info">
                 <span className="module-settings-name">{m.name}</span>
                 <span className="module-settings-desc">{m.summary}</span>
               </span>
-            </label>
+              <button
+                className={`module-settings-toggle${m.enabled ? ' on' : ''}`}
+                title={m.enabled ? 'Disable this module' : 'Enable this module'}
+                disabled={toggling === m.id}
+              >
+                <MdiIcon path={m.enabled ? mdiToggleSwitch : mdiToggleSwitchOffOutline} size={32} />
+              </button>
+            </div>
           ))}
         </div>
       )}

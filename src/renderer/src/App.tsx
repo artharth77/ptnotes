@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from './store/useAppStore'
 import { TopBar } from './components/TopBar'
 import { NoteList } from './components/NoteList'
@@ -103,6 +103,30 @@ function EmptyNote(): React.JSX.Element {
   )
 }
 
+function ChatSkeleton(): React.JSX.Element {
+  return (
+    <div className="chat-skeleton">
+      <div className="chat-skeleton-header">
+        <span className="skeleton-bar w60" />
+        <span className="skeleton-bar w20" />
+      </div>
+      <div className="chat-skeleton-body">
+        <span className="skeleton-bar w80" />
+        <span className="skeleton-bar w40" />
+        <span className="skeleton-bar w65" />
+        <span className="skeleton-bar w50" />
+        <span className="skeleton-bar w75" />
+        <span className="skeleton-bar w35" />
+        <span className="skeleton-bar w60" />
+      </div>
+      <div className="chat-skeleton-input">
+        <span className="skeleton-bar w70" />
+        <span className="skeleton-bar w15" />
+      </div>
+    </div>
+  )
+}
+
 function reloadActiveNoteIfUpdated(toolCall: ToolCallInfo): void {
   if (!toolCall.ok || !toolCall.result) return
   try {
@@ -163,14 +187,9 @@ function App(): React.JSX.Element {
   const sidebarVisible = useAppStore((s) => s.sidebarVisible)
   const [sidebarWidth, setSidebarWidth] = useState(280)
   const [chatWidth, setChatWidth] = useState(360)
-
-  function resizeSidebar(delta: number): void {
-    setSidebarWidth((w) => Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, w + delta)))
-  }
-
-  function resizeChat(delta: number): void {
-    setChatWidth((w) => Math.min(CHAT_MAX, Math.max(CHAT_MIN, w + delta)))
-  }
+  const [chatResizing, setChatResizing] = useState(false)
+  const sidebarRef = useRef<HTMLElement>(null)
+  const chatColRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     void init()
@@ -271,13 +290,22 @@ function App(): React.JSX.Element {
       {activeProject ? (
         <div className="app-body">
           <aside
+            ref={sidebarRef}
             className={`sidebar${sidebarVisible ? '' : ' collapsed'}`}
             style={{ width: sidebarVisible ? sidebarWidth : 0 }}
           >
             <SideTabs />
             {tab === 'todo' ? <TodoPanel /> : tab === 'modules' ? <ModulePanel /> : <NoteList />}
           </aside>
-          {sidebarVisible && <Resizer position="end" onResize={resizeSidebar} />}
+          {sidebarVisible && (
+            <Resizer
+              position="end"
+              targetRef={sidebarRef}
+              min={SIDEBAR_MIN}
+              max={SIDEBAR_MAX}
+              onCommit={setSidebarWidth}
+            />
+          )}
           <main className="main-area">
             {activeNoteId ? (
               <MarkdownEditor key={activeNoteId} noteId={activeNoteId} content={noteContent} />
@@ -285,23 +313,45 @@ function App(): React.JSX.Element {
               <EmptyNote />
             )}
           </main>
-          {chatOpen && <Resizer position="start" onResize={resizeChat} />}
+          {chatOpen && (
+            <Resizer
+              position="start"
+              targetRef={chatColRef}
+              min={CHAT_MIN}
+              max={CHAT_MAX}
+              onCommit={setChatWidth}
+              onStart={() => setChatResizing(true)}
+              onEnd={() => setChatResizing(false)}
+            />
+          )}
           <div
+            ref={chatColRef}
             className={`chat-col${chatOpen ? '' : ' collapsed'}`}
             style={{ width: chatOpen ? chatWidth : 0 }}
           >
-            <ChatDrawer width={chatWidth} />
+            {chatResizing ? <ChatSkeleton /> : <ChatDrawer width={chatWidth} />}
           </div>
         </div>
       ) : (
         <div className="app-body no-project">
           <EmptyProject />
-          {chatOpen && <Resizer position="start" onResize={resizeChat} />}
+          {chatOpen && (
+            <Resizer
+              position="start"
+              targetRef={chatColRef}
+              min={CHAT_MIN}
+              max={CHAT_MAX}
+              onCommit={setChatWidth}
+              onStart={() => setChatResizing(true)}
+              onEnd={() => setChatResizing(false)}
+            />
+          )}
           <div
+            ref={chatColRef}
             className={`chat-col${chatOpen ? '' : ' collapsed'}`}
             style={{ width: chatOpen ? chatWidth : 0 }}
           >
-            <ChatDrawer width={chatWidth} />
+            {chatResizing ? <ChatSkeleton /> : <ChatDrawer width={chatWidth} />}
           </div>
         </div>
       )}

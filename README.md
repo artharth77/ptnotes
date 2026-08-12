@@ -29,6 +29,7 @@ Markdown notes + todo lists + AI assistant, organized by project. Electron + Rea
 - Mermaid + `isomorphic-mermaid` for in-process diagram rendering (modules)
 - `@antv/infographic` for in-process infographic rendering (modules)
 - `@resvg/resvg-js` for PNG rasterization (charts, diagrams & infographics)
+- `@mdi/js` for app's renderer UI icons
 - `lucide-static` icon catalog for slide icons (modules)
 - `react-markdown` + `remark-gfm` + `remark-breaks` for rendering chat responses
 - cheerio for local page reading

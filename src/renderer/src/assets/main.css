@@ -105,6 +105,11 @@ body {
   white-space: nowrap;
 }
 
+.sidebar.resizing,
+.chat-col.resizing {
+  transition: none;
+}
+
 .resizer {
   flex-shrink: 0;
   width: 5px;
@@ -228,23 +233,6 @@ body {
   font-size: 12px;
 }
 
-.module-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.module-clear-btn {
-  font-size: 11px;
-  color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
-}
-
-.module-clear-btn:hover {
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
-  color: var(--danger);
-}
-
 .confirm-checkbox {
   display: flex;
   align-items: center;
@@ -263,6 +251,9 @@ body {
   padding: 2px 5px;
   border-radius: 6px;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .icon-btn:hover {
@@ -287,6 +278,8 @@ body {
 .btn-icon {
   font-size: 24px;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
 }
 
 .sidebar-toggle-icon {
@@ -639,12 +632,13 @@ body {
   font-size: 11px;
   color: var(--text-faint);
   margin-right: 2px;
+  white-space: nowrap;
 }
 
 .note-menu-btn {
   opacity: 0;
   font-size: 16px;
-  padding: 2px 6px;
+  padding: 2px 0px;
 }
 
 .note-item:hover .note-menu-btn {
@@ -692,35 +686,35 @@ body {
   color: var(--danger);
 }
 
+.note-menu-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .note-menu-icon {
   width: 18px;
-  text-align: center;
-  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.note-menu-toggle {
+  margin-left: auto;
+  padding-left: 32px;
+  display: inline-flex;
+  align-items: center;
 }
 
 /* ---------- Todo ---------- */
 
-.todo-toolbar {
+.todo-header-right {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 0 12px 8px;
+  gap: 4px;
 }
 
-.todo-showall {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--text-dim);
-  cursor: pointer;
-  user-select: none;
-}
-
-.todo-showall input {
-  accent-color: var(--accent);
-  cursor: pointer;
+.todo-menu-btn {
+  margin-left: 2px;
 }
 
 .todo-progress {
@@ -804,8 +798,7 @@ body {
 .todo-add {
   display: flex;
   gap: 6px;
-  padding: 10px;
-  border-bottom: 1px solid var(--border);
+  padding: 0 10px 10px 10px;
 }
 
 /* ---------- Text field / modal ---------- */
@@ -1110,6 +1103,9 @@ body {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .tb-btn:hover:not(:disabled) {
@@ -1279,6 +1275,95 @@ body {
 }
 
 /* ---------- Chat drawer ---------- */
+
+.chat-skeleton {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 14px;
+  gap: 14px;
+  background: var(--bg-elev);
+  border-left: 1px solid var(--border);
+}
+
+.chat-skeleton-header {
+  display: flex;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.chat-skeleton-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chat-skeleton-input {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.skeleton-bar {
+  display: block;
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    var(--bg-hover) 25%,
+    color-mix(in srgb, var(--bg-hover) 55%, var(--bg)) 50%,
+    var(--bg-hover) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s infinite;
+}
+
+.skeleton-bar.w80 {
+  width: 80%;
+}
+.skeleton-bar.w75 {
+  width: 75%;
+}
+.skeleton-bar.w70 {
+  width: 70%;
+}
+.skeleton-bar.w65 {
+  width: 65%;
+}
+.skeleton-bar.w60 {
+  width: 60%;
+}
+.skeleton-bar.w50 {
+  width: 50%;
+}
+.skeleton-bar.w40 {
+  width: 40%;
+}
+.skeleton-bar.w35 {
+  width: 35%;
+}
+.skeleton-bar.w20 {
+  width: 20%;
+}
+.skeleton-bar.w15 {
+  width: 15%;
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
 
 .chat-col {
   min-width: 0;
@@ -1603,6 +1688,8 @@ body {
 
 .chat-note-link-icon {
   font-size: 11px;
+  display: inline-flex;
+  align-items: center;
 }
 
 .markdown-body blockquote {
@@ -1818,6 +1905,9 @@ body {
   background: var(--bg);
   color: var(--text-dim);
   font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   cursor: pointer;
 }
 
@@ -1890,6 +1980,8 @@ body {
 
 .mention-icon {
   font-size: 12px;
+  display: inline-flex;
+  align-items: center;
 }
 
 .chat-status {
@@ -2081,26 +2173,39 @@ body {
 
 .module-settings-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  font-size: 13px;
   cursor: pointer;
-  user-select: none;
+  font-size: 13px;
 }
 
-.module-settings-row input {
-  accent-color: var(--accent);
-  width: 15px;
-  height: 15px;
-  margin-top: 2px;
+.module-settings-toggle {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
   flex-shrink: 0;
 }
 
-.module-settings-row.disabled {
-  opacity: 0.55;
+.module-settings-toggle:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.module-settings-toggle.on {
+  color: var(--accent);
+}
+
+.module-settings-toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .module-settings-info {
@@ -2233,7 +2338,10 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
+  transition:
+    opacity 0.12s ease,
+    color 0.12s ease,
+    background 0.12s ease;
 }
 
 .module-card-retry-btn {
@@ -2251,7 +2359,10 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
+  transition:
+    opacity 0.12s ease,
+    color 0.12s ease,
+    background 0.12s ease;
 }
 
 .module-card:hover .module-card-delete-btn,
@@ -2345,7 +2456,10 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
+  transition:
+    opacity 0.12s ease,
+    color 0.12s ease,
+    background 0.12s ease;
 }
 
 .module-card:hover .module-card-history-btn {
@@ -2663,7 +2777,10 @@ body {
   color: var(--text-dim);
   cursor: pointer;
   border-radius: 3px;
-  transition: transform 0.25s ease, color 0.15s ease, background 0.15s ease;
+  transition:
+    transform 0.25s ease,
+    color 0.15s ease,
+    background 0.15s ease;
 }
 
 .module-step-toggle.open {
@@ -2695,6 +2812,13 @@ body {
 
 .module-card-actions .btn.small.ghost {
   max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.module-card-actions .module-output-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -1,4 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
+import {
+  mdiCodeBraces,
+  mdiCodeTags,
+  mdiFormatBold,
+  mdiFormatHeader1,
+  mdiFormatHeader2,
+  mdiFormatHeader3,
+  mdiFormatItalic,
+  mdiFormatListBulleted,
+  mdiFormatListChecks,
+  mdiFormatListNumbered,
+  mdiFormatQuoteOpen,
+  mdiFormatStrikethroughVariant,
+  mdiLinkVariant,
+  mdiMinus,
+  mdiRedoVariant,
+  mdiUndoVariant
+} from '@mdi/js'
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { Markdown } from '@tiptap/markdown'
@@ -9,6 +27,7 @@ import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { useAppStore } from '../store/useAppStore'
 import { PromptModal } from './Modal'
+import { MdiIcon } from './MdiIcon'
 
 interface MarkdownEditorProps {
   noteId: string
@@ -16,13 +35,13 @@ interface MarkdownEditorProps {
 }
 
 function ToolbarBtn({
-  label,
+  icon,
   title,
   active,
   onClick,
   disabled
 }: {
-  label: string
+  icon: string
   title?: string
   active?: boolean
   onClick: () => void
@@ -32,11 +51,11 @@ function ToolbarBtn({
     <button
       type="button"
       className={`tb-btn ${active ? 'active' : ''}`}
-      title={title ?? label}
+      title={title}
       disabled={disabled}
       onClick={onClick}
     >
-      {label}
+      <MdiIcon path={icon} size={16} />
     </button>
   )
 }
@@ -118,90 +137,95 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
     <div className="editor-wrap">
       <div className="editor-toolbar">
         <ToolbarBtn
-          label="H1"
+          icon={mdiFormatHeader1}
+          title="Heading 1"
           active={state.isH1}
           onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
         />
         <ToolbarBtn
-          label="H2"
+          icon={mdiFormatHeader2}
+          title="Heading 2"
           active={state.isH2}
           onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
         />
         <ToolbarBtn
-          label="H3"
+          icon={mdiFormatHeader3}
+          title="Heading 3"
           active={state.isH3}
           onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
         />
         <span className="tb-sep" />
         <ToolbarBtn
-          label="B"
+          icon={mdiFormatBold}
           title="Bold"
           active={state.isBold}
           onClick={() => editor.chain().focus().toggleBold().run()}
         />
         <ToolbarBtn
-          label="I"
+          icon={mdiFormatItalic}
           title="Italic"
           active={state.isItalic}
           onClick={() => editor.chain().focus().toggleItalic().run()}
         />
         <ToolbarBtn
-          label="S"
+          icon={mdiFormatStrikethroughVariant}
           title="Strikethrough"
           active={state.isStrike}
           onClick={() => editor.chain().focus().toggleStrike().run()}
         />
         <ToolbarBtn
-          label="<>"
+          icon={mdiCodeTags}
           title="Inline code"
           active={state.isCode}
           onClick={() => editor.chain().focus().toggleCode().run()}
         />
         <span className="tb-sep" />
         <ToolbarBtn
-          label="• List"
+          icon={mdiFormatListBulleted}
+          title="Bullet list"
           active={state.isBullet}
           onClick={() => editor.chain().focus().toggleBulletList().run()}
         />
         <ToolbarBtn
-          label="1. List"
+          icon={mdiFormatListNumbered}
+          title="Numbered list"
           active={state.isOrdered}
           onClick={() => editor.chain().focus().toggleOrderedList().run()}
         />
         <ToolbarBtn
-          label="☑"
+          icon={mdiFormatListChecks}
           title="Task list"
           active={state.isTask}
           onClick={() => editor.chain().focus().toggleTaskList().run()}
         />
         <span className="tb-sep" />
         <ToolbarBtn
-          label="❝"
+          icon={mdiFormatQuoteOpen}
           title="Blockquote"
           active={state.isQuote}
           onClick={() => editor.chain().focus().toggleBlockquote().run()}
         />
         <ToolbarBtn
-          label="{ }"
+          icon={mdiCodeBraces}
           title="Code block"
           active={state.isCodeBlock}
           onClick={() => editor.chain().focus().toggleCodeBlock().run()}
         />
-        <ToolbarBtn label="🔗" title="Link" onClick={toggleLink} />
+        <ToolbarBtn icon={mdiLinkVariant} title="Link" onClick={toggleLink} />
         <ToolbarBtn
-          label="―"
+          icon={mdiMinus}
           title="Horizontal rule"
           onClick={() => editor.chain().focus().setHorizontalRule().run()}
         />
         <span className="tb-sep" />
         <ToolbarBtn
-          label="↶"
+          icon={mdiUndoVariant}
           title="Undo"
           disabled={!state.canUndo}
           onClick={() => editor.chain().focus().undo().run()}
         />
         <ToolbarBtn
-          label="↷"
+          icon={mdiRedoVariant}
           title="Redo"
           disabled={!state.canRedo}
           onClick={() => editor.chain().focus().redo().run()}

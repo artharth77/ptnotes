@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs'
 import type { PTTool, ToolContext } from '../../ai/tools'
 import { renderDiagramIsolated } from './diagramRenderer'
-import { slugify } from '../../utils/slug'
+import { slugify } from '@shared/slug'
 
 /**
  * Shared in-process mermaid diagram tools any module can opt into via

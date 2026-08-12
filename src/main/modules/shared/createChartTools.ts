@@ -8,7 +8,7 @@ import {
   type ChartDesign
 } from './chart'
 import { renderChartIsolated } from './chartRenderer'
-import { slugify } from '../../utils/slug'
+import { slugify } from '@shared/slug'
 
 /**
  * Shared in-process chart tools any module can opt into via

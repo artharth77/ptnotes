@@ -11,7 +11,7 @@ import type {
   Todo
 } from '@shared/types'
 import type { ModuleChatMessage, ModuleInfo, ModuleRun } from '@shared/types'
-import { slugify } from '../utils/slug'
+import { slugify } from '@shared/slug'
 import { detectFileKind } from '../ai/reader'
 
 const TODO_HEADER = '# Todo\n\n'

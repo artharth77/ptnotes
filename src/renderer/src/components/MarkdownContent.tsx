@@ -2,16 +2,36 @@ import { memo } from 'react'
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
+import { slugify } from '@shared/slug'
+import { MdiIcon } from './MdiIcon'
+import { NOTE_LINK_ICON } from './contentIcons'
 
 interface MarkdownContentProps {
   content: string
   onOpenNote?: (noteName: string) => void
 }
 
+function noteNameFromHref(href: string): string {
+  const raw = href.slice('note:'.length)
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
+  }
+}
+
+function normalizeNoteLinks(md: string): string {
+  return md.replace(
+    /\[([^\]]*)\]\(\s*(note:[^()]*?)\s*\)/g,
+    (_m, text, dest) => `[${text}](<${dest}>)`
+  )
+}
+
 export const MarkdownContent = memo(function MarkdownContent({
   content,
   onOpenNote
 }: MarkdownContentProps): React.JSX.Element {
+  const safeContent = normalizeNoteLinks(content)
   return (
     <div className="markdown-body">
       <ReactMarkdown
@@ -23,7 +43,7 @@ export const MarkdownContent = memo(function MarkdownContent({
         components={{
           a: ({ node: _node, href, children, ...props }) => {
             if (href?.startsWith('note:')) {
-              const noteName = href.slice('note:'.length)
+              const noteName = slugify(noteNameFromHref(href))
               return (
                 <a
                   href="#"
@@ -34,7 +54,9 @@ export const MarkdownContent = memo(function MarkdownContent({
                     onOpenNote?.(noteName)
                   }}
                 >
-                  <span className="chat-note-link-icon">📄</span>
+                  <span className="chat-note-link-icon">
+                    <MdiIcon path={NOTE_LINK_ICON} size={16} />
+                  </span>
                   {children}
                 </a>
               )
@@ -52,7 +74,7 @@ export const MarkdownContent = memo(function MarkdownContent({
           )
         }}
       >
-        {content}
+        {safeContent}
       </ReactMarkdown>
     </div>
   )

@@ -5,7 +5,7 @@ import type { RegisteredModule } from '../types'
 import { createInfographicTools } from '../shared/createInfographicTools'
 import { DEFAULT_INFOGRAPHIC_PIXEL_WIDTH, validateInfographic } from '../shared/infographic'
 import { renderInfographicIsolated } from '../shared/infographicRenderer'
-import { slugify } from '../../utils/slug'
+import { slugify } from '@shared/slug'
 
 function infographicOf(args: Record<string, unknown>): { raw: unknown; error?: string } {
   const raw = args.infographic

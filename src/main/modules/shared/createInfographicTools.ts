@@ -10,7 +10,7 @@ import {
   type InfographicTemplateCategory
 } from './infographic'
 import { renderInfographicIsolated } from './infographicRenderer'
-import { slugify } from '../../utils/slug'
+import { slugify } from '@shared/slug'
 
 /**
  * Shared in-process infographic tools any module can opt into via

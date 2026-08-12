@@ -1,7 +1,7 @@
 import type { PTNotesService } from '../service/PTNotesService'
 import { duckDuckGoSearch } from './search/duckduckgo'
 import { fetchWebPage } from './search/webFetch'
-import { slugify } from '../utils/slug'
+import { slugify } from '@shared/slug'
 import { readFileAsText } from './reader'
 import type { ConfirmRequest } from '@shared/types'
 

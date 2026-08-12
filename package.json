@@ -1,6 +1,6 @@
 {
   "name": "ptnotes",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Markdown notes + todo lists + AI assistant, organized by project",
   "main": "./out/main/index.js",
   "author": "",
@@ -24,6 +24,7 @@
     "@antv/infographic": "^0.2.19",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
+    "@mdi/js": "^7.4.47",
     "@napi-rs/canvas": "^1.0.5",
     "@resvg/resvg-js": "^2.6.2",
     "chart.js": "^4.5.1",

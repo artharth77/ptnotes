@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useAppStore } from '../store/useAppStore'
 import { MarkdownContent } from './MarkdownContent'
+import { MdiIcon } from './MdiIcon'
+import { NOTE_LINK_ICON } from './contentIcons'
 import { STATUS_LABELS } from './moduleStatus'
 import { splitContent } from './chatContent'
 import { ThinkBox, UserBubble } from './chatBubbles'
@@ -255,7 +257,7 @@ function ModuleHistoryPanel({
                                   void openNote(noteId)
                                 }}
                               >
-                                📄 {noteId}
+                                <MdiIcon path={NOTE_LINK_ICON} size={16} /> {noteId}
                               </button>
                             ) : null
                           })()}

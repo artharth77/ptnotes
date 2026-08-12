@@ -1,6 +1,14 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import {
+  mdiDotsVertical,
+  mdiEyeOffOutline,
+  mdiToggleSwitch,
+  mdiToggleSwitchOffOutline,
+  mdiTrashCanOutline
+} from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
 import { Modal } from './Modal'
+import { MdiIcon } from './MdiIcon'
 import type { Todo } from '@shared/types'
 
 export function TodoPanel(): React.JSX.Element {
@@ -8,14 +16,36 @@ export function TodoPanel(): React.JSX.Element {
   const activeProject = useAppStore((s) => s.activeProject)
   const refreshTodos = useAppStore((s) => s.refreshTodos)
   const [newTask, setNewTask] = useState('')
-  const [showAll, setShowAll] = useState(false)
+  const [hideCompleted, setHideCompleted] = useState(true)
   const [confirmClear, setConfirmClear] = useState(false)
   const [dragId, setDragId] = useState<string | null>(null)
   const [overId, setOverId] = useState<string | null>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
 
   const done = todos.filter((t) => t.done).length
   const pct = todos.length ? Math.round((done / todos.length) * 100) : 0
-  const visible = showAll ? todos : todos.filter((t) => !t.done)
+  const visible = hideCompleted ? todos.filter((t) => !t.done) : todos
+
+  useEffect(() => {
+    if (!menuOpen) return
+    function onClick(e: MouseEvent): void {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [menuOpen])
+
+  function toggleMenu(e: React.MouseEvent): void {
+    if (menuOpen) {
+      setMenuOpen(false)
+      return
+    }
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    setMenuPos({ x: rect.right, y: rect.bottom })
+    setMenuOpen(true)
+  }
 
   async function toggle(todo: Todo): Promise<void> {
     if (!activeProject) return
@@ -69,10 +99,65 @@ export function TodoPanel(): React.JSX.Element {
     <div className="todo-panel">
       <div className="list-header">
         <span>Todo</span>
-        <span className="todo-progress-text">
-          {done}/{todos.length}
+        <span className="todo-header-right">
+          <span className="todo-progress-text">
+            {done}/{todos.length}
+          </span>
+          <button
+            className="icon-btn todo-menu-btn"
+            title="Todo options"
+            onClick={toggleMenu}
+            aria-expanded={menuOpen}
+          >
+            <MdiIcon path={mdiDotsVertical} size={16} />
+          </button>
         </span>
       </div>
+      {menuOpen && menuPos && (
+        <>
+          <div className="menu-overlay" onClick={() => setMenuOpen(false)} />
+          <div
+            ref={menuRef}
+            className="note-menu"
+            style={{ left: menuPos.x, top: menuPos.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className="note-menu-item"
+              title="Hide completed tasks from the list"
+              onClick={() => {
+                setHideCompleted((v) => !v)
+                setMenuOpen(false)
+              }}
+            >
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiEyeOffOutline} size={16} />
+              </span>
+              Hide completed
+              <span className="note-menu-toggle">
+                <MdiIcon
+                  path={hideCompleted ? mdiToggleSwitch : mdiToggleSwitchOffOutline}
+                  size={28}
+                />
+              </span>
+            </button>
+            <button
+              className="note-menu-item danger"
+              disabled={done === 0}
+              title="Delete all completed tasks"
+              onClick={() => {
+                setConfirmClear(true)
+                setMenuOpen(false)
+              }}
+            >
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiTrashCanOutline} size={16} />
+              </span>
+              Delete completed
+            </button>
+          </div>
+        </>
+      )}
       <div className="todo-add">
         <input
           className="text-field"
@@ -85,20 +170,6 @@ export function TodoPanel(): React.JSX.Element {
         />
         <button className="btn primary" onClick={() => void add()} disabled={!newTask.trim()}>
           Add
-        </button>
-      </div>
-      <div className="todo-toolbar">
-        <label className="todo-showall" title="Show all tasks including completed">
-          <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
-          Show All
-        </label>
-        <button
-          className="btn small danger"
-          onClick={() => setConfirmClear(true)}
-          disabled={done === 0}
-          title="Delete all completed tasks"
-        >
-          Delete completed
         </button>
       </div>
       <div className="todo-progress">
@@ -148,7 +219,7 @@ export function TodoPanel(): React.JSX.Element {
               title="Delete"
               onClick={() => void remove(todo)}
             >
-              🗑
+              <MdiIcon path={mdiTrashCanOutline} size={14} />
             </button>
           </div>
         ))}
@@ -163,7 +234,7 @@ export function TodoPanel(): React.JSX.Element {
             <button className="btn" onClick={() => setConfirmClear(false)}>
               Cancel
             </button>
-            <button className="btn primary danger" onClick={() => void clearCompleted()}>
+            <button className="btn danger" onClick={() => void clearCompleted()}>
               Delete
             </button>
           </div>

@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { mdiFileOutline, mdiHistory, mdiPencil, mdiTrashCanOutline } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
 import { MarkdownContent } from './MarkdownContent'
 import { ModuleCard } from './ModuleCard'
+import { MdiIcon } from './MdiIcon'
+import { NOTE_LINK_ICON, TODO_LINK_ICON } from './contentIcons'
 import { splitContent } from './chatContent'
 import { ThinkBox, UserBubble } from './chatBubbles'
 import type { ChatMessage, ChatSessionMeta, ModuleRun, NoteMeta, Todo } from '@shared/types'
@@ -337,7 +340,9 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   async function openNote(noteName: string): Promise<void> {
     if (!activeProject) return
     const note =
-      notes.find((n) => n.name === noteName) ?? notes.find((n) => n.name.includes(noteName))
+      notes.find((n) => n.id === noteName) ??
+      notes.find((n) => n.name === noteName) ??
+      notes.find((n) => n.name.includes(noteName))
     if (!note) return
     await selectNote(note.id)
     setTab('notes')
@@ -398,7 +403,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
               }}
               title="Chat history"
             >
-              🕘
+              <MdiIcon path={mdiHistory} size={16} />
             </button>
             {historyOpen &&
               createPortal(
@@ -462,7 +467,9 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                             setRenameValue(s.title)
                           }}
                         >
-                          <span className="note-menu-icon">✎</span>
+                          <span className="note-menu-icon">
+                            <MdiIcon path={mdiPencil} size={14} />
+                          </span>
                         </button>
                         <button
                           className="chat-history-rename-btn"
@@ -472,7 +479,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                             if (renamingId === s.sessionId) setRenamingId(null)
                           }}
                         >
-                          🗑️
+                          <MdiIcon path={mdiTrashCanOutline} size={14} />
                         </button>
                       </div>
                     ))}
@@ -578,7 +585,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                               void openNote(noteId)
                             }}
                           >
-                            📄 {noteId}
+                            <MdiIcon path={NOTE_LINK_ICON} size={16} /> {noteId}
                           </button>
                         ) : null
                       })()}
@@ -647,7 +654,16 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                 onMouseEnter={() => setMentionIndex(i)}
               >
                 <span className="mention-icon">
-                  {mention?.kind === 'todo' ? '☑' : mention?.kind === 'file' ? '📎' : '📄'}
+                  <MdiIcon
+                    path={
+                      mention?.kind === 'todo'
+                        ? TODO_LINK_ICON
+                        : mention?.kind === 'file'
+                          ? mdiFileOutline
+                          : NOTE_LINK_ICON
+                    }
+                    size={16}
+                  />
                 </span>
                 {mentionName(item)}
               </div>

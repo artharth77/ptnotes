@@ -2,6 +2,31 @@
 
 All notable changes to PTNotes are documented in this file.
 
+## [0.5.2] — 2026-08-12
+
+### Added
+
+#### MDI Icon Overhaul
+- Replaced editor toolbar and UI buttons with Material Design Icons (MDI):
+  - Editor Toolbar: Headings, Bold, Italic, Strikethrough, Code, Lists, Quote, Link, HR, Undo, Redo.
+  - Navigation: Refresh, Pencil, Trash, Folder, Chat, Cog, History.
+  - Note/Todo links in chat now use content-aware MDI icons (Note, Todo, Docx, Pptx, Image, Code, Default).
+- New **Chat Skeleton** overlay: prevents lag and content reflow during chat panel resizing by rendering a shimmery placeholder instead of the heavy drawer.
+
+### Changed
+
+#### UX Improvements
+- **Resizing Performance**: Reworked sidebar and chat panel resizing to use imperative DOM updates with rAF-coalescing and disabled CSS transitions during drag, eliminating lag.
+- **Todo Panel**: Moved "Hide completed" and "Delete all" to a new dots-vertical context menu; replaced checkboxes with a toggle-switch icon (size 28px).
+- **Module Panel**: Moved "Delete all" finished runs to a new dots-vertical context menu; replaced checkboxes with a toggle-switch icon (size 32px).
+- **Confirmations**: Note deletion and Todo "Delete completed" now use styled Modals instead of native `window.confirm`.
+- **Note Links**: AI responses now link to slugified note IDs rather than display names, ensuring robust opening of notes with spaces.
+- **Module Settings**: Replaced checkboxes with right-aligned MDI toggle switches (size 32px) with accent-color active states.
+
+### Fixed
+
+- **Module Output Pills**: Fixed layout wrapping between icon and filename; added truncation with ellipsis.
+
 ## [0.5.1] — 2026-08-12
 
 ### Fixed

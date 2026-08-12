@@ -1,5 +1,7 @@
+import { mdiChatProcessingOutline, mdiCogOutline } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
 import { ProjectDropdown } from './ProjectDropdown'
+import { MdiIcon } from './MdiIcon'
 
 export function TopBar(): React.JSX.Element {
   const chatOpen = useAppStore((s) => s.chatOpen)
@@ -30,7 +32,7 @@ export function TopBar(): React.JSX.Element {
               >
                 <rect width="18" height="18" x="3" y="3" rx="2" />
                 <path d="M9 3v18" />
-                <path d="m14 9 3 3-3 3" />
+                <path d="m16 9-3 3 3 3" />
               </svg>
             ) : (
               <svg
@@ -44,7 +46,7 @@ export function TopBar(): React.JSX.Element {
               >
                 <rect width="18" height="18" x="3" y="3" rx="2" />
                 <path d="M9 3v18" />
-                <path d="m16 9-3 3 3 3" />
+                <path d="m14 9 3 3-3 3" />
               </svg>
             )}
           </span>
@@ -54,14 +56,24 @@ export function TopBar(): React.JSX.Element {
       </div>
       <div className="topbar-right">
         <button className="btn ghost" onClick={() => setSettingsOpen(true)} title="Settings">
-          <span className="btn-icon">⚙</span> Settings
+          <span className="btn-icon">
+            <MdiIcon path={mdiCogOutline} size={18} />
+          </span>{' '}
+          Settings
         </button>
         <button
           className={`btn ghost ${chatOpen ? 'active' : ''}`}
           onClick={() => setChatOpen(!chatOpen)}
           title="Toggle AI assistant"
         >
-          {chatBusy ? <span className="topbar-chat-spinner" /> : '💬'} Chat
+          {chatBusy ? (
+            <span className="topbar-chat-spinner" />
+          ) : (
+            <span className="btn-icon">
+              <MdiIcon path={mdiChatProcessingOutline} size={18} />
+            </span>
+          )}{' '}
+          Chat
         </button>
       </div>
     </header>
