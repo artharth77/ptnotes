@@ -46,6 +46,15 @@ export interface AppSettings {
   ai: AIProviderConfig
 }
 
+/** App + runtime version info shown in Settings ▸ About (populated by the main process). */
+export interface AboutInfo {
+  name: string
+  version: string
+  electron: string
+  chrome: string
+  node: string
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'

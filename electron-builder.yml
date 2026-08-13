@@ -19,6 +19,12 @@ asarUnpack:
   - '**/node_modules/@napi-rs/**'
 win:
   executableName: ptnotes
+  target:
+    - target: nsis
+    - target: portable
+portable:
+  artifactName: ${name}-${version}-portable.${ext}
+  requestExecutionLevel: user
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}

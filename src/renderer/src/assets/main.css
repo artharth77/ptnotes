@@ -964,6 +964,82 @@ body {
   min-width: 0;
 }
 
+.about {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.about-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.about-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  flex: none;
+}
+
+.about-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.about-name {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.about-version {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.about-description {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.about-stack {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.about-runtimes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.about-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-hover);
+  font-size: 12px;
+}
+
+.about-row code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
 .model-combo {
   display: flex;
   gap: 6px;
