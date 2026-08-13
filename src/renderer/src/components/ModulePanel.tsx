@@ -31,8 +31,15 @@ export function ModulePanel(): React.JSX.Element {
     function onClick(e: MouseEvent): void {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false)
     }
+    function onKeyDown(e: KeyboardEvent): void {
+      if (e.key === 'Escape') setMenuOpen(false)
+    }
     document.addEventListener('mousedown', onClick)
-    return () => document.removeEventListener('mousedown', onClick)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onClick)
+      document.removeEventListener('keydown', onKeyDown)
+    }
   }, [menuOpen])
 
   function toggleMenu(e: React.MouseEvent): void {

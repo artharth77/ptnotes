@@ -9,13 +9,15 @@ Markdown notes + todo lists + AI assistant, organized by project. Electron + Rea
 - **Todo lists** — markdown checklist per project with toggle, progress counts, **Show All** toggle, **Delete completed**, and drag & drop reorder.
 - **AI chat assistant** — collapsible right-side drawer with real-time streaming replies. Works with any OpenAI-compatible endpoint (OpenAI, OpenRouter, Groq, LM Studio, Ollama, …); base URL, API key, and model configured in-app.
 - **AI tools** — the assistant can create/update/read/delete/search notes, manage todos, search the web (DuckDuckGo, keyless), and read pages locally. Destructive actions (like note deletion) require your confirmation.
+- **Skills** — teach the assistant reusable instructions: named markdown documents (global or per-project) listed in its system prompt and loaded on demand via the `read_skill` tool, with per-skill enable/disable toggles. Managed from **Settings → Skills**.
 - **File attachments** — drag & drop files into the chat; supported files (any text file plus PDFs, detected by content) are copied locally to the project and can be reused via `#` mentions. The assistant reads them locally with the `read_file` tool.
 - **Chat mentions** — type `@` to insert a note, `!` to insert a todo, `#` to attach a project file; the AI can link to your notes with clickable `[name](note:name)` links.
+- **Slash commands** — type `/` in the chat to open a command + skill picker: `/new` starts a new chat, `/models` opens AI settings, and any **enabled skill** becomes a command (`/skillname my prompt`) that the assistant loads via `read_skill` and applies. **Tab** autocompletes the command, **Enter** runs it.
 - **Chat history** — each session is auto-saved to a JSON file; **New Chat** archives the current thread and a history picker lets you reopen, rename, or delete old sessions.
-- **Background modules** — the assistant can launch long-running background subagents (Modules, e.g. PPTX/PowerPoint, Word/DOCX, or Infographic) that plan steps and generate a deliverable file autonomously. A **Modules** tab shows live status and per-step progress; click the 💬 button on any run to open a read-only overlay of the module's full conversation (its system prompt, tool calls, and reasoning). Just ask e.g. *"make a PowerPoint about…"*, *"write a Word document about…"*, or *"make an infographic about…"* to start one.
+- **Background modules** — the assistant can launch long-running background subagents (Modules, e.g. PPTX/PowerPoint, Word/DOCX, or Infographic) that plan steps and generate a deliverable file autonomously. A **Modules** tab shows live status and per-step progress; click the 💬 button on any run to open a read-only overlay of the module's full conversation (its system prompt, tool calls, and reasoning). Just ask e.g. _"make a PowerPoint about…"_, _"write a Word document about…"_, or _"make an infographic about…"_ to start one.
 - **Reasoning models** — `<think>` reasoning blocks (e.g. DeepSeek-R1) render in a separate collapsed-by-default bubble; a **Stop** button interrupts a running reply.
 - **Missing projects** — projects whose folders were deleted externally still appear in the list (marked in red) and can be recreated in place.
-- **Settings** — a category-based **Settings** dialog covers storage, AI provider (with an editable model combobox fed by `GET /models`), and modules. See [Settings](#settings).
+- **Settings** — a category-based **Settings** dialog covers storage, AI provider (with an editable model combobox fed by `GET /models`), modules, skills, and an **About** pane. See [Settings](#settings).
 
 ## Tech stack
 
@@ -43,14 +45,19 @@ Data lives under `~/Documents/PTNotes/`:
 
 ```
 ~/Documents/PTNotes/
+├── .skills/             (global skills, shared by all projects)
 └── <ProjectName>/
     ├── notes/*.md          (one file per note)
     ├── TODO.md             (markdown checklist)
     ├── files/*             (attachments dropped into the chat, module outputs)
-    ├── modules/*.json      (module run state + prompts)
-    ├── modules/*.chat.json (per-run module conversation transcript)
-    └── chat/*.json         (one file per chat session)
+    └── .data/              (app-internal data: chat history, module run state, project skills)
+        ├── modules/*.json      (module run state + prompts)
+        ├── modules/*.chat.json (per-run module conversation transcript)
+        ├── skills/*/SKILL.md   (project skills)
+        └── chat/*.json         (one file per chat session)
 ```
+
+On startup, legacy per-project `chat/` and `modules/` folders are automatically migrated into `<project>/.data/`.
 
 The folder on disk is the source of truth, and the project root is configurable via **Settings → Storage** (changing it moves all data). App AI configuration (base URL, API key, model) is stored in Electron's `userData/ai-provider.json`, restricted to the owner's read/write and never bundled into the renderer.
 
@@ -61,13 +68,15 @@ The **Settings** page (⚙ icon in the top bar) is organized by category:
 - **Storage** — shows the current project root and lets you change where all project data lives (with confirmation). Every project folder, notes, todos, chats, and the project registry are moved to the new location.
 - **AI Settings** — connects the assistant to any OpenAI-compatible provider: base URL, API key, and model (editable combobox of available models), plus an optional **PDF upload** toggle for sending PDFs as raw file attachments.
 - **Modules** — lists the installed background modules and their enable/disable toggles. Disabling a module hides it from the AI assistant and prevents it from being started; the toggles apply immediately.
+- **Skills** — lists global and project skills (name, description) with a per-skill enable/disable toggle; disabled skills are excluded from the assistant. A `⋮` context menu offers **Edit**, **Move to Global/Project skills**, or **Delete** (with confirmation); create/edit happens in a modal (scope, name, description, markdown content). Changes apply immediately.
+- **About** — read-only pane showing the app icon, name, version, description + tech stack, and the Electron / Chromium / Node.js runtime versions.
 
 ## Screenshots
 
-*Note with AI chat*
+_Note with AI chat_
 ![AI chat](assets/screenshot-1-chat-th.png)
 
-*Module run log*
+_Module run log_
 ![Module run log](assets/screenshot-2-module-log-th.png)
 
 ## Commands

@@ -101,13 +101,13 @@ const chartPreviewTool: PTTool = {
   }
 }
 
-/** Render a chart to a temporary PNG + JSON pair in <project>/modules/temp/. */
+/** Render a chart to a temporary PNG + JSON pair in <project>/.data/modules/temp/. */
 const renderChartTool: PTTool = {
   definition: {
     type: 'function',
     function: {
       name: 'render_chart',
-      description: `Render a Chart.js data chart to temporary rasterized files in the project. Pure local rendering — NO network, CLI tools, or headless browser. Writes "<project>/modules/temp/<slug>.png" and ".json" (temp files that are deleted automatically once the final deck is built) and returns their absolute paths plus the canvas size. Use chart_preview to sanity-check first. The returned "png" path can be embedded on a "chart" slide via create_pptx_file.`,
+      description: `Render a Chart.js data chart to temporary rasterized files in the project. Pure local rendering — NO network, CLI tools, or headless browser. Writes "<project>/.data/modules/temp/<slug>.png" and ".json" (temp files that are deleted automatically once the final deck is built) and returns their absolute paths plus the canvas size. Use chart_preview to sanity-check first. The returned "png" path can be embedded on a "chart" slide via create_pptx_file.`,
       parameters: {
         type: 'object',
         properties: {

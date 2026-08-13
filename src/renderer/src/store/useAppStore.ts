@@ -31,7 +31,8 @@ interface AppState {
   chatStreamProject: string | null
   confirmRequest: ConfirmRequest | null
   settingsOpen: boolean
-  settingsCategory: 'storage' | 'ai' | 'modules'
+  settingsCategory: 'storage' | 'ai' | 'modules' | 'about' | 'skills'
+  skillEditRequest: string | null
   sidebarVisible: boolean
   loading: boolean
 
@@ -63,8 +64,10 @@ interface AppState {
   setChatStreamProject: (project: string | null) => void
   setConfirmRequest: (req: ConfirmRequest | null) => void
   setSettingsOpen: (open: boolean) => void
-  setSettingsCategory: (category: 'storage' | 'ai' | 'modules') => void
-  openSettings: (category?: 'storage' | 'ai' | 'modules') => void
+  setSettingsCategory: (category: 'storage' | 'ai' | 'modules' | 'about' | 'skills') => void
+  openSettings: (category?: 'storage' | 'ai' | 'modules' | 'about' | 'skills') => void
+  openSkillEditor: (name: string) => void
+  clearSkillEditRequest: () => void
   setSidebarVisible: (visible: boolean) => void
   newChat: (project: string) => Promise<void>
   openChat: (project: string, sessionId: string) => Promise<void>
@@ -96,6 +99,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   confirmRequest: null,
   settingsOpen: false,
   settingsCategory: 'storage',
+  skillEditRequest: null,
   sidebarVisible: true,
   loading: false,
 
@@ -418,6 +422,14 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   openSettings(category) {
     set({ settingsOpen: true, settingsCategory: category ?? get().settingsCategory })
+  },
+
+  openSkillEditor(name) {
+    set({ settingsOpen: true, settingsCategory: 'skills', skillEditRequest: name })
+  },
+
+  clearSkillEditRequest() {
+    set({ skillEditRequest: null })
   },
 
   setSidebarVisible(sidebarVisible) {

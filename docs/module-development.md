@@ -14,7 +14,7 @@ Main chat agent (ChatSession) calls the `start_module` tool
         │  passes { id, title, prompt }  →  returns immediately
         ▼
 ModuleRunManager.start()
-        │  writes prompt JSON to <project>/modules/
+        │  writes prompt JSON to <project>/.data/modules/
         │  builds a ModuleRun + emits status events to the UI
         ▼
 ModuleRunner (background subagent, independent LLM loop)
@@ -23,7 +23,7 @@ ModuleRunner (background subagent, independent LLM loop)
         │  · uses base chat tools + your module's tools
         │  · finishes with a text summary
         ▼
-persisted <project>/modules/<runId>.json  → viewable in Modules tab + chat card
+persisted <project>/.data/modules/<runId>.json  → viewable in Modules tab + chat card
 ```
 
 Key rules enforced by the runner (`src/main/modules/runner.ts`):
@@ -40,7 +40,12 @@ Key rules enforced by the runner (`src/main/modules/runner.ts`):
   The runner captures this as the run's `outputFile` (used by the reveal / clear-history / summary features). `ok:false` plus an `error` field is treated as a tool failure.
 - A tool can produce **multiple deliverables** in one call by adding a `files` array alongside `path`/`file`:
   ```json
-  { "ok": true, "path": "/abs/path/to/a.svg", "file": "a.svg", "files": ["/abs/path/to/a.svg", "/abs/path/to/a.png"] }
+  {
+    "ok": true,
+    "path": "/abs/path/to/a.svg",
+    "file": "a.svg",
+    "files": ["/abs/path/to/a.svg", "/abs/path/to/a.png"]
+  }
   ```
   Every entry lands in the run's `outputFiles` (the card shows one 📄 reveal pill per file; the first entry is the primary `outputFile`). `clearHistory`/`deleteRun` with the "delete output files" option removes all of them.
 
@@ -141,7 +146,7 @@ tools: [...createChartTools(), createSomeFileTool()]
 ```
 
 It provides `chart_preview` (dry-run, writes nothing) and `render_chart` (writes
-temporary `<project>/modules/temp/<slug>.png` + `.json` and returns the asset paths; the temp files
+temporary `<project>/.data/modules/temp/<slug>.png` + `.json` and returns the asset paths; the temp files
 are deleted automatically once a deck using them is built). Charts are drawn by `chart.js`
 (Chart.js-style config JSON: `{ type, data: { labels?, datasets }, options?, width?, height? }`)
 onto `@napi-rs/canvas` (prebuilt Node-API Skia binding — same no-rebuild packaging pattern as
@@ -164,7 +169,7 @@ tools: [...createDiagramTools(), createSomeFileTool()]
 ```
 
 It provides `diagram_preview` (dry-run, writes nothing) and `render_diagram` (writes temporary
-`<project>/modules/temp/<slug>.png` + `.svg` + `.json` and returns the asset paths; the temp files
+`<project>/.data/modules/temp/<slug>.png` + `.svg` + `.json` and returns the asset paths; the temp files
 are deleted automatically once a deck using them is built). Diagrams are authored as **mermaid DSL
 source text** (`flowchart TD/LR`, `sequenceDiagram`, `stateDiagram-v2`, `classDiagram`, `erDiagram`,
 `pie`, `gantt`) and rendered by mermaid v11 on a jsdom/svgdom DOM shim (`isomorphic-mermaid`; no headless
@@ -185,7 +190,7 @@ tools: [...createInfographicTools(), createSomeFileTool()]
 
 It provides `list_infographic_templates` (the ~276 built-in catalog, filterable by
 category/query, with per-category data-shape hints), `infographic_preview` (dry-run, writes
-nothing) and `render_infographic` (writes temporary `<project>/modules/temp/<slug>.png` +
+nothing) and `render_infographic` (writes temporary `<project>/.data/modules/temp/<slug>.png` +
 `.svg` + `.json` and returns the asset paths; the temp files are deleted automatically once a
 deck using them is built). Designs are authored as **@antv/infographic DSL text** (an
 `infographic <template>` first line followed by `data` / `design` / `theme` blocks) or a JSON

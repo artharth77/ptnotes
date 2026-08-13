@@ -163,7 +163,7 @@ const renderInfographicTool: PTTool = {
     function: {
       name: 'render_infographic',
       description:
-        `Render an @antv/infographic infographic to temporary rasterized files in the project. Pure local rendering — NO network, CLI tools, or headless browser. Writes "<project>/modules/temp/<slug>.png", ".svg" and ".json" (temp files that are deleted automatically once the final deck is built) and returns their absolute paths plus the template name and size. Use list_infographic_templates to pick the template and infographic_preview to sanity-check first. The returned "png" path can be embedded on an "infographic" slide via create_pptx_file.` +
+        `Render an @antv/infographic infographic to temporary rasterized files in the project. Pure local rendering — NO network, CLI tools, or headless browser. Writes "<project>/.data/modules/temp/<slug>.png", ".svg" and ".json" (temp files that are deleted automatically once the final deck is built) and returns their absolute paths plus the template name and size. Use list_infographic_templates to pick the template and infographic_preview to sanity-check first. The returned "png" path can be embedded on an "infographic" slide via create_pptx_file.` +
         ` Data arrays: list templates use "lists", sequence use "sequences", compare use "compares", relation use "nodes" + "relations", hierarchy use "root" (with nested "children"), chart use "values". Items are { "label", "desc"?, "value"?, "children"? }.`,
       parameters: {
         type: 'object',

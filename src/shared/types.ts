@@ -46,6 +46,36 @@ export interface AppSettings {
   ai: AIProviderConfig
 }
 
+/** App + runtime version info shown in Settings ▸ About (populated by the main process). */
+export interface AboutInfo {
+  name: string
+  version: string
+  electron: string
+  chrome: string
+  node: string
+}
+
+// ---- Skills (named instruction documents the AI can load on demand) ----
+
+export type SkillScope = 'global' | 'project'
+
+export interface SkillMeta {
+  scope: SkillScope
+  name: string
+  description: string
+  /** Whether the skill is offered to the AI. Disabled skills are excluded from the system-prompt index and refused by `read_skill`. */
+  enabled: boolean
+}
+
+export interface SkillList {
+  global: SkillMeta[]
+  project: SkillMeta[]
+}
+
+export interface SkillContent extends SkillMeta {
+  content: string
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'

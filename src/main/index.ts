@@ -7,6 +7,7 @@ import { registerProjectIpc, registerNoteIpc, registerTodoIpc, registerChatIpc }
 import { registerAiIpc, createSessionRegistry } from './ipc/ai'
 import { registerFilesIpc } from './ipc/files'
 import { registerSettingsIpc } from './ipc/settings'
+import { registerSkillsIpc } from './ipc/skills'
 import { registerModulesIpc } from './ipc/modules'
 import { ModuleRegistry } from './modules/registry'
 import { ModuleRunManager } from './modules/runs'
@@ -72,6 +73,7 @@ app.whenReady().then(async () => {
   const settingsStore = new SettingsStore()
   const settings = await settingsStore.load()
   const service = new PTNotesService(settings.rootDir)
+  await service.migrateLegacyFolders()
   const configStore = new AIConfigStore()
 
   const moduleRegistry = new ModuleRegistry()
@@ -103,6 +105,7 @@ app.whenReady().then(async () => {
   registerAiIpc(registry, configStore)
   registerFilesIpc(service, registry, configStore)
   registerSettingsIpc(service, settingsStore)
+  registerSkillsIpc(service)
   registerModulesIpc(moduleManager, settingsStore, moduleRegistry)
 
   createWindow()

@@ -23,7 +23,7 @@ export type ModuleEventBroadcaster = (evt: ModuleEvent) => void
 export type ModuleClientFactory = (cfg: AIProviderConfig) => OpenAI
 
 /**
- * Owns active module runs, their persistence in <project>/modules/ and the
+ * Owns active module runs, their persistence in <project>/.data/modules/ and the
  * broadcast of progress events to the renderer.
  */
 export class ModuleRunManager {

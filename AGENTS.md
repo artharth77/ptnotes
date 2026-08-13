@@ -50,7 +50,7 @@ Run `npm run typecheck` and `npm run lint` after any change.
 | AI streaming            | Yes (real-time)                                                                                                                                                                                                                                                                                                     |
 | Settings dialog         | Two-panel dialog: **Storage** (project root path) + **AI Settings** (base URL, API key, model)                                                                                                                                                                                                                      |
 | Project root            | Configurable via settings; default `~/Documents/PTNotes`; changing it moves all data + registry to the new location after confirmation                                                                                                                                                                              |
-| Chat history            | Persisted per session as JSON files under `<project>/chat/`; auto-saved per message; New Chat archives current thread; history picker can view/reopen old sessions                                                                                                                                                  |
+| Chat history            | Persisted per session as JSON files under `<project>/.data/chat/`; auto-saved per message; New Chat archives current thread; history picker can view/reopen old sessions                                                                                                                                            |
 | Chat titles             | Hybrid: local heuristic from first message immediately, refined by a background AI completion; manual rename supported; history popup shows title + message count                                                                                                                                                   |
 | Chat note mention       | `@` opens note list → inserts `note:<notename>` → AI calls `read_note`                                                                                                                                                                                                                                              |
 | Chat todo mention       | `!` opens todo list → inserts `todo:<todotext>` (filterable by text)                                                                                                                                                                                                                                                |
@@ -64,15 +64,23 @@ Run `npm run typecheck` and `npm run lint` after any change.
 
 ```
 ~/Documents/PTNotes/
+├── .skills/             (global skills: `<skill>/SKILL.md` with OpenAI skill-guide front-matter (`name:` + `description:`), shared by all projects)
 └── <ProjectName>/
     ├── notes/*.md          (one file per note)
     ├── TODO.md             (markdown checklist: `- [ ]` / `- [x]`)
     ├── files/*.{pdf,md,txt,json,log,yaml,yml} (attachments copied on chat drop) + module deliverables (.pptx, .svg/.png, .docx)
-    ├── modules/*.json        (module run state + prompts; kept out of the # file picker)
-    ├── modules/*.chat.json   (per-run subagent transcript, read-only history overlay)
-    ├── modules/temp/*.{png,svg,json}  (temp module/shared-tool output; deleted once the deck is built)
-    └── chat/*.json         (one file per chat session: messages + timestamps)
+    └── .data/              (app-internal data; dot-prefixed so it stays out of the # file picker)
+        ├── modules/*.json        (module run state + prompts)
+        ├── modules/*.chat.json   (per-run subagent transcript, read-only history overlay)
+        ├── modules/temp/*.{png,svg,json}  (temp module/shared-tool output; deleted once the deck is built)
+        ├── skills/*/SKILL.md (project skills — same OpenAI skill-guide layout (`<skill>/SKILL.md` with `name:` + `description:` front-matter) as global skills, scoped to one project)
+        └── chat/*.json         (one file per chat session: messages + timestamps)
 ```
+
+- On startup (and after `changeRootDir`), legacy per-project `chat/` and `modules/`
+  folders found at the project root are migrated into `<project>/.data/` automatically
+  (whole-folder `rename` when the target is free, recursive merge — keeping both files
+  on collision with a `-2` suffix — otherwise). The migration is idempotent.
 
 - App AI config stored in Electron `userData/ai-provider.json`, `chmod 600`, never in the renderer bundle.
 - App settings (project root path + `disabledModules` module toggles) stored in Electron `userData/ptnotes-settings.json`, `chmod 600`.
@@ -87,7 +95,7 @@ src/
 │   ├── index.ts         # window creation, app lifecycle
 │   ├── settings.ts      # SettingsStore (userData/ptnotes-settings.json → project root)
 │   ├── service/
-│   │   └── PTNotesService.ts   # all fs operations (projects/notes/todos/chats) + changeRootDir
+│   │   └── PTNotesService.ts   # all fs operations (projects/notes/todos/chats/skills) + changeRootDir
 │   ├── ipc/             # ipcMain.handle registrations
 │   │   ├── projects.ts
 │   │   ├── notes.ts
@@ -95,11 +103,12 @@ src/
 │   │   ├── chat.ts      # chat history persistence (list/read/write/delete/rename)
 │   │   ├── ai.ts        # chat session registry + ai:generateTitle (chat titles)
 │   │   ├── files.ts     # files:* attach/extract/list/reveal + pdf:upload (multi-file drop: .pdf/.md/.txt)
+│   │   ├── skills.ts    # skills:list/read/save/delete (global + project)
 │   │   └── settings.ts  # settings:get / settings:chooseRoot / settings:changeRoot
 │   └── ai/
 │       ├── client.ts    # OpenAI-compatible client (streaming)
 │       ├── tools.ts     # tool JSON schemas + executors (bind to PTNotesService)
-│       ├── chatSession.ts   # conversation state + tool-call loop
+│       ├── chatSession.ts   # conversation state + tool-call loop (system prompt refreshed per send, includes skills index)
 │       ├── config.ts    # ai-provider.json load/save
 │       ├── reader.ts     # readFileAsText + detectFileKind: content-based (pdf-parse for PDFs, raw text for any text file) + MAX_PDF_CHARS truncation
 │       └── search/
@@ -108,7 +117,7 @@ src/
 │   └── modules/
 │       ├── registry.ts   # module registry (extensible)
 │       ├── runs.ts       # ModuleRunManager: start/list/stop + event broadcast + readChat (live in-memory transcript or persisted .chat.json)
-│       ├── runner.ts     # subagent loop; persists a read-only transcript to <project>/modules/<runId>.chat.json each turn (removed on run delete/retry)
+│       ├── runner.ts     # subagent loop; persists a read-only transcript to <project>/.data/modules/<runId>.chat.json each turn (removed on run delete/retry)
 │       ├── tool.ts       # start_module tool (main chat → module run)
 │       ├── pptx/         # PowerPoint module (design schema → buildPptx)
 │       ├── infographic/  # standalone infographic module (design schema → create_infographic_file; reuses the shared tool-pack)
@@ -137,7 +146,7 @@ src/
 │   │   │   ├── NoteList.tsx         # Notes tab
 │   │   │   ├── TodoPanel.tsx        # Todo tab (checkboxes + progress)
 │   │   │   ├── MarkdownEditor.tsx   # TipTap WYSIWYG + markdown sync + auto-save
-│   │   │   ├── MarkdownContent.tsx  # react-markdown chat rendering + note: link handling
+│   │   │   ├── MarkdownContent.tsx  # react-markdown chat rendering + note:/skill: link handling
 │   │   │   ├── ChatDrawer.tsx       # right drawer, streaming, mentions, history, titles
 │   │   │   ├── ModuleHistoryOverlay.tsx # read-only transcript overlay for module runs (💬 button on ModuleCard)
 │   │   │   └── SettingsDialog.tsx  # two-panel Settings (Storage + AI Settings)
@@ -187,10 +196,11 @@ src/
 - **Todos:** `read` (parse checklist), `save` (serialize `- [ ]`/`- [x]`), `toggle`, `deleteCompleted`, `reorder`
 - **Chat history:** `list`, `read`, `write`, `delete`, `rename`
 - **AI:** `send` (message → streamed reply), `getConfig`, `setConfig`, `listModels(baseUrl, apiKey)`, `generateTitle`, `stop`, `clear`, `confirmResponse`, `onStreamEvent` (token chunks + tool-call logs + confirm events)
-- **Settings:** `get` (returns `{ rootDir }`), `chooseRoot` (native folder picker), `changeRoot` (moves data + persists + returns new `{ rootDir }`)
+- **Settings:** `get` (returns `{ rootDir }`), `getAbout` (app name/version + Electron/Chromium/Node versions for the About pane), `chooseRoot` (native folder picker), `changeRoot` (moves data + persists + returns new `{ rootDir }`)
+- **Skills:** `list(project)` (returns `{ global, project }` metas), `read(project, scope, name)` (full content), `save(project, scope, name, { description, content, enabled? })` (upsert → `SkillMeta`), `setEnabled(project, scope, name, enabled)` (toggle → `SkillMeta`), `move(project, scope, name, toScope)` (relocates the skill folder between scopes → `SkillMeta`), `delete(project, scope, name)` (→ boolean)
 - **PDF:** `supportsUpload` (returns the AI settings `uploadPdfEnabled` toggle — user-controlled), `upload` (raw PDF via provider Responses API `input_file` — uploads base64 through the Files API, falling back to inline `file_data`)
 - **Files:** `list` (`<project>/files/*` — PDF + any text file — for the chat `#` picker), `getPathForFile` (dropped file path via `webUtils`, never `File.path`), `copyToProject` (content-based: any text file + PDFs copied into `<project>/files/`; non-PDF binaries rejected), `extract` (local text → `{ text, pageCount, charCount, truncated }`; pdf-parse for `.pdf`, raw text for any text file), `reveal` (`shell.showItemInFolder`)
-- **Modules:** `list`, `listAvailable`, `setEnabled`, `start`, `startModule`, `stop`, `retry`, `reveal` (optional `filePath` to reveal a specific file of a multi-file run; defaults to the primary `outputFile`), `deleteRun`, `clearHistory`, `readChat` (per-run subagent transcript: live in-memory for active runs, persisted `<project>/modules/<runId>.chat.json` otherwise). A run records **every** deliverable in `outputFiles` (one 📄 reveal pill each on the card; the first is also `outputFile`); `deleteRun`/`clearHistory` with the delete-output option removes them all.
+- **Modules:** `list`, `listAvailable`, `setEnabled`, `start`, `startModule`, `stop`, `retry`, `reveal` (optional `filePath` to reveal a specific file of a multi-file run; defaults to the primary `outputFile`), `deleteRun`, `clearHistory`, `readChat` (per-run subagent transcript: live in-memory for active runs, persisted `<project>/.data/modules/<runId>.chat.json` otherwise). A run records **every** deliverable in `outputFiles` (one 📄 reveal pill each on the card; the first is also `outputFile`); `deleteRun`/`clearHistory` with the delete-output option removes them all.
 
 ## AI chat feature
 
@@ -210,20 +220,25 @@ ChatPanel (renderer) ──send──▶ Main process
 - Session is kept in memory per project (`sessions` map) so closing the drawer and reopening continues the same conversation.
 - Each `ai:send` call receives the renderer's current thread as `history` and the session is re-seeded from it, so reopening a historical chat (or switching sessions) keeps the correct model context — the AI never relies solely on in-memory accumulation.
 - System prompt is sent when a session starts; it includes the active project and instructs the AI that a `note:<notename>` message means it must call `read_note` for that note.
+- Each `ai:send` also forwards the currently **active note** (`activeNoteId` from the renderer store). The system prompt tells the AI that "this note", "the current note" or "the active note" means it should call `read_note` **without a `title`**, which resolves to the note the user is viewing.
+- The system prompt also lists available **enabled** skills (name + description per skill, global + project)
+  and is **rebuilt on every `send()`** (`ensureSystemPrompt` → `renderSkillsIndex`), so skills
+  created/edited/toggled in Settings apply mid-session. The model calls `read_skill` to load full content
+  when a skill is relevant; disabled skills are excluded from the index and refused by `read_skill`.
 - A `!` todo mention inserts `todo:<todotext>` which is sent to the model as-is.
 - A `#` file mention inserts `file:<filename>`; the system prompt instructs the AI that a
   `file:<filename>` message means it must call `read_file` (content-based local extraction;
   `.pdf` via pdf-parse, any text file as raw text) before responding — so previously dropped
   files can be reused without re-dragging.
 
-### Tools (13 total)
+### Tools (16 total)
 
 | Tool           | Action                                                                                                          |
 | -------------- | --------------------------------------------------------------------------------------------------------------- |
 | `create_note`  | new `.md` in project `notes/`                                                                                   |
 | `update_note`  | overwrite / rename existing note                                                                                |
 | `list_notes`   | model context                                                                                                   |
-| `read_note`    | model context                                                                                                   |
+| `read_note`    | model context; omit `title` to read the currently active note (the one the user is viewing)                    |
 | `search_notes` | search note titles + content, return matching names + snippet                                                   |
 | `delete_note`  | delete one or more notes (requires user confirmation dialog)                                                    |
 | `create_todos` | append `- [ ]` items to `TODO.md`                                                                               |
@@ -231,6 +246,9 @@ ChatPanel (renderer) ──send──▶ Main process
 | `delete_todo`  | remove an item                                                                                                  |
 | `list_todos`   | model context                                                                                                   |
 | `read_file`    | extract text of a project file locally via `readFileAsText` (pdf-parse for `.pdf`, raw text for any text file)  |
+| `create_skill` | upsert a skill (`scope`: `global`/`project`) from name + description + content                                  |
+| `read_skill`   | load a skill's full content (skills are listed in the system prompt; no separate `list_skills`)                 |
+| `delete_skill` | delete a skill (requires user confirmation dialog)                                                              |
 | `web_search`   | DuckDuckGo HTML search, no API key, Node fetch in main (user-agent header, rate-limit errors surfaced to model) |
 | `web_fetch`    | direct fetch + cheerio local parse (strip scripts/styles/nav, extract title + readable text) — fully private    |
 
@@ -264,6 +282,14 @@ ChatPanel (renderer) ──send──▶ Main process
   Parsed from the tool result JSON (`{ ok, note }`) via `noteIdFromToolCall`.
 - Note slugs are Unicode-safe: non-Latin scripts (e.g. Thai) keep their characters, including combining
   marks (`\p{M}`); only Latin combining accents (`\u0300-\u036f`) are stripped (see `slugify`).
+- **Slash commands:** typing `/` at the start of the chat input opens a popup of built-in commands
+  (`/new` → new chat, `/models` → open AI Settings) and **enabled skills** (≤10 rows). Typing filters
+  (name + description); **Tab** autocompletes the command + a trailing space to type args; **Enter**
+  (or a mouse click) autocompletes and runs it immediately. Skill commands send
+  `Use the skill "name" (scope: …): <prompt>` so the model calls `read_skill` first (enforced by a
+  system-prompt rule). Registry lives in `src/shared/slash.ts` (pure logic + tests) and
+  `src/renderer/src/commands.ts` (built-ins with actions); skills are merged in via
+  `buildSkillCommandList` (built-ins win over same-named skills, project scope wins over global).
 
 ### Settings dialog
 
@@ -284,6 +310,12 @@ Two-panel dialog (`.settings-layout` with `.settings-nav` + `.settings-pane`):
   tool description and refused by `ModuleRunManager.start`; the list comes from
   `modules:listAvailable` / `modules:setEnabled`, persisted as `disabledModules` in
   `ptnotes-settings.json`. Toggles apply immediately, no Save button.
+- **Skills:** lists global + project skills (name, description, enabled state) with a per-skill
+  enable/disable toggle and a `⋮` context menu (Edit skill, Move to Global/Project skills,
+  Delete-with-confirm). Create/edit happens in a modal (scope, name, description, content).
+  Changes apply immediately — the chat system prompt re-renders its skills index on the next
+  send. Disabled skills are excluded from the index and refused by `read_skill` (`enabled:`
+  front-matter in `SKILL.md`, default enabled).
 - Model downloads auto-load silently when the AI pane opens (best-effort; failures hidden until
   **Load models** is clicked).
 - When the AI isn't configured (empty model, or no API key for a remote provider), the chat panel
@@ -303,11 +335,12 @@ Two-panel dialog (`.settings-layout` with `.settings-nav` + `.settings-pane`):
 
 - DuckDuckGo scraping can be rate-limited; errors are surfaced to the model so it can retry/adapt.
 - Bing Search API retired Aug 2025 and Brave dropped its free tier — avoid both.
-- Tool count is 13; keeping it near ~10 avoids model tool-selection degradation.
+- Tool count is 16 (AGENTS.md's ~10 is a guideline; acceptable tradeoff for the skills feature).
 - API key must never be committed or bundled into the renderer.
 - The persistent project registry only records known project names/paths — it never stores file contents; the folder on disk remains the source of truth.
 - `note:<notename>` uses the note's slugified file name (as shown in the Notes list), so the `@` picker should insert the exact list name.
 - `todo:<todotext>` uses the todo's checklist text, so the `!` picker should insert the exact text.
+- The system prompt instructs the AI to link to skills it mentions as `[skill name](skill:skill name)`; the renderer renders these as clickable pills (book icon) that open **Settings → Skills** and load the skill into the editor (via `openSkillEditor` + the `skillEditRequest` store field).
 
 ## Docs
 

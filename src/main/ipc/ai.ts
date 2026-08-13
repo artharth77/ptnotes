@@ -157,9 +157,15 @@ export function registerAiIpc(registry: SessionRegistry, configStore: AIConfigSt
 
   ipcMain.handle(
     'ai:send',
-    async (event: IpcMainInvokeEvent, project: string, text: string, history?: ChatMessage[]) => {
+    async (
+      event: IpcMainInvokeEvent,
+      project: string,
+      text: string,
+      history?: ChatMessage[],
+      activeNoteId?: string | null
+    ) => {
       const session = registry.getSession(event, project)
-      await session.send(text, history)
+      await session.send(text, history, activeNoteId)
     }
   )
 }

@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type {
+  AboutInfo,
   AIProviderConfig,
   ChatMessage,
   ChatSessionMeta,
@@ -17,6 +18,10 @@ import type {
   NoteMeta,
   PdfExtractResult,
   Project,
+  SkillContent,
+  SkillList,
+  SkillMeta,
+  SkillScope,
   Todo
 } from '../shared/types'
 
@@ -73,8 +78,12 @@ const api = {
       ipcRenderer.invoke('chat:rename', project, sessionId, title)
   },
   ai: {
-    send: (project: string, text: string, history?: ChatMessage[]): Promise<void> =>
-      ipcRenderer.invoke('ai:send', project, text, history),
+    send: (
+      project: string,
+      text: string,
+      history?: ChatMessage[],
+      activeNoteId?: string | null
+    ): Promise<void> => ipcRenderer.invoke('ai:send', project, text, history, activeNoteId),
     stop: (project: string): Promise<void> => ipcRenderer.invoke('ai:stop', project),
     confirmResponse: (resp: ConfirmResponse): Promise<void> =>
       ipcRenderer.invoke('ai:confirmResponse', resp),
@@ -96,9 +105,35 @@ const api = {
   },
   settings: {
     get: (): Promise<StorageSettings> => ipcRenderer.invoke('settings:get'),
+    getAbout: (): Promise<AboutInfo> => ipcRenderer.invoke('settings:getAbout'),
     chooseRoot: (): Promise<string | null> => ipcRenderer.invoke('settings:chooseRoot'),
     changeRoot: (newRoot: string): Promise<StorageSettings> =>
       ipcRenderer.invoke('settings:changeRoot', newRoot)
+  },
+  skills: {
+    list: (project: string): Promise<SkillList> => ipcRenderer.invoke('skills:list', project),
+    read: (project: string, scope: SkillScope, name: string): Promise<SkillContent | null> =>
+      ipcRenderer.invoke('skills:read', project, scope, name),
+    save: (
+      project: string,
+      scope: SkillScope,
+      name: string,
+      input: { description: string; content: string; enabled?: boolean }
+    ): Promise<SkillMeta> => ipcRenderer.invoke('skills:save', project, scope, name, input),
+    setEnabled: (
+      project: string,
+      scope: SkillScope,
+      name: string,
+      enabled: boolean
+    ): Promise<SkillMeta> => ipcRenderer.invoke('skills:setEnabled', project, scope, name, enabled),
+    move: (
+      project: string,
+      scope: SkillScope,
+      name: string,
+      toScope: SkillScope
+    ): Promise<SkillMeta> => ipcRenderer.invoke('skills:move', project, scope, name, toScope),
+    delete: (project: string, scope: SkillScope, name: string): Promise<boolean> =>
+      ipcRenderer.invoke('skills:delete', project, scope, name)
   },
   pdf: {
     supportsUpload: (): Promise<boolean> => ipcRenderer.invoke('pdf:supportsUpload'),

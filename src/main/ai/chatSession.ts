@@ -23,7 +23,22 @@ export type ToolsProvider = () => Promise<PTTool[]>
 
 const MAX_TOOL_ITERATIONS = 12
 
-export function buildSystemPrompt(activeProject: string, currentDate: string): string {
+export function buildSystemPrompt(
+  activeProject: string,
+  currentDate: string,
+  skillsIndex?: string,
+  activeNote?: string | null
+): string {
+  const skillsSection = skillsIndex
+    ? `\nSkills:
+You can load skills (named instruction documents) on demand when a task is relevant. Call the read_skill tool to load a skill's full content before applying it.
+${skillsIndex}
+`
+    : ''
+  const activeNoteSection = activeNote
+    ? `- The note the user is currently viewing is "${activeNote}". When the user says "this note", "the current note", "the active note" or "check this note", read it with the read_note tool (omit the title argument to read the active note).
+`
+    : ''
   return `You are PTNotes assistant, an automation and research assistant inside a markdown notes + todo desktop app.
 
 You operate inside a project. The currently active project is "${activeProject}". Use it by default; you may target other projects by passing the "project" argument to a tool.
@@ -35,14 +50,15 @@ Guidelines:
 - When the user asks for up-to-date or factual information, use web_search (and web_fetch for detail) instead of relying only on your own knowledge.
 - After researching, if the user wants it saved, write a well-structured markdown note via create_note/update_note.
 - If the user references a note as \`note:<notename>\` (for example \`note:meeting-notes\`), call the read_note tool to read that specific note before responding.
-- If the user references a project file as \`file:<filename>\` (for example \`file:report.pdf\`, \`file:notes.md\`, \`file:data.json\` or \`file:readme.txt\`), call the read_file tool to read that file before responding.
+${activeNoteSection}- If the user references a project file as \`file:<filename>\` (for example \`file:report.pdf\`, \`file:notes.md\`, \`file:data.json\` or \`file:readme.txt\`), call the read_file tool to read that file before responding.
+- If the user asks you to use a skill by name (for example \`Use the skill "name": …\`, optionally with the scope in parentheses), call the read_skill tool to load that skill before applying it.
 - When the user asks you to find notes about a topic, call the search_notes tool.
 - Quote the snippet returned by search_notes exactly as given; never paraphrase, reword, or summarize it.
 - Whenever you mention an existing note by name in your reply, always link to it: [note name](note:note name). The link opens the note, so never return a bare note name without a link.
 - Whenever you mention an existing todo by its text in your reply, always link to it: [todo text](todo:todo text).
+- Whenever you mention an existing skill by name in your reply, always link to it: [skill name](skill:skill name). The link opens the skill's editor, so never return a bare skill name without a link.
 - Keep replies short and actionable.
-
-Current date: ${currentDate}.`
+${skillsSection}Current date: ${currentDate}.`
 }
 
 export class ChatSession {
@@ -54,6 +70,7 @@ export class ChatSession {
   private stopped = false
   private abortController: AbortController | undefined
   private readonly toolsProvider?: ToolsProvider
+  private activeNoteId: string | null = null
 
   constructor(
     getConfig: () => Promise<AIProviderConfig>,
@@ -73,9 +90,14 @@ export class ChatSession {
     return extra.length > 0 ? [...tools, ...extra] : tools
   }
 
-  async send(userText: string, history?: ChatMessage[]): Promise<void> {
+  async send(
+    userText: string,
+    history?: ChatMessage[],
+    activeNoteId?: string | null
+  ): Promise<void> {
     this.stopped = false
     this.abortController = undefined
+    this.activeNoteId = activeNoteId ?? null
     this.config = await this.getConfig()
     if (!this.config.apiKey && !isLocalEndpoint(this.config.baseUrl)) {
       this.emit({
@@ -92,7 +114,7 @@ export class ChatSession {
     if (history && history.length > 0) this.loadContext(history)
 
     const date = new Date().toISOString().slice(0, 10)
-    this.ensureSystemPrompt(date)
+    await this.ensureSystemPrompt(date)
     this.messages.push({ role: 'user', content: userText })
 
     const client = createClient(this.config)
@@ -130,7 +152,7 @@ export class ChatSession {
 
     const cleanPrompt = prompt.trim() || 'Summarize this PDF and highlight its key points.'
     const date = new Date().toISOString().slice(0, 10)
-    this.ensureSystemPrompt(date)
+    const skillsIndex = await this.ctx.service.renderSkillsIndex(this.ctx.activeProject)
     this.messages.push({ role: 'user', content: cleanPrompt })
 
     const client = createClient(this.config)
@@ -163,7 +185,7 @@ export class ChatSession {
       const stream = await client.responses.create(
         {
           model: this.config.model,
-          instructions: buildSystemPrompt(this.ctx.activeProject, date),
+          instructions: buildSystemPrompt(this.ctx.activeProject, date, skillsIndex),
           input: [
             {
               role: 'user',
@@ -264,12 +286,20 @@ export class ChatSession {
     return out
   }
 
-  private ensureSystemPrompt(date: string): void {
-    if (!this.messages.some((m) => m.role === 'system')) {
-      this.messages.unshift({
-        role: 'system',
-        content: buildSystemPrompt(this.ctx.activeProject, date)
-      })
+  /** (Re)build the system message on every send so mid-session changes (e.g. skills) apply. */
+  private async ensureSystemPrompt(date: string): Promise<void> {
+    const skillsIndex = await this.ctx.service.renderSkillsIndex(this.ctx.activeProject)
+    let activeNote: string | null = null
+    if (this.activeNoteId) {
+      const notes = await this.ctx.service.listNotes(this.ctx.activeProject)
+      activeNote = notes.find((n) => n.id === this.activeNoteId)?.name ?? null
+    }
+    const content = buildSystemPrompt(this.ctx.activeProject, date, skillsIndex, activeNote)
+    const idx = this.messages.findIndex((m) => m.role === 'system')
+    if (idx === -1) {
+      this.messages.unshift({ role: 'system', content })
+    } else {
+      this.messages[idx] = { role: 'system', content }
     }
   }
 
@@ -410,7 +440,10 @@ export class ChatSession {
     }
 
     try {
-      const result = await tool.execute(args, this.ctx)
+      const result = await tool.execute(args, {
+        ...this.ctx,
+        activeNoteId: this.activeNoteId
+      })
       this.emitTool(call.function.name, args, true, result)
       return result
     } catch (err) {
