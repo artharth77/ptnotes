@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type {
+  AboutInfo,
   AIProviderConfig,
   ChatMessage,
   ChatSessionMeta,
@@ -96,6 +97,7 @@ const api = {
   },
   settings: {
     get: (): Promise<StorageSettings> => ipcRenderer.invoke('settings:get'),
+    getAbout: (): Promise<AboutInfo> => ipcRenderer.invoke('settings:getAbout'),
     chooseRoot: (): Promise<string | null> => ipcRenderer.invoke('settings:chooseRoot'),
     changeRoot: (newRoot: string): Promise<StorageSettings> =>
       ipcRenderer.invoke('settings:changeRoot', newRoot)

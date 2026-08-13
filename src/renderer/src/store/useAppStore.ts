@@ -31,7 +31,7 @@ interface AppState {
   chatStreamProject: string | null
   confirmRequest: ConfirmRequest | null
   settingsOpen: boolean
-  settingsCategory: 'storage' | 'ai' | 'modules'
+  settingsCategory: 'storage' | 'ai' | 'modules' | 'about'
   sidebarVisible: boolean
   loading: boolean
 
@@ -63,8 +63,8 @@ interface AppState {
   setChatStreamProject: (project: string | null) => void
   setConfirmRequest: (req: ConfirmRequest | null) => void
   setSettingsOpen: (open: boolean) => void
-  setSettingsCategory: (category: 'storage' | 'ai' | 'modules') => void
-  openSettings: (category?: 'storage' | 'ai' | 'modules') => void
+  setSettingsCategory: (category: 'storage' | 'ai' | 'modules' | 'about') => void
+  openSettings: (category?: 'storage' | 'ai' | 'modules' | 'about') => void
   setSidebarVisible: (visible: boolean) => void
   newChat: (project: string) => Promise<void>
   openChat: (project: string, sessionId: string) => Promise<void>

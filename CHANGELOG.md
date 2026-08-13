@@ -2,6 +2,16 @@
 
 All notable changes to PTNotes are documented in this file.
 
+## [0.6.0] — 2026-08-13
+
+### Added
+
+#### About pane in Settings
+
+- New **About** category in Settings showing the app icon, name, version, one-line description, a short tech-stack blurb, and labeled rows for the Electron / Chromium / Node.js runtime versions.
+- Version data flows through IPC from the main process (`settings:getAbout` → `app.getName()` / `app.getVersion()` / `process.versions`), so the renderer never touches `process.versions` directly; the icon is bundled as a Vite asset (allowed by CSP `img-src 'self'`).
+- Read-only pane (no Save/Cancel actions), matching the existing settings-pane layout.
+
 ## [0.5.2] — 2026-08-12
 
 ### Added
