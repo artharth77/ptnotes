@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 interface ModalProps {
   title: string
@@ -8,8 +8,22 @@ interface ModalProps {
 }
 
 export function Modal({ title, onClose, children, className }: ModalProps): React.JSX.Element {
+  const overlayRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent): void {
+      if (e.key !== 'Escape') return
+      const el = overlayRef.current
+      if (!el) return
+      const overlays = document.querySelectorAll<HTMLElement>('.modal-overlay')
+      if (overlays[overlays.length - 1] === el) onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
+
   return (
-    <div className="modal-overlay">
+    <div className="modal-overlay" ref={overlayRef}>
       <div
         className={`modal${className ? ` ${className}` : ''}`}
         role="dialog"

@@ -461,8 +461,15 @@ function SkillsPane(): React.JSX.Element {
     function onPointerDown(e: MouseEvent): void {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuFor(null)
     }
+    function onKeyDown(e: KeyboardEvent): void {
+      if (e.key === 'Escape') setMenuFor(null)
+    }
     window.addEventListener('pointerdown', onPointerDown)
-    return () => window.removeEventListener('pointerdown', onPointerDown)
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown)
+      window.removeEventListener('keydown', onKeyDown)
+    }
   }, [menuFor])
 
   function openMenu(e: React.MouseEvent, key: string): void {

@@ -44,8 +44,15 @@ export function NoteList(): React.JSX.Element {
     function onClick(e: MouseEvent): void {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuFor(null)
     }
+    function onKeyDown(e: KeyboardEvent): void {
+      if (e.key === 'Escape') setMenuFor(null)
+    }
     document.addEventListener('mousedown', onClick)
-    return () => document.removeEventListener('mousedown', onClick)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onClick)
+      document.removeEventListener('keydown', onKeyDown)
+    }
   }, [menuFor])
 
   async function handleCreate(): Promise<void> {
