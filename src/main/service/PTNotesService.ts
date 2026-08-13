@@ -8,6 +8,10 @@ import type {
   CreateProjectResult,
   NoteMeta,
   Project,
+  SkillContent,
+  SkillList,
+  SkillMeta,
+  SkillScope,
   Todo
 } from '@shared/types'
 import type { ModuleChatMessage, ModuleInfo, ModuleRun } from '@shared/types'
@@ -17,6 +21,7 @@ import { detectFileKind } from '../ai/reader'
 const TODO_HEADER = '# Todo\n\n'
 const WELCOME_ID = 'welcome'
 const REGISTRY_FILE = '.ptnotes-projects.json'
+const GLOBAL_SKILLS_DIR = '.skills'
 const WELCOME_NOTE = `# Welcome to PTNotes
 
 This is your first note. Everything you write here is stored as markdown in:
@@ -63,6 +68,7 @@ export class PTNotesService {
     }
     const dirs = entries.filter((e) => e.isDirectory() && !e.name.startsWith('.'))
     const registry = entries.find((e) => e.isFile() && e.name === REGISTRY_FILE)
+    const skills = entries.find((e) => e.isDirectory() && e.name === GLOBAL_SKILLS_DIR)
     for (const entry of dirs) {
       const dest = join(target, entry.name)
       if (await this.pathExists(dest)) throw new Error(`A folder already exists at ${dest}`)
@@ -70,11 +76,17 @@ export class PTNotesService {
     if (registry && (await this.pathExists(join(target, registry.name)))) {
       throw new Error(`A file already exists at ${join(target, registry.name)}`)
     }
+    if (skills && (await this.pathExists(join(target, skills.name)))) {
+      throw new Error(`A folder already exists at ${join(target, skills.name)}`)
+    }
     for (const entry of dirs) {
       await fs.rename(join(this.rootDir, entry.name), join(target, entry.name))
     }
     if (registry) {
       await fs.rename(join(this.rootDir, registry.name), join(target, registry.name))
+    }
+    if (skills) {
+      await fs.rename(join(this.rootDir, skills.name), join(target, skills.name))
     }
     this.rootDir = target
     await this.migrateLegacyFolders()
@@ -133,6 +145,38 @@ export class PTNotesService {
 
   private modulesDir(name: string): string {
     return join(this.dataDir(name), 'modules')
+  }
+
+  /** Global skills dir (shared across all projects), next to the project registry. */
+  private globalSkillsDir(): string {
+    return join(this.rootDir, GLOBAL_SKILLS_DIR)
+  }
+
+  /** Per-project skills dir under the app-internal data dir. */
+  private projectSkillsDir(name: string): string {
+    return join(this.dataDir(name), 'skills')
+  }
+
+  private skillsDir(scope: SkillScope, name: string): string {
+    return scope === 'global' ? this.globalSkillsDir() : this.projectSkillsDir(name)
+  }
+
+  /** OpenAI skill-guide layout: each skill is a folder containing a SKILL.md manifest. */
+  private skillDir(scope: SkillScope, project: string, name: string): string {
+    return join(this.skillsDir(scope, project), validateNoteId(slugify(name)))
+  }
+
+  private skillManifestPath(scope: SkillScope, project: string, name: string): string {
+    return join(this.skillDir(scope, project, name), 'SKILL.md')
+  }
+
+  /** Locate the manifest of a skill folder (`SKILL.md`, case-insensitive per the spec). */
+  private async findSkillManifest(dir: string): Promise<string | null> {
+    for (const name of ['SKILL.md', 'skill.md']) {
+      const p = join(dir, name)
+      if (await this.pathExists(p)) return p
+    }
+    return null
   }
 
   private chatPath(project: string, sessionId: string): string {
@@ -337,6 +381,151 @@ export class PTNotesService {
 
   async revealNoteInFolder(project: string, noteId: string): Promise<void> {
     shell.showItemInFolder(this.notePath(project, noteId))
+  }
+
+  // ---- Skills ----
+
+  /** List global + project skills (folders with a SKILL.md manifest + `description:` front-matter). */
+  async listSkills(project: string): Promise<SkillList> {
+    const [global, projectSkills] = await Promise.all([
+      this.readSkillsDir(this.globalSkillsDir(), 'global'),
+      this.readSkillsDir(this.projectSkillsDir(project), 'project')
+    ])
+    return { global, project: projectSkills }
+  }
+
+  private async readSkillsDir(dir: string, scope: SkillScope): Promise<SkillMeta[]> {
+    let entries: import('fs').Dirent[]
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true })
+    } catch {
+      return []
+    }
+    const skills: SkillMeta[] = []
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const manifest = await this.findSkillManifest(join(dir, entry.name))
+      if (!manifest) continue
+      const raw = await fs.readFile(manifest, 'utf8').catch(() => '')
+      skills.push({
+        scope,
+        name: entry.name,
+        description: parseSkillDescription(raw),
+        enabled: parseSkillEnabled(raw)
+      })
+    }
+    skills.sort((a, b) => a.name.localeCompare(b.name))
+    return skills
+  }
+
+  async readSkill(project: string, scope: SkillScope, name: string): Promise<SkillContent | null> {
+    try {
+      const raw = await fs.readFile(this.skillManifestPath(scope, project, name), 'utf8')
+      const slug = slugify(name)
+      return {
+        scope,
+        name: slug,
+        description: parseSkillDescription(raw),
+        enabled: parseSkillEnabled(raw),
+        content: stripSkillFrontMatter(raw).trim()
+      }
+    } catch {
+      return null
+    }
+  }
+
+  /** Upsert a skill: folder `<name>/SKILL.md` with OpenAI skill-guide front-matter. */
+  async saveSkill(
+    project: string,
+    scope: SkillScope,
+    name: string,
+    input: { description: string; content: string; enabled?: boolean }
+  ): Promise<SkillMeta> {
+    const slug = slugify(name)
+    const dir = this.skillDir(scope, project, slug)
+    await fs.mkdir(dir, { recursive: true })
+    const enabled = input.enabled ?? true
+    await fs.writeFile(
+      join(dir, 'SKILL.md'),
+      renderSkillFile(slug, input.description ?? '', input.content ?? '', enabled),
+      'utf8'
+    )
+    return {
+      scope,
+      name: slug,
+      description: (input.description ?? '').trim(),
+      enabled
+    }
+  }
+
+  async deleteSkill(project: string, scope: SkillScope, name: string): Promise<boolean> {
+    const dir = this.skillDir(scope, project, name)
+    if (!(await this.pathExists(dir))) return false
+    await fs.rm(dir, { recursive: true, force: true })
+    return true
+  }
+
+  /** Toggle whether a skill is offered to the AI, preserving its description and content. */
+  async setSkillEnabled(
+    project: string,
+    scope: SkillScope,
+    name: string,
+    enabled: boolean
+  ): Promise<SkillMeta> {
+    const existing = await this.readSkill(project, scope, name)
+    if (!existing) throw new Error(`Skill "${name}" (${scope}) not found`)
+    return this.saveSkill(project, scope, existing.name, {
+      description: existing.description,
+      content: existing.content,
+      enabled
+    })
+  }
+
+  /** Move a skill between scopes, relocating its whole folder. */
+  async moveSkill(
+    project: string,
+    fromScope: SkillScope,
+    name: string,
+    toScope: SkillScope
+  ): Promise<SkillMeta> {
+    const slug = slugify(name)
+    const fromDir = this.skillDir(fromScope, project, name)
+    const toDir = this.skillDir(toScope, project, slug)
+    if (fromDir === toDir) {
+      const meta = await this.readSkill(project, fromScope, slug)
+      if (!meta) throw new Error(`Skill "${slug}" (${fromScope}) not found`)
+      return meta
+    }
+    if (!(await this.pathExists(fromDir))) {
+      throw new Error(`Skill "${slug}" (${fromScope}) not found`)
+    }
+    if (await this.pathExists(toDir)) {
+      throw new Error(`Skill "${slug}" already exists in ${toScope} skills`)
+    }
+    await fs.mkdir(this.skillsDir(toScope, project), { recursive: true })
+    await fs.rename(fromDir, toDir)
+    const moved = await this.readSkill(project, toScope, slug)
+    if (!moved) throw new Error(`Skill "${slug}" not found after moving`)
+    return moved
+  }
+
+  /** Prompt block listing enabled skills (global + project) for the system prompt. Disabled skills are excluded. */
+  async renderSkillsIndex(project: string): Promise<string> {
+    const { global, project: projectSkills } = await this.listSkills(project)
+    const lines: string[] = []
+    const enabledGlobal = global.filter((s) => s.enabled)
+    const enabledProject = projectSkills.filter((s) => s.enabled)
+    if (enabledGlobal.length > 0) {
+      lines.push('Global skills:')
+      for (const s of enabledGlobal)
+        lines.push(`- ${s.name} — ${s.description || '(no description)'}`)
+    }
+    if (enabledProject.length > 0) {
+      lines.push('Project skills:')
+      for (const s of enabledProject)
+        lines.push(`- ${s.name} — ${s.description || '(no description)'}`)
+    }
+    return lines.join('\n')
   }
 
   async listChatSessions(project: string): Promise<ChatSessionMeta[]> {
@@ -860,6 +1049,45 @@ function outputFilesOf(run: ModuleRun | undefined): string[] {
   if (!run) return []
   if (Array.isArray(run.outputFiles) && run.outputFiles.length > 0) return run.outputFiles
   return run.outputFile ? [run.outputFile] : []
+}
+
+/** Parse the one-line `description:` front-matter of a skill markdown file (OpenAI skill-guide format). */
+function parseSkillDescription(raw: string): string {
+  const m = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n/)
+  if (!m) return ''
+  const line = m[1].split('\n').find((l) => /^description\s*:/i.test(l))
+  return line ? line.replace(/^description\s*:\s*/i, '').trim() : ''
+}
+
+/** Strip the `description:` front-matter block, returning just the body content. */
+function stripSkillFrontMatter(raw: string): string {
+  const m = raw.match(/^---\s*\n[\s\S]*?\n---\s*\n?/)
+  return m ? raw.slice(m[0].length) : raw
+}
+
+/** Parse the optional `enabled:` front-matter line; missing = enabled. */
+function parseSkillEnabled(raw: string): boolean {
+  const m = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n/)
+  if (!m) return true
+  const line = m[1].split('\n').find((l) => /^enabled\s*:/i.test(l))
+  if (!line) return true
+  const v = line
+    .replace(/^enabled\s*:\s*/i, '')
+    .trim()
+    .toLowerCase()
+  return v !== 'false' && v !== '0' && v !== 'no'
+}
+
+/** Serialize a skill to markdown using the OpenAI skill-guide front-matter (`name` + `description` + `enabled`). */
+function renderSkillFile(
+  name: string,
+  description: string,
+  content: string,
+  enabled = true
+): string {
+  const desc = (description || '').trim().replace(/\s*\n+\s*/g, ' ')
+  const body = (content || '').trim()
+  return `---\nname: ${name}\ndescription: ${desc}\nenabled: ${enabled}\n---\n\n${body}${body ? '\n' : ''}`
 }
 
 function isInside(parent: string, child: string): boolean {

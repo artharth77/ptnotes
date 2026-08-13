@@ -18,6 +18,10 @@ import type {
   NoteMeta,
   PdfExtractResult,
   Project,
+  SkillContent,
+  SkillList,
+  SkillMeta,
+  SkillScope,
   Todo
 } from '../shared/types'
 
@@ -101,6 +105,31 @@ const api = {
     chooseRoot: (): Promise<string | null> => ipcRenderer.invoke('settings:chooseRoot'),
     changeRoot: (newRoot: string): Promise<StorageSettings> =>
       ipcRenderer.invoke('settings:changeRoot', newRoot)
+  },
+  skills: {
+    list: (project: string): Promise<SkillList> => ipcRenderer.invoke('skills:list', project),
+    read: (project: string, scope: SkillScope, name: string): Promise<SkillContent | null> =>
+      ipcRenderer.invoke('skills:read', project, scope, name),
+    save: (
+      project: string,
+      scope: SkillScope,
+      name: string,
+      input: { description: string; content: string; enabled?: boolean }
+    ): Promise<SkillMeta> => ipcRenderer.invoke('skills:save', project, scope, name, input),
+    setEnabled: (
+      project: string,
+      scope: SkillScope,
+      name: string,
+      enabled: boolean
+    ): Promise<SkillMeta> => ipcRenderer.invoke('skills:setEnabled', project, scope, name, enabled),
+    move: (
+      project: string,
+      scope: SkillScope,
+      name: string,
+      toScope: SkillScope
+    ): Promise<SkillMeta> => ipcRenderer.invoke('skills:move', project, scope, name, toScope),
+    delete: (project: string, scope: SkillScope, name: string): Promise<boolean> =>
+      ipcRenderer.invoke('skills:delete', project, scope, name)
   },
   pdf: {
     supportsUpload: (): Promise<boolean> => ipcRenderer.invoke('pdf:supportsUpload'),

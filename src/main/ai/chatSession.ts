@@ -23,7 +23,17 @@ export type ToolsProvider = () => Promise<PTTool[]>
 
 const MAX_TOOL_ITERATIONS = 12
 
-export function buildSystemPrompt(activeProject: string, currentDate: string): string {
+export function buildSystemPrompt(
+  activeProject: string,
+  currentDate: string,
+  skillsIndex?: string
+): string {
+  const skillsSection = skillsIndex
+    ? `\nSkills:
+You can load skills (named instruction documents) on demand when a task is relevant. Call the read_skill tool to load a skill's full content before applying it.
+${skillsIndex}
+`
+    : ''
   return `You are PTNotes assistant, an automation and research assistant inside a markdown notes + todo desktop app.
 
 You operate inside a project. The currently active project is "${activeProject}". Use it by default; you may target other projects by passing the "project" argument to a tool.
@@ -41,8 +51,7 @@ Guidelines:
 - Whenever you mention an existing note by name in your reply, always link to it: [note name](note:note name). The link opens the note, so never return a bare note name without a link.
 - Whenever you mention an existing todo by its text in your reply, always link to it: [todo text](todo:todo text).
 - Keep replies short and actionable.
-
-Current date: ${currentDate}.`
+${skillsSection}Current date: ${currentDate}.`
 }
 
 export class ChatSession {
@@ -92,7 +101,7 @@ export class ChatSession {
     if (history && history.length > 0) this.loadContext(history)
 
     const date = new Date().toISOString().slice(0, 10)
-    this.ensureSystemPrompt(date)
+    await this.ensureSystemPrompt(date)
     this.messages.push({ role: 'user', content: userText })
 
     const client = createClient(this.config)
@@ -130,7 +139,7 @@ export class ChatSession {
 
     const cleanPrompt = prompt.trim() || 'Summarize this PDF and highlight its key points.'
     const date = new Date().toISOString().slice(0, 10)
-    this.ensureSystemPrompt(date)
+    const skillsIndex = await this.ctx.service.renderSkillsIndex(this.ctx.activeProject)
     this.messages.push({ role: 'user', content: cleanPrompt })
 
     const client = createClient(this.config)
@@ -163,7 +172,7 @@ export class ChatSession {
       const stream = await client.responses.create(
         {
           model: this.config.model,
-          instructions: buildSystemPrompt(this.ctx.activeProject, date),
+          instructions: buildSystemPrompt(this.ctx.activeProject, date, skillsIndex),
           input: [
             {
               role: 'user',
@@ -264,12 +273,15 @@ export class ChatSession {
     return out
   }
 
-  private ensureSystemPrompt(date: string): void {
-    if (!this.messages.some((m) => m.role === 'system')) {
-      this.messages.unshift({
-        role: 'system',
-        content: buildSystemPrompt(this.ctx.activeProject, date)
-      })
+  /** (Re)build the system message on every send so mid-session changes (e.g. skills) apply. */
+  private async ensureSystemPrompt(date: string): Promise<void> {
+    const skillsIndex = await this.ctx.service.renderSkillsIndex(this.ctx.activeProject)
+    const content = buildSystemPrompt(this.ctx.activeProject, date, skillsIndex)
+    const idx = this.messages.findIndex((m) => m.role === 'system')
+    if (idx === -1) {
+      this.messages.unshift({ role: 'system', content })
+    } else {
+      this.messages[idx] = { role: 'system', content }
     }
   }
 
