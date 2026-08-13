@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { mdiFileOutline, mdiHistory, mdiPencil, mdiTrashCanOutline } from '@mdi/js'
+import { mdiChevronDown, mdiFileOutline, mdiHistory, mdiPencil, mdiTrashCanOutline } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
 import { MarkdownContent } from './MarkdownContent'
 import { ModuleCard } from './ModuleCard'
@@ -134,6 +134,8 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   const [skillList, setSkillList] = useState<SkillList | null>(null)
   const [slashIndex, setSlashIndex] = useState(0)
   const [slashDismissed, setSlashDismissed] = useState(false)
+  const [nav, setNav] = useState<{ entries: string[]; index: number } | null>(null)
+  const [showJumpDown, setShowJumpDown] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const prevBusy = useRef(false)
@@ -154,6 +156,12 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   }, [settingsOpen])
 
   const list = useMemo(() => messages ?? [], [messages])
+
+  const userHistory = useMemo(
+    () =>
+      list.filter((m) => m.role === 'user' && m.content.trim().length > 0).map((m) => m.content),
+    [list]
+  )
 
   const mentionItems = useMemo<(NoteMeta | Todo | string)[]>(() => {
     if (!mention) return []
@@ -238,6 +246,17 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [list, chatBusy])
+
+  function onScroll(e: React.UIEvent<HTMLDivElement>): void {
+    const el = e.currentTarget
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
+    setShowJumpDown(!atBottom)
+  }
+
+  function jumpToBottom(): void {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
+    setShowJumpDown(false)
+  }
 
   function updateMention(value: string, sel: number): void {
     const before = value.slice(0, sel)
@@ -345,6 +364,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
       setChatTitle(project, deriveLocalTitle(text))
     }
     setInput('')
+    setNav(null)
     setMention(null)
     setChatBusy(true)
     setChatStreamProject(project)
@@ -514,6 +534,31 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
         return
       }
     }
+    if (e.key === 'ArrowUp') {
+      if (userHistory.length === 0) return
+      e.preventDefault()
+      if (!nav) {
+        const entries = [...userHistory]
+        setNav({ entries, index: entries.length - 1 })
+        setInput(entries[entries.length - 1]!)
+      } else if (nav.index > 0) {
+        setNav({ ...nav, index: nav.index - 1 })
+        setInput(nav.entries[nav.index - 1]!)
+      }
+      return
+    }
+    if (e.key === 'ArrowDown') {
+      if (!nav) return
+      e.preventDefault()
+      if (nav.index < nav.entries.length - 1) {
+        setNav({ ...nav, index: nav.index + 1 })
+        setInput(nav.entries[nav.index + 1]!)
+      } else {
+        setNav(null)
+        setInput('')
+      }
+      return
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       const cmd = commandFromInput(input)
@@ -600,6 +645,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                             onClick={() => {
                               if (activeProject) void openChat(activeProject, s.sessionId)
                               closeHistory()
+                              focusInput()
                             }}
                             title={`${s.title} · ${s.messageCount} message${s.messageCount === 1 ? '' : 's'} · ${new Date(s.createdAt).toLocaleString()}`}
                           >
@@ -651,7 +697,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
         </div>
       </div>
 
-      <div className="chat-scroll" ref={scrollRef}>
+      <div className="chat-scroll" ref={scrollRef} onScroll={onScroll}>
         {!aiReady && (
           <div className="chat-ai-hint">
             <div className="chat-ai-hint-title">AI not configured</div>
@@ -792,6 +838,16 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
       </div>
 
       <div className="chat-input">
+        {showJumpDown && (
+          <button
+            className="chat-jump-down"
+            onClick={jumpToBottom}
+            title="Jump to bottom"
+            aria-label="Jump to bottom"
+          >
+            <MdiIcon path={mdiChevronDown} size={20} />
+          </button>
+        )}
         {slashItems.length > 0 && (
           <div className="command-popup">
             {slashItems.map((c, i) => (
@@ -852,6 +908,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
           onChange={(e) => {
             const value = e.target.value
             setInput(value)
+            setNav(null)
             setSlashDismissed(false)
             if (extractSlashToken(value) !== slashToken) setSlashIndex(0)
             updateMention(value, e.target.selectionStart ?? value.length)
