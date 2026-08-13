@@ -113,6 +113,15 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     if (activeProject) void loadChatSessions(activeProject)
   }
 
+  useEffect(() => {
+    if (!historyOpen) return
+    function onKeyDown(e: KeyboardEvent): void {
+      if (e.key === 'Escape') closeHistory()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [historyOpen])
+
   const [input, setInput] = useState('')
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({})
   const [mention, setMention] = useState<{
@@ -189,6 +198,13 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   useEffect(() => {
     focusInput()
   }, [])
+
+  const chatOpen = useAppStore((s) => s.chatOpen)
+  const prevChatOpen = useRef(false)
+  useEffect(() => {
+    if (chatOpen && !prevChatOpen.current) focusInput()
+    prevChatOpen.current = chatOpen
+  }, [chatOpen])
 
   useEffect(() => {
     if (prevBusy.current && !chatBusy) {
