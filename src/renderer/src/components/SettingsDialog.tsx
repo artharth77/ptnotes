@@ -401,6 +401,8 @@ function SkillEditorModal({
 
 function SkillsPane(): React.JSX.Element {
   const activeProject = useAppStore((s) => s.activeProject)
+  const skillEditRequest = useAppStore((s) => s.skillEditRequest)
+  const clearSkillEditRequest = useAppStore((s) => s.clearSkillEditRequest)
   const [skills, setSkills] = useState<SkillList | null>(null)
   const [editing, setEditing] = useState<SkillContent | null>(null)
   const [creating, setCreating] = useState(false)
@@ -433,12 +435,41 @@ function SkillsPane(): React.JSX.Element {
   }, [activeProject])
 
   useEffect(() => {
+    if (!skillEditRequest || !activeProject) return
+    const name = skillEditRequest
+    void window.ptnotes.skills
+      .list(activeProject)
+      .then((list) => {
+        const found =
+          list.project.find((s) => s.name === name) ?? list.global.find((s) => s.name === name)
+        if (!found) return
+        return window.ptnotes.skills.read(activeProject, found.scope, found.name)
+      })
+      .then((skill) => {
+        if (skill) setEditing(skill)
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : String(err))
+      })
+      .finally(() => {
+        clearSkillEditRequest()
+      })
+  }, [skillEditRequest, activeProject, clearSkillEditRequest])
+
+  useEffect(() => {
     if (!menuFor) return
     function onPointerDown(e: MouseEvent): void {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuFor(null)
     }
+    function onKeyDown(e: KeyboardEvent): void {
+      if (e.key === 'Escape') setMenuFor(null)
+    }
     window.addEventListener('pointerdown', onPointerDown)
-    return () => window.removeEventListener('pointerdown', onPointerDown)
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown)
+      window.removeEventListener('keydown', onKeyDown)
+    }
   }, [menuFor])
 
   function openMenu(e: React.MouseEvent, key: string): void {

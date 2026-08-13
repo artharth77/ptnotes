@@ -146,7 +146,7 @@ src/
 │   │   │   ├── NoteList.tsx         # Notes tab
 │   │   │   ├── TodoPanel.tsx        # Todo tab (checkboxes + progress)
 │   │   │   ├── MarkdownEditor.tsx   # TipTap WYSIWYG + markdown sync + auto-save
-│   │   │   ├── MarkdownContent.tsx  # react-markdown chat rendering + note: link handling
+│   │   │   ├── MarkdownContent.tsx  # react-markdown chat rendering + note:/skill: link handling
 │   │   │   ├── ChatDrawer.tsx       # right drawer, streaming, mentions, history, titles
 │   │   │   ├── ModuleHistoryOverlay.tsx # read-only transcript overlay for module runs (💬 button on ModuleCard)
 │   │   │   └── SettingsDialog.tsx  # two-panel Settings (Storage + AI Settings)
@@ -220,6 +220,7 @@ ChatPanel (renderer) ──send──▶ Main process
 - Session is kept in memory per project (`sessions` map) so closing the drawer and reopening continues the same conversation.
 - Each `ai:send` call receives the renderer's current thread as `history` and the session is re-seeded from it, so reopening a historical chat (or switching sessions) keeps the correct model context — the AI never relies solely on in-memory accumulation.
 - System prompt is sent when a session starts; it includes the active project and instructs the AI that a `note:<notename>` message means it must call `read_note` for that note.
+- Each `ai:send` also forwards the currently **active note** (`activeNoteId` from the renderer store). The system prompt tells the AI that "this note", "the current note" or "the active note" means it should call `read_note` **without a `title`**, which resolves to the note the user is viewing.
 - The system prompt also lists available **enabled** skills (name + description per skill, global + project)
   and is **rebuilt on every `send()`** (`ensureSystemPrompt` → `renderSkillsIndex`), so skills
   created/edited/toggled in Settings apply mid-session. The model calls `read_skill` to load full content
@@ -237,7 +238,7 @@ ChatPanel (renderer) ──send──▶ Main process
 | `create_note`  | new `.md` in project `notes/`                                                                                   |
 | `update_note`  | overwrite / rename existing note                                                                                |
 | `list_notes`   | model context                                                                                                   |
-| `read_note`    | model context                                                                                                   |
+| `read_note`    | model context; omit `title` to read the currently active note (the one the user is viewing)                    |
 | `search_notes` | search note titles + content, return matching names + snippet                                                   |
 | `delete_note`  | delete one or more notes (requires user confirmation dialog)                                                    |
 | `create_todos` | append `- [ ]` items to `TODO.md`                                                                               |
@@ -281,6 +282,14 @@ ChatPanel (renderer) ──send──▶ Main process
   Parsed from the tool result JSON (`{ ok, note }`) via `noteIdFromToolCall`.
 - Note slugs are Unicode-safe: non-Latin scripts (e.g. Thai) keep their characters, including combining
   marks (`\p{M}`); only Latin combining accents (`\u0300-\u036f`) are stripped (see `slugify`).
+- **Slash commands:** typing `/` at the start of the chat input opens a popup of built-in commands
+  (`/new` → new chat, `/models` → open AI Settings) and **enabled skills** (≤10 rows). Typing filters
+  (name + description); **Tab** autocompletes the command + a trailing space to type args; **Enter**
+  (or a mouse click) autocompletes and runs it immediately. Skill commands send
+  `Use the skill "name" (scope: …): <prompt>` so the model calls `read_skill` first (enforced by a
+  system-prompt rule). Registry lives in `src/shared/slash.ts` (pure logic + tests) and
+  `src/renderer/src/commands.ts` (built-ins with actions); skills are merged in via
+  `buildSkillCommandList` (built-ins win over same-named skills, project scope wins over global).
 
 ### Settings dialog
 
@@ -331,6 +340,7 @@ Two-panel dialog (`.settings-layout` with `.settings-nav` + `.settings-pane`):
 - The persistent project registry only records known project names/paths — it never stores file contents; the folder on disk remains the source of truth.
 - `note:<notename>` uses the note's slugified file name (as shown in the Notes list), so the `@` picker should insert the exact list name.
 - `todo:<todotext>` uses the todo's checklist text, so the `!` picker should insert the exact text.
+- The system prompt instructs the AI to link to skills it mentions as `[skill name](skill:skill name)`; the renderer renders these as clickable pills (book icon) that open **Settings → Skills** and load the skill into the editor (via `openSkillEditor` + the `skillEditRequest` store field).
 
 ## Docs
 
