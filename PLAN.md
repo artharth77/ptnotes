@@ -196,3 +196,94 @@ and a new **Settings ▸ Skills** pane.
 - `npm run typecheck`
 - `npm run lint`
 - `npm run test`
+## Goal 4: Slash commands in chat
+
+When the user types `/` at the start of the chat input, show a popup listing
+**commands** and **enabled skills** (~10 rows). Typing filters the list. **Tab**
+autocompletes the selected command followed by a space (so the user can type more
+parameters). **Enter** while the list is shown autocompletes and runs the command.
+Skill commands submit a prompt that references the skill so the AI loads it via
+`read_skill`. Design is an extensible registry so more commands can be added later.
+
+### Design
+
+A renderer-side, extensible command registry. Commands are either **client
+actions** (e.g. `/new`, `/models`) or **skill commands** (dynamically derived from
+enabled skills) that submit an AI message. `/` detection is derived from the input
+value, reusing the existing mention-popup UI pattern (`@`/`!`/`#`).
+
+- `/` at input start → popup of commands + enabled skills (≤10 rows). Typing
+  filters it (case-insensitive match on name + description).
+- **Tab** → autocomplete command + trailing space (popup closes; type args next).
+- **Enter** while popup open → autocomplete + run immediately (action or send).
+- **Enter** after args typed (popup already closed) → still runs the command
+  instead of sending raw `/…` text.
+- Skills are invoked by reference: `/name args` sends
+  `Use the skill "name" (scope: …): args`, plus one new system-prompt rule so the
+  model calls `read_skill` first (scope passed in parentheses so the right skill
+  is loaded for both global and project skills).
+
+### Changes
+
+1. **`src/shared/slash.ts`** (new, pure + testable)
+   - Types: `SlashCommand { name, description, action?(ctx) }`,
+     `SlashCommandContext { project, newChat, openAiSettings }`.
+   - `extractSlashToken(value)` → in-progress token when input starts with `/` and
+     the token has no space; `null` otherwise.
+   - `filterSlashCommands(commands, query)` → case-insensitive match on name +
+     description.
+   - `buildSkillMessage(name, scope, args)` →
+     `Use the skill "name" (scope: global): args` (or `… .` with no args).
+   - `buildSkillCommandList(skills)` → pure merge of enabled global+project skills
+     into command shapes; dedupes by name (project scope wins), skips names
+     colliding with built-ins.
+2. **`src/main/ai/chatSession.ts`** — add one bullet to `buildSystemPrompt`: "If
+   the user asks you to use a skill by name (`Use the skill "name": …`, scope in
+   parentheses), call `read_skill` to load it before applying it."
+3. **`src/renderer/src/commands.ts`** (new) — built-in registry with actions via
+   `useAppStore.getState()`:
+   - `/new` → `newChat(project)`
+   - `/models` → `openSettings('ai')`
+   - Export `builtinSlashCommands`; ChatDrawer merges with
+     `buildSkillCommandList`.
+4. **`src/renderer/src/components/ChatDrawer.tsx`**
+   - Load skills (state + `window.ptnotes.skills.list`) on mount, project change,
+     and when `settingsOpen` closes or `chatBusy` ends (keeps chat-created skills
+     fresh).
+   - `slashItems` memo (token → filtered, sliced to 10) + `slashIndex` +
+     Escape-dismiss flag.
+   - Extend `onKeyDown`: ArrowUp/Down navigate; **Tab** autocompletes + space;
+     **Enter** runs selected (or, popup closed, the first-token command with
+     args); otherwise normal send.
+   - Refactor `send()` to accept an optional text override; add
+     `runSlashCommand(cmd, args)` that either fires the action or sends
+     `buildSkillMessage`.
+   - Render a `.command-popup` above the input (mirrors `.mention-popup`):
+     `/name` + description, scope badge on skill rows, `active` highlight,
+     `onMouseDown` select. Update the empty-chat hint to mention `/`.
+5. **`src/renderer/src/assets/main.css`** — `.command-popup` (max-height ≈340px ≈
+   10 rows), `.command-item`, `.command-name`, `.command-desc`,
+   `.command-badge`.
+6. **Tests** — new `scripts/test-slash.mts` covering `extractSlashToken` (incl.
+   space/`/`-only/no-leading-`/`), `filterSlashCommands`, `buildSkillMessage`, and
+   the merge (enabled filtering, scope dedupe, builtin-collision). Wire into
+   `package.json` `test`.
+7. **Docs** — `AGENTS.md` (chat feature/UI section), `CHANGELOG.md` (0.6.0
+   **Added**), `README.md` (one bullet).
+
+### Notes / edge cases
+
+- Only the enabled-skills subset appears; disabled skills are excluded (mirrors
+  `renderSkillsIndex`).
+- Built-in commands win over same-named skills; duplicate skill names prefer the
+  project scope.
+- No new IPC — reuses existing `skills:list` and `openSettings`/`newChat` store
+  actions.
+- Escape closes the popup (dismiss flag reset on the next keystroke).
+
+### Verify
+
+- `npm run typecheck`
+- `npm run lint`
+- `npm run test`
+

@@ -20,6 +20,12 @@ All notable changes to PTNotes are documented in this file.
 - Skills can be **disabled** (an `enabled:` front-matter flag in `SKILL.md`, default `true`): disabled skills are excluded from the system-prompt index and refused by `read_skill`, with a new `skills:setEnabled` toggle IPC.
 - `changeRootDir` now relocates the global `<root>/.skills` folder alongside the project registry.
 
+#### Slash commands in chat
+
+- Typing `/` at the start of the chat input opens a popup listing **built-in commands** (`/new` → start a new chat, `/models` → open AI Settings) and **enabled skills** (~10 rows). Typing filters by name + description; **Tab** autocompletes the command with a trailing space so more parameters can be typed; **Enter** (or a mouse click) autocompletes and runs the command immediately.
+- Skill commands submit `Use the skill "name" (scope: …): <prompt>` so the assistant loads the skill via `read_skill` first (a system-prompt rule enforces this) and applies it to the given prompt.
+- The command registry is extensible: built-ins live in `src/renderer/src/commands.ts` (client actions, no IPC), skills are merged in dynamically via `buildSkillCommandList` (built-ins win over same-named skills, project scope wins over global, disabled skills excluded), and the parsing/filtering/message-building logic is pure and unit-tested in `src/shared/slash.ts`.
+
 ### Changed
 
 - **Chat/module data moved into `<project>/.data/`**: per-project `chat/` and `modules/` folders (including `modules/temp/`) now live under the dot-directory `<project>/.data/`, keeping app-internal data out of the project root and the `#` file picker. Legacy folders found at the project root are migrated automatically on startup (and after changing the storage root) — whole-folder move when the target is free, recursive merge otherwise, with colliding files kept as `-2` copies. The migration is idempotent.

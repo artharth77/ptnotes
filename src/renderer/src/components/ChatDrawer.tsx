@@ -8,7 +8,23 @@ import { MdiIcon } from './MdiIcon'
 import { NOTE_LINK_ICON, TODO_LINK_ICON } from './contentIcons'
 import { splitContent } from './chatContent'
 import { ThinkBox, UserBubble } from './chatBubbles'
-import type { ChatMessage, ChatSessionMeta, ModuleRun, NoteMeta, Todo } from '@shared/types'
+import { builtinSlashCommands, builtinSlashNames } from '../commands'
+import {
+  MAX_COMMAND_ROWS,
+  buildSkillCommandList,
+  buildSkillMessage,
+  extractSlashToken,
+  filterSlashCommands
+} from '@shared/slash'
+import type { SlashCommand, SlashCommandContext } from '@shared/slash'
+import type {
+  ChatMessage,
+  ChatSessionMeta,
+  ModuleRun,
+  NoteMeta,
+  SkillList,
+  Todo
+} from '@shared/types'
 
 const NO_SESSIONS: ChatSessionMeta[] = []
 const NO_MODULE_RUNS: ModuleRun[] = []
@@ -105,6 +121,9 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   } | null>(null)
   const [mentionIndex, setMentionIndex] = useState(0)
   const [dragActive, setDragActive] = useState(false)
+  const [skillList, setSkillList] = useState<SkillList | null>(null)
+  const [slashIndex, setSlashIndex] = useState(0)
+  const [slashDismissed, setSlashDismissed] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const prevBusy = useRef(false)
@@ -146,6 +165,21 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   const mentionName = (item: NoteMeta | Todo | string): string =>
     typeof item === 'string' ? item : 'name' in item ? item.name : item.text
 
+  const commands = useMemo<SlashCommand[]>(
+    () =>
+      activeProject
+        ? [...builtinSlashCommands, ...buildSkillCommandList(skillList, builtinSlashNames)]
+        : builtinSlashCommands,
+    [skillList, activeProject]
+  )
+
+  const slashToken = useMemo(() => extractSlashToken(input), [input])
+
+  const slashItems = useMemo<SlashCommand[]>(() => {
+    if (slashToken === null || slashDismissed) return []
+    return filterSlashCommands(commands, slashToken).slice(0, MAX_COMMAND_ROWS)
+  }, [slashToken, commands, slashDismissed])
+
   function focusInput(): void {
     const el = textareaRef.current
     if (el && !el.disabled) el.focus()
@@ -158,9 +192,31 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   useEffect(() => {
     if (prevBusy.current && !chatBusy) {
       focusInput()
+      if (activeProject) {
+        window.ptnotes.skills
+          .list(activeProject)
+          .then(setSkillList)
+          .catch(() => {})
+      }
     }
     prevBusy.current = chatBusy
-  }, [chatBusy])
+  }, [chatBusy, activeProject])
+
+  useEffect(() => {
+    if (!activeProject) return
+    let cancelled = false
+    window.ptnotes.skills
+      .list(activeProject)
+      .then((list) => {
+        if (!cancelled) setSkillList(list)
+      })
+      .catch(() => {
+        if (!cancelled) setSkillList(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [activeProject, settingsOpen])
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
@@ -214,9 +270,52 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     })
   }
 
-  async function send(): Promise<void> {
+  function commandFromInput(value: string): SlashCommand | undefined {
+    if (!value.startsWith('/')) return undefined
+    const first = value.slice(1).split(/\s+/)[0]
+    if (!first) return undefined
+    return commands.find((c) => c.name === first)
+  }
+
+  function runCommand(cmd: SlashCommand, args: string): void {
+    setInput('')
+    setMention(null)
+    setSlashDismissed(true)
+    if (cmd.action) {
+      const ctx: SlashCommandContext = {
+        project: activeProject,
+        newChat: (p: string) => newChat(p),
+        openAiSettings: () => openSettings('ai')
+      }
+      void cmd.action(ctx)
+      return
+    }
+    const message = buildSkillMessage(cmd.name, cmd.scope ?? 'project', args)
+    void send(message)
+  }
+
+  function acceptSlash(run: boolean, item?: SlashCommand): void {
+    const cmd = item ?? slashItems[slashIndex] ?? slashItems[0]
+    if (!cmd) return
+    const nextInput = `/${cmd.name}${run ? '' : ' '}`
+    setInput(nextInput)
+    setSlashDismissed(true)
+    requestAnimationFrame(() => {
+      const el = textareaRef.current
+      if (el) {
+        el.focus()
+        const pos = nextInput.length
+        el.setSelectionRange(pos, pos)
+      }
+    })
+    if (run) {
+      runCommand(cmd, '')
+    }
+  }
+
+  async function send(textOverride?: string): Promise<void> {
     const project = activeProject
-    const text = input.trim()
+    const text = (textOverride ?? input).trim()
     if (!text || !project || chatBusy) return
 
     const isFirstMessage = list.length === 0
@@ -349,6 +448,33 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>): void {
+    if (slashItems.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setSlashIndex((i) => (i + 1) % slashItems.length)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setSlashIndex((i) => (i - 1 + slashItems.length) % slashItems.length)
+        return
+      }
+      if (e.key === 'Tab') {
+        e.preventDefault()
+        acceptSlash(false)
+        return
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        acceptSlash(true)
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setSlashDismissed(true)
+        return
+      }
+    }
     if (mentionItems.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
@@ -373,7 +499,14 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      void send()
+      const cmd = commandFromInput(input)
+      if (cmd) {
+        const first = input.slice(1).split(/\s+/)[0]
+        const args = input.slice(1 + first.length).trim()
+        runCommand(cmd, args)
+      } else {
+        void send()
+      }
     }
   }
 
@@ -520,9 +653,9 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
               Working on: <strong>{activeProject}</strong>
             </p>
             <p className="chat-empty-hint">
-              Type @ to reference a note, ! to reference a todo, # to reference a file. Drop PDFs or
-              text files (markdown, JSON, logs, YAML, plain text) to add them to the project&apos;s
-              files.
+              Type / for commands and skills, @ to reference a note, ! to reference a todo, # to
+              reference a file. Drop PDFs or text files (markdown, JSON, logs, YAML, plain text) to
+              add them to the project&apos;s files.
             </p>
           </div>
         )}
@@ -641,6 +774,26 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
       </div>
 
       <div className="chat-input">
+        {slashItems.length > 0 && (
+          <div className="command-popup">
+            {slashItems.map((c, i) => (
+              <div
+                key={c.name}
+                className={`command-item ${i === slashIndex ? 'active' : ''}`}
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  setSlashIndex(i)
+                  acceptSlash(true, c)
+                }}
+                onMouseEnter={() => setSlashIndex(i)}
+              >
+                <span className="command-name">/{c.name}</span>
+                {c.scope && <span className="command-badge">{c.scope}</span>}
+                <span className="command-desc">{c.description}</span>
+              </div>
+            ))}
+          </div>
+        )}
         {mentionItems.length > 0 && (
           <div className="mention-popup">
             {mentionItems.map((item, i) => (
@@ -679,8 +832,11 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
           disabled={!activeProject || chatBusy}
           rows={2}
           onChange={(e) => {
-            setInput(e.target.value)
-            updateMention(e.target.value, e.target.selectionStart ?? e.target.value.length)
+            const value = e.target.value
+            setInput(value)
+            setSlashDismissed(false)
+            if (extractSlashToken(value) !== slashToken) setSlashIndex(0)
+            updateMention(value, e.target.selectionStart ?? value.length)
           }}
           onKeyDown={onKeyDown}
         />

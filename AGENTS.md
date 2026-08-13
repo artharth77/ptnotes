@@ -281,6 +281,14 @@ ChatPanel (renderer) ──send──▶ Main process
   Parsed from the tool result JSON (`{ ok, note }`) via `noteIdFromToolCall`.
 - Note slugs are Unicode-safe: non-Latin scripts (e.g. Thai) keep their characters, including combining
   marks (`\p{M}`); only Latin combining accents (`\u0300-\u036f`) are stripped (see `slugify`).
+- **Slash commands:** typing `/` at the start of the chat input opens a popup of built-in commands
+  (`/new` → new chat, `/models` → open AI Settings) and **enabled skills** (≤10 rows). Typing filters
+  (name + description); **Tab** autocompletes the command + a trailing space to type args; **Enter**
+  (or a mouse click) autocompletes and runs it immediately. Skill commands send
+  `Use the skill "name" (scope: …): <prompt>` so the model calls `read_skill` first (enforced by a
+  system-prompt rule). Registry lives in `src/shared/slash.ts` (pure logic + tests) and
+  `src/renderer/src/commands.ts` (built-ins with actions); skills are merged in via
+  `buildSkillCommandList` (built-ins win over same-named skills, project scope wins over global).
 
 ### Settings dialog
 
