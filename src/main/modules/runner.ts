@@ -156,7 +156,7 @@ export class ModuleRunner {
     return toTranscript(this.messages)
   }
 
-  /** Persist the latest transcript to <project>/modules/<runId>.chat.json (best-effort). */
+  /** Persist the latest transcript to <project>/.data/modules/<runId>.chat.json (best-effort). */
   private persistChat(): void {
     void this.service
       .writeModuleChat(this.activeProject, this.run.runId, toTranscript(this.messages))

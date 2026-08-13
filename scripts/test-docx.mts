@@ -183,7 +183,7 @@ const infoPng = await renderInfographicPng(infoDsl, 720)
 pngMagic(infoPng.png)
 
 // ---- buildDocx with a chart / diagram / infographic image block ----
-const tempDir = join(ROOT, PROJECT, 'modules', 'temp')
+const tempDir = join(ROOT, PROJECT, '.data', 'modules', 'temp')
 await fs.mkdir(tempDir, { recursive: true })
 const chartTemp = join(tempDir, 'docx-chart.png')
 const diagramTemp = join(tempDir, 'docx-diagram.png')

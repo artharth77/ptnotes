@@ -50,7 +50,7 @@ Run `npm run typecheck` and `npm run lint` after any change.
 | AI streaming            | Yes (real-time)                                                                                                                                                                                                                                                                                                     |
 | Settings dialog         | Two-panel dialog: **Storage** (project root path) + **AI Settings** (base URL, API key, model)                                                                                                                                                                                                                      |
 | Project root            | Configurable via settings; default `~/Documents/PTNotes`; changing it moves all data + registry to the new location after confirmation                                                                                                                                                                              |
-| Chat history            | Persisted per session as JSON files under `<project>/chat/`; auto-saved per message; New Chat archives current thread; history picker can view/reopen old sessions                                                                                                                                                  |
+| Chat history            | Persisted per session as JSON files under `<project>/.data/chat/`; auto-saved per message; New Chat archives current thread; history picker can view/reopen old sessions                                                                                                                                          |
 | Chat titles             | Hybrid: local heuristic from first message immediately, refined by a background AI completion; manual rename supported; history popup shows title + message count                                                                                                                                                   |
 | Chat note mention       | `@` opens note list → inserts `note:<notename>` → AI calls `read_note`                                                                                                                                                                                                                                              |
 | Chat todo mention       | `!` opens todo list → inserts `todo:<todotext>` (filterable by text)                                                                                                                                                                                                                                                |
@@ -68,11 +68,17 @@ Run `npm run typecheck` and `npm run lint` after any change.
     ├── notes/*.md          (one file per note)
     ├── TODO.md             (markdown checklist: `- [ ]` / `- [x]`)
     ├── files/*.{pdf,md,txt,json,log,yaml,yml} (attachments copied on chat drop) + module deliverables (.pptx, .svg/.png, .docx)
-    ├── modules/*.json        (module run state + prompts; kept out of the # file picker)
-    ├── modules/*.chat.json   (per-run subagent transcript, read-only history overlay)
-    ├── modules/temp/*.{png,svg,json}  (temp module/shared-tool output; deleted once the deck is built)
-    └── chat/*.json         (one file per chat session: messages + timestamps)
+    └── .data/              (app-internal data; dot-prefixed so it stays out of the # file picker)
+        ├── modules/*.json        (module run state + prompts)
+        ├── modules/*.chat.json   (per-run subagent transcript, read-only history overlay)
+        ├── modules/temp/*.{png,svg,json}  (temp module/shared-tool output; deleted once the deck is built)
+        └── chat/*.json         (one file per chat session: messages + timestamps)
 ```
+
+- On startup (and after `changeRootDir`), legacy per-project `chat/` and `modules/`
+  folders found at the project root are migrated into `<project>/.data/` automatically
+  (whole-folder `rename` when the target is free, recursive merge — keeping both files
+  on collision with a `-2` suffix — otherwise). The migration is idempotent.
 
 - App AI config stored in Electron `userData/ai-provider.json`, `chmod 600`, never in the renderer bundle.
 - App settings (project root path + `disabledModules` module toggles) stored in Electron `userData/ptnotes-settings.json`, `chmod 600`.
@@ -108,7 +114,7 @@ src/
 │   └── modules/
 │       ├── registry.ts   # module registry (extensible)
 │       ├── runs.ts       # ModuleRunManager: start/list/stop + event broadcast + readChat (live in-memory transcript or persisted .chat.json)
-│       ├── runner.ts     # subagent loop; persists a read-only transcript to <project>/modules/<runId>.chat.json each turn (removed on run delete/retry)
+│       ├── runner.ts     # subagent loop; persists a read-only transcript to <project>/.data/modules/<runId>.chat.json each turn (removed on run delete/retry)
 │       ├── tool.ts       # start_module tool (main chat → module run)
 │       ├── pptx/         # PowerPoint module (design schema → buildPptx)
 │       ├── infographic/  # standalone infographic module (design schema → create_infographic_file; reuses the shared tool-pack)
@@ -190,7 +196,7 @@ src/
 - **Settings:** `get` (returns `{ rootDir }`), `getAbout` (app name/version + Electron/Chromium/Node versions for the About pane), `chooseRoot` (native folder picker), `changeRoot` (moves data + persists + returns new `{ rootDir }`)
 - **PDF:** `supportsUpload` (returns the AI settings `uploadPdfEnabled` toggle — user-controlled), `upload` (raw PDF via provider Responses API `input_file` — uploads base64 through the Files API, falling back to inline `file_data`)
 - **Files:** `list` (`<project>/files/*` — PDF + any text file — for the chat `#` picker), `getPathForFile` (dropped file path via `webUtils`, never `File.path`), `copyToProject` (content-based: any text file + PDFs copied into `<project>/files/`; non-PDF binaries rejected), `extract` (local text → `{ text, pageCount, charCount, truncated }`; pdf-parse for `.pdf`, raw text for any text file), `reveal` (`shell.showItemInFolder`)
-- **Modules:** `list`, `listAvailable`, `setEnabled`, `start`, `startModule`, `stop`, `retry`, `reveal` (optional `filePath` to reveal a specific file of a multi-file run; defaults to the primary `outputFile`), `deleteRun`, `clearHistory`, `readChat` (per-run subagent transcript: live in-memory for active runs, persisted `<project>/modules/<runId>.chat.json` otherwise). A run records **every** deliverable in `outputFiles` (one 📄 reveal pill each on the card; the first is also `outputFile`); `deleteRun`/`clearHistory` with the delete-output option removes them all.
+- **Modules:** `list`, `listAvailable`, `setEnabled`, `start`, `startModule`, `stop`, `retry`, `reveal` (optional `filePath` to reveal a specific file of a multi-file run; defaults to the primary `outputFile`), `deleteRun`, `clearHistory`, `readChat` (per-run subagent transcript: live in-memory for active runs, persisted `<project>/.data/modules/<runId>.chat.json` otherwise). A run records **every** deliverable in `outputFiles` (one 📄 reveal pill each on the card; the first is also `outputFile`); `deleteRun`/`clearHistory` with the delete-output option removes them all.
 
 ## AI chat feature
 

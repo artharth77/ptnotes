@@ -72,6 +72,7 @@ app.whenReady().then(async () => {
   const settingsStore = new SettingsStore()
   const settings = await settingsStore.load()
   const service = new PTNotesService(settings.rootDir)
+  await service.migrateLegacyFolders()
   const configStore = new AIConfigStore()
 
   const moduleRegistry = new ModuleRegistry()
