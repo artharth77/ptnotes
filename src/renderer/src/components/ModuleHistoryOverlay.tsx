@@ -89,6 +89,7 @@ function ModuleHistoryPanel({
 }): React.JSX.Element {
   const selectNote = useAppStore((s) => s.selectNote)
   const setTab = useAppStore((s) => s.setTab)
+  const openSkillEditor = useAppStore((s) => s.openSkillEditor)
   const notes = useAppStore((s) => s.notes)
   const runs = useAppStore((s) => s.moduleRuns[project] ?? NO_RUNS)
 
@@ -279,6 +280,7 @@ function ModuleHistoryPanel({
                         <MarkdownContent
                           content={part.content}
                           onOpenNote={(n) => void openNote(n)}
+                          onOpenSkill={(n) => openSkillEditor(n)}
                         />
                       </div>
                     )

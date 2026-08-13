@@ -75,6 +75,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   const newChat = useAppStore((s) => s.newChat)
   const openChat = useAppStore((s) => s.openChat)
   const openSettings = useAppStore((s) => s.openSettings)
+  const openSkillEditor = useAppStore((s) => s.openSkillEditor)
   const settingsOpen = useAppStore((s) => s.settingsOpen)
   const loadChatSessions = useAppStore((s) => s.loadChatSessions)
   const getActiveSessionId = useAppStore((s) => s.getActiveSessionId)
@@ -741,6 +742,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                       <MarkdownContent
                         content={part.content}
                         onOpenNote={(n) => void openNote(n)}
+                        onOpenSkill={(n) => openSkillEditor(n)}
                       />
                     </div>
                   )

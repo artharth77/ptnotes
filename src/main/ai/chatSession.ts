@@ -51,6 +51,7 @@ Guidelines:
 - Quote the snippet returned by search_notes exactly as given; never paraphrase, reword, or summarize it.
 - Whenever you mention an existing note by name in your reply, always link to it: [note name](note:note name). The link opens the note, so never return a bare note name without a link.
 - Whenever you mention an existing todo by its text in your reply, always link to it: [todo text](todo:todo text).
+- Whenever you mention an existing skill by name in your reply, always link to it: [skill name](skill:skill name). The link opens the skill's editor, so never return a bare skill name without a link.
 - Keep replies short and actionable.
 ${skillsSection}Current date: ${currentDate}.`
 }

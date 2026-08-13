@@ -26,6 +26,10 @@ All notable changes to PTNotes are documented in this file.
 - Skill commands submit `Use the skill "name" (scope: …): <prompt>` so the assistant loads the skill via `read_skill` first (a system-prompt rule enforces this) and applies it to the given prompt.
 - The command registry is extensible: built-ins live in `src/renderer/src/commands.ts` (client actions, no IPC), skills are merged in dynamically via `buildSkillCommandList` (built-ins win over same-named skills, project scope wins over global, disabled skills excluded), and the parsing/filtering/message-building logic is pure and unit-tested in `src/shared/slash.ts`.
 
+#### Skill links in chat
+
+- The system prompt now tells the assistant to link skills it mentions with the same convention as notes/todos: `[skill name](skill:skill name)`. The renderer renders these as clickable pills (book icon) that open **Settings → Skills** and load that skill directly into the editor for viewing or editing (via the `skillEditRequest` store field consumed by the Skills pane).
+
 ### Changed
 
 - **Chat/module data moved into `<project>/.data/`**: per-project `chat/` and `modules/` folders (including `modules/temp/`) now live under the dot-directory `<project>/.data/`, keeping app-internal data out of the project root and the `#` file picker. Legacy folders found at the project root are migrated automatically on startup (and after changing the storage root) — whole-folder move when the target is free, recursive merge otherwise, with colliding files kept as `-2` copies. The migration is idempotent.

@@ -146,7 +146,7 @@ src/
 │   │   │   ├── NoteList.tsx         # Notes tab
 │   │   │   ├── TodoPanel.tsx        # Todo tab (checkboxes + progress)
 │   │   │   ├── MarkdownEditor.tsx   # TipTap WYSIWYG + markdown sync + auto-save
-│   │   │   ├── MarkdownContent.tsx  # react-markdown chat rendering + note: link handling
+│   │   │   ├── MarkdownContent.tsx  # react-markdown chat rendering + note:/skill: link handling
 │   │   │   ├── ChatDrawer.tsx       # right drawer, streaming, mentions, history, titles
 │   │   │   ├── ModuleHistoryOverlay.tsx # read-only transcript overlay for module runs (💬 button on ModuleCard)
 │   │   │   └── SettingsDialog.tsx  # two-panel Settings (Storage + AI Settings)
@@ -339,6 +339,7 @@ Two-panel dialog (`.settings-layout` with `.settings-nav` + `.settings-pane`):
 - The persistent project registry only records known project names/paths — it never stores file contents; the folder on disk remains the source of truth.
 - `note:<notename>` uses the note's slugified file name (as shown in the Notes list), so the `@` picker should insert the exact list name.
 - `todo:<todotext>` uses the todo's checklist text, so the `!` picker should insert the exact text.
+- The system prompt instructs the AI to link to skills it mentions as `[skill name](skill:skill name)`; the renderer renders these as clickable pills (book icon) that open **Settings → Skills** and load the skill into the editor (via `openSkillEditor` + the `skillEditRequest` store field).
 
 ## Docs
 
