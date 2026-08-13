@@ -190,4 +190,94 @@ assert.equal(
 )
 await service.deleteProject('Docs')
 
+// ---- Legacy chat/modules → .data migration ----
+const exists = async (p: string): Promise<boolean> =>
+  fs
+    .access(p)
+    .then(() => true)
+    .catch(() => false)
+
+await service.createProject('Legacy')
+
+// legacy <proj>/chat/a.json
+const legacyChatDir = join(ROOT, 'Legacy', 'chat')
+await fs.mkdir(legacyChatDir, { recursive: true })
+await fs.writeFile(
+  join(legacyChatDir, 'a.json'),
+  JSON.stringify({
+    sessionId: 'a',
+    createdAt: 1,
+    updatedAt: 2,
+    messages: [
+      { role: 'user', content: 'hello' },
+      { role: 'assistant', content: 'hi' }
+    ]
+  }),
+  'utf8'
+)
+
+// legacy <proj>/modules/<id>.json + modules/temp/x.png
+const legacyModDir = join(ROOT, 'Legacy', 'modules')
+await fs.mkdir(join(legacyModDir, 'temp'), { recursive: true })
+await fs.writeFile(
+  join(legacyModDir, 'run-1.json'),
+  JSON.stringify({
+    runId: 'run-1',
+    module: 'pptx',
+    title: 'Legacy deck',
+    prompt: 'old',
+    status: 'done',
+    steps: [],
+    updatedAt: 3
+  }),
+  'utf8'
+)
+await fs.writeFile(join(legacyModDir, 'temp', 'x.png'), Buffer.from('fake-png'))
+
+// merge case: .data/modules already exists with its own run before migration
+const dataModDir = join(ROOT, 'Legacy', '.data', 'modules')
+await fs.mkdir(dataModDir, { recursive: true })
+await fs.writeFile(
+  join(dataModDir, 'run-2.json'),
+  JSON.stringify({
+    runId: 'run-2',
+    module: 'docx',
+    title: 'Legacy doc',
+    prompt: 'new',
+    status: 'done',
+    steps: [],
+    updatedAt: 4
+  }),
+  'utf8'
+)
+
+await service.migrateLegacyFolders()
+
+assert.equal(await exists(legacyChatDir), false, 'legacy chat dir moved')
+assert.equal(await exists(legacyModDir), false, 'legacy modules dir moved')
+
+// chat data readable through the service
+const migratedSessions = await service.listChatSessions('Legacy')
+assert.equal(migratedSessions.length, 1, 'migrated chat session listed')
+assert.equal(migratedSessions[0].sessionId, 'a')
+assert.equal((await service.readChat('Legacy', 'a')).messages.length, 2, 'migrated chat read')
+
+// module runs merged (run-1 from legacy + run-2 from .data), temp file moved
+const migratedRuns = await service.listStoredModuleRuns('Legacy')
+assert.deepEqual(
+  migratedRuns.map((r) => r.runId).sort(),
+  ['run-1', 'run-2'],
+  'legacy + existing .data runs merged without data loss'
+)
+await fs.access(join(dataModDir, 'temp', 'x.png'))
+await assert.rejects(fs.access(join(legacyModDir, 'temp', 'x.png')))
+
+// idempotent
+await service.migrateLegacyFolders()
+assert.equal(await exists(legacyChatDir), false, 'migration stays idempotent')
+
+await service.deleteProject('Legacy')
+projects = await service.listProjects()
+assert.ok(!projects.some((p) => p.name === 'Legacy'), 'Legacy project deleted')
+
 console.log('ALL SERVICE TESTS PASSED')

@@ -92,7 +92,7 @@ const renderDiagramTool: PTTool = {
     function: {
       name: 'render_diagram',
       description:
-        `Render a mermaid diagram to temporary rasterized files in the project. Pure local rendering — NO network, CLI tools, or headless browser. Writes "<project>/modules/temp/<slug>.png", ".svg" and ".json" (temp files that are deleted automatically once the final deck is built) and returns their absolute paths plus the diagram type and size. Use diagram_preview to sanity-check first. The returned "png" path can be embedded on a "diagram" slide via create_pptx_file.` +
+        `Render a mermaid diagram to temporary rasterized files in the project. Pure local rendering — NO network, CLI tools, or headless browser. Writes "<project>/.data/modules/temp/<slug>.png", ".svg" and ".json" (temp files that are deleted automatically once the final deck is built) and returns their absolute paths plus the diagram type and size. Use diagram_preview to sanity-check first. The returned "png" path can be embedded on a "diagram" slide via create_pptx_file.` +
         ` Supported diagram types: ${MERMAID_DIAGRAM_TYPES}. Labels must stay SVG text (no HTML labels).`,
       parameters: {
         type: 'object',

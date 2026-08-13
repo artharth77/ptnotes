@@ -15,7 +15,7 @@ Markdown notes + todo lists + AI assistant, organized by project. Electron + Rea
 - **Background modules** — the assistant can launch long-running background subagents (Modules, e.g. PPTX/PowerPoint, Word/DOCX, or Infographic) that plan steps and generate a deliverable file autonomously. A **Modules** tab shows live status and per-step progress; click the 💬 button on any run to open a read-only overlay of the module's full conversation (its system prompt, tool calls, and reasoning). Just ask e.g. *"make a PowerPoint about…"*, *"write a Word document about…"*, or *"make an infographic about…"* to start one.
 - **Reasoning models** — `<think>` reasoning blocks (e.g. DeepSeek-R1) render in a separate collapsed-by-default bubble; a **Stop** button interrupts a running reply.
 - **Missing projects** — projects whose folders were deleted externally still appear in the list (marked in red) and can be recreated in place.
-- **Settings** — a category-based **Settings** dialog covers storage, AI provider (with an editable model combobox fed by `GET /models`), and modules. See [Settings](#settings).
+- **Settings** — a category-based **Settings** dialog covers storage, AI provider (with an editable model combobox fed by `GET /models`), modules, and an **About** pane. See [Settings](#settings).
 
 ## Tech stack
 
@@ -47,10 +47,13 @@ Data lives under `~/Documents/PTNotes/`:
     ├── notes/*.md          (one file per note)
     ├── TODO.md             (markdown checklist)
     ├── files/*             (attachments dropped into the chat, module outputs)
-    ├── modules/*.json      (module run state + prompts)
-    ├── modules/*.chat.json (per-run module conversation transcript)
-    └── chat/*.json         (one file per chat session)
+    └── .data/              (app-internal data: chat history, module run state)
+        ├── modules/*.json      (module run state + prompts)
+        ├── modules/*.chat.json (per-run module conversation transcript)
+        └── chat/*.json         (one file per chat session)
 ```
+
+On startup, legacy per-project `chat/` and `modules/` folders are automatically migrated into `<project>/.data/`.
 
 The folder on disk is the source of truth, and the project root is configurable via **Settings → Storage** (changing it moves all data). App AI configuration (base URL, API key, model) is stored in Electron's `userData/ai-provider.json`, restricted to the owner's read/write and never bundled into the renderer.
 
@@ -61,6 +64,7 @@ The **Settings** page (⚙ icon in the top bar) is organized by category:
 - **Storage** — shows the current project root and lets you change where all project data lives (with confirmation). Every project folder, notes, todos, chats, and the project registry are moved to the new location.
 - **AI Settings** — connects the assistant to any OpenAI-compatible provider: base URL, API key, and model (editable combobox of available models), plus an optional **PDF upload** toggle for sending PDFs as raw file attachments.
 - **Modules** — lists the installed background modules and their enable/disable toggles. Disabling a module hides it from the AI assistant and prevents it from being started; the toggles apply immediately.
+- **About** — read-only pane showing the app icon, name, version, description + tech stack, and the Electron / Chromium / Node.js runtime versions.
 
 ## Screenshots
 

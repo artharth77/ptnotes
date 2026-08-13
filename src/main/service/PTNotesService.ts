@@ -77,6 +77,37 @@ export class PTNotesService {
       await fs.rename(join(this.rootDir, registry.name), join(target, registry.name))
     }
     this.rootDir = target
+    await this.migrateLegacyFolders()
+  }
+
+  /**
+   * Move legacy per-project `chat/` and `modules/` folders into
+   * `<project>/.data/` on startup. Idempotent — safe to call repeatedly.
+   */
+  async migrateLegacyFolders(): Promise<void> {
+    await this.ensureRoot()
+    const entries = await fs.readdir(this.rootDir, { withFileTypes: true })
+    const projectNames = entries
+      .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+      .map((e) => e.name)
+    for (const name of projectNames) {
+      await this.migrateLegacyFolder(name, 'chat')
+      await this.migrateLegacyFolder(name, 'modules')
+    }
+  }
+
+  private async migrateLegacyFolder(project: string, folder: string): Promise<void> {
+    const legacy = join(this.projectDir(project), folder)
+    const stat = await fs.stat(legacy).catch(() => null)
+    if (!stat?.isDirectory()) return
+    const target = join(this.dataDir(project), folder)
+    if (!(await this.pathExists(target))) {
+      await fs.mkdir(this.dataDir(project), { recursive: true })
+      await fs.rename(legacy, target)
+      return
+    }
+    await mergeDir(legacy, target)
+    await fs.rm(legacy, { recursive: true, force: true })
   }
 
   private projectDir(name: string): string {
@@ -87,8 +118,13 @@ export class PTNotesService {
     return join(this.projectDir(name), 'notes')
   }
 
+  /** Per-project app-internal data dir (`chat`, `modules`, … live under it). */
+  private dataDir(name: string): string {
+    return join(this.projectDir(name), '.data')
+  }
+
   private chatDir(name: string): string {
-    return join(this.projectDir(name), 'chat')
+    return join(this.dataDir(name), 'chat')
   }
 
   private filesDir(name: string): string {
@@ -96,7 +132,7 @@ export class PTNotesService {
   }
 
   private modulesDir(name: string): string {
-    return join(this.projectDir(name), 'modules')
+    return join(this.dataDir(name), 'modules')
   }
 
   private chatPath(project: string, sessionId: string): string {
@@ -438,7 +474,7 @@ export class PTNotesService {
     return (await this.pathExists(full)) ? full : null
   }
 
-  // ---- Module run storage (JSON kept in <project>/modules/, out of the # file picker) ----
+  // ---- Module run storage (JSON kept in <project>/.data/modules/, out of the # file picker) ----
 
   private moduleTempPath(project: string, runId: string): string {
     return join(this.modulesDir(project), `${validateNoteId(runId)}.json`)
@@ -629,14 +665,14 @@ export class PTNotesService {
     return join(dir, candidate)
   }
 
-  // ---- Temporary module output (<project>/modules/temp/) ----
+  // ---- Temporary module output (<project>/.data/modules/temp/) ----
 
   /** Directory for temporary module/shared tool files, kept out of the # file picker. */
   moduleTempDir(project: string): string {
     return join(this.modulesDir(project), 'temp')
   }
 
-  /** Pick a non-colliding, safe temp path inside <project>/modules/temp/. */
+  /** Pick a non-colliding, safe temp path inside <project>/.data/modules/temp/. */
   async uniqueModuleTempPath(project: string, fileName: string): Promise<string> {
     const dir = this.moduleTempDir(project)
     await fs.mkdir(dir, { recursive: true })
@@ -655,7 +691,7 @@ export class PTNotesService {
 
   /**
    * Delete temp module files (PNG + its sibling .json/.svg) after a presentation
-   * has embedded them. Only removes files inside <project>/modules/temp/.
+   * has embedded them. Only removes files inside <project>/.data/modules/temp/.
    */
   async cleanupModuleTempFiles(project: string, pngPaths: string[]): Promise<number> {
     const prefix = this.moduleTempDir(project) + sep
@@ -829,6 +865,47 @@ function outputFilesOf(run: ModuleRun | undefined): string[] {
 function isInside(parent: string, child: string): boolean {
   const rel = relative(parent, child)
   return rel !== '' && !rel.startsWith('..') && !rel.startsWith(sep)
+}
+
+/**
+ * Recursively merge the contents of `src` into `dst` (both directories).
+ * Directories are merged recursively; on a leaf-file collision both are kept —
+ * the incoming file gets a `-2` (then `-3`, …) suffix, matching the codebase's
+ * collision pattern. `dst` must already exist.
+ */
+async function mergeDir(src: string, dst: string): Promise<void> {
+  const entries = await fs.readdir(src, { withFileTypes: true })
+  for (const entry of entries) {
+    const from = join(src, entry.name)
+    const to = join(dst, entry.name)
+    if (entry.isDirectory()) {
+      if (await pathExists(to)) {
+        const toStat = await fs.stat(to)
+        if (!toStat.isDirectory()) await fs.unlink(to)
+      }
+      await fs.mkdir(to, { recursive: true })
+      await mergeDir(from, to)
+    } else if (entry.isSymbolicLink()) {
+      await fs.unlink(to).catch(() => {})
+      await fs.rename(from, to)
+    } else {
+      let candidate = to
+      const ext = extname(entry.name)
+      const stem = ext ? entry.name.slice(0, -ext.length) : entry.name
+      let i = 2
+      while (await pathExists(candidate)) {
+        candidate = join(dst, `${stem}-${i++}${ext}`)
+      }
+      await fs.rename(from, candidate)
+    }
+  }
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  return fs
+    .access(path)
+    .then(() => true)
+    .catch(() => false)
 }
 
 async function hashFile(path: string): Promise<string> {

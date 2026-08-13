@@ -2,6 +2,18 @@
 
 All notable changes to PTNotes are documented in this file.
 
+## [0.6.0] — 2026-08-13
+
+### Changed
+
+- **Chat/module data moved into `<project>/.data/`**: per-project `chat/` and
+  `modules/` folders (including `modules/temp/`) now live under the dot-directory
+  `<project>/.data/`, keeping app-internal data out of the project root and the
+  `#` file picker. Legacy folders found at the project root are migrated
+  automatically on startup (and after changing the storage root) — whole-folder
+  move when the target is free, recursive merge otherwise, with colliding files
+  kept as `-2` copies. The migration is idempotent.
+
 ## [0.5.2] — 2026-08-12
 
 ### Added
