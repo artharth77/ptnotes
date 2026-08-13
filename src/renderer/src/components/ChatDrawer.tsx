@@ -486,7 +486,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
         setMentionIndex((i) => (i - 1 + mentionItems.length) % mentionItems.length)
         return
       }
-      if (e.key === 'Enter') {
+      if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault()
         insertMention(mentionName(mentionItems[mentionIndex]!))
         return
