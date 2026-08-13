@@ -38,6 +38,17 @@ const call = async (name: string, args: Record<string, unknown>): Promise<unknow
   return JSON.parse(res)
 }
 
+const callWith = async (
+  name: string,
+  args: Record<string, unknown>,
+  extra: Partial<ToolContext>
+): Promise<unknown> => {
+  const tool = tools.find((t) => t.definition.function.name === name)
+  assert.ok(tool, `tool ${name} exists`)
+  const res = await tool.execute(args, { ...ctx, ...extra })
+  return JSON.parse(res)
+}
+
 // create_note
 let r = await call('create_note', { title: 'Electron Tips', content: '# Electron\n\nUse sandbox.' })
 assert.equal(r.ok, true)
@@ -54,6 +65,22 @@ r = await call('list_notes', {})
 assert.ok(Array.isArray(r.notes) && r.notes.includes('electron-tips'))
 r = await call('read_note', { title: 'electron-tips' })
 assert.match(r.content, /v2/)
+
+// read_note with no title reads the active note
+r = await callWith('read_note', {}, { activeNoteId: 'electron-tips' })
+assert.equal(r.ok, true)
+assert.equal(r.note, 'electron-tips')
+assert.match(r.content, /v2/)
+
+// read_note with no title and no active note fails
+r = await call('read_note', {})
+assert.equal(r.ok, false)
+
+// read_note with title overrides the active note
+await call('create_note', { title: 'Active Override', content: 'override body' })
+r = await callWith('read_note', { title: 'Active Override' }, { activeNoteId: 'electron-tips' })
+assert.equal(r.note, 'active-override')
+assert.match(r.content, /override body/)
 
 // search_notes
 await call('create_note', { title: 'Meeting Notes', content: 'Agenda' })

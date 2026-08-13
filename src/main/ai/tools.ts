@@ -8,6 +8,8 @@ import type { ConfirmRequest, SkillScope } from '@shared/types'
 export interface ToolContext {
   service: PTNotesService
   activeProject: string
+  /** The note the user is currently viewing, if any. */
+  activeNoteId?: string | null
   confirm: (req: Omit<ConfirmRequest, 'id'>) => Promise<boolean>
 }
 
@@ -153,7 +155,8 @@ export const tools: PTTool[] = [
       type: 'function',
       function: {
         name: 'read_note',
-        description: 'Read the full markdown content of a note in a project.',
+        description:
+          'Read the full markdown content of a note in a project. Omit the title to read the currently active note (the one the user is viewing).',
         parameters: {
           type: 'object',
           properties: {
@@ -161,18 +164,38 @@ export const tools: PTTool[] = [
               type: 'string',
               description: 'Project name. Defaults to the current project.'
             },
-            title: { type: 'string', description: 'Title of the note to read' }
-          },
-          required: ['title']
+            title: {
+              type: 'string',
+              description: 'Title of the note to read. Omit to read the currently active note.'
+            }
+          }
         }
       }
     },
     async execute(args, ctx) {
       const project = projectOf(args, ctx)
-      const title = String(args.title ?? '')
-      const existing = await ctx.service.listNotes(project)
-      const found = findNote(existing, title)
-      if (!found) return JSON.stringify({ ok: false, error: `Note "${title}" not found` })
+      const title = String(args.title ?? '').trim()
+      let found: { id: string; name: string } | undefined
+      if (title) {
+        const existing = await ctx.service.listNotes(project)
+        found = findNote(existing, title)
+        if (!found) return JSON.stringify({ ok: false, error: `Note "${title}" not found` })
+      } else if (ctx.activeNoteId) {
+        const existing = await ctx.service.listNotes(ctx.activeProject)
+        const active = existing.find((n) => n.id === ctx.activeNoteId)
+        if (!active) {
+          return JSON.stringify({
+            ok: false,
+            error: 'The active note could not be resolved.'
+          })
+        }
+        found = { id: active.id, name: active.name }
+      } else {
+        return JSON.stringify({
+          ok: false,
+          error: 'No note specified and no active note is open.'
+        })
+      }
       const content = await ctx.service.readNote(project, found.id)
       return JSON.stringify({ ok: true, project, note: found.id, content })
     }

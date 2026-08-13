@@ -349,7 +349,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     setChatBusy(true)
     setChatStreamProject(project)
     try {
-      await window.ptnotes.ai.send(project, text, history)
+      await window.ptnotes.ai.send(project, text, history, activeNoteId)
     } finally {
       setChatBusy(false)
       setChatStreamProject(null)

@@ -220,6 +220,7 @@ ChatPanel (renderer) ──send──▶ Main process
 - Session is kept in memory per project (`sessions` map) so closing the drawer and reopening continues the same conversation.
 - Each `ai:send` call receives the renderer's current thread as `history` and the session is re-seeded from it, so reopening a historical chat (or switching sessions) keeps the correct model context — the AI never relies solely on in-memory accumulation.
 - System prompt is sent when a session starts; it includes the active project and instructs the AI that a `note:<notename>` message means it must call `read_note` for that note.
+- Each `ai:send` also forwards the currently **active note** (`activeNoteId` from the renderer store). The system prompt tells the AI that "this note", "the current note" or "the active note" means it should call `read_note` **without a `title`**, which resolves to the note the user is viewing.
 - The system prompt also lists available **enabled** skills (name + description per skill, global + project)
   and is **rebuilt on every `send()`** (`ensureSystemPrompt` → `renderSkillsIndex`), so skills
   created/edited/toggled in Settings apply mid-session. The model calls `read_skill` to load full content
@@ -237,7 +238,7 @@ ChatPanel (renderer) ──send──▶ Main process
 | `create_note`  | new `.md` in project `notes/`                                                                                   |
 | `update_note`  | overwrite / rename existing note                                                                                |
 | `list_notes`   | model context                                                                                                   |
-| `read_note`    | model context                                                                                                   |
+| `read_note`    | model context; omit `title` to read the currently active note (the one the user is viewing)                    |
 | `search_notes` | search note titles + content, return matching names + snippet                                                   |
 | `delete_note`  | delete one or more notes (requires user confirmation dialog)                                                    |
 | `create_todos` | append `- [ ]` items to `TODO.md`                                                                               |

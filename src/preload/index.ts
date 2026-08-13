@@ -78,8 +78,12 @@ const api = {
       ipcRenderer.invoke('chat:rename', project, sessionId, title)
   },
   ai: {
-    send: (project: string, text: string, history?: ChatMessage[]): Promise<void> =>
-      ipcRenderer.invoke('ai:send', project, text, history),
+    send: (
+      project: string,
+      text: string,
+      history?: ChatMessage[],
+      activeNoteId?: string | null
+    ): Promise<void> => ipcRenderer.invoke('ai:send', project, text, history, activeNoteId),
     stop: (project: string): Promise<void> => ipcRenderer.invoke('ai:stop', project),
     confirmResponse: (resp: ConfirmResponse): Promise<void> =>
       ipcRenderer.invoke('ai:confirmResponse', resp),

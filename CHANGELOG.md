@@ -30,6 +30,10 @@ All notable changes to PTNotes are documented in this file.
 
 - The system prompt now tells the assistant to link skills it mentions with the same convention as notes/todos: `[skill name](skill:skill name)`. The renderer renders these as clickable pills (book icon) that open **Settings → Skills** and load that skill directly into the editor for viewing or editing (via the `skillEditRequest` store field consumed by the Skills pane).
 
+#### `read_note` supports the active note
+
+- The `read_note` tool now accepts an **omitted `title`** to read the note the user is currently viewing. The chat session tracks the active note on every send and tells the model (via the system prompt) that "this note", "the current note" or "the active note" means it should call `read_note` without a title; the tool resolves the active note locally. Passing an explicit `title` still overrides it.
+
 ### Changed
 
 - **Chat/module data moved into `<project>/.data/`**: per-project `chat/` and `modules/` folders (including `modules/temp/`) now live under the dot-directory `<project>/.data/`, keeping app-internal data out of the project root and the `#` file picker. Legacy folders found at the project root are migrated automatically on startup (and after changing the storage root) — whole-folder move when the target is free, recursive merge otherwise, with colliding files kept as `-2` copies. The migration is idempotent.
