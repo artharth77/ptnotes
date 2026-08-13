@@ -3,7 +3,7 @@ import { duckDuckGoSearch } from './search/duckduckgo'
 import { fetchWebPage } from './search/webFetch'
 import { slugify } from '@shared/slug'
 import { readFileAsText } from './reader'
-import type { ConfirmRequest } from '@shared/types'
+import type { ConfirmRequest, SkillScope } from '@shared/types'
 
 export interface ToolContext {
   service: PTNotesService
@@ -39,6 +39,17 @@ function findNote(
     notes.find((n) => n.name.toLowerCase() === raw) ??
     notes.find((n) => n.name.toLowerCase().includes(raw))
   )
+}
+
+function scopeOf(args: Record<string, unknown>): SkillScope | null {
+  const scope = String(args.scope ?? 'project')
+  return scope === 'global' || scope === 'project' ? scope : null
+}
+
+/** All enabled skill names (global + project) for error messages. */
+async function skillNames(ctx: ToolContext): Promise<string[]> {
+  const list = await ctx.service.listSkills(ctx.activeProject)
+  return [...list.global, ...list.project].filter((s) => s.enabled).map((s) => s.name)
 }
 
 export const tools: PTTool[] = [
@@ -504,6 +515,157 @@ export const tools: PTTool[] = [
         title: page.title,
         content: page.text
       })
+    }
+  },
+  {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'create_skill',
+        description:
+          'Create or update a skill (a named instruction document the AI can load on demand) for the current project (scope "project") or for all projects (scope "global"). Skills are listed in the system prompt; call this to teach the assistant reusable instructions.',
+        parameters: {
+          type: 'object',
+          properties: {
+            scope: {
+              type: 'string',
+              enum: ['global', 'project'],
+              description:
+                'Where the skill lives: "global" (all projects) or "project" (current project). Defaults to "project".'
+            },
+            name: { type: 'string', description: 'Short unique name for the skill' },
+            description: {
+              type: 'string',
+              description: 'One-line description shown in the skills index'
+            },
+            content: {
+              type: 'string',
+              description: 'Full skill instructions (markdown)'
+            },
+            project: {
+              type: 'string',
+              description: 'Project name. Defaults to the current project.'
+            }
+          },
+          required: ['name', 'description', 'content']
+        }
+      }
+    },
+    async execute(args, ctx) {
+      const project = projectOf(args, ctx)
+      const scope = scopeOf(args)
+      if (!scope) return JSON.stringify({ ok: false, error: 'scope must be "global" or "project"' })
+      const name = String(args.name ?? '').trim()
+      if (!name) return JSON.stringify({ ok: false, error: 'No skill name provided' })
+      const existing = await ctx.service.readSkill(project, scope, name)
+      const meta = await ctx.service.saveSkill(project, scope, name, {
+        description: String(args.description ?? ''),
+        content: String(args.content ?? ''),
+        enabled: existing?.enabled ?? true
+      })
+      return JSON.stringify({
+        ok: true,
+        action: existing ? 'updated' : 'created',
+        scope: meta.scope,
+        name: meta.name,
+        project
+      })
+    }
+  },
+  {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'read_skill',
+        description:
+          'Load the full content of a skill (a named instruction document) before applying it. Skills are listed by name and description in the system prompt; call this to get the complete instructions.',
+        parameters: {
+          type: 'object',
+          properties: {
+            scope: {
+              type: 'string',
+              enum: ['global', 'project'],
+              description: 'Where the skill lives: "global" or "project". Defaults to "project".'
+            },
+            name: { type: 'string', description: 'Name of the skill to load' },
+            project: {
+              type: 'string',
+              description: 'Project name. Defaults to the current project.'
+            }
+          },
+          required: ['name']
+        }
+      }
+    },
+    async execute(args, ctx) {
+      const project = projectOf(args, ctx)
+      const scope = scopeOf(args)
+      if (!scope) return JSON.stringify({ ok: false, error: 'scope must be "global" or "project"' })
+      const name = String(args.name ?? '').trim()
+      if (!name) return JSON.stringify({ ok: false, error: 'No skill name provided' })
+      const skill = await ctx.service.readSkill(project, scope, name)
+      if (!skill) {
+        return JSON.stringify({
+          ok: false,
+          error: `Skill "${name}" (${scope}) not found. Available skills: ${
+            (await skillNames(ctx)).join(', ') || '(none)'
+          }`
+        })
+      }
+      if (!skill.enabled) {
+        return JSON.stringify({ ok: false, error: `Skill "${name}" (${scope}) is disabled.` })
+      }
+      return JSON.stringify({ ok: true, ...skill })
+    }
+  },
+  {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'delete_skill',
+        description:
+          'Delete a skill (a named instruction document) for the current project (scope "project") or for all projects (scope "global"). Requires user confirmation before deleting.',
+        parameters: {
+          type: 'object',
+          properties: {
+            scope: {
+              type: 'string',
+              enum: ['global', 'project'],
+              description: 'Where the skill lives: "global" or "project". Defaults to "project".'
+            },
+            name: { type: 'string', description: 'Name of the skill to delete' },
+            project: {
+              type: 'string',
+              description: 'Project name. Defaults to the current project.'
+            }
+          },
+          required: ['name']
+        }
+      }
+    },
+    async execute(args, ctx) {
+      const project = projectOf(args, ctx)
+      const scope = scopeOf(args)
+      if (!scope) return JSON.stringify({ ok: false, error: 'scope must be "global" or "project"' })
+      const name = String(args.name ?? '').trim()
+      if (!name) return JSON.stringify({ ok: false, error: 'No skill name provided' })
+      const existing = await ctx.service.readSkill(project, scope, name)
+      if (!existing) {
+        return JSON.stringify({ ok: false, error: `Skill "${name}" (${scope}) not found` })
+      }
+      const approved = await ctx.confirm({
+        project,
+        message: `Delete the ${scope} skill "${name}"?`,
+        items: [name]
+      })
+      if (!approved) {
+        return JSON.stringify({ ok: false, cancelled: true, scope, name })
+      }
+      const deleted = await ctx.service.deleteSkill(project, scope, name)
+      if (!deleted) {
+        return JSON.stringify({ ok: false, error: `Skill "${name}" (${scope}) not found` })
+      }
+      return JSON.stringify({ ok: true, scope, name, project })
     }
   }
 ]

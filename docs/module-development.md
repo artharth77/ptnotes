@@ -40,7 +40,12 @@ Key rules enforced by the runner (`src/main/modules/runner.ts`):
   The runner captures this as the run's `outputFile` (used by the reveal / clear-history / summary features). `ok:false` plus an `error` field is treated as a tool failure.
 - A tool can produce **multiple deliverables** in one call by adding a `files` array alongside `path`/`file`:
   ```json
-  { "ok": true, "path": "/abs/path/to/a.svg", "file": "a.svg", "files": ["/abs/path/to/a.svg", "/abs/path/to/a.png"] }
+  {
+    "ok": true,
+    "path": "/abs/path/to/a.svg",
+    "file": "a.svg",
+    "files": ["/abs/path/to/a.svg", "/abs/path/to/a.png"]
+  }
   ```
   Every entry lands in the run's `outputFiles` (the card shows one 📄 reveal pill per file; the first entry is the primary `outputFile`). `clearHistory`/`deleteRun` with the "delete output files" option removes all of them.
 

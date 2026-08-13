@@ -25,7 +25,11 @@ import type { ToolContext } from '../src/main/ai/tools'
 
 const service = new PTNotesService(ROOT)
 await service.createProject('Research')
-const ctx: ToolContext = { service, activeProject: 'Research' }
+const ctx: ToolContext = {
+  service,
+  activeProject: 'Research',
+  confirm: async () => true
+}
 
 const call = async (name: string, args: Record<string, unknown>): Promise<unknown> => {
   const tool = tools.find((t) => t.definition.function.name === name)
@@ -91,6 +95,71 @@ assert.equal(r.project, 'Other')
 // tool error handling (read_note missing)
 r = await call('read_note', { title: 'missing-note' })
 assert.equal(r.ok, false)
+
+// create_skill (project scope)
+r = await call('create_skill', {
+  scope: 'project',
+  name: 'Code Review',
+  description: 'Review code before merging',
+  content: '1. Read the diff\n2. Check the tests pass'
+})
+assert.equal(r.ok, true)
+assert.equal(r.action, 'created')
+assert.equal(r.name, 'code-review')
+
+// read_skill
+r = await call('read_skill', { scope: 'project', name: 'code-review' })
+assert.equal(r.ok, true)
+assert.match(r.content, /Read the diff/)
+
+// create_skill (global scope)
+r = await call('create_skill', {
+  scope: 'global',
+  name: 'tone',
+  description: 'Write concisely',
+  content: 'Be short and direct.'
+})
+assert.equal(r.ok, true)
+assert.equal(r.scope, 'global')
+
+// renderSkillsIndex includes both scopes with name — description
+const index = await service.renderSkillsIndex('Research')
+assert.match(index, /Global skills:/)
+assert.match(index, /- tone — Write concisely/)
+assert.match(index, /Project skills:/)
+assert.match(index, /- code-review — Review code before merging/)
+
+// disabled skills are excluded from the index and refused by read_skill
+await service.setSkillEnabled('Research', 'project', 'code-review', false)
+const index2 = await service.renderSkillsIndex('Research')
+assert.ok(!index2.includes('code-review'), 'disabled skill excluded from index')
+assert.ok(index2.includes('tone'), 'enabled global skill still listed')
+r = await call('read_skill', { scope: 'project', name: 'code-review' })
+assert.equal(r.ok, false, 'disabled skill refused')
+await service.setSkillEnabled('Research', 'project', 'code-review', true)
+r = await call('read_skill', { scope: 'project', name: 'code-review' })
+assert.equal(r.ok, true, 're-enabled skill readable')
+
+// upsert (update) existing skill
+r = await call('create_skill', {
+  scope: 'project',
+  name: 'Code Review',
+  description: 'Updated desc',
+  content: 'v2'
+})
+assert.equal(r.action, 'updated')
+assert.equal(
+  await (
+    await service.readSkill('Research', 'project', 'code-review')
+  )?.description,
+  'Updated desc'
+)
+
+// delete_skill (confirm resolves true in test context)
+r = await call('delete_skill', { scope: 'project', name: 'code-review' })
+assert.equal(r.ok, true)
+r = await call('read_skill', { scope: 'project', name: 'code-review' })
+assert.equal(r.ok, false, 'deleted skill is gone')
 
 // webFetch local extraction
 const html = `<html><head><title>Test Page</title></head><body>

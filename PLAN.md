@@ -77,7 +77,7 @@ new `.data` path before proceeding.
      fresh root that contains legacy folders is also migrated immediately (not just
      on next launch).
 2. **`src/main/index.ts`** — startup hook: after `const service =
-   new PTNotesService(...)` and before `register*Ipc` / `createWindow()`, call
+new PTNotesService(...)` and before `register*Ipc` / `createWindow()`, call
    `await service.migrateLegacyFolders()` (satisfies "verify legacy folders upon
    startup and migrate before proceeding").
 3. **Tool descriptions** — update temp path strings in
@@ -122,7 +122,7 @@ new `.data` path before proceeding.
 - `npm run lint`
 - `npm run test`
 
-## Goal 3: Skills support in AI chat
+## Goal 3: Skills support in AI chat (implemented)
 
 Skills are named instruction documents (markdown) the AI can load on demand.
 **Global** skills live at `<root>/.skills/`; **project** skills at
@@ -171,9 +171,9 @@ and a new **Settings ▸ Skills** pane.
 6. **Settings ▸ Skills pane** —
    - `useAppStore.ts`: widen `settingsCategory` union to `'skills'`.
    - `SettingsDialog.tsx`: add **Skills** nav button + `SkillsPane` listing global
-     + project skills (name, description, edit ✏️ / delete 🗑, click-to-expand
-     content); create/edit via a modal (scope, name, description, content
-     textarea) reusing `Modal`/`TextField`; delete confirms.
+     - project skills (name, description, edit ✏️ / delete 🗑, click-to-expand
+       content); create/edit via a modal (scope, name, description, content
+       textarea) reusing `Modal`/`TextField`; delete confirms.
    - `main.css`: `.skills-*` styles matching the settings pane.
 7. **Tests**:
    - `scripts/test-ai.mts` — skill tools: create global + project skill, upsert
@@ -187,8 +187,8 @@ and a new **Settings ▸ Skills** pane.
 ### Notes
 
 - Tool count hits 16 (AGENTS.md prefers ~10); acceptable tradeoff for the feature.
-- Skill files are human-editable markdown with a one-line `description:`
-  front-matter.
+- Skill files follow the OpenAI skill-guide layout: each skill is a folder containing a `SKILL.md`
+  manifest with `name:` + one-line `description:` front-matter.
 - Module subagent prompts are out of scope (skills apply to the main chat only).
 
 ### Verify

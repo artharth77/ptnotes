@@ -280,4 +280,140 @@ await service.deleteProject('Legacy')
 projects = await service.listProjects()
 assert.ok(!projects.some((p) => p.name === 'Legacy'), 'Legacy project deleted')
 
+// ---- Skills ----
+await service.createProject('Skills')
+
+let skills = await service.listSkills('Skills')
+assert.deepEqual(skills, { global: [], project: [] }, 'skills start empty')
+
+const skillMeta = await service.saveSkill('Skills', 'project', 'Style Guide', {
+  description: 'House style rules',
+  content: '# Style\n\nUse sentence case.'
+})
+assert.equal(skillMeta.name, 'style-guide')
+skills = await service.listSkills('Skills')
+assert.equal(skills.project.length, 1)
+assert.equal(skills.project[0].name, 'style-guide')
+assert.equal(skills.project[0].description, 'House style rules')
+assert.equal(skills.project[0].enabled, true, 'skills default to enabled')
+
+const skillContent = await service.readSkill('Skills', 'project', 'style-guide')
+assert.ok(skillContent, 'skill read')
+assert.equal(skillContent.description, 'House style rules')
+assert.equal(skillContent.content, '# Style\n\nUse sentence case.')
+assert.equal(skillContent.enabled, true, 'readSkill reports enabled')
+
+// OpenAI skill-guide layout: a per-skill folder containing SKILL.md with name + description lines
+const skillFolder = join(ROOT, 'Skills', '.data', 'skills', 'style-guide')
+const manifestStat = await fs.stat(skillFolder)
+assert.ok(manifestStat.isDirectory(), 'skill stored as a folder')
+const rawSkill = await fs.readFile(join(skillFolder, 'SKILL.md'), 'utf8')
+assert.match(rawSkill, /^name: style-guide$/m, 'front-matter has name line')
+assert.match(rawSkill, /^description: House style rules$/m, 'front-matter has description line')
+assert.match(rawSkill, /^enabled: true$/m, 'front-matter has enabled line')
+
+// global skill
+await service.saveSkill('Skills', 'global', 'Tone', {
+  description: 'Concise tone',
+  content: 'Be brief.'
+})
+skills = await service.listSkills('Skills')
+assert.equal(skills.global.length, 1)
+assert.equal(skills.global[0].name, 'tone')
+
+// skills index block
+const index = await service.renderSkillsIndex('Skills')
+assert.match(index, /Global skills:/)
+assert.match(index, /- tone — Concise tone/)
+assert.match(index, /Project skills:/)
+assert.match(index, /- style-guide — House style rules/)
+
+// upsert updates in place (no duplicate)
+await service.saveSkill('Skills', 'project', 'Style Guide', {
+  description: 'Updated rules',
+  content: '# Style\n\nv2'
+})
+skills = await service.listSkills('Skills')
+assert.equal(skills.project.length, 1, 'upsert updates, no duplicate')
+assert.equal(skills.project[0].description, 'Updated rules')
+
+// disabling a skill excludes it from the index and flips the stored front-matter
+const disabledMeta = await service.setSkillEnabled('Skills', 'project', 'style-guide', false)
+assert.equal(disabledMeta.enabled, false)
+const disabledIndex = await service.renderSkillsIndex('Skills')
+assert.ok(!disabledIndex.includes('style-guide'), 'disabled skill excluded from the index')
+assert.ok(disabledIndex.includes('tone'), 'enabled global skill still listed')
+const disabledRaw = await fs.readFile(join(skillFolder, 'SKILL.md'), 'utf8')
+assert.match(disabledRaw, /^enabled: false$/m, 'enabled line flips to false')
+assert.equal((await service.readSkill('Skills', 'project', 'style-guide'))?.enabled, false)
+await service.setSkillEnabled('Skills', 'project', 'style-guide', true)
+const reEnabledIndex = await service.renderSkillsIndex('Skills')
+assert.ok(reEnabledIndex.includes('style-guide'), 're-enabled skill back in the index')
+
+// moving a skill between scopes relocates its whole folder
+let moved = await service.moveSkill('Skills', 'project', 'style-guide', 'global')
+assert.equal(moved.scope, 'global')
+skills = await service.listSkills('Skills')
+assert.equal(skills.global.length, 2, 'skill now listed under global')
+assert.equal(skills.project.length, 0)
+assert.equal(await service.readSkill('Skills', 'project', 'style-guide'), null)
+assert.ok(
+  await fs
+    .stat(join(ROOT, '.skills', 'style-guide'))
+    .then((s) => s.isDirectory())
+    .catch(() => false),
+  'folder relocated to global skills dir'
+)
+// moving back to project (same content preserved)
+moved = await service.moveSkill('Skills', 'global', 'style-guide', 'project')
+assert.equal(moved.scope, 'project')
+assert.equal(moved.description, 'Updated rules')
+assert.equal(
+  await fs
+    .stat(join(ROOT, 'Skills', '.data', 'skills', 'style-guide'))
+    .then((s) => s.isDirectory())
+    .catch(() => false),
+  true,
+  'folder back under the project'
+)
+// conflict guard
+await service.saveSkill('Skills', 'global', 'Style Guide', {
+  description: 'Global copy',
+  content: 'g'
+})
+await assert.rejects(
+  service.moveSkill('Skills', 'project', 'style-guide', 'global'),
+  /already exists/,
+  'moving onto an existing name throws'
+)
+await service.deleteSkill('Skills', 'global', 'style-guide')
+
+// delete
+assert.equal(await service.deleteSkill('Skills', 'project', 'style-guide'), true)
+assert.equal(
+  await service.deleteSkill('Skills', 'project', 'style-guide'),
+  false,
+  'deleting a missing skill returns false'
+)
+skills = await service.listSkills('Skills')
+assert.equal(skills.project.length, 0)
+
+// changeRootDir relocates the global .skills folder alongside the registry + projects
+await service.createProject('SkillsMove')
+await service.saveSkill('SkillsMove', 'project', 'Local Rules', {
+  description: 'Local',
+  content: 'x'
+})
+const NEW_ROOT = '/tmp/ptnotes-skills-root-2'
+await fs.rm(NEW_ROOT, { recursive: true, force: true })
+await service.changeRootDir(NEW_ROOT)
+skills = await service.listSkills('SkillsMove')
+assert.equal(skills.global.length, 1, 'global skills moved to the new root')
+assert.equal(skills.global[0].name, 'tone')
+assert.equal(skills.project.length, 1, 'project skills moved with the project folder')
+assert.equal(skills.project[0].name, 'local-rules')
+
+await service.deleteProject('SkillsMove')
+await fs.rm(NEW_ROOT, { recursive: true, force: true })
+
 console.log('ALL SERVICE TESTS PASSED')
