@@ -3,7 +3,8 @@ import { mdiToggleSwitch, mdiToggleSwitchOffOutline } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
 import { Modal, TextField } from './Modal'
 import { MdiIcon } from './MdiIcon'
-import type { AIProviderConfig, ModuleSettings, StorageSettings } from '@shared/types'
+import type { AboutInfo, AIProviderConfig, ModuleSettings, StorageSettings } from '@shared/types'
+import appIcon from '../../../../resources/icon.png'
 
 function AiSettingsPane({
   config,
@@ -208,7 +209,9 @@ function ModulesPane({
       ) : (
         <div className="module-settings-list">
           {modules.map((m) => (
-            <div key={m.id} className={`module-settings-row${m.enabled ? '' : ' disabled'}`}
+            <div
+              key={m.id}
+              className={`module-settings-row${m.enabled ? '' : ' disabled'}`}
               aria-pressed={m.enabled}
               onClick={() => void toggle(m)}
             >
@@ -228,6 +231,60 @@ function ModulesPane({
         </div>
       )}
     </>
+  )
+}
+
+function AboutPane(): React.JSX.Element {
+  const [about, setAbout] = useState<AboutInfo | null>(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    void window.ptnotes.settings
+      .getAbout()
+      .then(setAbout)
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
+  }, [])
+
+  if (error) {
+    return <p className="form-error">{error}</p>
+  }
+
+  if (!about) {
+    return <p className="hint">Loading…</p>
+  }
+
+  return (
+    <div className="about">
+      <div className="about-header">
+        <img className="about-icon" src={appIcon} alt="PTNotes icon" />
+        <div className="about-title">
+          <span className="about-name">{about.name}</span>
+          <span className="about-version">Version {about.version}</span>
+        </div>
+      </div>
+      <p className="about-description">
+        Markdown notes + todo lists + AI assistant, organized by project.
+      </p>
+      <p className="about-stack">
+        A desktop app built with Electron and React. Notes are WYSIWYG-edited with TipTap and stored
+        as markdown, todos live in a markdown checklist, and the AI chat works with any
+        OpenAI-compatible API. Everything runs locally — your notes and data stay on this machine.
+      </p>
+      <div className="about-runtimes">
+        <div className="about-row">
+          <span>Electron</span>
+          <code>{about.electron}</code>
+        </div>
+        <div className="about-row">
+          <span>Chromium</span>
+          <code>{about.chrome}</code>
+        </div>
+        <div className="about-row">
+          <span>Node.js</span>
+          <code>{about.node}</code>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -317,6 +374,12 @@ export function SettingsDialog(): React.JSX.Element {
           >
             Modules
           </button>
+          <button
+            className={category === 'about' ? 'active' : ''}
+            onClick={() => setSettingsCategory('about')}
+          >
+            About
+          </button>
         </nav>
         <div className="settings-pane">
           {category === 'storage' ? (
@@ -339,6 +402,10 @@ export function SettingsDialog(): React.JSX.Element {
           ) : category === 'modules' ? (
             <>
               <ModulesPane modules={modules} setModules={setModules} />
+            </>
+          ) : category === 'about' ? (
+            <>
+              <AboutPane />
             </>
           ) : (
             <>
