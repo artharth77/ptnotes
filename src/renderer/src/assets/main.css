@@ -1644,6 +1644,10 @@ body {
   background: var(--bg-hover);
 }
 
+.chat-history-item.active {
+  background: var(--bg-hover);
+}
+
 .chat-history-open {
   display: flex;
   flex-direction: column;

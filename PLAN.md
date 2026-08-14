@@ -5,7 +5,7 @@
 ## Goals
 
 - **Goal 1 — Human-in-the-Loop (`ask_user`)** — see below.
-- Goal 2 — *(to be defined)*
+- **Goal 2 — Chat keyboard shortcuts** — see below.
 - Goal 3 — *(to be defined)*
 
 ---
@@ -214,3 +214,121 @@ npm run test         # includes scripts/test-ask.mts
 npm run typecheck
 npm run lint
 ```
+
+---
+
+## Goal 2: Chat keyboard shortcuts
+
+Keyboard-driven chat: with the cursor in the chat input box, `Cmd/Ctrl+Shift+N`
+starts a new chat and `Cmd/Ctrl+Shift+H` opens the chat history popup. The
+history popup itself is navigable with the keyboard (`↑`/`↓` move the selector,
+`Enter` opens the selected session). While the chat input is focused,
+`Ctrl+Home`/`Ctrl+End` scroll the chat message list to the top/bottom and
+`Ctrl+PageUp`/`Ctrl+PageDown` scroll it by one page. Globally,
+`Cmd/Ctrl+Shift+C` toggles the chat panel (mirrors the top-bar Chat button).
+
+### Scope decisions (locked in)
+
+| Area                   | Decision                                                                                                                                                  |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Modifier key           | `Cmd` on macOS, `Ctrl` on Windows/Linux (detected via `window.electron.process.platform === 'darwin'`)                                                     |
+| Conflict avoidance     | `Shift`-modified shortcuts (`Cmd/Ctrl+Shift+N` / `Cmd/Ctrl+Shift+H` / `Cmd/Ctrl+Shift+C`) so the default Electron menu accelerators (`Cmd+N` New Window, `Cmd+H` Hide) never fire first — **no main-process menu changes needed** |
+| Activation scope       | `N`/`H` + chat-list scroll keys only active while the chat textarea is focused; history nav keys only active while the popup is open; `C` toggle is global (ChatDrawer is always mounted) |
+| Chat-list scroll keys  | `Ctrl` (not `Cmd`) on all platforms, per spec; instant (`behavior: 'auto'`) scrolling                                                                    |
+| History popup nav      | `↑`/`↓` move selector (clamped, active item auto-scrolled into view), `Enter` opens the selected session, `Escape` closes + refocuses the input; skipped while a session is being renamed (the rename input owns its keys) |
+| Selector sync          | Mouse **move** (`onMouseMove`) re-syncs the selector to the pointer only while the mouse is moving; a stationary pointer never steals it                  |
+
+### Files to change
+
+- `src/renderer/src/components/ChatDrawer.tsx`
+- `src/renderer/src/assets/main.css`
+- `AGENTS.md`, `CHANGELOG.md`
+
+### 1. Renderer — `ChatDrawer.tsx` shortcuts in the textarea `onKeyDown`
+
+Add a module-level `const IS_MAC = window.electron.process.platform === 'darwin'`
+(available via `window.electron.process.platform` from `@electron-toolkit/preload`
+— no preload/IPC changes).
+
+At the **top** of `onKeyDown` (line 540), before all existing branches:
+
+- `const mod = (IS_MAC ? e.metaKey : e.ctrlKey) && e.shiftKey`
+- if `mod && !e.altKey`:
+  - `n` → `e.preventDefault()`, `closeHistory()`, and if `!chatBusy && activeProject`
+    mirror the "+ New Chat" button (`await newChat(activeProject); focusInput()`).
+  - `h` → `e.preventDefault()`, toggle `historyOpen ? closeHistory() : openHistory()`;
+    opening **blurs** the textarea (so the popup takes keyboard focus), closing
+    refocuses it.
+- Then `if (historyOpen) return` so plain keys defer to the history popup.
+
+**Chat-list scrolling** (after the history early-return): if
+`e.ctrlKey && !e.metaKey && !e.altKey` and the key is `Home`/`End`/`PageUp`/`PageDown`,
+`e.preventDefault()` and scroll `scrollRef.current` (`.chat-scroll`):
+
+- `Home` → `scrollTo({ top: 0, behavior: 'auto' })`
+- `End` → `scrollTo({ top: el.scrollHeight, behavior: 'auto' })`
+- `PageUp` → `el.scrollTop - el.clientHeight * 0.8`
+- `PageDown` → `el.scrollTop + el.clientHeight * 0.8`
+
+The existing `onScroll` handler already updates the jump-down button state after
+these scrolls.
+
+### 2. Renderer — history popup keyboard navigation
+
+Extend the existing `historyOpen` window `keydown` effect (lines 169–176) with
+`e.preventDefault()` on handled keys:
+
+- `Escape` → `closeHistory()` + `focusInput()`.
+- `ArrowDown` / `ArrowUp` → move `historyIndex` clamped to `[0, sessions.length - 1]`.
+- `Enter` → open `sessions[Math.min(historyIndex, sessions.length - 1)]` via
+  `openChat(activeProject, s.sessionId)`, then `closeHistory(); focusInput()`.
+- Skip Arrow/Enter handling when `renamingId !== null` (rename input owns its keys).
+
+Because this is a window-level listener it works whether the popup was opened by
+mouse or by `Cmd/Ctrl+Shift+H`; the textarea early-returns while the popup is open
+so only the window listener acts.
+
+### 3. Renderer — history selector state + highlight
+
+- Add `const [historyIndex, setHistoryIndex] = useState(0)`; reset to `0` in `openHistory()`.
+- Render: add `active` class to `.chat-history-item` when
+  `index === Math.min(historyIndex, sessions.length - 1)`.
+- Mouse **move** over a history item (`onMouseMove`) re-syncs `historyIndex` to the
+  pointer index — a stationary pointer does not move the selection.
+- A `useEffect` calls `scrollIntoView({ block: 'nearest' })` on the active item
+  whenever `historyIndex` changes, keeping the selector visible while navigating.
+
+### 4. Renderer — global chat-panel toggle
+
+`ChatDrawer` is always mounted (renders inside the collapsed `.chat-col` in
+`App.tsx`), so a window-level `keydown` listener there is always active:
+
+- Match `(IS_MAC ? e.metaKey : e.ctrlKey) && e.shiftKey && !e.altKey &&
+  e.key.toLowerCase() === 'c'`; `e.preventDefault()`; `setChatOpen(!chatOpen)`
+  — identical to the top-bar Chat button (`TopBar.tsx`). Works globally so the
+  panel can be re-opened from anywhere. **Suppressed while a dialog/modal is
+  open**: skipped when any `.modal-overlay` (shared `Modal`) or
+  `.module-history-backdrop` (`ModuleHistoryOverlay`) exists in the DOM.
+
+### 5. CSS — `main.css`
+
+Add `.chat-history-item.active { background: var(--bg-hover); }` (mirrors the
+existing `.chat-history-item:hover` rule).
+
+### 6. Docs
+
+Update `AGENTS.md` (chat UI section: shortcut summary) and `CHANGELOG.md`.
+
+### Verification
+
+No renderer test harness exists; verify via:
+
+```bash
+npm run typecheck
+npm run lint
+npm run build
+```
+
+plus manual QA: new chat + history toggle from the focused input, history
+`↑`/`↓`/`Enter`, chat-list `Ctrl+Home`/`Ctrl+End`/`Ctrl+PageUp`/`Ctrl+PageDown`,
+and the global `Cmd/Ctrl+Shift+C` panel toggle.

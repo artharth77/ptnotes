@@ -21,6 +21,13 @@ All notable changes to PTNotes are documented in this file.
 
 - **New Chat focuses the input**: clicking the **+ New Chat** button now moves focus to the chat input so you can start typing right away.
 
+#### Chat keyboard shortcuts
+
+- While the cursor is in the chat input box, **`Cmd/Ctrl+Shift+N`** starts a new chat and **`Cmd/Ctrl+Shift+H`** opens the chat history popup (toggling it closed if already open, refocusing the input). The `Shift`-modified combos avoid the app's default menu accelerators (`Cmd+N` New Window, `Cmd+H` Hide), so no menu changes were needed; opening via the shortcut blurs the input so the popup takes keyboard focus.
+- The **chat history popup is keyboard-navigable**: `↑`/`↓` move the active selector (highlighted row, auto-scrolled into view when out of sight), mouse hover re-syncs the selector to the pointer, `Enter` opens the selected session, `Escape` closes. Works whether the popup was opened by mouse or by `Cmd/Ctrl+Shift+H`.
+- While the chat input is focused, **`Ctrl+Home`** / **`Ctrl+End`** scroll the chat message list to the top / bottom and **`Ctrl+PageUp`** / **`Ctrl+PageDown`** scroll it by one page (uses `Ctrl` on all platforms, including macOS).
+- **`Cmd/Ctrl+Shift+C`** toggles the chat panel from anywhere — identical to the top-bar Chat button (handled by a global window listener in `ChatDrawer`, which is always mounted). It is suppressed while any dialog/modal is open (a `.modal-overlay` or `.module-history-backdrop` in the DOM).
+
 ## [0.6.0] — 2026-08-13
 
 ### Added
