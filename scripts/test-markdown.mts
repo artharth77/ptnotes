@@ -66,3 +66,19 @@ assert.equal(
   'table round-trip is idempotent'
 )
 console.log('MARKDOWN TABLE OK — parsed + round-trips')
+
+const underlineJson = manager.parse('some ++under++ and **bold** text')
+const underlineText = underlineJson.content[0].content as {
+  text: string
+  marks?: { type: string }[]
+}[]
+assert.ok(
+  underlineText[1].marks?.some((m) => m.type === 'underline'),
+  'expected an underline mark on the ++..++ segment'
+)
+assert.equal(
+  manager.serialize(underlineJson),
+  'some ++under++ and **bold** text',
+  'underline round-trips as ++..++'
+)
+console.log('MARKDOWN UNDERLINE OK — parsed + round-trips as ++..++')

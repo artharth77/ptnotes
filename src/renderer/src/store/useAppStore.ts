@@ -36,6 +36,7 @@ interface AppState {
   settingsCategory: 'storage' | 'ai' | 'modules' | 'about' | 'skills'
   skillEditRequest: string | null
   sidebarVisible: boolean
+  formatHelperEnabled: boolean
   loading: boolean
 
   init: () => Promise<void>
@@ -72,6 +73,7 @@ interface AppState {
   openSkillEditor: (name: string) => void
   clearSkillEditRequest: () => void
   setSidebarVisible: (visible: boolean) => void
+  setFormatHelperEnabled: (enabled: boolean) => void
   newChat: (project: string) => Promise<void>
   openChat: (project: string, sessionId: string) => Promise<void>
   deleteChat: (project: string, sessionId: string) => Promise<void>
@@ -105,6 +107,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   settingsCategory: 'storage',
   skillEditRequest: null,
   sidebarVisible: true,
+  formatHelperEnabled: localStorage.getItem('ptnotes:formatHelper') !== '0',
   loading: false,
 
   async init() {
@@ -442,5 +445,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setSidebarVisible(sidebarVisible) {
     set({ sidebarVisible })
+  },
+
+  setFormatHelperEnabled(enabled) {
+    localStorage.setItem('ptnotes:formatHelper', enabled ? '1' : '0')
+    set({ formatHelperEnabled: enabled })
   }
 }))

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   mdiCodeBraces,
   mdiCodeTags,
+  mdiCloseCircle,
   mdiFormatBold,
   mdiFormatHeader1,
   mdiFormatHeader2,
@@ -12,6 +13,8 @@ import {
   mdiFormatListNumbered,
   mdiFormatQuoteOpen,
   mdiFormatStrikethroughVariant,
+  mdiFormatText,
+  mdiFormatUnderline,
   mdiLinkVariant,
   mdiMinus,
   mdiRedoVariant,
@@ -26,6 +29,9 @@ import {
   mdiUndoVariant
 } from '@mdi/js'
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react'
+import type { Editor } from '@tiptap/react'
+import { BubbleMenu } from '@tiptap/react/menus'
+import { PluginKey } from '@tiptap/pm/state'
 import StarterKit from '@tiptap/starter-kit'
 import { Markdown } from '@tiptap/markdown'
 import Placeholder from '@tiptap/extension-placeholder'
@@ -69,9 +75,102 @@ function ToolbarBtn({
   )
 }
 
+const bubbleMenuKey = new PluginKey('formatHelperBubble')
+
+function FormatButtons({
+  editor,
+  state,
+  withLabels,
+  onRun
+}: {
+  editor: Editor
+  state: {
+    isBold: boolean
+    isItalic: boolean
+    isUnderline: boolean
+    isStrike: boolean
+    isCode: boolean
+  }
+  withLabels?: boolean
+  onRun?: () => void
+}): React.JSX.Element {
+  const items = [
+    {
+      icon: mdiFormatBold,
+      label: 'Bold',
+      active: state.isBold,
+      run: () => editor.chain().focus().toggleBold().run()
+    },
+    {
+      icon: mdiFormatItalic,
+      label: 'Italic',
+      active: state.isItalic,
+      run: () => editor.chain().focus().toggleItalic().run()
+    },
+    {
+      icon: mdiFormatUnderline,
+      label: 'Underline',
+      active: state.isUnderline,
+      run: () => editor.chain().focus().toggleUnderline().run()
+    },
+    {
+      icon: mdiFormatStrikethroughVariant,
+      label: 'Strikethrough',
+      active: state.isStrike,
+      run: () => editor.chain().focus().toggleStrike().run()
+    },
+    {
+      icon: mdiCodeTags,
+      label: 'Inline code',
+      active: state.isCode,
+      run: () => editor.chain().focus().toggleCode().run()
+    }
+  ]
+  if (withLabels) {
+    return (
+      <>
+        {items.map((it) => (
+          <button
+            key={it.label}
+            type="button"
+            className={`note-menu-item ${it.active ? 'active' : ''}`}
+            onClick={() => {
+              it.run()
+              onRun?.()
+            }}
+          >
+            <span className="note-menu-icon">
+              <MdiIcon path={it.icon} size={16} />
+            </span>
+            {it.label}
+          </button>
+        ))}
+      </>
+    )
+  }
+  return (
+    <>
+      {items.map((it) => (
+        <ToolbarBtn
+          key={it.label}
+          icon={it.icon}
+          title={it.label}
+          active={it.active}
+          onClick={() => {
+            it.run()
+            onRun?.()
+          }}
+        />
+      ))}
+    </>
+  )
+}
+
 export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.JSX.Element {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const appliedContent = useRef(content)
+  const formatHelperEnabled = useAppStore((s) => s.formatHelperEnabled)
+  const setFormatHelperEnabled = useAppStore((s) => s.setFormatHelperEnabled)
 
   const editor = useEditor({
     extensions: [
@@ -117,6 +216,7 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
       return {
         isBold: ed.isActive('bold'),
         isItalic: ed.isActive('italic'),
+        isUnderline: ed.isActive('underline'),
         isStrike: ed.isActive('strike'),
         isCode: ed.isActive('code'),
         isBullet: ed.isActive('bulletList'),
@@ -138,15 +238,19 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
 
   const [linkPrompt, setLinkPrompt] = useState(false)
   const [tableMenu, setTableMenu] = useState<{ x: number; y: number } | null>(null)
+  const [formatMenu, setFormatMenu] = useState<{ x: number; y: number } | null>(null)
 
   useEffect(() => {
-    if (!tableMenu) return
+    if (!tableMenu && !formatMenu) return
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setTableMenu(null)
+      if (e.key === 'Escape') {
+        setTableMenu(null)
+        setFormatMenu(null)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [tableMenu])
+  }, [tableMenu, formatMenu])
 
   if (!editor) {
     return <div className="editor empty-state">Loading editor…</div>
@@ -189,6 +293,12 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
           title="Italic"
           active={state.isItalic}
           onClick={() => editor.chain().focus().toggleItalic().run()}
+        />
+        <ToolbarBtn
+          icon={mdiFormatUnderline}
+          title="Underline"
+          active={state.isUnderline}
+          onClick={() => editor.chain().focus().toggleUnderline().run()}
         />
         <ToolbarBtn
           icon={mdiFormatStrikethroughVariant}
@@ -309,21 +419,70 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
         className="editor-content"
         onContextMenu={(e) => {
           const target = e.target instanceof Element ? e.target : null
-          if (!target?.closest('table')) {
-            setTableMenu(null)
+          if (target?.closest('table')) {
+            setFormatMenu(null)
+            e.preventDefault()
+            const coords = editor.view.posAtCoords({ left: e.clientX, top: e.clientY })
+            if (coords) editor.commands.setTextSelection(coords.pos)
+            setTableMenu({
+              x: Math.min(e.clientX, window.innerWidth - 200),
+              y: Math.min(e.clientY, window.innerHeight - 280)
+            })
             return
           }
           e.preventDefault()
           const coords = editor.view.posAtCoords({ left: e.clientX, top: e.clientY })
-          if (coords) editor.commands.setTextSelection(coords.pos)
-          setTableMenu({
-            x: Math.min(e.clientX, window.innerWidth - 200),
+          if (coords) {
+            const sel = editor.state.selection
+            const insideSelection = !sel.empty && sel.from <= coords.pos && coords.pos <= sel.to
+            if (!insideSelection) editor.commands.setTextSelection(coords.pos)
+          }
+          setTableMenu(null)
+          setFormatMenu({
+            x: Math.min(e.clientX, window.innerWidth - 220),
             y: Math.min(e.clientY, window.innerHeight - 280)
           })
+          editor.view.dispatch(editor.state.tr.setMeta(bubbleMenuKey, 'hide'))
         }}
       />
+      {formatHelperEnabled && (
+        <BubbleMenu
+          editor={editor}
+          pluginKey={bubbleMenuKey}
+          appendTo={() => document.body}
+          shouldShow={({ view, state }) => {
+            if (state.selection.empty) return false
+            if (!view.hasFocus()) return false
+            if (editor.isActive('table')) return false
+            return true
+          }}
+        >
+          <div className="bubble-menu">
+            <FormatButtons editor={editor} state={state} />
+            <button
+              type="button"
+              className="bubble-close"
+              title="Turn off format helper"
+              onClick={() => setFormatHelperEnabled(false)}
+            >
+              <MdiIcon path={mdiCloseCircle} size={16} />
+            </button>
+          </div>
+        </BubbleMenu>
+      )}
       <div className="editor-meta">
-        Saving to <code>notes/{noteId}.md</code> · markdown
+        <span>
+          Saving to <code>notes/{noteId}.md</code> · markdown
+        </span>
+        <button
+          type="button"
+          className={`format-helper-toggle ${formatHelperEnabled ? 'active' : ''}`}
+          title="Format helper"
+          onClick={() => setFormatHelperEnabled(!formatHelperEnabled)}
+        >
+          <MdiIcon path={mdiFormatText} size={14} />
+          Format helper
+        </button>
       </div>
       {tableMenu && state.isTable && (
         <>
@@ -428,6 +587,30 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
               </span>
               Delete table
             </button>
+          </div>
+        </>
+      )}
+      {formatMenu && (
+        <>
+          <div
+            className="menu-overlay"
+            onClick={() => setFormatMenu(null)}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              setFormatMenu(null)
+            }}
+          />
+          <div
+            className="note-menu"
+            style={{ left: formatMenu.x, top: formatMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <FormatButtons
+              editor={editor}
+              state={state}
+              withLabels
+              onRun={() => setFormatMenu(null)}
+            />
           </div>
         </>
       )}
