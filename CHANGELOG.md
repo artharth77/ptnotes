@@ -35,6 +35,14 @@ All notable changes to PTNotes are documented in this file.
 - **Right-click a table cell** for the same actions as a context menu at the cursor (caret moves to the clicked cell so commands target it). Closes on Escape, outside click, or another right-click.
 - Table cells use the app's border/header style with a soft highlight for the selected cell.
 
+#### Markdown editor QoL
+
+- **Underline** is now available in the note editor: a new toolbar button (after Italic) toggles it, and it's included in the format helper and right-click menu too. Underline round-trips to markdown as GitLab-style `++text++` (StarterKit v3 already registers the extension — no new dependency).
+- **Format helper bubble**: selecting text in the editor pops an icon-only bubble above the selection with **Bold / Italic / Underline / Strikethrough / Inline code** buttons (active states + tooltips). A circular **X** button in its top-right corner closes the bubble and turns the feature off.
+- **Right-click format menu**: right-clicking in the editor always shows a context menu with the same five formatting actions (keeps the selection when the click is inside it, otherwise moves the cursor to the click point). Opening the menu hides the bubble popup; closing it does not bring the bubble back — it only returns on a fresh selection. The table right-click menu is unchanged.
+- **Status-bar toggle**: the editor status bar now has an icon + label **Format helper** toggle on the right that turns the bubble popup on/off. The setting is remembered across restarts (default on, stored in `localStorage`).
+- **Show Raw mode**: a second status-bar button (left of the Format helper, label "RAW") swaps the WYSIWYG editor for a plain monospace **markdown `<textarea>`** so you can edit the raw source directly. Edits auto-save (~800ms debounce, same as the WYSIWYG view) and toggling back re-syncs the rich editor. The toggle is **not persisted** — it resets to off every time you switch notes.
+
 ### Fixed
 
 - **Markdown tables now render in the note editor**: TipTap's `StarterKit` doesn't include table extensions in v3, so `@tiptap/markdown` silently dropped the whole `<table>` on parse. The `@tiptap/extension-table` `TableKit` (Table/TableRow/TableCell/TableHeader) is now registered, so tables in notes display as real tables and round-trip to valid markdown on save.

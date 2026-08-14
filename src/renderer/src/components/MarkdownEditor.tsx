@@ -239,6 +239,8 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
   const [linkPrompt, setLinkPrompt] = useState(false)
   const [tableMenu, setTableMenu] = useState<{ x: number; y: number } | null>(null)
   const [formatMenu, setFormatMenu] = useState<{ x: number; y: number } | null>(null)
+  const [rawMode, setRawMode] = useState(false)
+  const [rawText, setRawText] = useState('')
 
   useEffect(() => {
     if (!tableMenu && !formatMenu) return
@@ -260,192 +262,225 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
     setLinkPrompt(true)
   }
 
+  function toggleRaw(): void {
+    if (rawMode) {
+      editor.commands.setContent(rawText, { contentType: 'markdown', emitUpdate: false })
+      setRawMode(false)
+    } else {
+      setRawText(editor.getMarkdown())
+      setTableMenu(null)
+      setFormatMenu(null)
+      setRawMode(true)
+    }
+  }
+
+  function handleRawChange(e: React.ChangeEvent<HTMLTextAreaElement>): void {
+    const text = e.target.value
+    setRawText(text)
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(() => {
+      void useAppStore.getState().saveNote(text)
+    }, 800)
+  }
+
   return (
     <div className="editor-wrap">
-      <div className="editor-toolbar">
-        <ToolbarBtn
-          icon={mdiFormatHeader1}
-          title="Heading 1"
-          active={state.isH1}
-          onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
+      {!rawMode && (
+        <div className="editor-toolbar">
+          <ToolbarBtn
+            icon={mdiFormatHeader1}
+            title="Heading 1"
+            active={state.isH1}
+            onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
+          />
+          <ToolbarBtn
+            icon={mdiFormatHeader2}
+            title="Heading 2"
+            active={state.isH2}
+            onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
+          />
+          <ToolbarBtn
+            icon={mdiFormatHeader3}
+            title="Heading 3"
+            active={state.isH3}
+            onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
+          />
+          <span className="tb-sep" />
+          <ToolbarBtn
+            icon={mdiFormatBold}
+            title="Bold"
+            active={state.isBold}
+            onClick={() => editor.chain().focus().toggleBold().run()}
+          />
+          <ToolbarBtn
+            icon={mdiFormatItalic}
+            title="Italic"
+            active={state.isItalic}
+            onClick={() => editor.chain().focus().toggleItalic().run()}
+          />
+          <ToolbarBtn
+            icon={mdiFormatUnderline}
+            title="Underline"
+            active={state.isUnderline}
+            onClick={() => editor.chain().focus().toggleUnderline().run()}
+          />
+          <ToolbarBtn
+            icon={mdiFormatStrikethroughVariant}
+            title="Strikethrough"
+            active={state.isStrike}
+            onClick={() => editor.chain().focus().toggleStrike().run()}
+          />
+          <ToolbarBtn
+            icon={mdiCodeTags}
+            title="Inline code"
+            active={state.isCode}
+            onClick={() => editor.chain().focus().toggleCode().run()}
+          />
+          <span className="tb-sep" />
+          <ToolbarBtn
+            icon={mdiFormatListBulleted}
+            title="Bullet list"
+            active={state.isBullet}
+            onClick={() => editor.chain().focus().toggleBulletList().run()}
+          />
+          <ToolbarBtn
+            icon={mdiFormatListNumbered}
+            title="Numbered list"
+            active={state.isOrdered}
+            onClick={() => editor.chain().focus().toggleOrderedList().run()}
+          />
+          <ToolbarBtn
+            icon={mdiFormatListChecks}
+            title="Task list"
+            active={state.isTask}
+            onClick={() => editor.chain().focus().toggleTaskList().run()}
+          />
+          <span className="tb-sep" />
+          <ToolbarBtn
+            icon={mdiFormatQuoteOpen}
+            title="Blockquote"
+            active={state.isQuote}
+            onClick={() => editor.chain().focus().toggleBlockquote().run()}
+          />
+          <ToolbarBtn
+            icon={mdiCodeBraces}
+            title="Code block"
+            active={state.isCodeBlock}
+            onClick={() => editor.chain().focus().toggleCodeBlock().run()}
+          />
+          <ToolbarBtn icon={mdiLinkVariant} title="Link" onClick={toggleLink} />
+          <ToolbarBtn
+            icon={mdiTablePlus}
+            title="Insert table"
+            active={state.isTable}
+            onClick={() =>
+              editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
+            }
+          />
+          {state.isTable && (
+            <>
+              <span className="tb-sep" />
+              <ToolbarBtn
+                icon={mdiTableColumnPlusBefore}
+                title="Insert column before"
+                onClick={() => editor.chain().focus().addColumnBefore().run()}
+              />
+              <ToolbarBtn
+                icon={mdiTableColumnPlusAfter}
+                title="Insert column after"
+                onClick={() => editor.chain().focus().addColumnAfter().run()}
+              />
+              <ToolbarBtn
+                icon={mdiTableColumnRemove}
+                title="Delete column"
+                disabled={!state.canDeleteColumn}
+                onClick={() => editor.chain().focus().deleteColumn().run()}
+              />
+              <ToolbarBtn
+                icon={mdiTableRowPlusBefore}
+                title="Insert row before"
+                onClick={() => editor.chain().focus().addRowBefore().run()}
+              />
+              <ToolbarBtn
+                icon={mdiTableRowPlusAfter}
+                title="Insert row after"
+                onClick={() => editor.chain().focus().addRowAfter().run()}
+              />
+              <ToolbarBtn
+                icon={mdiTableRowRemove}
+                title="Delete row"
+                disabled={!state.canDeleteRow}
+                onClick={() => editor.chain().focus().deleteRow().run()}
+              />
+              <ToolbarBtn
+                icon={mdiTableRemove}
+                title="Delete table"
+                onClick={() => editor.chain().focus().deleteTable().run()}
+              />
+            </>
+          )}
+          <ToolbarBtn
+            icon={mdiMinus}
+            title="Horizontal rule"
+            onClick={() => editor.chain().focus().setHorizontalRule().run()}
+          />
+          <span className="tb-sep" />
+          <ToolbarBtn
+            icon={mdiUndoVariant}
+            title="Undo"
+            disabled={!state.canUndo}
+            onClick={() => editor.chain().focus().undo().run()}
+          />
+          <ToolbarBtn
+            icon={mdiRedoVariant}
+            title="Redo"
+            disabled={!state.canRedo}
+            onClick={() => editor.chain().focus().redo().run()}
+          />
+        </div>
+      )}
+      {rawMode ? (
+        <textarea
+          className="editor-raw"
+          value={rawText}
+          onChange={handleRawChange}
+          spellCheck={false}
+          autoFocus
         />
-        <ToolbarBtn
-          icon={mdiFormatHeader2}
-          title="Heading 2"
-          active={state.isH2}
-          onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
-        />
-        <ToolbarBtn
-          icon={mdiFormatHeader3}
-          title="Heading 3"
-          active={state.isH3}
-          onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
-        />
-        <span className="tb-sep" />
-        <ToolbarBtn
-          icon={mdiFormatBold}
-          title="Bold"
-          active={state.isBold}
-          onClick={() => editor.chain().focus().toggleBold().run()}
-        />
-        <ToolbarBtn
-          icon={mdiFormatItalic}
-          title="Italic"
-          active={state.isItalic}
-          onClick={() => editor.chain().focus().toggleItalic().run()}
-        />
-        <ToolbarBtn
-          icon={mdiFormatUnderline}
-          title="Underline"
-          active={state.isUnderline}
-          onClick={() => editor.chain().focus().toggleUnderline().run()}
-        />
-        <ToolbarBtn
-          icon={mdiFormatStrikethroughVariant}
-          title="Strikethrough"
-          active={state.isStrike}
-          onClick={() => editor.chain().focus().toggleStrike().run()}
-        />
-        <ToolbarBtn
-          icon={mdiCodeTags}
-          title="Inline code"
-          active={state.isCode}
-          onClick={() => editor.chain().focus().toggleCode().run()}
-        />
-        <span className="tb-sep" />
-        <ToolbarBtn
-          icon={mdiFormatListBulleted}
-          title="Bullet list"
-          active={state.isBullet}
-          onClick={() => editor.chain().focus().toggleBulletList().run()}
-        />
-        <ToolbarBtn
-          icon={mdiFormatListNumbered}
-          title="Numbered list"
-          active={state.isOrdered}
-          onClick={() => editor.chain().focus().toggleOrderedList().run()}
-        />
-        <ToolbarBtn
-          icon={mdiFormatListChecks}
-          title="Task list"
-          active={state.isTask}
-          onClick={() => editor.chain().focus().toggleTaskList().run()}
-        />
-        <span className="tb-sep" />
-        <ToolbarBtn
-          icon={mdiFormatQuoteOpen}
-          title="Blockquote"
-          active={state.isQuote}
-          onClick={() => editor.chain().focus().toggleBlockquote().run()}
-        />
-        <ToolbarBtn
-          icon={mdiCodeBraces}
-          title="Code block"
-          active={state.isCodeBlock}
-          onClick={() => editor.chain().focus().toggleCodeBlock().run()}
-        />
-        <ToolbarBtn icon={mdiLinkVariant} title="Link" onClick={toggleLink} />
-        <ToolbarBtn
-          icon={mdiTablePlus}
-          title="Insert table"
-          active={state.isTable}
-          onClick={() =>
-            editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
-          }
-        />
-        {state.isTable && (
-          <>
-            <span className="tb-sep" />
-            <ToolbarBtn
-              icon={mdiTableColumnPlusBefore}
-              title="Insert column before"
-              onClick={() => editor.chain().focus().addColumnBefore().run()}
-            />
-            <ToolbarBtn
-              icon={mdiTableColumnPlusAfter}
-              title="Insert column after"
-              onClick={() => editor.chain().focus().addColumnAfter().run()}
-            />
-            <ToolbarBtn
-              icon={mdiTableColumnRemove}
-              title="Delete column"
-              disabled={!state.canDeleteColumn}
-              onClick={() => editor.chain().focus().deleteColumn().run()}
-            />
-            <ToolbarBtn
-              icon={mdiTableRowPlusBefore}
-              title="Insert row before"
-              onClick={() => editor.chain().focus().addRowBefore().run()}
-            />
-            <ToolbarBtn
-              icon={mdiTableRowPlusAfter}
-              title="Insert row after"
-              onClick={() => editor.chain().focus().addRowAfter().run()}
-            />
-            <ToolbarBtn
-              icon={mdiTableRowRemove}
-              title="Delete row"
-              disabled={!state.canDeleteRow}
-              onClick={() => editor.chain().focus().deleteRow().run()}
-            />
-            <ToolbarBtn
-              icon={mdiTableRemove}
-              title="Delete table"
-              onClick={() => editor.chain().focus().deleteTable().run()}
-            />
-          </>
-        )}
-        <ToolbarBtn
-          icon={mdiMinus}
-          title="Horizontal rule"
-          onClick={() => editor.chain().focus().setHorizontalRule().run()}
-        />
-        <span className="tb-sep" />
-        <ToolbarBtn
-          icon={mdiUndoVariant}
-          title="Undo"
-          disabled={!state.canUndo}
-          onClick={() => editor.chain().focus().undo().run()}
-        />
-        <ToolbarBtn
-          icon={mdiRedoVariant}
-          title="Redo"
-          disabled={!state.canRedo}
-          onClick={() => editor.chain().focus().redo().run()}
-        />
-      </div>
-      <EditorContent
-        editor={editor}
-        className="editor-content"
-        onContextMenu={(e) => {
-          const target = e.target instanceof Element ? e.target : null
-          if (target?.closest('table')) {
-            setFormatMenu(null)
+      ) : (
+        <EditorContent
+          editor={editor}
+          className="editor-content"
+          onContextMenu={(e) => {
+            const target = e.target instanceof Element ? e.target : null
+            if (target?.closest('table')) {
+              setFormatMenu(null)
+              e.preventDefault()
+              const coords = editor.view.posAtCoords({ left: e.clientX, top: e.clientY })
+              if (coords) editor.commands.setTextSelection(coords.pos)
+              setTableMenu({
+                x: Math.min(e.clientX, window.innerWidth - 200),
+                y: Math.min(e.clientY, window.innerHeight - 280)
+              })
+              return
+            }
             e.preventDefault()
             const coords = editor.view.posAtCoords({ left: e.clientX, top: e.clientY })
-            if (coords) editor.commands.setTextSelection(coords.pos)
-            setTableMenu({
-              x: Math.min(e.clientX, window.innerWidth - 200),
+            if (coords) {
+              const sel = editor.state.selection
+              const insideSelection = !sel.empty && sel.from <= coords.pos && coords.pos <= sel.to
+              if (!insideSelection) editor.commands.setTextSelection(coords.pos)
+            }
+            setTableMenu(null)
+            setFormatMenu({
+              x: Math.min(e.clientX, window.innerWidth - 220),
               y: Math.min(e.clientY, window.innerHeight - 280)
             })
-            return
-          }
-          e.preventDefault()
-          const coords = editor.view.posAtCoords({ left: e.clientX, top: e.clientY })
-          if (coords) {
-            const sel = editor.state.selection
-            const insideSelection = !sel.empty && sel.from <= coords.pos && coords.pos <= sel.to
-            if (!insideSelection) editor.commands.setTextSelection(coords.pos)
-          }
-          setTableMenu(null)
-          setFormatMenu({
-            x: Math.min(e.clientX, window.innerWidth - 220),
-            y: Math.min(e.clientY, window.innerHeight - 280)
-          })
-          editor.view.dispatch(editor.state.tr.setMeta(bubbleMenuKey, 'hide'))
-        }}
-      />
-      {formatHelperEnabled && (
+            editor.view.dispatch(editor.state.tr.setMeta(bubbleMenuKey, 'hide'))
+          }}
+        />
+      )}
+      {!rawMode && formatHelperEnabled && (
         <BubbleMenu
           editor={editor}
           pluginKey={bubbleMenuKey}
@@ -474,17 +509,27 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
         <span>
           Saving to <code>notes/{noteId}.md</code> · markdown
         </span>
-        <button
-          type="button"
-          className={`format-helper-toggle ${formatHelperEnabled ? 'active' : ''}`}
-          title="Format helper"
-          onClick={() => setFormatHelperEnabled(!formatHelperEnabled)}
-        >
-          <MdiIcon path={mdiFormatText} size={14} />
-          Format helper
-        </button>
+        <div className="editor-meta-actions">
+          <button
+            type="button"
+            className={`format-helper-toggle ${rawMode ? 'active' : ''}`}
+            title="Show raw markdown"
+            onClick={toggleRaw}
+          >
+            RAW
+          </button>
+          <button
+            type="button"
+            className={`format-helper-toggle ${formatHelperEnabled ? 'active' : ''}`}
+            title="Format helper"
+            onClick={() => setFormatHelperEnabled(!formatHelperEnabled)}
+          >
+            <MdiIcon path={mdiFormatText} size={14} />
+            Format helper
+          </button>
+        </div>
       </div>
-      {tableMenu && state.isTable && (
+      {!rawMode && tableMenu && state.isTable && (
         <>
           <div
             className="menu-overlay"
@@ -590,7 +635,7 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
           </div>
         </>
       )}
-      {formatMenu && (
+      {!rawMode && formatMenu && (
         <>
           <div
             className="menu-overlay"

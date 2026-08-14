@@ -1321,6 +1321,27 @@ body {
   padding: 24px 28px;
 }
 
+.editor-raw {
+  flex: 1;
+  width: 100%;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.65;
+  padding: 24px 28px;
+  box-sizing: border-box;
+}
+
+.editor-meta-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .ProseMirror {
   max-width: 780px;
   margin: 0 auto;
