@@ -54,6 +54,59 @@ function noteIdFromToolCall(name: string, result?: string): string | null {
   }
 }
 
+/** Compact Q&A summary for `ask_user` tool bubbles (question → answer lines). */
+function AskToolSummary({
+  args,
+  result
+}: {
+  args: Record<string, unknown>
+  result: string
+}): React.JSX.Element {
+  const questions = useMemo(() => {
+    const raw = Array.isArray(args.questions) ? args.questions : []
+    return raw
+      .map((r) =>
+        typeof r === 'object' && r !== null
+          ? (r as { id?: unknown; question?: unknown })
+          : ({} as { id?: unknown; question?: unknown })
+      )
+      .map((q) => ({ id: String(q.id ?? ''), question: String(q.question ?? '') }))
+      .filter((q) => q.id && q.question)
+  }, [args])
+  const { cancelled, byId } = useMemo(() => {
+    try {
+      const data = JSON.parse(result) as {
+        cancelled?: boolean
+        answers?: { id?: string; answer?: string; selections?: string[] }[]
+      }
+      const map: Record<string, string> = {}
+      for (const a of data.answers ?? []) {
+        if (!a.id) continue
+        map[a.id] =
+          a.selections && a.selections.length > 0 ? a.selections.join(', ') : (a.answer ?? '')
+      }
+      return { cancelled: !!data.cancelled, byId: map }
+    } catch {
+      return { cancelled: false, byId: {} }
+    }
+  }, [result])
+  if (questions.length === 0) {
+    return <pre className="chat-tool-result">{result}</pre>
+  }
+  return (
+    <div className="ask-tool-summary">
+      {cancelled && <div className="ask-tool-cancelled">Cancelled by user</div>}
+      {questions.map((q, i) => (
+        <div key={q.id} className="ask-tool-item">
+          <div className="ask-tool-qlabel">Question {i + 1}</div>
+          <div className="ask-tool-qtext">{q.question}</div>
+          <div className="ask-tool-atext">{byId[q.id] ?? (cancelled ? '—' : '…')}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   const activeProject = useAppStore((s) => s.activeProject)
   const activeNoteId = useAppStore((s) => s.activeNoteId)
@@ -686,8 +739,10 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
           </div>
           <button
             className="btn small ghost"
-            onClick={() => {
-              if (activeProject) void newChat(activeProject)
+            onClick={async () => {
+              if (!activeProject) return
+              await newChat(activeProject)
+              focusInput()
             }}
             disabled={chatBusy}
             title="Start a new chat"
@@ -786,9 +841,13 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                         ) : null
                       })()}
                     </div>
-                    {expandedTools[tc.id] && tc.result && (
-                      <pre className="chat-tool-result">{tc.result}</pre>
-                    )}
+                    {expandedTools[tc.id] &&
+                      tc.result &&
+                      (tc.name === 'ask_user' ? (
+                        <AskToolSummary args={tc.args} result={tc.result} />
+                      ) : (
+                        <pre className="chat-tool-result">{tc.result}</pre>
+                      ))}
                   </div>
                 ))}
               </div>

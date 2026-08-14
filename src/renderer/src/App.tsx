@@ -6,6 +6,7 @@ import { TodoPanel } from './components/TodoPanel'
 import { MarkdownEditor } from './components/MarkdownEditor'
 import { ChatDrawer } from './components/ChatDrawer'
 import { SettingsDialog } from './components/SettingsDialog'
+import { AskUserDialog } from './components/AskUserDialog'
 import { ModulePanel } from './components/ModulePanel'
 import { ModuleHistoryOverlay } from './components/ModuleHistoryOverlay'
 import { PromptModal, Modal } from './components/Modal'
@@ -185,6 +186,7 @@ function App(): React.JSX.Element {
   const chatOpen = useAppStore((s) => s.chatOpen)
   const settingsOpen = useAppStore((s) => s.settingsOpen)
   const sidebarVisible = useAppStore((s) => s.sidebarVisible)
+  const askRequest = useAppStore((s) => s.askRequest)
   const [sidebarWidth, setSidebarWidth] = useState(280)
   const [chatWidth, setChatWidth] = useState(360)
   const [chatResizing, setChatResizing] = useState(false)
@@ -266,6 +268,11 @@ function App(): React.JSX.Element {
         case 'confirm':
           if (evt.confirm) {
             state.setConfirmRequest(evt.confirm)
+          }
+          break
+        case 'ask':
+          if (evt.ask) {
+            state.setAskRequest(evt.ask)
           }
           break
       }
@@ -358,6 +365,7 @@ function App(): React.JSX.Element {
 
       {settingsOpen && <SettingsDialog />}
       <ConfirmDeleteDialog />
+      <AskUserDialog key={askRequest?.id ?? 'none'} />
       <ModuleHistoryOverlay />
     </div>
   )

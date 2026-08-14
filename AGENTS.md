@@ -195,7 +195,7 @@ src/
 - **Notes:** `list`, `read`, `save`, `create`, `rename`, `delete`
 - **Todos:** `read` (parse checklist), `save` (serialize `- [ ]`/`- [x]`), `toggle`, `deleteCompleted`, `reorder`
 - **Chat history:** `list`, `read`, `write`, `delete`, `rename`
-- **AI:** `send` (message → streamed reply), `getConfig`, `setConfig`, `listModels(baseUrl, apiKey)`, `generateTitle`, `stop`, `clear`, `confirmResponse`, `onStreamEvent` (token chunks + tool-call logs + confirm events)
+- **AI:** `send` (message → streamed reply), `getConfig`, `setConfig`, `listModels(baseUrl, apiKey)`, `generateTitle`, `stop`, `clear`, `confirmResponse`, `askResponse` (human-in-the-loop answers for `ask_user`), `onStreamEvent` (token chunks + tool-call logs + confirm events)
 - **Settings:** `get` (returns `{ rootDir }`), `getAbout` (app name/version + Electron/Chromium/Node versions for the About pane), `chooseRoot` (native folder picker), `changeRoot` (moves data + persists + returns new `{ rootDir }`)
 - **Skills:** `list(project)` (returns `{ global, project }` metas), `read(project, scope, name)` (full content), `save(project, scope, name, { description, content, enabled? })` (upsert → `SkillMeta`), `setEnabled(project, scope, name, enabled)` (toggle → `SkillMeta`), `move(project, scope, name, toScope)` (relocates the skill folder between scopes → `SkillMeta`), `delete(project, scope, name)` (→ boolean)
 - **PDF:** `supportsUpload` (returns the AI settings `uploadPdfEnabled` toggle — user-controlled), `upload` (raw PDF via provider Responses API `input_file` — uploads base64 through the Files API, falling back to inline `file_data`)
@@ -231,7 +231,7 @@ ChatPanel (renderer) ──send──▶ Main process
   `.pdf` via pdf-parse, any text file as raw text) before responding — so previously dropped
   files can be reused without re-dragging.
 
-### Tools (16 total)
+### Tools (17 total)
 
 | Tool           | Action                                                                                                          |
 | -------------- | --------------------------------------------------------------------------------------------------------------- |
@@ -251,6 +251,7 @@ ChatPanel (renderer) ──send──▶ Main process
 | `delete_skill` | delete a skill (requires user confirmation dialog)                                                              |
 | `web_search`   | DuckDuckGo HTML search, no API key, Node fetch in main (user-agent header, rate-limit errors surfaced to model) |
 | `web_fetch`    | direct fetch + cheerio local parse (strip scripts/styles/nav, extract title + readable text) — fully private    |
+| `ask_user`     | ask the user 1–8 choice/free-text questions in a wizard dialog (radio / checkboxes / free text); chat-only     |
 
 ### PDF attachments (drag & drop into chat)
 
@@ -280,6 +281,9 @@ ChatPanel (renderer) ──send──▶ Main process
 - `create_note` / `update_note` tool bubbles show a clickable `📄 <note>` pill in the header (CSS
   truncated, max-width 180px) that opens the note, whether the bubble is collapsed or expanded.
   Parsed from the tool result JSON (`{ ok, note }`) via `noteIdFromToolCall`.
+- `ask_user` tool bubbles show a compact **Q&A summary** (question → answer lines) instead of raw
+  JSON in the expanded result, mapping tool args (`questions`) to the tool result (`answers` by id);
+  cancelled runs show a "Cancelled by user" line.
 - Note slugs are Unicode-safe: non-Latin scripts (e.g. Thai) keep their characters, including combining
   marks (`\p{M}`); only Latin combining accents (`\u0300-\u036f`) are stripped (see `slugify`).
 - **Slash commands:** typing `/` at the start of the chat input opens a popup of built-in commands
@@ -335,7 +339,8 @@ Two-panel dialog (`.settings-layout` with `.settings-nav` + `.settings-pane`):
 
 - DuckDuckGo scraping can be rate-limited; errors are surfaced to the model so it can retry/adapt.
 - Bing Search API retired Aug 2025 and Brave dropped its free tier — avoid both.
-- Tool count is 16 (AGENTS.md's ~10 is a guideline; acceptable tradeoff for the skills feature).
+- Tool count is 17 (AGENTS.md's ~10 is a guideline; acceptable tradeoff for the skills + HITL features).
+- `ask_user` is **chat-only**: module subagents never receive it (filtered out of the module tool list), and `ToolContext.ask` is absent in module runs so it can never pop a dialog from a background run.
 - API key must never be committed or bundled into the renderer.
 - The persistent project registry only records known project names/paths — it never stores file contents; the folder on disk remains the source of truth.
 - `note:<notename>` uses the note's slugified file name (as shown in the Notes list), so the `@` picker should insert the exact list name.

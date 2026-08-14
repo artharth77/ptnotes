@@ -3,7 +3,7 @@ import { duckDuckGoSearch } from './search/duckduckgo'
 import { fetchWebPage } from './search/webFetch'
 import { slugify } from '@shared/slug'
 import { readFileAsText } from './reader'
-import type { ConfirmRequest, SkillScope } from '@shared/types'
+import type { AskAnswer, AskQuestion, AskRequest, ConfirmRequest, SkillScope } from '@shared/types'
 
 export interface ToolContext {
   service: PTNotesService
@@ -11,6 +11,8 @@ export interface ToolContext {
   /** The note the user is currently viewing, if any. */
   activeNoteId?: string | null
   confirm: (req: Omit<ConfirmRequest, 'id'>) => Promise<boolean>
+  /** Present only in the interactive chat (module subagents never provide it). */
+  ask?: (req: Omit<AskRequest, 'id'>) => Promise<{ answers: AskAnswer[]; cancelled?: boolean }>
 }
 
 export interface PTTool {
@@ -689,6 +691,94 @@ export const tools: PTTool[] = [
         return JSON.stringify({ ok: false, error: `Skill "${name}" (${scope}) not found` })
       }
       return JSON.stringify({ ok: true, scope, name, project })
+    }
+  },
+  {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'ask_user',
+        description:
+          'Ask the user for input — a choice, a detail, or confirmation — before continuing. You may include several questions in a single call; the user answers them all at once in a dialog. Each question has an id and question text, plus optional predefined options (2-6 choices; omit options for free text, set multiple true for multi-select). Only call this when you genuinely need input from the user.',
+        parameters: {
+          type: 'object',
+          properties: {
+            questions: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string', description: 'Stable identifier for the question' },
+                  question: { type: 'string', description: 'The question to ask' },
+                  options: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Predefined choices (2-6). Omit for free text.'
+                  },
+                  multiple: {
+                    type: 'boolean',
+                    description: 'True to allow selecting multiple options (checkboxes).'
+                  }
+                },
+                required: ['id', 'question']
+              },
+              description: '1-8 questions to ask the user'
+            }
+          },
+          required: ['questions']
+        }
+      }
+    },
+    async execute(args, ctx) {
+      const raw = Array.isArray(args.questions) ? (args.questions as unknown[]) : []
+      if (raw.length === 0) {
+        return JSON.stringify({
+          ok: false,
+          error: 'ask_user requires a non-empty questions array.'
+        })
+      }
+      if (raw.length > 8) {
+        return JSON.stringify({
+          ok: false,
+          error: 'ask_user supports at most 8 questions per call.'
+        })
+      }
+      const questions: AskQuestion[] = []
+      for (const item of raw) {
+        const q = (typeof item === 'object' && item !== null ? item : {}) as Record<string, unknown>
+        const id = String(q.id ?? '').trim()
+        const question = String(q.question ?? '').trim()
+        if (!id || !question) {
+          return JSON.stringify({
+            ok: false,
+            error: 'Each question needs a non-empty id and question text.'
+          })
+        }
+        const options = Array.isArray(q.options)
+          ? q.options.map(String).filter((s) => s.trim().length > 0)
+          : []
+        if (options.length > 0 && (options.length < 2 || options.length > 6)) {
+          return JSON.stringify({
+            ok: false,
+            error: `Question "${id}" needs 2-6 options, or none for free text.`
+          })
+        }
+        questions.push({
+          id,
+          question,
+          ...(options.length > 0 ? { options } : {}),
+          ...(options.length > 0 && q.multiple === true ? { multiple: true } : {})
+        })
+      }
+      if (!ctx.ask) {
+        return JSON.stringify({ ok: false, error: 'ask_user requires the interactive chat' })
+      }
+      const res = await ctx.ask({ project: ctx.activeProject, questions })
+      return JSON.stringify({
+        ok: !res.cancelled,
+        cancelled: !!res.cancelled,
+        answers: res.answers
+      })
     }
   }
 ]

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type {
+  AskRequest,
   ChatMessage,
   ChatSessionMeta,
   ConfirmRequest,
@@ -30,6 +31,7 @@ interface AppState {
   chatBusy: boolean
   chatStreamProject: string | null
   confirmRequest: ConfirmRequest | null
+  askRequest: AskRequest | null
   settingsOpen: boolean
   settingsCategory: 'storage' | 'ai' | 'modules' | 'about' | 'skills'
   skillEditRequest: string | null
@@ -63,6 +65,7 @@ interface AppState {
   setChatBusy: (busy: boolean) => void
   setChatStreamProject: (project: string | null) => void
   setConfirmRequest: (req: ConfirmRequest | null) => void
+  setAskRequest: (req: AskRequest | null) => void
   setSettingsOpen: (open: boolean) => void
   setSettingsCategory: (category: 'storage' | 'ai' | 'modules' | 'about' | 'skills') => void
   openSettings: (category?: 'storage' | 'ai' | 'modules' | 'about' | 'skills') => void
@@ -97,6 +100,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   chatBusy: false,
   chatStreamProject: null,
   confirmRequest: null,
+  askRequest: null,
   settingsOpen: false,
   settingsCategory: 'storage',
   skillEditRequest: null,
@@ -410,6 +414,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setConfirmRequest(req) {
     set({ confirmRequest: req })
+  },
+
+  setAskRequest(req) {
+    set({ askRequest: req })
   },
 
   setSettingsOpen(settingsOpen) {
