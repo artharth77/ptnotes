@@ -1464,6 +1464,11 @@ body {
 .ProseMirror a {
   color: var(--accent);
   text-decoration: underline;
+  cursor: text;
+}
+
+.editor-content.mod-key-down a:hover {
+  cursor: pointer;
 }
 
 .editor-meta {

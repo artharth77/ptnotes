@@ -41,6 +41,7 @@ import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { TableKit } from '@tiptap/extension-table'
 import { useAppStore } from '../store/useAppStore'
+import { slugify } from '@shared/slug'
 import { PromptModal } from './Modal'
 import { MdiIcon } from './MdiIcon'
 
@@ -76,6 +77,38 @@ function ToolbarBtn({
 }
 
 const bubbleMenuKey = new PluginKey('formatHelperBubble')
+
+function internalNameFromHref(href: string, prefix: string): string {
+  const raw = href.slice(prefix.length)
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
+  }
+}
+
+function handleEditorLink(href: string): void {
+  if (href.startsWith('note:')) {
+    const name = slugify(internalNameFromHref(href, 'note:'))
+    const st = useAppStore.getState()
+    const note =
+      st.notes.find((n) => n.id === name) ??
+      st.notes.find((n) => n.name === name) ??
+      st.notes.find((n) => n.name.includes(name))
+    if (!note) return
+    void st.selectNote(note.id)
+    st.setTab('notes')
+  } else if (href.startsWith('skill:')) {
+    const name = slugify(internalNameFromHref(href, 'skill:'))
+    useAppStore.getState().openSkillEditor(name)
+  } else if (href.startsWith('file:')) {
+    const name = internalNameFromHref(href, 'file:')
+    const project = useAppStore.getState().activeProject
+    if (project) void window.ptnotes.files.revealByName(project, name)
+  } else {
+    window.open(href, '_blank')
+  }
+}
 
 function FormatButtons({
   editor,
@@ -180,7 +213,7 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
       }),
       Placeholder.configure({ placeholder: 'Start writing…' }),
       Typography,
-      Link.configure({ openOnClick: false, autolink: true }),
+      Link.configure({ openOnClick: false, autolink: true, protocols: ['note', 'skill', 'file'] }),
       TaskList,
       TaskItem.configure({ nested: true }),
       TableKit
@@ -241,6 +274,7 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
   const [formatMenu, setFormatMenu] = useState<{ x: number; y: number } | null>(null)
   const [rawMode, setRawMode] = useState(false)
   const [rawText, setRawText] = useState('')
+  const [modKeyDown, setModKeyDown] = useState(false)
 
   useEffect(() => {
     if (!tableMenu && !formatMenu) return
@@ -253,6 +287,43 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [tableMenu, formatMenu])
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key === 'Meta' || e.key === 'Control') setModKeyDown(true)
+    }
+    const onKeyUp = (e: KeyboardEvent): void => {
+      if (e.key === 'Meta' || e.key === 'Control') setModKeyDown(false)
+    }
+    const onBlur = (): void => setModKeyDown(false)
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!editor) return
+    const dom = editor.view.dom
+    const onClick = (e: MouseEvent): void => {
+      const target = e.target instanceof Element ? e.target : null
+      const link = target?.closest('a[href]')
+      if (!link) return
+      if (e.metaKey || e.ctrlKey) {
+        e.preventDefault()
+        e.stopPropagation()
+        handleEditorLink(link.getAttribute('href') ?? '')
+      } else {
+        e.preventDefault()
+      }
+    }
+    dom.addEventListener('click', onClick, true)
+    return () => dom.removeEventListener('click', onClick, true)
+  }, [editor])
 
   if (!editor) {
     return <div className="editor empty-state">Loading editor…</div>
@@ -450,7 +521,7 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
       ) : (
         <EditorContent
           editor={editor}
-          className="editor-content"
+          className={`editor-content${modKeyDown ? ' mod-key-down' : ''}`}
           onContextMenu={(e) => {
             const target = e.target instanceof Element ? e.target : null
             if (target?.closest('table')) {

@@ -35,6 +35,14 @@ export function registerFilesIpc(
     shell.showItemInFolder(path)
   })
 
+  ipcMain.handle(
+    'files:revealByName',
+    async (_e: IpcMainInvokeEvent, project: string, fileName: string): Promise<void> => {
+      const full = await service.projectFilePath(project, fileName)
+      if (full) shell.showItemInFolder(full)
+    }
+  )
+
   ipcMain.handle('pdf:supportsUpload', async (): Promise<boolean> => {
     const config = await configStore.load()
     return config.uploadPdfEnabled ?? true
