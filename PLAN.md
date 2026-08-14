@@ -6,7 +6,7 @@
 
 - **Goal 1 — Human-in-the-Loop (`ask_user`)** — see below.
 - **Goal 2 — Chat keyboard shortcuts** — see below.
-- Goal 3 — *(to be defined)*
+- **Goal 3 — Markdown editor table bug** — see below.
 
 ---
 
@@ -332,3 +332,151 @@ npm run build
 plus manual QA: new chat + history toggle from the focused input, history
 `↑`/`↓`/`Enter`, chat-list `Ctrl+Home`/`Ctrl+End`/`Ctrl+PageUp`/`Ctrl+PageDown`,
 and the global `Cmd/Ctrl+Shift+C` panel toggle.
+
+---
+
+## Goal 3: Markdown editor table bug
+
+The TipTap editor does not show markdown tables in notes — the whole table is
+silently dropped on parse (and would serialize to `''`). Fix rendering +
+round-trip and add an Insert Table toolbar button.
+
+### Root cause (confirmed)
+
+`StarterKit` does **not** include table extensions in TipTap v3, and no table
+extensions are registered in `MarkdownEditor.tsx`. `@tiptap/markdown` lexes a
+GFM table into a `table` marked token (via the `Table` extension's custom
+`markdownTokenizer`); with no registered handler, `MarkdownManager.parseToken`
+falls through to `parseFallbackToken` → `null`, dropping the entire table.
+Serialization returns `''` for node types with no `renderMarkdown` handler.
+
+Verified by probing the current setup:
+`NODE TYPES: ["heading"]` (table content vanished).
+`@tiptap/extension-table@3.29.2` ships full markdown integration
+(`parseMarkdown` / `renderMarkdown` / `markdownTokenizer`); a throwaway install
+round-trips idempotently:
+
+```
+| Name  | Age | City    |
+| ----- | --- | ------- |
+| Alice | 30  | Paris   |
+| Bob   | 25  | Bangkok |
+```
+
+### Scope decisions (locked in)
+
+| Area              | Decision                                                                                                                                              |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Table extensions  | `TableKit` from `@tiptap/extension-table@^3.29.2` (bundles `Table` / `TableRow` / `TableCell` / `TableHeader`); default `resizable: false` — no extra plugins |
+| Markdown round-trip | Parse + serialize both work out of the box (extension ships `parseMarkdown`/`renderMarkdown`); serialization normalizes cell padding (cosmetic, idempotent) |
+| Toolbar button    | **Insert Table** button added next to Horizontal rule → `insertTable({ rows: 3, cols: 3, withHeaderRow: true })`; active state when cursor is inside a table |
+| Row/column controls | Contextual toolbar group (approach A), shown only while the cursor is inside a table (`isTable`): insert/delete column before+after, insert/delete row before+after, **Delete Table** (no merge/split — plain markdown tables can't represent merged cells). Built-in keymap already handles `Tab`/`Shift+Tab` cell navigation |
+| Scope             | Editor-only fix; chat already renders tables via `react-markdown` GFM. No main-process/IPC changes                                                       |
+
+### Files to change
+
+- `package.json` (add `@tiptap/extension-table`)
+- `src/renderer/src/components/MarkdownEditor.tsx`
+- `src/renderer/src/assets/main.css`
+- `scripts/test-markdown.mts`
+- `CHANGELOG.md`
+
+### 1. Dependency — `package.json`
+
+```bash
+npm install -D @tiptap/extension-table@^3.29.2
+```
+
+(devDependency, matching the other `@tiptap/*` packages.)
+
+### 2. Renderer — `MarkdownEditor.tsx`
+
+- Import `TableKit` from `@tiptap/extension-table` and `mdiTablePlus` from `@mdi/js`.
+- Add `TableKit` to the `extensions` array in `useEditor` (the `Markdown`
+  extension already present handles the markdown in/out integration).
+- Add `isTable: ed.isActive('table')` to the `useEditorState` selector.
+- New toolbar button (after Horizontal rule):
+  `editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()`,
+  `active={state.isTable}`.
+
+### 3. CSS — `main.css`
+
+Add `.ProseMirror` table styles (dark-mode aware via existing CSS vars,
+mirroring the chat `.markdown-body` look at editor scale):
+
+- `table { border-collapse: collapse; width: 100%; margin: 0 0 10px; }`
+- `th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: top; }`
+- `th { background: var(--bg-hover); font-weight: 600; }`
+- `th.selectedCell, td.selectedCell { background: var(--accent-soft); }`
+
+### 4. Tests — `scripts/test-markdown.mts`
+
+Add `TableKit` to the extension list and assert:
+- parse a GFM table → JSON contains `table` / `tableRow` / `tableHeader` / `tableCell`.
+- serialize → re-parse produces the same table (round-trip idempotent).
+
+### 5. Docs — `CHANGELOG.md`
+
+Add a v0.7.0 **Fixed** entry (editor renders markdown tables) + **Added** note
+for the Insert Table toolbar button.
+
+### 6. Table row/column toolbar controls (approved follow-up)
+
+The `@tiptap/extension-table` `Table` extension already exposes the commands
+(`addColumnBefore/After`, `deleteColumn`, `addRowBefore/After`, `deleteRow`,
+`deleteTable`) plus a built-in keymap (`Tab` next cell with
+auto-append row at table end, `Shift+Tab` previous cell, `Delete`/`Backspace` on
+a fully-selected table deletes it) — there is just no UI. Add a **contextual
+toolbar group** shown only while the cursor is inside a table:
+
+- `src/renderer/src/components/MarkdownEditor.tsx`:
+  - Imports: MDI icons `mdiTableColumnPlusBefore/After`, `mdiTableColumnRemove`,
+    `mdiTableRowPlusBefore/After`, `mdiTableRowRemove`, `mdiTableRemove`.
+  - `useEditorState` selector additions:
+    `canDeleteColumn: ed.can().deleteColumn()` (false at 1 column),
+    `canDeleteRow: ed.can().deleteRow()` (false at 1 row).
+  - When `state.isTable`, render after the Insert Table button a `tb-sep` +
+    6 buttons mapping to the commands above; Delete column/row disabled via the
+    can-states. The group auto-mounts/unmounts with `isTable`.
+  - **No merge/split** — plain markdown tables can't represent merged cells, so
+    `mergeOrSplit` is intentionally not exposed.
+- No CSS changes (reuses `.tb-btn`/`.tb-sep`). No new dependencies.
+- `CHANGELOG.md`: extend the "Tables in the markdown editor" Added entry with the
+  row/column/delete controls.
+
+### 7. Table cell right-click context menu (approved follow-up)
+
+Right-clicking any table cell opens a `.note-menu` (same pattern as TodoPanel /
+NoteList / SettingsDialog — `.menu-overlay` + `.note-menu` + `.note-menu-item`)
+at the cursor with the **same actions as the toolbar** (insert/delete column and
+row, delete table).
+
+- `src/renderer/src/components/MarkdownEditor.tsx`:
+  - State `tableMenu: { x, y } | null`; `useEffect` clears it when
+    `!state.isTable` and on `Escape` (app convention: Escape closes popups).
+  - `onContextMenu` on `<EditorContent>` (EditorContentProps forwards DOM props):
+    - `e.target.closest('table')` gates the menu; otherwise close + default menu.
+    - `e.preventDefault()`; place the caret in the clicked cell via
+      `editor.view.posAtCoords({ left: e.clientX, top: e.clientY })` +
+      `setTextSelection(pos)` so commands act on that cell even when the editor
+      wasn't focused.
+    - Clamp `x/y` to the viewport (menu is fixed-position).
+  - Render `menu-overlay` (click / right-click closes) + `.note-menu` with the
+    7 `note-menu-item` buttons (16px icons), grouped by two `.note-menu-sep`
+    dividers (column | row | delete table); disabled states mirror the toolbar
+    (`canDeleteColumn`/`canDeleteRow`), Delete table `.danger`.
+- `main.css`: add `.note-menu-sep { height: 1px; background: var(--border); margin: 4px 6px; }`.
+  Everything else reuses existing `note-menu` styles.
+- `CHANGELOG.md`: extend the "Tables in the markdown editor" entry with the
+  right-click context menu.
+
+### Verification
+
+```bash
+npm run test         # includes scripts/test-markdown.mts
+npm run typecheck
+npm run lint
+```
+
+plus manual QA: open a note containing a markdown table → renders as a table;
+edit a cell → auto-save keeps valid markdown; Insert Table creates a 3×3 table.

@@ -28,6 +28,17 @@ All notable changes to PTNotes are documented in this file.
 - While the chat input is focused, **`Ctrl+Home`** / **`Ctrl+End`** scroll the chat message list to the top / bottom and **`Ctrl+PageUp`** / **`Ctrl+PageDown`** scroll it by one page (uses `Ctrl` on all platforms, including macOS).
 - **`Cmd/Ctrl+Shift+C`** toggles the chat panel from anywhere — identical to the top-bar Chat button (handled by a global window listener in `ChatDrawer`, which is always mounted). It is suppressed while any dialog/modal is open (a `.modal-overlay` or `.module-history-backdrop` in the DOM).
 
+#### Tables in the markdown editor
+
+- New **Insert Table** toolbar button (next to the link button) creates a 3×3 table with a header row (`insertTable`).
+- While the cursor is inside a table, a contextual toolbar group appears: **insert/delete column** (before/after), **insert/delete row** (before/after), and **Delete Table**. Delete column/row disable at 1 column/row. (No merge/split — plain markdown tables can't represent merged cells.)
+- **Right-click a table cell** for the same actions as a context menu at the cursor (caret moves to the clicked cell so commands target it). Closes on Escape, outside click, or another right-click.
+- Table cells use the app's border/header style with a soft highlight for the selected cell.
+
+### Fixed
+
+- **Markdown tables now render in the note editor**: TipTap's `StarterKit` doesn't include table extensions in v3, so `@tiptap/markdown` silently dropped the whole `<table>` on parse. The `@tiptap/extension-table` `TableKit` (Table/TableRow/TableCell/TableHeader) is now registered, so tables in notes display as real tables and round-trip to valid markdown on save.
+
 ## [0.6.0] — 2026-08-13
 
 ### Added
