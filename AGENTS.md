@@ -286,6 +286,20 @@ ChatPanel (renderer) ──send──▶ Main process
   cancelled runs show a "Cancelled by user" line.
 - Note slugs are Unicode-safe: non-Latin scripts (e.g. Thai) keep their characters, including combining
   marks (`\p{M}`); only Latin combining accents (`\u0300-\u036f`) are stripped (see `slugify`).
+- **Keyboard shortcuts:** with the cursor in the chat input box, `Cmd/Ctrl+Shift+N` starts a new chat
+  and `Cmd/Ctrl+Shift+H` toggles the chat history popup (Shift-modified to avoid the default menu's
+  `Cmd+N` New Window / `Cmd+H` Hide accelerators — no main-process menu changes); opening via the
+  shortcut blurs the input, closing refocuses it. Globally, `Cmd/Ctrl+Shift+C` toggles the chat
+  panel (mirrors the top-bar Chat button, handled by a window listener in ChatDrawer, which is
+  always mounted); it is suppressed while any dialog/modal is open (a `.modal-overlay` or
+  `.module-history-backdrop` present in the DOM). The history popup is
+  keyboard-navigable: `↑`/`↓` move the active selector (highlighted via `.chat-history-item.active`,
+  auto-scrolled into view), mouse move re-syncs the selector to the pointer,
+  `Enter` opens the selected session, `Escape` closes and refocuses the input (nav keys skipped
+  while renaming). While the chat
+  input is focused, `Ctrl+Home`/`Ctrl+End` scroll the chat list to top/bottom and
+  `Ctrl+PageUp`/`Ctrl+PageDown` page it (Ctrl on all platforms). Platform is detected via
+  `window.electron.process.platform === 'darwin'`.
 - **Slash commands:** typing `/` at the start of the chat input opens a popup of built-in commands
   (`/new` → new chat, `/models` → open AI Settings) and **enabled skills** (≤10 rows). Typing filters
   (name + description); **Tab** autocompletes the command + a trailing space to type args; **Enter**
