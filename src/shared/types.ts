@@ -132,12 +132,43 @@ export interface ToolCallInfo {
 }
 
 export interface ChatStreamEvent {
-  type: 'message-start' | 'content' | 'tool' | 'message-end' | 'error' | 'confirm'
+  type: 'message-start' | 'content' | 'tool' | 'message-end' | 'error' | 'confirm' | 'ask'
   messageId?: string
   content?: string
   toolCall?: ToolCallInfo
   confirm?: ConfirmRequest
+  ask?: AskRequest
   error?: string
+}
+
+// ---- Human-in-the-loop (`ask_user` tool) ----
+
+export interface AskQuestion {
+  id: string
+  question: string
+  /** Empty/omitted → free-text input. Present → single-select radio (or checkbox multi-select when `multiple`). */
+  options?: string[]
+  multiple?: boolean
+}
+
+export interface AskRequest {
+  id: string
+  project: string
+  questions: AskQuestion[]
+}
+
+export interface AskAnswer {
+  id: string
+  /** Selected option text, joined multi-select, or typed free text. */
+  answer: string
+  /** Full selection list when `multiple`. */
+  selections?: string[]
+}
+
+export interface AskResponse {
+  id: string
+  answers: AskAnswer[]
+  cancelled?: boolean
 }
 
 export interface ConfirmRequest {

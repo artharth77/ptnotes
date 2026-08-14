@@ -8,6 +8,9 @@ import type { ToolsProvider } from '../ai/chatSession'
 import { createClient } from '../ai/client'
 import type {
   AIProviderConfig,
+  AskAnswer,
+  AskRequest,
+  AskResponse,
   ChatMessage,
   ChatStreamEvent,
   ConfirmRequest,
@@ -15,12 +18,19 @@ import type {
 } from '@shared/types'
 
 const CONFIRM_TIMEOUT_MS = 60_000
+const ASK_TIMEOUT_MS = 120_000
+
+export interface AskResult {
+  answers: AskAnswer[]
+  cancelled?: boolean
+}
 
 export interface SessionRegistry {
   getSession(event: IpcMainInvokeEvent, project: string): ChatSession
   clear(project: string): void
   stop(project: string): void
   respond(resp: ConfirmResponse): void
+  askResponse(resp: AskResponse): void
 }
 
 export function createSessionRegistry(
@@ -32,6 +42,10 @@ export function createSessionRegistry(
   const pendingConfirms = new Map<
     string,
     { resolve: (approved: boolean) => void; timer: NodeJS.Timeout }
+  >()
+  const pendingAsks = new Map<
+    string,
+    { resolve: (res: AskResult) => void; timer: NodeJS.Timeout }
   >()
 
   return {
@@ -60,6 +74,20 @@ export function createSessionRegistry(
               })
               send({ type: 'confirm', confirm: { id, ...req } })
               return promise
+            },
+            ask: (req: Omit<AskRequest, 'id'>) => {
+              const id = randomUUID()
+              const timer = setTimeout(() => {
+                const pending = pendingAsks.get(id)
+                if (!pending) return
+                pendingAsks.delete(id)
+                pending.resolve({ answers: [], cancelled: true })
+              }, ASK_TIMEOUT_MS)
+              const promise = new Promise<AskResult>((resolve) => {
+                pendingAsks.set(id, { resolve, timer })
+              })
+              send({ type: 'ask', ask: { id, ...req } })
+              return promise
             }
           },
           send,
@@ -81,6 +109,13 @@ export function createSessionRegistry(
       clearTimeout(pending.timer)
       pendingConfirms.delete(resp.id)
       pending.resolve(resp.approved)
+    },
+    askResponse(resp) {
+      const pending = pendingAsks.get(resp.id)
+      if (!pending) return
+      clearTimeout(pending.timer)
+      pendingAsks.delete(resp.id)
+      pending.resolve({ answers: resp.answers, cancelled: !!resp.cancelled })
     }
   }
 }
@@ -153,6 +188,10 @@ export function registerAiIpc(registry: SessionRegistry, configStore: AIConfigSt
 
   ipcMain.handle('ai:confirmResponse', async (_e, resp: ConfirmResponse): Promise<void> => {
     registry.respond(resp)
+  })
+
+  ipcMain.handle('ai:askResponse', async (_e, resp: AskResponse): Promise<void> => {
+    registry.askResponse(resp)
   })
 
   ipcMain.handle(

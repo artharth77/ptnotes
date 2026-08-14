@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type {
+  AskRequest,
   ChatMessage,
   ChatSessionMeta,
   ConfirmRequest,
@@ -30,10 +31,12 @@ interface AppState {
   chatBusy: boolean
   chatStreamProject: string | null
   confirmRequest: ConfirmRequest | null
+  askRequest: AskRequest | null
   settingsOpen: boolean
   settingsCategory: 'storage' | 'ai' | 'modules' | 'about' | 'skills'
   skillEditRequest: string | null
   sidebarVisible: boolean
+  formatHelperEnabled: boolean
   loading: boolean
 
   init: () => Promise<void>
@@ -63,12 +66,14 @@ interface AppState {
   setChatBusy: (busy: boolean) => void
   setChatStreamProject: (project: string | null) => void
   setConfirmRequest: (req: ConfirmRequest | null) => void
+  setAskRequest: (req: AskRequest | null) => void
   setSettingsOpen: (open: boolean) => void
   setSettingsCategory: (category: 'storage' | 'ai' | 'modules' | 'about' | 'skills') => void
   openSettings: (category?: 'storage' | 'ai' | 'modules' | 'about' | 'skills') => void
   openSkillEditor: (name: string) => void
   clearSkillEditRequest: () => void
   setSidebarVisible: (visible: boolean) => void
+  setFormatHelperEnabled: (enabled: boolean) => void
   newChat: (project: string) => Promise<void>
   openChat: (project: string, sessionId: string) => Promise<void>
   deleteChat: (project: string, sessionId: string) => Promise<void>
@@ -97,10 +102,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   chatBusy: false,
   chatStreamProject: null,
   confirmRequest: null,
+  askRequest: null,
   settingsOpen: false,
   settingsCategory: 'storage',
   skillEditRequest: null,
   sidebarVisible: true,
+  formatHelperEnabled: localStorage.getItem('ptnotes:formatHelper') !== '0',
   loading: false,
 
   async init() {
@@ -412,6 +419,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ confirmRequest: req })
   },
 
+  setAskRequest(req) {
+    set({ askRequest: req })
+  },
+
   setSettingsOpen(settingsOpen) {
     set({ settingsOpen })
   },
@@ -434,5 +445,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setSidebarVisible(sidebarVisible) {
     set({ sidebarVisible })
+  },
+
+  setFormatHelperEnabled(enabled) {
+    localStorage.setItem('ptnotes:formatHelper', enabled ? '1' : '0')
+    set({ formatHelperEnabled: enabled })
   }
 }))

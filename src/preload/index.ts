@@ -3,6 +3,7 @@ import { electronAPI } from '@electron-toolkit/preload'
 import type {
   AboutInfo,
   AIProviderConfig,
+  AskResponse,
   ChatMessage,
   ChatSessionMeta,
   ChatStreamEvent,
@@ -87,6 +88,7 @@ const api = {
     stop: (project: string): Promise<void> => ipcRenderer.invoke('ai:stop', project),
     confirmResponse: (resp: ConfirmResponse): Promise<void> =>
       ipcRenderer.invoke('ai:confirmResponse', resp),
+    askResponse: (resp: AskResponse): Promise<void> => ipcRenderer.invoke('ai:askResponse', resp),
     clear: (project: string): Promise<void> => ipcRenderer.invoke('ai:clear', project),
     generateTitle: (project: string, firstMessage: string): Promise<string> =>
       ipcRenderer.invoke('ai:generateTitle', project, firstMessage),
@@ -146,7 +148,9 @@ const api = {
     copyToProject: (project: string, sourcePath: string, fileName?: string): Promise<string> =>
       ipcRenderer.invoke('files:copyToProject', project, sourcePath, fileName),
     extract: (path: string): Promise<PdfExtractResult> => ipcRenderer.invoke('files:extract', path),
-    reveal: (path: string): Promise<void> => ipcRenderer.invoke('files:reveal', path)
+    reveal: (path: string): Promise<void> => ipcRenderer.invoke('files:reveal', path),
+    revealByName: (project: string, fileName: string): Promise<void> =>
+      ipcRenderer.invoke('files:revealByName', project, fileName)
   },
   modules: {
     list: (project: string): Promise<ModuleRun[]> => ipcRenderer.invoke('modules:list', project),

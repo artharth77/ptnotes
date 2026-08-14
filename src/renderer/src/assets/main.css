@@ -682,6 +682,12 @@ body {
   background: var(--bg-hover);
 }
 
+.note-menu-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 6px;
+}
+
 .note-menu-item.danger {
   color: var(--danger);
 }
@@ -1315,6 +1321,27 @@ body {
   padding: 24px 28px;
 }
 
+.editor-raw {
+  flex: 1;
+  width: 100%;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.65;
+  padding: 24px 28px;
+  box-sizing: border-box;
+}
+
+.editor-meta-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .ProseMirror {
   max-width: 780px;
   margin: 0 auto;
@@ -1402,6 +1429,30 @@ body {
   margin: 16px 0;
 }
 
+.ProseMirror table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0 0 10px;
+}
+
+.ProseMirror th,
+.ProseMirror td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.ProseMirror th {
+  background: var(--bg-hover);
+  font-weight: 600;
+}
+
+.ProseMirror th.selectedCell,
+.ProseMirror td.selectedCell {
+  background: var(--accent-soft);
+}
+
 .ProseMirror p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   color: var(--text-faint);
@@ -1413,9 +1464,18 @@ body {
 .ProseMirror a {
   color: var(--accent);
   text-decoration: underline;
+  cursor: text;
+}
+
+.editor-content.mod-key-down a:hover {
+  cursor: pointer;
 }
 
 .editor-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 6px 14px;
   border-top: 1px solid var(--border);
   font-size: 11px;
@@ -1426,6 +1486,72 @@ body {
   background: var(--bg-hover);
   border-radius: 4px;
   padding: 1px 5px;
+}
+
+.format-helper-toggle {
+  min-width: 24px;
+  height: 24px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 11px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  justify-content: center;
+}
+
+.format-helper-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.format-helper-toggle.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.bubble-menu {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  z-index: 95;
+  position: relative;
+}
+
+.bubble-close {
+  position: absolute;
+  top: -9px;
+  right: -9px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--bg-elev);
+  color: var(--text-dim);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow);
+}
+
+.bubble-close:hover {
+  color: var(--danger);
+}
+
+.note-menu-item.active {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* ---------- Empty states ---------- */
@@ -1641,6 +1767,10 @@ body {
 }
 
 .chat-history-item:hover {
+  background: var(--bg-hover);
+}
+
+.chat-history-item.active {
   background: var(--bg-hover);
 }
 
@@ -3095,6 +3225,235 @@ body {
 .module-card-summary {
   font-size: 12px;
   line-height: 1.5;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- Ask user dialog (ask_user tool, human-in-the-loop) ---------- */
+
+.modal.ask-dialog {
+  width: 660px;
+  max-width: calc(100vw - 40px);
+}
+
+.ask-layout {
+  display: flex;
+  gap: 16px;
+  min-height: 260px;
+  max-height: 62vh;
+}
+
+.ask-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 170px;
+  max-width: 220px;
+  padding-right: 12px;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.ask-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ask-nav-item:hover {
+  background: var(--bg-hover);
+}
+
+.ask-nav-item.unanswered {
+  opacity: 0.45;
+}
+
+.ask-nav-item.unanswered:hover,
+.ask-nav-item.unanswered.active {
+  opacity: 1;
+}
+
+.ask-nav-item.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.ask-nav-index {
+  flex: none;
+  width: 18px;
+  font-weight: 600;
+  color: var(--text-faint);
+}
+
+.ask-nav-item.active .ask-nav-index {
+  color: var(--accent);
+}
+
+.ask-nav-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ask-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  outline: none;
+}
+
+.ask-question-full {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.ask-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+}
+
+.ask-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  user-select: none;
+}
+
+.ask-option:hover {
+  background: var(--bg-hover);
+}
+
+.ask-option.cursor {
+  border-color: var(--accent);
+}
+
+.ask-option.checked {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ask-option-bullet {
+  flex: none;
+  width: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ask-option-label {
+  overflow-wrap: anywhere;
+}
+
+.ask-free-text {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+
+.ask-free-text:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.ask-confirm-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+.ask-confirm-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-hover);
+}
+
+.ask-confirm-q {
+  font-size: 12px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.ask-confirm-a {
+  font-size: 13px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.ask-confirm-a.missing {
+  color: var(--danger);
+  font-style: italic;
+}
+
+.ask-nav-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.ask-tool-summary {
+  padding: 6px 10px;
+  font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ask-tool-cancelled {
+  font-weight: 600;
+  color: var(--danger);
+}
+
+.ask-tool-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ask-tool-qlabel {
+  font-weight: 700;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.ask-tool-qtext {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.ask-tool-atext {
   color: var(--text-dim);
   overflow-wrap: anywhere;
 }

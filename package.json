@@ -1,6 +1,6 @@
 {
   "name": "ptnotes",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Markdown notes + todo lists + AI assistant, organized by project",
   "main": "./out/main/index.js",
   "author": "",
@@ -18,7 +18,7 @@
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "electron-vite build && electron-builder --mac",
     "build:linux": "electron-vite build && electron-builder --linux",
-    "test": "tsx --tsconfig tsconfig.node.json scripts/test-service.mts && tsx --tsconfig tsconfig.node.json scripts/test-ai.mts && tsx --tsconfig tsconfig.node.json scripts/test-chat.mts && tsx --tsconfig tsconfig.node.json scripts/test-slash.mts && tsx --tsconfig tsconfig.node.json scripts/test-markdown.mts && tsx --tsconfig tsconfig.node.json scripts/test-pdf.mts && tsx --tsconfig tsconfig.node.json scripts/test-modules.mts && tsx --tsconfig tsconfig.node.json scripts/test-docx.mts"
+    "test": "tsx --tsconfig tsconfig.node.json scripts/test-service.mts && tsx --tsconfig tsconfig.node.json scripts/test-ai.mts && tsx --tsconfig tsconfig.node.json scripts/test-chat.mts && tsx --tsconfig tsconfig.node.json scripts/test-ask.mts && tsx --tsconfig tsconfig.node.json scripts/test-slash.mts && tsx --tsconfig tsconfig.node.json scripts/test-markdown.mts && tsx --tsconfig tsconfig.node.json scripts/test-pdf.mts && tsx --tsconfig tsconfig.node.json scripts/test-modules.mts && tsx --tsconfig tsconfig.node.json scripts/test-docx.mts"
   },
   "dependencies": {
     "@antv/infographic": "^0.2.19",
@@ -45,6 +45,7 @@
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@tiptap/extension-link": "^3.29.2",
     "@tiptap/extension-placeholder": "^3.29.2",
+    "@tiptap/extension-table": "^3.29.2",
     "@tiptap/extension-task-item": "^3.29.2",
     "@tiptap/extension-task-list": "^3.29.2",
     "@tiptap/extension-typography": "^3.29.2",

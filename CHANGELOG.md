@@ -2,6 +2,53 @@
 
 All notable changes to PTNotes are documented in this file.
 
+## [0.7.0] — 2026-08-14
+
+### Added
+
+#### Human-in-the-loop — `ask_user` tool
+
+- New **`ask_user`** chat tool (17th) lets the assistant ask the user for input — a choice, a detail, or confirmation — before continuing. The model can pose **1–8 questions** in a single call (validated: non-empty id + question; `options` 2–6 when present, omitted/empty for free text, `multiple: true` for multi-select checkboxes).
+- Questions are presented in a **wizard-style dialog** (`.ask-dialog`, ~660px): left nav with numbered question rows + a final Confirm row (active row highlighted, long text ellipsized, click to jump), right pane showing the full question with a focusable radio / checkbox / free-text input, and Previous / Next at bottom-right.
+- **Require-all-answered** gating: Confirm (and Enter on the confirm pane) stays disabled until every question has an answer; the confirm pane shows a `Q1 → answer` summary and flags missing ones as "Not answered". Enter on the confirm pane with missing answers jumps to the first unanswered question.
+- **Keyboard spec:** `↑`/`↓` move the cursor highlight; `←`/`→` navigate panes (like `Shift+Tab`/`Tab`, except on free-text questions where they move the input caret); radio `Enter`/`Tab`/`Space` commit + next; checkbox `Space`/`Enter` toggle + `Tab` next; free-text `Enter`/`Tab` next; `Shift+Tab` previous; `Escape` cancels.
+- Answers flow back to the model as the tool result (`{ ok, cancelled, answers }`), so the conversation loop continues with the user's input. Unanswered dialogs time out after 120s (treated as cancelled).
+- **Chat-only:** `ask_user` is filtered out of background module subagent tool lists and `ToolContext.ask` is absent in module runs — modules can never pop a dialog.
+- The flow logic (`src/shared/ask.ts`: `initFlow`, `reduce`, `isAllAnswered`, `buildAnswers`) is pure and unit-tested (`scripts/test-ask.mts`), and `ask_user` tool validation/result paths are covered with a mocked `ctx.ask`.
+- `ask_user` tool bubbles in chat show a compact **Q&A summary** (question → answer lines) instead of raw JSON when expanded, with a "Cancelled by user" line for cancelled runs.
+
+#### Chat QoL
+
+- **New Chat focuses the input**: clicking the **+ New Chat** button now moves focus to the chat input so you can start typing right away.
+
+#### Chat keyboard shortcuts
+
+- While the cursor is in the chat input box, **`Cmd/Ctrl+Shift+N`** starts a new chat and **`Cmd/Ctrl+Shift+H`** opens the chat history popup (toggling it closed if already open, refocusing the input). The `Shift`-modified combos avoid the app's default menu accelerators (`Cmd+N` New Window, `Cmd+H` Hide), so no menu changes were needed; opening via the shortcut blurs the input so the popup takes keyboard focus.
+- The **chat history popup is keyboard-navigable**: `↑`/`↓` move the active selector (highlighted row, auto-scrolled into view when out of sight), mouse hover re-syncs the selector to the pointer, `Enter` opens the selected session, `Escape` closes. Works whether the popup was opened by mouse or by `Cmd/Ctrl+Shift+H`.
+- While the chat input is focused, **`Ctrl+Home`** / **`Ctrl+End`** scroll the chat message list to the top / bottom and **`Ctrl+PageUp`** / **`Ctrl+PageDown`** scroll it by one page (uses `Ctrl` on all platforms, including macOS).
+- **`Cmd/Ctrl+Shift+C`** toggles the chat panel from anywhere — identical to the top-bar Chat button (handled by a global window listener in `ChatDrawer`, which is always mounted). It is suppressed while any dialog/modal is open (a `.modal-overlay` or `.module-history-backdrop` in the DOM).
+
+#### Tables in the markdown editor
+
+- New **Insert Table** toolbar button (next to the link button) creates a 3×3 table with a header row (`insertTable`).
+- While the cursor is inside a table, a contextual toolbar group appears: **insert/delete column** (before/after), **insert/delete row** (before/after), and **Delete Table**. Delete column/row disable at 1 column/row. (No merge/split — plain markdown tables can't represent merged cells.)
+- **Right-click a table cell** for the same actions as a context menu at the cursor (caret moves to the clicked cell so commands target it). Closes on Escape, outside click, or another right-click.
+- Table cells use the app's border/header style with a soft highlight for the selected cell.
+
+#### Markdown editor QoL
+ 
+ - **Underline** is now available in the note editor: a new toolbar button (after Italic) toggles it, and it's included in the format helper and right-click menu too. Underline round-trips to markdown as GitLab-style `++text++` (StarterKit v3 already registers the extension — no new dependency).
+ - **Format helper bubble**: selecting text in the editor pops an icon-only bubble above the selection with **Bold / Italic / Underline / Strikethrough / Inline code** buttons (active states + tooltips). A circular **X** button in its top-right corner closes the bubble and turns the feature off.
+ - **Right-click format menu**: right-clicking in the editor always shows a context menu with the same five formatting actions (keeps the selection when the click is inside it, otherwise moves the cursor to the click point). Opening the menu hides the bubble popup; closing it does not bring the bubble back — it only returns on a fresh selection. The table right-click menu is unchanged.
+ - **Status-bar toggle**: the editor status bar now has an icon + label **Format helper** toggle on the right that turns the bubble popup on/off. The setting is remembered across restarts (default on, stored in `localStorage`).
+ - **Show Raw mode**: a second status-bar button (left of the Format helper, label "RAW") swaps the WYSIWYG editor for a plain monospace **markdown `<textarea>`** so you can edit the raw source directly. Edits auto-save (~800ms debounce, same as the WYSIWYG view) and toggling back re-syncs the rich editor. The toggle is **not persisted** — it resets to off every time you switch notes.
+ - **Cmd/Ctrl+click link navigation**: links in the WYSIWYG editor no longer navigate on plain click (which now correctly places the text cursor); instead, users must hold **Cmd/Ctrl** to navigate. External links open in the OS browser; internal `note:`, `skill:`, and `file:` links open the respective note, skill editor, or reveal the file in Finder (matching chat behavior). Hovering a link while holding the modifier key changes the cursor to a pointer.
+
+
+### Fixed
+
+- **Markdown tables now render in the note editor**: TipTap's `StarterKit` doesn't include table extensions in v3, so `@tiptap/markdown` silently dropped the whole `<table>` on parse. The `@tiptap/extension-table` `TableKit` (Table/TableRow/TableCell/TableHeader) is now registered, so tables in notes display as real tables and round-trip to valid markdown on save.
+
 ## [0.6.0] — 2026-08-13
 
 ### Added

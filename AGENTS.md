@@ -187,7 +187,10 @@ src/
 
 - **Top bar:** current project name with dropdown (switch / new / rename / delete), Settings, chat toggle.
 - **Middle column:** tabs for Notes (list + create/rename/delete) and Todo (interactive checklist + progress).
-- **Main area:** TipTap WYSIWYG editor for notes; auto-save to `.md` ~800ms after edits (debounced).
+- **Main area:** TipTap WYSIWYG editor for notes; auto-save to `.md` ~800ms after edits (debounced). The toolbar includes an **underline** button (StarterKit v3 registers `Underline`; markdown round-trips as GitLab-style `++text++`). Links in the editor require Cmd/Ctrl+click to navigate: external links open in the OS browser, while `note:`, `skill:`, and `file:` links open the note, skill editor, or reveal the file in Finder, respectively.
+- **Format helper (bubble popup):** selecting text shows an icon-only bubble (`BubbleMenu` from `@tiptap/react/menus` — no new dependency) with **Bold / Italic / Underline / Strikethrough / Inline code** buttons (active states + tooltips); a circular `mdiCloseCircle` X button in its top-right corner closes it and turns the feature off. Enabled by default, persisted in `localStorage` (`ptnotes:formatHelper`), and toggled from a status-bar button on the right (icon + label).
+- **Right-click format menu:** right-clicking in the editor (outside a table) always shows a `note-menu` with the same five actions — keeps the selection when the click is inside it, otherwise moves the cursor to the click point. Opening the menu hides the bubble popup (`setMeta('hide')`); closing it never re-shows the bubble (it only returns on a fresh selection). The table right-click menu is unchanged.
+- **Show Raw toggle:** a second status-bar button (left of the Format helper button, label "RAW") swaps the toolbar + TipTap view for a plain markdown `<textarea>` (`editor-raw`: monospace, `spellCheck={false}`, `autoFocus`). Edits auto-save debounced ~800ms (reuses the editor's `saveTimer`); leaving raw mode re-syncs the TipTap doc via `setContent(rawText, { contentType: 'markdown', emitUpdate: false })`. The toggle is **component-local only** — never persisted and resets to off on every note change (the editor remounts via `key={activeNoteId}`).
 
 ## IPC surface (window.ptnotes)
 
@@ -195,7 +198,7 @@ src/
 - **Notes:** `list`, `read`, `save`, `create`, `rename`, `delete`
 - **Todos:** `read` (parse checklist), `save` (serialize `- [ ]`/`- [x]`), `toggle`, `deleteCompleted`, `reorder`
 - **Chat history:** `list`, `read`, `write`, `delete`, `rename`
-- **AI:** `send` (message → streamed reply), `getConfig`, `setConfig`, `listModels(baseUrl, apiKey)`, `generateTitle`, `stop`, `clear`, `confirmResponse`, `onStreamEvent` (token chunks + tool-call logs + confirm events)
+- **AI:** `send` (message → streamed reply), `getConfig`, `setConfig`, `listModels(baseUrl, apiKey)`, `generateTitle`, `stop`, `clear`, `confirmResponse`, `askResponse` (human-in-the-loop answers for `ask_user`), `onStreamEvent` (token chunks + tool-call logs + confirm events)
 - **Settings:** `get` (returns `{ rootDir }`), `getAbout` (app name/version + Electron/Chromium/Node versions for the About pane), `chooseRoot` (native folder picker), `changeRoot` (moves data + persists + returns new `{ rootDir }`)
 - **Skills:** `list(project)` (returns `{ global, project }` metas), `read(project, scope, name)` (full content), `save(project, scope, name, { description, content, enabled? })` (upsert → `SkillMeta`), `setEnabled(project, scope, name, enabled)` (toggle → `SkillMeta`), `move(project, scope, name, toScope)` (relocates the skill folder between scopes → `SkillMeta`), `delete(project, scope, name)` (→ boolean)
 - **PDF:** `supportsUpload` (returns the AI settings `uploadPdfEnabled` toggle — user-controlled), `upload` (raw PDF via provider Responses API `input_file` — uploads base64 through the Files API, falling back to inline `file_data`)
@@ -231,7 +234,7 @@ ChatPanel (renderer) ──send──▶ Main process
   `.pdf` via pdf-parse, any text file as raw text) before responding — so previously dropped
   files can be reused without re-dragging.
 
-### Tools (16 total)
+### Tools (17 total)
 
 | Tool           | Action                                                                                                          |
 | -------------- | --------------------------------------------------------------------------------------------------------------- |
@@ -251,6 +254,7 @@ ChatPanel (renderer) ──send──▶ Main process
 | `delete_skill` | delete a skill (requires user confirmation dialog)                                                              |
 | `web_search`   | DuckDuckGo HTML search, no API key, Node fetch in main (user-agent header, rate-limit errors surfaced to model) |
 | `web_fetch`    | direct fetch + cheerio local parse (strip scripts/styles/nav, extract title + readable text) — fully private    |
+| `ask_user`     | ask the user 1–8 choice/free-text questions in a wizard dialog (radio / checkboxes / free text); chat-only     |
 
 ### PDF attachments (drag & drop into chat)
 
@@ -280,8 +284,25 @@ ChatPanel (renderer) ──send──▶ Main process
 - `create_note` / `update_note` tool bubbles show a clickable `📄 <note>` pill in the header (CSS
   truncated, max-width 180px) that opens the note, whether the bubble is collapsed or expanded.
   Parsed from the tool result JSON (`{ ok, note }`) via `noteIdFromToolCall`.
+- `ask_user` tool bubbles show a compact **Q&A summary** (question → answer lines) instead of raw
+  JSON in the expanded result, mapping tool args (`questions`) to the tool result (`answers` by id);
+  cancelled runs show a "Cancelled by user" line.
 - Note slugs are Unicode-safe: non-Latin scripts (e.g. Thai) keep their characters, including combining
   marks (`\p{M}`); only Latin combining accents (`\u0300-\u036f`) are stripped (see `slugify`).
+- **Keyboard shortcuts:** with the cursor in the chat input box, `Cmd/Ctrl+Shift+N` starts a new chat
+  and `Cmd/Ctrl+Shift+H` toggles the chat history popup (Shift-modified to avoid the default menu's
+  `Cmd+N` New Window / `Cmd+H` Hide accelerators — no main-process menu changes); opening via the
+  shortcut blurs the input, closing refocuses it. Globally, `Cmd/Ctrl+Shift+C` toggles the chat
+  panel (mirrors the top-bar Chat button, handled by a window listener in ChatDrawer, which is
+  always mounted); it is suppressed while any dialog/modal is open (a `.modal-overlay` or
+  `.module-history-backdrop` present in the DOM). The history popup is
+  keyboard-navigable: `↑`/`↓` move the active selector (highlighted via `.chat-history-item.active`,
+  auto-scrolled into view), mouse move re-syncs the selector to the pointer,
+  `Enter` opens the selected session, `Escape` closes and refocuses the input (nav keys skipped
+  while renaming). While the chat
+  input is focused, `Ctrl+Home`/`Ctrl+End` scroll the chat list to top/bottom and
+  `Ctrl+PageUp`/`Ctrl+PageDown` page it (Ctrl on all platforms). Platform is detected via
+  `window.electron.process.platform === 'darwin'`.
 - **Slash commands:** typing `/` at the start of the chat input opens a popup of built-in commands
   (`/new` → new chat, `/models` → open AI Settings) and **enabled skills** (≤10 rows). Typing filters
   (name + description); **Tab** autocompletes the command + a trailing space to type args; **Enter**
@@ -335,7 +356,8 @@ Two-panel dialog (`.settings-layout` with `.settings-nav` + `.settings-pane`):
 
 - DuckDuckGo scraping can be rate-limited; errors are surfaced to the model so it can retry/adapt.
 - Bing Search API retired Aug 2025 and Brave dropped its free tier — avoid both.
-- Tool count is 16 (AGENTS.md's ~10 is a guideline; acceptable tradeoff for the skills feature).
+- Tool count is 17 (AGENTS.md's ~10 is a guideline; acceptable tradeoff for the skills + HITL features).
+- `ask_user` is **chat-only**: module subagents never receive it (filtered out of the module tool list), and `ToolContext.ask` is absent in module runs so it can never pop a dialog from a background run.
 - API key must never be committed or bundled into the renderer.
 - The persistent project registry only records known project names/paths — it never stores file contents; the folder on disk remains the source of truth.
 - `note:<notename>` uses the note's slugified file name (as shown in the Notes list), so the `@` picker should insert the exact list name.

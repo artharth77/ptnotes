@@ -29,6 +29,8 @@ import type {
 const NO_SESSIONS: ChatSessionMeta[] = []
 const NO_MODULE_RUNS: ModuleRun[] = []
 
+const IS_MAC = window.electron.process.platform === 'darwin'
+
 function deriveLocalTitle(text: string): string {
   const clean = text.replace(/\s+/g, ' ').trim()
   if (!clean) return 'Untitled chat'
@@ -52,6 +54,59 @@ function noteIdFromToolCall(name: string, result?: string): string | null {
   } catch {
     return null
   }
+}
+
+/** Compact Q&A summary for `ask_user` tool bubbles (question → answer lines). */
+function AskToolSummary({
+  args,
+  result
+}: {
+  args: Record<string, unknown>
+  result: string
+}): React.JSX.Element {
+  const questions = useMemo(() => {
+    const raw = Array.isArray(args.questions) ? args.questions : []
+    return raw
+      .map((r) =>
+        typeof r === 'object' && r !== null
+          ? (r as { id?: unknown; question?: unknown })
+          : ({} as { id?: unknown; question?: unknown })
+      )
+      .map((q) => ({ id: String(q.id ?? ''), question: String(q.question ?? '') }))
+      .filter((q) => q.id && q.question)
+  }, [args])
+  const { cancelled, byId } = useMemo(() => {
+    try {
+      const data = JSON.parse(result) as {
+        cancelled?: boolean
+        answers?: { id?: string; answer?: string; selections?: string[] }[]
+      }
+      const map: Record<string, string> = {}
+      for (const a of data.answers ?? []) {
+        if (!a.id) continue
+        map[a.id] =
+          a.selections && a.selections.length > 0 ? a.selections.join(', ') : (a.answer ?? '')
+      }
+      return { cancelled: !!data.cancelled, byId: map }
+    } catch {
+      return { cancelled: false, byId: {} }
+    }
+  }, [result])
+  if (questions.length === 0) {
+    return <pre className="chat-tool-result">{result}</pre>
+  }
+  return (
+    <div className="ask-tool-summary">
+      {cancelled && <div className="ask-tool-cancelled">Cancelled by user</div>}
+      {questions.map((q, i) => (
+        <div key={q.id} className="ask-tool-item">
+          <div className="ask-tool-qlabel">Question {i + 1}</div>
+          <div className="ask-tool-qtext">{q.question}</div>
+          <div className="ask-tool-atext">{byId[q.id] ?? (cancelled ? '—' : '…')}</div>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
@@ -91,6 +146,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   )
   const setTab = useAppStore((s) => s.setTab)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyIndex, setHistoryIndex] = useState(0)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [historyPos, setHistoryPos] = useState<{ top: number; right: number } | null>(null)
@@ -109,18 +165,10 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
       const rect = el.getBoundingClientRect()
       setHistoryPos({ top: rect.bottom + 4, right: Math.max(0, window.innerWidth - rect.right) })
     }
+    setHistoryIndex(0)
     setHistoryOpen(true)
     if (activeProject) void loadChatSessions(activeProject)
   }
-
-  useEffect(() => {
-    if (!historyOpen) return
-    function onKeyDown(e: KeyboardEvent): void {
-      if (e.key === 'Escape') closeHistory()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [historyOpen])
 
   const [input, setInput] = useState('')
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({})
@@ -204,15 +252,67 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   }
 
   useEffect(() => {
+    if (!historyOpen) return
+    function onKeyDown(e: KeyboardEvent): void {
+      if (e.key === 'Escape') {
+        closeHistory()
+        focusInput()
+        return
+      }
+      if (renamingId !== null) return
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setHistoryIndex((i) => Math.min(i + 1, Math.max(0, sessions.length - 1)))
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setHistoryIndex((i) => Math.max(i - 1, 0))
+        return
+      }
+      if (e.key === 'Enter' && sessions.length > 0) {
+        e.preventDefault()
+        const s = sessions[Math.min(historyIndex, sessions.length - 1)]
+        if (s && activeProject) void openChat(activeProject, s.sessionId)
+        closeHistory()
+        focusInput()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [historyOpen, sessions, historyIndex, renamingId, activeProject, openChat])
+
+  useEffect(() => {
+    if (!historyOpen || sessions.length === 0) return
+    const items = document.querySelectorAll('.chat-history-item')
+    const active = items[Math.min(historyIndex, sessions.length - 1)]
+    active?.scrollIntoView({ block: 'nearest' })
+  }, [historyOpen, historyIndex, sessions.length])
+
+  useEffect(() => {
     focusInput()
   }, [])
 
   const chatOpen = useAppStore((s) => s.chatOpen)
+  const setChatOpen = useAppStore((s) => s.setChatOpen)
   const prevChatOpen = useRef(false)
   useEffect(() => {
     if (chatOpen && !prevChatOpen.current) focusInput()
     prevChatOpen.current = chatOpen
   }, [chatOpen])
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent): void {
+      const mod = (IS_MAC ? e.metaKey : e.ctrlKey) && e.shiftKey
+      if (!mod || e.altKey || e.key.toLowerCase() !== 'c') return
+      const modalOpen = document.querySelector('.modal-overlay, .module-history-backdrop') !== null
+      if (modalOpen) return
+      e.preventDefault()
+      setChatOpen(!chatOpen)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [chatOpen, setChatOpen])
 
   useEffect(() => {
     if (prevBusy.current && !chatBusy) {
@@ -485,6 +585,52 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>): void {
+    const mod = (IS_MAC ? e.metaKey : e.ctrlKey) && e.shiftKey
+    if (mod && !e.altKey) {
+      const key = e.key.toLowerCase()
+      if (key === 'n') {
+        e.preventDefault()
+        closeHistory()
+        if (!chatBusy && activeProject) {
+          void (async () => {
+            await newChat(activeProject)
+            focusInput()
+          })()
+        }
+        return
+      }
+      if (key === 'h') {
+        e.preventDefault()
+        if (historyOpen) {
+          closeHistory()
+          focusInput()
+        } else {
+          openHistory()
+          textareaRef.current?.blur()
+        }
+        return
+      }
+    }
+    if (historyOpen) return
+    if (e.ctrlKey && !e.metaKey && !e.altKey) {
+      const el = scrollRef.current
+      if (e.key === 'Home' || e.key === 'End' || e.key === 'PageUp' || e.key === 'PageDown') {
+        e.preventDefault()
+        if (!el) return
+        if (e.key === 'Home') {
+          el.scrollTo({ top: 0, behavior: 'auto' })
+        } else if (e.key === 'End') {
+          el.scrollTo({ top: el.scrollHeight, behavior: 'auto' })
+        } else {
+          const delta = el.clientHeight * 0.8
+          el.scrollTo({
+            top: e.key === 'PageUp' ? el.scrollTop - delta : el.scrollTop + delta,
+            behavior: 'auto'
+          })
+        }
+        return
+      }
+    }
     if (slashItems.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
@@ -608,8 +754,16 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                     {sessions.length === 0 && (
                       <div className="chat-history-empty">No past chats</div>
                     )}
-                    {sessions.map((s) => (
-                      <div key={s.sessionId} className="chat-history-item">
+                    {sessions.map((s, index) => (
+                      <div
+                        key={s.sessionId}
+                        className={
+                          index === Math.min(historyIndex, sessions.length - 1)
+                            ? 'chat-history-item active'
+                            : 'chat-history-item'
+                        }
+                        onMouseMove={() => setHistoryIndex(index)}
+                      >
                         {renamingId === s.sessionId ? (
                           <div className="chat-history-rename">
                             <input
@@ -686,8 +840,10 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
           </div>
           <button
             className="btn small ghost"
-            onClick={() => {
-              if (activeProject) void newChat(activeProject)
+            onClick={async () => {
+              if (!activeProject) return
+              await newChat(activeProject)
+              focusInput()
             }}
             disabled={chatBusy}
             title="Start a new chat"
@@ -786,9 +942,13 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                         ) : null
                       })()}
                     </div>
-                    {expandedTools[tc.id] && tc.result && (
-                      <pre className="chat-tool-result">{tc.result}</pre>
-                    )}
+                    {expandedTools[tc.id] &&
+                      tc.result &&
+                      (tc.name === 'ask_user' ? (
+                        <AskToolSummary args={tc.args} result={tc.result} />
+                      ) : (
+                        <pre className="chat-tool-result">{tc.result}</pre>
+                      ))}
                   </div>
                 ))}
               </div>
