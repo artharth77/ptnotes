@@ -2,6 +2,25 @@
 
 All notable changes to PTNotes are documented in this file.
 
+## [0.7.0] — 2026-08-14
+
+### Added
+
+#### Human-in-the-loop — `ask_user` tool
+
+- New **`ask_user`** chat tool (17th) lets the assistant ask the user for input — a choice, a detail, or confirmation — before continuing. The model can pose **1–8 questions** in a single call (validated: non-empty id + question; `options` 2–6 when present, omitted/empty for free text, `multiple: true` for multi-select checkboxes).
+- Questions are presented in a **wizard-style dialog** (`.ask-dialog`, ~660px): left nav with numbered question rows + a final Confirm row (active row highlighted, long text ellipsized, click to jump), right pane showing the full question with a focusable radio / checkbox / free-text input, and Previous / Next at bottom-right.
+- **Require-all-answered** gating: Confirm (and Enter on the confirm pane) stays disabled until every question has an answer; the confirm pane shows a `Q1 → answer` summary and flags missing ones as "Not answered". Enter on the confirm pane with missing answers jumps to the first unanswered question.
+- **Keyboard spec:** `↑`/`↓` move the cursor highlight; `←`/`→` navigate panes (like `Shift+Tab`/`Tab`, except on free-text questions where they move the input caret); radio `Enter`/`Tab`/`Space` commit + next; checkbox `Space`/`Enter` toggle + `Tab` next; free-text `Enter`/`Tab` next; `Shift+Tab` previous; `Escape` cancels.
+- Answers flow back to the model as the tool result (`{ ok, cancelled, answers }`), so the conversation loop continues with the user's input. Unanswered dialogs time out after 120s (treated as cancelled).
+- **Chat-only:** `ask_user` is filtered out of background module subagent tool lists and `ToolContext.ask` is absent in module runs — modules can never pop a dialog.
+- The flow logic (`src/shared/ask.ts`: `initFlow`, `reduce`, `isAllAnswered`, `buildAnswers`) is pure and unit-tested (`scripts/test-ask.mts`), and `ask_user` tool validation/result paths are covered with a mocked `ctx.ask`.
+- `ask_user` tool bubbles in chat show a compact **Q&A summary** (question → answer lines) instead of raw JSON when expanded, with a "Cancelled by user" line for cancelled runs.
+
+#### Chat QoL
+
+- **New Chat focuses the input**: clicking the **+ New Chat** button now moves focus to the chat input so you can start typing right away.
+
 ## [0.6.0] — 2026-08-13
 
 ### Added

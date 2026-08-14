@@ -18,7 +18,7 @@
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "electron-vite build && electron-builder --mac",
     "build:linux": "electron-vite build && electron-builder --linux",
-    "test": "tsx --tsconfig tsconfig.node.json scripts/test-service.mts && tsx --tsconfig tsconfig.node.json scripts/test-ai.mts && tsx --tsconfig tsconfig.node.json scripts/test-chat.mts && tsx --tsconfig tsconfig.node.json scripts/test-slash.mts && tsx --tsconfig tsconfig.node.json scripts/test-markdown.mts && tsx --tsconfig tsconfig.node.json scripts/test-pdf.mts && tsx --tsconfig tsconfig.node.json scripts/test-modules.mts && tsx --tsconfig tsconfig.node.json scripts/test-docx.mts"
+    "test": "tsx --tsconfig tsconfig.node.json scripts/test-service.mts && tsx --tsconfig tsconfig.node.json scripts/test-ai.mts && tsx --tsconfig tsconfig.node.json scripts/test-chat.mts && tsx --tsconfig tsconfig.node.json scripts/test-ask.mts && tsx --tsconfig tsconfig.node.json scripts/test-slash.mts && tsx --tsconfig tsconfig.node.json scripts/test-markdown.mts && tsx --tsconfig tsconfig.node.json scripts/test-pdf.mts && tsx --tsconfig tsconfig.node.json scripts/test-modules.mts && tsx --tsconfig tsconfig.node.json scripts/test-docx.mts"
   },
   "dependencies": {
     "@antv/infographic": "^0.2.19",

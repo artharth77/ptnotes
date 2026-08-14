@@ -220,7 +220,9 @@ export class ModuleRunner {
   }
 
   private toolList(): PTTool[] {
-    return [...baseTools, ...this.module.tools, setPlanTool(this), updateStepTool(this)]
+    // ask_user is chat-only (modules are background subagents — they must never pop dialogs).
+    const base = baseTools.filter((t) => t.definition.function.name !== 'ask_user')
+    return [...base, ...this.module.tools, setPlanTool(this), updateStepTool(this)]
   }
 
   /** Run one completion turn. Returns 'done' when the run produced a final answer. */
