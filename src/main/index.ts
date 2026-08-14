@@ -52,6 +52,15 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const devUrl = process.env['ELECTRON_RENDERER_URL']
+    const allowed = devUrl ? url.startsWith(devUrl) : url.startsWith('file://')
+    if (!allowed) {
+      event.preventDefault()
+      shell.openExternal(url)
+    }
+  })
+
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {

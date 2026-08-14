@@ -1321,6 +1321,27 @@ body {
   padding: 24px 28px;
 }
 
+.editor-raw {
+  flex: 1;
+  width: 100%;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.65;
+  padding: 24px 28px;
+  box-sizing: border-box;
+}
+
+.editor-meta-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .ProseMirror {
   max-width: 780px;
   margin: 0 auto;
@@ -1443,9 +1464,18 @@ body {
 .ProseMirror a {
   color: var(--accent);
   text-decoration: underline;
+  cursor: text;
+}
+
+.editor-content.mod-key-down a:hover {
+  cursor: pointer;
 }
 
 .editor-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 6px 14px;
   border-top: 1px solid var(--border);
   font-size: 11px;
@@ -1456,6 +1486,72 @@ body {
   background: var(--bg-hover);
   border-radius: 4px;
   padding: 1px 5px;
+}
+
+.format-helper-toggle {
+  min-width: 24px;
+  height: 24px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 11px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  justify-content: center;
+}
+
+.format-helper-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.format-helper-toggle.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.bubble-menu {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  z-index: 95;
+  position: relative;
+}
+
+.bubble-close {
+  position: absolute;
+  top: -9px;
+  right: -9px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--bg-elev);
+  color: var(--text-dim);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow);
+}
+
+.bubble-close:hover {
+  color: var(--danger);
+}
+
+.note-menu-item.active {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* ---------- Empty states ---------- */

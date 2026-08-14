@@ -7,6 +7,7 @@
 - **Goal 1 — Human-in-the-Loop (`ask_user`)** — see below.
 - **Goal 2 — Chat keyboard shortcuts** — see below.
 - **Goal 3 — Markdown editor table bug** — see below.
+- **Goal 4 — Markdown editor QoL** — see below.
 
 ---
 
@@ -480,3 +481,103 @@ npm run lint
 
 plus manual QA: open a note containing a markdown table → renders as a table;
 edit a cell → auto-save keeps valid markdown; Insert Table creates a 3×3 table.
+
+---
+
+## Goal 4: Markdown editor QoL — underline, format helper, context menu
+
+Markdown-editor quality-of-life: an **underline** toolbar button, a **format
+helper** bubble popup that appears over a text selection with icon-only buttons
+(Bold / Italic / Underline / Strikethrough / Inline code), a **right-click
+format context menu** with the same actions, a **status-bar toggle** (right
+side) that turns the bubble popup on/off, and a **Show Raw** toggle that swaps
+the WYSIWYG editor for a plain markdown `<textarea>`.
+
+### Scope decisions (locked in)
+
+| Area                  | Decision                                                                                                                                                                                                                                                            |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Underline             | StarterKit **v3 already registers `Underline`** (verified in `starter-kit` source) — no new dependency. `@tiptap/markdown` round-trips it as GitLab-style `++text++` (verified empirically); toolbar button added after Italic → `toggleUnderline()` |
+| Bubble popup          | `BubbleMenu` from `@tiptap/react/menus` (ships with `@tiptap/react`, pulls in `@tiptap/extension-bubble-menu` + floating-ui) — no new dependency. Icon-only buttons, shown when there is a **non-empty selection**, the editor has focus, and the cursor is **not inside a table** |
+| Toggle scope          | Status-bar toggle controls **only the bubble popup**; the right-click format menu is **always available**                                                                                                                                                           |
+| Context menu          | **Always shown** on right-click outside a table: keeps the selection when the click falls inside it, otherwise moves the cursor to the click point (`posAtCoords` + `setTextSelection`). Reuses the `.note-menu` pattern (icon + label items); table right-click menu unchanged |
+| Bubble/context interplay | Opening the context menu hides the bubble (`setMeta(bubbleMenuKey, 'hide')`); closing the menu does **not** re-show it — the bubble only returns on a fresh selection change. No re-show logic |
+| Persistence           | `ptnotes:formatHelper` in `localStorage`, **default ON**; read at store init, written on toggle (same pattern as `ptnotes:activeProject`)                                                                                                                            |
+| Bubble close button   | `mdiCloseCircle` X button overlapping the bubble's top-right corner; clicking it closes the popup **and turns the feature off** (`setFormatHelperEnabled(false)`). `appendTo={() => document.body}` so the button isn't clipped by the editor's scroll container |
+| Status-bar toggle     | Right side of the status bar, **icon + label** (`mdiFormatText` + "Format helper"), highlighted while enabled; tooltip "Format helper"                                                                                                                               |
+| Show Raw toggle       | Second status-bar button, **left of the format-helper button**, label **"RAW"** (no icon). Swaps the toolbar + TipTap view for a `<textarea>` editing the raw markdown (monospace, `spellCheck={false}`, `autoFocus`). **Not persisted** and **not saved** — it's component-local state that resets to off on every note change (the editor remounts via `key={activeNoteId}`) |
+| Raw autosave          | Debounced ~800ms auto-save (reuses `saveTimer`), same as the WYSIWYG editor. Leaving raw mode re-syncs the TipTap doc from the raw text via `setContent(rawText, { contentType: 'markdown', emitUpdate: false })` |
+
+### Files to change
+
+- `src/renderer/src/components/MarkdownEditor.tsx`
+- `src/renderer/src/store/useAppStore.ts`
+- `src/renderer/src/assets/main.css`
+- `scripts/test-markdown.mts`
+- `AGENTS.md`, `CHANGELOG.md`
+
+### 1. Store — `useAppStore.ts`
+
+- Add `formatHelperEnabled: boolean` (initialized from
+  `localStorage.getItem('ptnotes:formatHelper') !== '0'`) + `setFormatHelperEnabled(enabled)`
+  that persists `'1'`/`'0'` and updates state — same pattern as `ptnotes:activeProject`.
+
+### 2. Renderer — `MarkdownEditor.tsx`
+
+- Imports: `mdiFormatUnderline`, `mdiFormatText`, `mdiCloseCircle` from `@mdi/js`;
+  `BubbleMenu` from `@tiptap/react/menus`; `PluginKey` from `@tiptap/pm/state`;
+  `type { Editor }` from `@tiptap/react`.
+- Module scope: `const bubbleMenuKey = new PluginKey('formatHelperBubble')`.
+- `useEditorState` selector gains `isUnderline: ed.isActive('underline')`.
+- **Toolbar:** Underline button inserted after Italic.
+- **Shared `FormatButtons`** component (icon-only for the bubble, icon+label in the
+  context menu via `withLabels`) renders the 5 actions with active states.
+- **Bubble popup:** `{formatHelperEnabled && <BubbleMenu …>}` with
+  `shouldShow` → non-empty selection, `view.hasFocus()`, not inside a table;
+  renders `.bubble-menu` with the 5 buttons + the X close button
+  (`setFormatHelperEnabled(false)`).
+- **Context menu:** `EditorContent.onContextMenu` — outside a table: `preventDefault`,
+  position via `posAtCoords`, keep selection if the click is inside it else move the
+  cursor there, open `formatMenu` (`note-menu` + `menu-overlay`), dispatch `'hide'`
+  meta on `bubbleMenuKey`. Closing the menu (overlay click / Escape / action) just
+  clears `formatMenu` — no re-show. Table branch untouched.
+- **Status bar:** `.editor-meta` becomes a flex row — left: "Saving to
+  `notes/{noteId}.md` · markdown"; right: `.editor-meta-actions` grouping the
+  **Show Raw** button (label "RAW", `toggleRaw()`) then the format-helper
+  button.
+- **Show Raw:** `rawMode`/`rawText` local state (default `false` — remount on note
+  change resets it, no persistence). `toggleRaw()`: ON → snapshot
+  `editor.getMarkdown()` into `rawText` + clear open menus; OFF →
+  `setContent(rawText, …)` re-syncs the WYSIWYG doc. `handleRawChange` updates
+  `rawText` + debounced `saveNote`. In raw mode the toolbar, `BubbleMenu` and
+  format/table menus are not rendered.
+
+### 3. CSS — `main.css`
+
+- `.editor-meta`: `display:flex; justify-content:space-between`.
+- `.editor-meta-actions` (flex row, gap) keeps the two status-bar buttons together.
+- `.editor-raw` (monospace, `flex:1`, editor padding, no border/outline/resize).
+- `.format-helper-toggle` (icon+label, gap, `.active` highlight).
+- `.bubble-menu` (floating elevated container, `position:relative`) +
+  `.bubble-close` (absolute top-right circle, hover → `--danger`).
+- `.note-menu-item.active` highlight for the context menu.
+
+### 4. Tests — `scripts/test-markdown.mts`
+
+Add an underline assertion: parse `some ++under++ and **bold** text` → the middle
+segment carries a `underline` mark, and re-serializing yields the same `++..++` string.
+
+### Verification
+
+```bash
+npm run test         # includes scripts/test-markdown.mts
+npm run typecheck
+npm run lint
+```
+
+plus manual QA: select text → bubble with 5 icon buttons + X; format from the
+bubble/toolbar/context menu; right-click always shows the format menu; toggling
+the status-bar button (icon+label) hides/shows the bubble only; X button turns the
+feature off and persists across restarts; **Show Raw** → editor becomes a raw
+markdown textarea, edits auto-save, switching back re-syncs the WYSIWYG view,
+and switching notes resets the toggle to off (not persisted).
