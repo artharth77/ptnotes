@@ -15,6 +15,14 @@ import {
   mdiLinkVariant,
   mdiMinus,
   mdiRedoVariant,
+  mdiTableColumnPlusAfter,
+  mdiTableColumnPlusBefore,
+  mdiTableColumnRemove,
+  mdiTablePlus,
+  mdiTableRemove,
+  mdiTableRowPlusAfter,
+  mdiTableRowPlusBefore,
+  mdiTableRowRemove,
   mdiUndoVariant
 } from '@mdi/js'
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react'
@@ -25,6 +33,7 @@ import Typography from '@tiptap/extension-typography'
 import Link from '@tiptap/extension-link'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
+import { TableKit } from '@tiptap/extension-table'
 import { useAppStore } from '../store/useAppStore'
 import { PromptModal } from './Modal'
 import { MdiIcon } from './MdiIcon'
@@ -74,7 +83,8 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
       Typography,
       Link.configure({ openOnClick: false, autolink: true }),
       TaskList,
-      TaskItem.configure({ nested: true })
+      TaskItem.configure({ nested: true }),
+      TableKit
     ],
     content,
     contentType: 'markdown',
@@ -117,6 +127,9 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
         isH1: ed.isActive('heading', { level: 1 }),
         isH2: ed.isActive('heading', { level: 2 }),
         isH3: ed.isActive('heading', { level: 3 }),
+        isTable: ed.isActive('table'),
+        canDeleteColumn: ed.can().deleteColumn(),
+        canDeleteRow: ed.can().deleteRow(),
         canUndo: ed.can().undo(),
         canRedo: ed.can().redo()
       }
@@ -124,6 +137,16 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
   })
 
   const [linkPrompt, setLinkPrompt] = useState(false)
+  const [tableMenu, setTableMenu] = useState<{ x: number; y: number } | null>(null)
+
+  useEffect(() => {
+    if (!tableMenu) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setTableMenu(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [tableMenu])
 
   if (!editor) {
     return <div className="editor empty-state">Loading editor…</div>
@@ -213,6 +236,56 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
         />
         <ToolbarBtn icon={mdiLinkVariant} title="Link" onClick={toggleLink} />
         <ToolbarBtn
+          icon={mdiTablePlus}
+          title="Insert table"
+          active={state.isTable}
+          onClick={() =>
+            editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
+          }
+        />
+        {state.isTable && (
+          <>
+            <span className="tb-sep" />
+            <ToolbarBtn
+              icon={mdiTableColumnPlusBefore}
+              title="Insert column before"
+              onClick={() => editor.chain().focus().addColumnBefore().run()}
+            />
+            <ToolbarBtn
+              icon={mdiTableColumnPlusAfter}
+              title="Insert column after"
+              onClick={() => editor.chain().focus().addColumnAfter().run()}
+            />
+            <ToolbarBtn
+              icon={mdiTableColumnRemove}
+              title="Delete column"
+              disabled={!state.canDeleteColumn}
+              onClick={() => editor.chain().focus().deleteColumn().run()}
+            />
+            <ToolbarBtn
+              icon={mdiTableRowPlusBefore}
+              title="Insert row before"
+              onClick={() => editor.chain().focus().addRowBefore().run()}
+            />
+            <ToolbarBtn
+              icon={mdiTableRowPlusAfter}
+              title="Insert row after"
+              onClick={() => editor.chain().focus().addRowAfter().run()}
+            />
+            <ToolbarBtn
+              icon={mdiTableRowRemove}
+              title="Delete row"
+              disabled={!state.canDeleteRow}
+              onClick={() => editor.chain().focus().deleteRow().run()}
+            />
+            <ToolbarBtn
+              icon={mdiTableRemove}
+              title="Delete table"
+              onClick={() => editor.chain().focus().deleteTable().run()}
+            />
+          </>
+        )}
+        <ToolbarBtn
           icon={mdiMinus}
           title="Horizontal rule"
           onClick={() => editor.chain().focus().setHorizontalRule().run()}
@@ -231,10 +304,133 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
           onClick={() => editor.chain().focus().redo().run()}
         />
       </div>
-      <EditorContent editor={editor} className="editor-content" />
+      <EditorContent
+        editor={editor}
+        className="editor-content"
+        onContextMenu={(e) => {
+          const target = e.target instanceof Element ? e.target : null
+          if (!target?.closest('table')) {
+            setTableMenu(null)
+            return
+          }
+          e.preventDefault()
+          const coords = editor.view.posAtCoords({ left: e.clientX, top: e.clientY })
+          if (coords) editor.commands.setTextSelection(coords.pos)
+          setTableMenu({
+            x: Math.min(e.clientX, window.innerWidth - 200),
+            y: Math.min(e.clientY, window.innerHeight - 280)
+          })
+        }}
+      />
       <div className="editor-meta">
         Saving to <code>notes/{noteId}.md</code> · markdown
       </div>
+      {tableMenu && state.isTable && (
+        <>
+          <div
+            className="menu-overlay"
+            onClick={() => setTableMenu(null)}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              setTableMenu(null)
+            }}
+          />
+          <div
+            className="note-menu"
+            style={{ left: tableMenu.x, top: tableMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className="note-menu-item"
+              onClick={() => {
+                editor.chain().focus().addColumnBefore().run()
+                setTableMenu(null)
+              }}
+            >
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiTableColumnPlusBefore} size={16} />
+              </span>
+              Insert column before
+            </button>
+            <button
+              className="note-menu-item"
+              onClick={() => {
+                editor.chain().focus().addColumnAfter().run()
+                setTableMenu(null)
+              }}
+            >
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiTableColumnPlusAfter} size={16} />
+              </span>
+              Insert column after
+            </button>
+            <button
+              className="note-menu-item"
+              disabled={!state.canDeleteColumn}
+              onClick={() => {
+                editor.chain().focus().deleteColumn().run()
+                setTableMenu(null)
+              }}
+            >
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiTableColumnRemove} size={16} />
+              </span>
+              Delete column
+            </button>
+            <div className="note-menu-sep" />
+            <button
+              className="note-menu-item"
+              onClick={() => {
+                editor.chain().focus().addRowBefore().run()
+                setTableMenu(null)
+              }}
+            >
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiTableRowPlusBefore} size={16} />
+              </span>
+              Insert row before
+            </button>
+            <button
+              className="note-menu-item"
+              onClick={() => {
+                editor.chain().focus().addRowAfter().run()
+                setTableMenu(null)
+              }}
+            >
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiTableRowPlusAfter} size={16} />
+              </span>
+              Insert row after
+            </button>
+            <button
+              className="note-menu-item"
+              disabled={!state.canDeleteRow}
+              onClick={() => {
+                editor.chain().focus().deleteRow().run()
+                setTableMenu(null)
+              }}
+            >
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiTableRowRemove} size={16} />
+              </span>
+              Delete row
+            </button>
+            <div className="note-menu-sep" />
+            <button
+              className="note-menu-item danger"
+              onClick={() => {
+                editor.chain().focus().deleteTable().run()
+                setTableMenu(null)
+              }}
+            >
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiTableRemove} size={16} />
+              </span>
+              Delete table
+            </button>
+          </div>
+        </>
+      )}
       {linkPrompt && (
         <PromptModal
           title="Link URL"

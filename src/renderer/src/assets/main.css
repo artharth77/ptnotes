@@ -682,6 +682,12 @@ body {
   background: var(--bg-hover);
 }
 
+.note-menu-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 6px;
+}
+
 .note-menu-item.danger {
   color: var(--danger);
 }
@@ -1400,6 +1406,30 @@ body {
   border: none;
   border-top: 1px solid var(--border);
   margin: 16px 0;
+}
+
+.ProseMirror table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0 0 10px;
+}
+
+.ProseMirror th,
+.ProseMirror td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.ProseMirror th {
+  background: var(--bg-hover);
+  font-weight: 600;
+}
+
+.ProseMirror th.selectedCell,
+.ProseMirror td.selectedCell {
+  background: var(--accent-soft);
 }
 
 .ProseMirror p.is-editor-empty:first-child::before {

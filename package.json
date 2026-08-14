@@ -45,6 +45,7 @@
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@tiptap/extension-link": "^3.29.2",
     "@tiptap/extension-placeholder": "^3.29.2",
+    "@tiptap/extension-table": "^3.29.2",
     "@tiptap/extension-task-item": "^3.29.2",
     "@tiptap/extension-task-list": "^3.29.2",
     "@tiptap/extension-typography": "^3.29.2",
