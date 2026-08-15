@@ -1,13 +1,21 @@
 import { Resvg } from '@resvg/resvg-js'
+import { DEFAULT_MDI_ICON, findMdiIcon, mdiIconPath, resolveMdiIconSymbol } from './mdiIcons'
 
 /**
  * In-process infographic engine. Renders an `@antv/infographic` design (a DSL
  * syntax string or a JSON options object) to an SVG string via the package's
  * node SSR entry (`@antv/infographic/ssr` → `renderToString`, which uses
  * `linkedom` for its DOM) and rasterizes it to a PNG buffer via
- * @resvg/resvg-js. Pure local rendering: no network calls (model-supplied
- * `icon`/`illus` fields are stripped — the offline renderer would otherwise
- * query a remote icon service), no CLI exec/spawn, no headless browser/apps.
+ * @resvg/resvg-js. Pure local rendering: no network calls, no CLI exec/spawn,
+ * no headless browser/apps.
+ *
+ * Icons are the one resource the package would otherwise fetch remotely, so
+ * they are resolved locally instead: item `icon` fields are normalized to
+ * `mdi/<name>` (the bundled `@mdi/js` catalog) before rendering, a registered
+ * resource loader turns `mdi/<name>` into an inline SVG `<symbol>`, and
+ * `illus` fields (remote illustrations) are stripped. Items that omit an icon
+ * get a matching name auto-filled from the item label so icon slots render
+ * instead of staying blank.
  *
  * The SSR entry installs browser-like globals (`window`, `document`, DOM
  * classes, requestAnimationFrame) on `globalThis` and never restores them, so
@@ -70,6 +78,8 @@ interface InfographicModule {
   getTemplates: () => string[]
   getTemplate: (name: string) => unknown
   parseSyntax: (input: string) => SyntaxParseResult
+  registerResourceLoader: (loader: (config: { data: string }) => Promise<unknown>) => void
+  loadSVGResource: (svg: string) => unknown
 }
 
 let infographicPromise: Promise<InfographicModule> | null = null
@@ -86,12 +96,27 @@ function loadInfographic(): Promise<InfographicModule> {
         getTemplates: () => string[]
         getTemplate: (name: string) => unknown
         parseSyntax: (input: string) => SyntaxParseResult
+        registerResourceLoader: (loader: (config: { data: string }) => Promise<unknown>) => void
+        loadSVGResource: (svg: string) => unknown
       }
+      // Route every plain-string icon through the local @mdi/js catalog so the
+      // offline renderer never queries the package's remote icon service. The
+      // loader never returns null (a null would trigger the remote fallback).
+      mainMod.registerResourceLoader(async (cfg) => {
+        const data = typeof cfg.data === 'string' ? cfg.data : ''
+        try {
+          return mainMod.loadSVGResource(await resolveMdiIconSymbol(data))
+        } catch {
+          return mainMod.loadSVGResource(`<symbol viewBox="0 0 24 24"><path d=""/></symbol>`)
+        }
+      })
       return {
         renderToString: ssrMod.renderToString,
         getTemplates: mainMod.getTemplates,
         getTemplate: mainMod.getTemplate,
-        parseSyntax: mainMod.parseSyntax
+        parseSyntax: mainMod.parseSyntax,
+        registerResourceLoader: mainMod.registerResourceLoader,
+        loadSVGResource: mainMod.loadSVGResource
       }
     })
   }
@@ -236,19 +261,83 @@ function dataHasContent(data: unknown): boolean {
 }
 
 /**
- * Remove `icon` / `illus` fields anywhere in the design/data so the offline
- * renderer never queries the package's remote icon service.
+ * Prepare a validated design for offline rendering. `illus` fields (remote
+ * illustrations) are stripped everywhere; item `icon` fields are normalized to
+ * the local `mdi/<name>` format (bare names are matched against the MDI
+ * catalog, unsupported resources like URLs/data-URIs/raw SVG/`ref:` and object
+ * icons are dropped). When an item omits an icon, a matching MDI name is
+ * auto-filled from the item's label so the icon slot renders instead of
+ * staying blank (a harmless no-op for templates that do not render icons).
  */
-function stripRemoteResources(value: unknown): void {
+async function prepareDesignForRender(design: InfographicDesignObject): Promise<void> {
+  await walkDesignNode(design, 'generic')
+}
+
+function looksRemoteResource(v: string): boolean {
+  return (
+    v.startsWith('data:') ||
+    v.startsWith('<svg') ||
+    v.startsWith('<symbol') ||
+    v.startsWith('ref:') ||
+    /^[a-z][a-z0-9+.-]*:\/\//i.test(v)
+  )
+}
+
+async function normalizeItemIcon(obj: Record<string, unknown>): Promise<void> {
+  const icon = obj.icon
+  if (icon === undefined) {
+    if (typeof obj.label === 'string' && obj.label.trim()) {
+      const matched = await findMdiIcon(obj.label)
+      obj.icon = `mdi/${matched ?? DEFAULT_MDI_ICON}`
+    }
+    return
+  }
+  if (typeof icon !== 'string') {
+    delete obj.icon
+    return
+  }
+  const v = icon.trim()
+  if (!v || looksRemoteResource(v)) {
+    delete obj.icon
+    return
+  }
+  if (v.startsWith('mdi/')) {
+    const name = v.slice(4).trim()
+    if (name && (await mdiIconPath(name))) return
+    const matched = await findMdiIcon(name)
+    obj.icon = `mdi/${matched ?? DEFAULT_MDI_ICON}`
+    return
+  }
+  const matched = await findMdiIcon(v)
+  obj.icon = `mdi/${matched ?? DEFAULT_MDI_ICON}`
+}
+
+/**
+ * Recursively walk the design. `generic` mode strips stray `icon` fields (e.g.
+ * top-level, relation edges, custom design nodes); `config` mode (theme /
+ * themeConfig / attributes subtrees) only strips `illus`, never item icons or
+ * icon styling. Objects carrying an item `label` are treated as data items.
+ */
+async function walkDesignNode(value: unknown, mode: 'generic' | 'config'): Promise<void> {
   if (Array.isArray(value)) {
-    for (const v of value) stripRemoteResources(v)
+    for (const v of value) await walkDesignNode(v, mode)
     return
   }
   if (!value || typeof value !== 'object') return
   const obj = value as Record<string, unknown>
-  delete obj.icon
+  const isItem =
+    typeof obj.label === 'string' && !(typeof obj.from === 'string' && typeof obj.to === 'string')
+  if (isItem) {
+    await normalizeItemIcon(obj)
+  } else if (mode === 'generic') {
+    delete obj.icon
+  }
   delete obj.illus
-  for (const v of Object.values(obj)) stripRemoteResources(v)
+  for (const [key, v] of Object.entries(obj)) {
+    const childMode =
+      key === 'attributes' || key === 'theme' || key === 'themeConfig' ? 'config' : mode
+    await walkDesignNode(v, childMode)
+  }
 }
 
 function templateNameOfObject(o: Record<string, unknown>): string {
@@ -304,10 +393,10 @@ export async function validateInfographic(raw: unknown): Promise<InfographicVali
           'The infographic data block is empty. Add at least one item to the relevant data array (see the tool description).'
       }
     }
-    // Normalize to the validated object form so icon/illus fields can be
-    // stripped (the DSL form would otherwise trigger remote icon lookups).
+    // Normalize to the validated object form so item icons can be resolved
+    // locally (mdi/*) and illus fields stripped.
     const design = buildDesignObject(parsedOptions, template)
-    stripRemoteResources(design)
+    await prepareDesignForRender(design)
     return { ok: true, template, templateInfo: templateInfoOf(template), renderArgs: design }
   }
 
@@ -335,7 +424,7 @@ export async function validateInfographic(raw: unknown): Promise<InfographicVali
     }
   }
   const design = buildDesignObject(o, template)
-  stripRemoteResources(design)
+  await prepareDesignForRender(design)
   return { ok: true, template, templateInfo: templateInfoOf(template), renderArgs: design }
 }
 

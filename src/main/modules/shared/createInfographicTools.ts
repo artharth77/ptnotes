@@ -62,6 +62,9 @@ function dataHintFor(template: string): string {
 const INFOGRAPHIC_SCHEMA_HINT =
   'Infographic design — either a DSL string starting with "infographic <template>" followed by "data" / "design" / "theme" blocks (2-space indent), or a JSON object { "template": "<name>", "data": { ... }, "theme"?, "width"?, "height"? }. Pick the template with list_infographic_templates first.'
 
+const INFOGRAPHIC_ICON_HINT =
+  'Item icons use the local Material Design Icons format "icon": "mdi/<name>" (kebab-case name from the bundled MDI catalog, e.g. "mdi/cog", "mdi/email", "mdi/rocket"). Only "mdi/<name>" icons render; other icon sources are ignored. When an item omits "icon", a matching name is auto-filled from the item label.'
+
 /** List the built-in template catalog (model picks a template before rendering). */
 const listTemplatesTool: PTTool = {
   definition: {
@@ -164,7 +167,7 @@ const renderInfographicTool: PTTool = {
       name: 'render_infographic',
       description:
         `Render an @antv/infographic infographic to temporary rasterized files in the project. Pure local rendering — NO network, CLI tools, or headless browser. Writes "<project>/.data/modules/temp/<slug>.png", ".svg" and ".json" (temp files that are deleted automatically once the final deck is built) and returns their absolute paths plus the template name and size. Use list_infographic_templates to pick the template and infographic_preview to sanity-check first. The returned "png" path can be embedded on an "infographic" slide via create_pptx_file.` +
-        ` Data arrays: list templates use "lists", sequence use "sequences", compare use "compares", relation use "nodes" + "relations", hierarchy use "root" (with nested "children"), chart use "values". Items are { "label", "desc"?, "value"?, "children"? }.`,
+        ` Data arrays: list templates use "lists", sequence use "sequences", compare use "compares", relation use "nodes" + "relations", hierarchy use "root" (with nested "children"), chart use "values". Items are { "label", "desc"?, "value"?, "icon"?, "children"? }. ${INFOGRAPHIC_ICON_HINT}`,
       parameters: {
         type: 'object',
         properties: {
