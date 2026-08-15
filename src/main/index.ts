@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow } from 'electron'
+import { app, shell, BrowserWindow, Menu } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -25,6 +25,60 @@ import { AIConfigStore } from './ai/config'
 app.setName('PTNotes')
 
 let mainWindow: BrowserWindow | null = null
+
+function buildAppMenu(): Menu {
+  const isMac = process.platform === 'darwin'
+  const template: Electron.MenuItemConstructorOptions[] = [
+    ...(isMac ? [{ role: 'appMenu' } as Electron.MenuItemConstructorOptions] : []),
+    {
+      label: 'File',
+      submenu: [
+        isMac
+          ? { role: 'close' }
+          : ({ role: 'quit', label: 'Quit PTNotes' } as Electron.MenuItemConstructorOptions)
+      ]
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        ...(isMac
+          ? ([
+              { role: 'pasteAndMatchStyle' },
+              { role: 'delete' },
+              { role: 'selectAll' }
+            ] as Electron.MenuItemConstructorOptions[])
+          : ([
+              { role: 'delete' },
+              { type: 'separator' },
+              { role: 'selectAll' }
+            ] as Electron.MenuItemConstructorOptions[]))
+      ]
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' }
+      ]
+    },
+    { role: 'windowMenu' },
+    { role: 'help' }
+  ]
+  return Menu.buildFromTemplate(template)
+}
 
 function openExternalSafely(url: string): void {
   try {
@@ -80,6 +134,8 @@ function createWindow(): void {
 
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.ptnotes.app')
+
+  Menu.setApplicationMenu(buildAppMenu())
 
   if (process.platform === 'darwin' && !app.isPackaged && app.dock) {
     app.dock.setIcon(icon)

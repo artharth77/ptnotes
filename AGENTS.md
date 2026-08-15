@@ -192,6 +192,7 @@ src/
 - **Format helper (bubble popup):** selecting text shows an icon-only bubble (`BubbleMenu` from `@tiptap/react/menus` — no new dependency) with **Bold / Italic / Underline / Strikethrough / Inline code** buttons (active states + tooltips); a circular `mdiCloseCircle` X button in its top-right corner closes it and turns the feature off. Enabled by default, persisted in `localStorage` (`ptnotes:formatHelper`), and toggled from a status-bar button on the right (icon + label).
 - **Right-click format menu:** right-clicking in the editor (outside a table) always shows a `note-menu` with the same five actions — keeps the selection when the click is inside it, otherwise moves the cursor to the click point. Opening the menu hides the bubble popup (`setMeta('hide')`); closing it never re-shows the bubble (it only returns on a fresh selection). The table right-click menu is unchanged.
 - **Show Raw toggle:** a second status-bar button (left of the Format helper button, label "RAW") swaps the toolbar + TipTap view for a plain markdown `<textarea>` (`editor-raw`: monospace, `spellCheck={false}`, `autoFocus`). Edits auto-save debounced ~800ms (reuses the editor's `saveTimer`); leaving raw mode re-syncs the TipTap doc via `setContent(rawText, { contentType: 'markdown', emitUpdate: false })`. The toggle is **component-local only** — never persisted and resets to off on every note change (the editor remounts via `key={activeNoteId}`).
+- **Find & replace:** `Cmd/Ctrl+F` or the magnify toolbar button (left of Undo) opens a find bar: search input with a `current/total` counter, previous/next, match-case toggle, replace input, and **Replace** / **Replace all**. Highlights are pure **ProseMirror decorations** (never mutate the doc, so markdown round-trip/undo/auto-save are untouched). The engine is a custom `FindReplace` extension (`src/renderer/src/editor/findReplace.ts`) with the match algorithm kept as a pure, unit-tested function in `src/shared/find.ts` (`findMatchesInTextRuns`: regex-escaped literal query, `matchCase` flag, whitespace-only matches skipped). Text runs are grouped per block (`buildTextRuns`), so matches span inline marks (bold/link) but never cross paragraph boundaries. Typing/step/replace-current all select the match and scroll the editor to it via `view.coordsAtPos` + manual `.editor-content` scrolling (`scrollMatchIntoView` — ProseMirror's own `scrollToSelection` silently no-ops when DOM focus is in the find input, not the editor). `Escape` closes and refocuses the editor; the bar is hidden in raw mode.
 
 ## IPC surface (window.ptnotes)
 
@@ -292,7 +293,10 @@ ChatPanel (renderer) ──send──▶ Main process
   marks (`\p{M}`); only Latin combining accents (`\u0300-\u036f`) are stripped (see `slugify`).
 - **Keyboard shortcuts:** with the cursor in the chat input box, `Cmd/Ctrl+Shift+N` starts a new chat
   and `Cmd/Ctrl+Shift+H` toggles the chat history popup (Shift-modified to avoid the default menu's
-  `Cmd+N` New Window / `Cmd+H` Hide accelerators — no main-process menu changes); opening via the
+  `Cmd+N` New Window / `Cmd+H` Hide accelerators — no main-process menu changes for chat; note that
+  the app *does* install a custom application menu, `buildAppMenu()` in `src/main/index.ts`, whose
+  sole purpose is removing the default Edit→Find role so the renderer owns `Cmd/Ctrl+F` for the
+  markdown editor's find/replace bar); opening via the
   shortcut blurs the input, closing refocuses it. Globally, `Cmd/Ctrl+Shift+C` toggles the chat
   panel (mirrors the top-bar Chat button, handled by a window listener in ChatDrawer, which is
   always mounted); it is suppressed while any dialog/modal is open (a `.modal-overlay` or

@@ -3,6 +3,7 @@
 ### Added
 
 - **Editor link tooltip**: holding **Cmd/Ctrl** over a link in the WYSIWYG editor now shows a cursor-following tooltip with the contextual action — `Open note: <name>`, `Open skill: <name>`, `Open file location: <name>`, or `Open link: <url>` — previewing where the Cmd/Ctrl+click will take you. The tooltip follows the mouse while hovering and disappears on leaving the link, releasing the key, or leaving the editor.
+- **Find & replace in the markdown editor**: **`Cmd/Ctrl+F`** (or the new magnify toolbar button next to Undo) opens a find bar with live match highlighting, a `current/total` counter, previous/next navigation (moves the caret and scrolls the editor to the match), a match-case toggle, and single **Replace** / **Replace all** actions. As you type, matches highlight immediately and the editor jumps to the first match. Highlights are ProseMirror decorations (non-destructive — markdown source, undo, and auto-save are untouched) and never cross paragraph boundaries. `Escape` closes the bar; the bar is hidden in raw-markdown mode. Freeing `Cmd/Ctrl+F` required replacing the default Electron menu with a custom one that drops the Edit→Find role.
 
 ### Fixed
 

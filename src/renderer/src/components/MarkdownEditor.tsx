@@ -15,7 +15,14 @@ import {
   mdiFormatStrikethroughVariant,
   mdiFormatText,
   mdiFormatUnderline,
+  mdiChevronDown,
+  mdiChevronUp,
+  mdiClose,
+  mdiFileReplaceOutline,
+  mdiFindReplace,
+  mdiFormatLetterCase,
   mdiLinkVariant,
+  mdiMagnify,
   mdiMinus,
   mdiRedoVariant,
   mdiTableColumnPlusAfter,
@@ -51,6 +58,15 @@ import { useAppStore } from '../store/useAppStore'
 import { slugify } from '@shared/slug'
 import { PromptModal } from './Modal'
 import { MdiIcon } from './MdiIcon'
+import {
+  FindReplace,
+  clearFind,
+  findStep,
+  getFindState,
+  replaceAll,
+  replaceCurrent,
+  setFind
+} from '../editor/findReplace'
 
 interface MarkdownEditorProps {
   noteId: string
@@ -242,7 +258,8 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
       }),
       TaskList,
       TaskItem.configure({ nested: true }),
-      TableKit
+      TableKit,
+      FindReplace
     ],
     content,
     contentType: 'markdown',
@@ -295,6 +312,14 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
     }
   })
 
+  const findState = useEditorState({
+    editor,
+    selector: (ctx) => {
+      const st = getFindState(ctx.editor)
+      return { count: st.results.length, index: st.index }
+    }
+  })
+
   const [linkPrompt, setLinkPrompt] = useState(false)
   const [tableMenu, setTableMenu] = useState<{ x: number; y: number } | null>(null)
   const [formatMenu, setFormatMenu] = useState<{ x: number; y: number } | null>(null)
@@ -304,6 +329,11 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
   const [linkTooltip, setLinkTooltip] = useState<{ label: string; x: number; y: number } | null>(
     null
   )
+  const [findOpen, setFindOpen] = useState(false)
+  const [findTerm, setFindTerm] = useState('')
+  const [replaceTerm, setReplaceTerm] = useState('')
+  const [matchCase, setMatchCase] = useState(false)
+  const findInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     if (!tableMenu && !formatMenu) return
@@ -386,6 +416,47 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
     return () => dom.removeEventListener('click', onClick, true)
   }, [editor])
 
+  useEffect(() => {
+    if (!editor) return
+    if (findTerm) {
+      setFind(editor, findTerm, matchCase)
+    } else {
+      clearFind(editor)
+    }
+  }, [editor, findTerm, matchCase])
+
+  useEffect(() => {
+    if (!editor) return
+    if (!findOpen) clearFind(editor)
+  }, [editor, findOpen])
+
+  useEffect(() => {
+    if (findOpen && !rawMode) findInputRef.current?.focus()
+  }, [findOpen, rawMode])
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+        if (rawMode) return
+        e.preventDefault()
+        e.stopPropagation()
+        if (findOpen) {
+          findInputRef.current?.focus()
+          findInputRef.current?.select()
+        } else {
+          setFindOpen(true)
+        }
+        return
+      }
+      if (e.key === 'Escape' && findOpen) {
+        setFindOpen(false)
+        editor?.commands.focus()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [findOpen, rawMode, editor])
+
   if (!editor) {
     return <div className="editor empty-state">Loading editor…</div>
   }
@@ -402,6 +473,7 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
       setRawText(editor.getMarkdown())
       setTableMenu(null)
       setFormatMenu(null)
+      setFindOpen(false)
       setRawMode(true)
     }
   }
@@ -558,6 +630,12 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
           />
           <span className="tb-sep" />
           <ToolbarBtn
+            icon={mdiMagnify}
+            title="Find"
+            active={findOpen}
+            onClick={() => setFindOpen(!findOpen)}
+          />
+          <ToolbarBtn
             icon={mdiUndoVariant}
             title="Undo"
             disabled={!state.canUndo}
@@ -569,6 +647,90 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
             disabled={!state.canRedo}
             onClick={() => editor.chain().focus().redo().run()}
           />
+        </div>
+      )}
+      {!rawMode && findOpen && (
+        <div className="find-bar">
+          <input
+            ref={findInputRef}
+            className="find-input"
+            value={findTerm}
+            placeholder="Find"
+            spellCheck={false}
+            onChange={(e) => setFindTerm(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                findStep(editor, 1)
+              }
+            }}
+          />
+          {findTerm && (
+            <span className="find-count">
+              {findState.count ? `${findState.index + 1}/${findState.count}` : '0/0'}
+            </span>
+          )}
+          <button
+            type="button"
+            className="tb-btn"
+            title="Previous match"
+            disabled={!findState.count}
+            onClick={() => findStep(editor, -1)}
+          >
+            <MdiIcon path={mdiChevronUp} size={16} />
+          </button>
+          <button
+            type="button"
+            className="tb-btn"
+            title="Next match"
+            disabled={!findState.count}
+            onClick={() => findStep(editor, 1)}
+          >
+            <MdiIcon path={mdiChevronDown} size={16} />
+          </button>
+          <button
+            type="button"
+            className={`tb-btn ${matchCase ? 'active' : ''}`}
+            title="Match case"
+            onClick={() => setMatchCase(!matchCase)}
+          >
+            <MdiIcon path={mdiFormatLetterCase} size={16} />
+          </button>
+          <span className="tb-sep" />
+          <input
+            className="find-input find-replace-input"
+            value={replaceTerm}
+            placeholder="Replace"
+            spellCheck={false}
+            onChange={(e) => setReplaceTerm(e.target.value)}
+          />
+          <button
+            type="button"
+            className="tb-btn"
+            title="Replace"
+            disabled={!findState.count}
+            onClick={() => replaceCurrent(editor, replaceTerm)}
+          >
+            <MdiIcon path={mdiFileReplaceOutline} size={16} />
+          </button>
+          <button
+            type="button"
+            className="tb-btn"
+            title="Replace all"
+            disabled={!findState.count}
+            onClick={() => replaceAll(editor, replaceTerm)}
+          >
+            <MdiIcon path={mdiFindReplace} size={16} />
+          </button>
+          <span className="find-spacer" />
+          <button
+            type="button"
+            className="tb-btn"
+            title="Close find (Esc)"
+            onClick={() => setFindOpen(false)}
+          >
+            <MdiIcon path={mdiClose} size={16} />
+          </button>
         </div>
       )}
       {rawMode ? (

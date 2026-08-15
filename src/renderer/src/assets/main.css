@@ -1315,6 +1315,63 @@ body {
   margin: 0 5px;
 }
 
+.find-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+}
+
+.find-input {
+  width: 160px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+}
+
+.find-input:focus {
+  border-color: var(--accent);
+}
+
+.find-replace-input {
+  width: 120px;
+}
+
+.find-count {
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  padding: 0 4px;
+}
+
+.find-spacer {
+  flex: 1;
+}
+
+.find-match {
+  background: var(--accent-soft);
+  border-radius: 3px;
+  color: var(--text);
+}
+
+.find-match-current {
+  background: var(--accent);
+  color: #fff;
+}
+
+@media (prefers-color-scheme: dark) {
+  .find-match-current {
+    color: var(--bg-elev);
+  }
+}
+
 .editor-content {
   flex: 1;
   overflow-y: auto;
