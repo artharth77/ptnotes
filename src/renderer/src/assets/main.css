@@ -1473,6 +1473,24 @@ body {
   cursor: pointer;
 }
 
+.editor-link-tooltip {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  transform: translate(10px, 14px);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--text);
+  font-size: 12px;
+  box-shadow: var(--shadow);
+}
+
 .editor-meta {
   display: flex;
   align-items: center;

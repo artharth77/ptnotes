@@ -94,6 +94,14 @@ function internalNameFromHref(href: string, prefix: string): string {
   }
 }
 
+function linkTooltipLabel(href: string): string {
+  if (href.startsWith('note:')) return `Open note: ${slugify(internalNameFromHref(href, 'note:'))}`
+  if (href.startsWith('skill:'))
+    return `Open skill: ${slugify(internalNameFromHref(href, 'skill:'))}`
+  if (href.startsWith('file:')) return `Open file location: ${internalNameFromHref(href, 'file:')}`
+  return `Open link: ${href}`
+}
+
 function handleEditorLink(href: string): void {
   if (href.startsWith('note:')) {
     const name = slugify(internalNameFromHref(href, 'note:'))
@@ -293,6 +301,9 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
   const [rawMode, setRawMode] = useState(false)
   const [rawText, setRawText] = useState('')
   const [modKeyDown, setModKeyDown] = useState(false)
+  const [linkTooltip, setLinkTooltip] = useState<{ label: string; x: number; y: number } | null>(
+    null
+  )
 
   useEffect(() => {
     if (!tableMenu && !formatMenu) return
@@ -323,6 +334,36 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
       window.removeEventListener('blur', onBlur)
     }
   }, [])
+  useEffect(() => {
+    if (!editor) return
+    const dom = editor.view.dom
+    const onMove = (e: MouseEvent): void => {
+      if (!e.metaKey && !e.ctrlKey) {
+        setLinkTooltip(null)
+        return
+      }
+      const target = e.target instanceof Element ? e.target : null
+      const link = target?.closest('.editor-link')
+      if (!link) {
+        setLinkTooltip(null)
+        return
+      }
+      const href = link.getAttribute('href') ?? ''
+      setLinkTooltip({ label: linkTooltipLabel(href), x: e.clientX, y: e.clientY })
+    }
+    const onLeave = (): void => setLinkTooltip(null)
+    const onKeyUp = (e: KeyboardEvent): void => {
+      if (e.key === 'Meta' || e.key === 'Control') setLinkTooltip(null)
+    }
+    dom.addEventListener('mousemove', onMove)
+    dom.addEventListener('mouseleave', onLeave)
+    window.addEventListener('keyup', onKeyUp)
+    return () => {
+      dom.removeEventListener('mousemove', onMove)
+      dom.removeEventListener('mouseleave', onLeave)
+      window.removeEventListener('keyup', onKeyUp)
+    }
+  }, [editor])
   useEffect(() => {
     if (!editor) return
     const dom = editor.view.dom
@@ -762,6 +803,11 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
             editor.chain().focus().setLink({ href: url }).run()
           }}
         />
+      )}
+      {linkTooltip && (
+        <div className="editor-link-tooltip" style={{ left: linkTooltip.x, top: linkTooltip.y }}>
+          {linkTooltip.label}
+        </div>
       )}
     </div>
   )

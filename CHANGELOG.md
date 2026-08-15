@@ -1,5 +1,9 @@
 ## [0.7.1] — 2026-08-15
 
+### Added
+
+- **Editor link tooltip**: holding **Cmd/Ctrl** over a link in the WYSIWYG editor now shows a cursor-following tooltip with the contextual action — `Open note: <name>`, `Open skill: <name>`, `Open file location: <name>`, or `Open link: <url>` — previewing where the Cmd/Ctrl+click will take you. The tooltip follows the mouse while hovering and disappears on leaving the link, releasing the key, or leaving the editor.
+
 ### Fixed
 
 - **Markdown editor link navigation**: fixed a bug where plain clicks on http/https links still triggered navigation in some environments; links now correctly place the text cursor on plain click and only navigate on **Cmd/Ctrl+click**.
