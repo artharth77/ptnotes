@@ -37,6 +37,13 @@ import { Markdown } from '@tiptap/markdown'
 import Placeholder from '@tiptap/extension-placeholder'
 import Typography from '@tiptap/extension-typography'
 import Link from '@tiptap/extension-link'
+import { mergeAttributes } from '@tiptap/core'
+
+const CustomLink = Link.extend({
+  renderHTML({ HTMLAttributes }) {
+    return ['span', mergeAttributes(HTMLAttributes, { class: 'editor-link' }), 0]
+  }
+})
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { TableKit } from '@tiptap/extension-table'
@@ -106,7 +113,14 @@ function handleEditorLink(href: string): void {
     const project = useAppStore.getState().activeProject
     if (project) void window.ptnotes.files.revealByName(project, name)
   } else {
-    window.open(href, '_blank')
+    try {
+      const parsed = new URL(href)
+      if (['http:', 'https:', 'mailto:'].includes(parsed.protocol)) {
+        window.open(href, '_blank')
+      }
+    } catch {
+      // Invalid URL, ignore
+    }
   }
 }
 
@@ -213,7 +227,11 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
       }),
       Placeholder.configure({ placeholder: 'Start writing…' }),
       Typography,
-      Link.configure({ openOnClick: false, autolink: true, protocols: ['note', 'skill', 'file'] }),
+      CustomLink.configure({
+        openOnClick: false,
+        autolink: true,
+        protocols: ['note', 'skill', 'file']
+      }),
       TaskList,
       TaskItem.configure({ nested: true }),
       TableKit
@@ -305,20 +323,22 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
       window.removeEventListener('blur', onBlur)
     }
   }, [])
-
   useEffect(() => {
     if (!editor) return
     const dom = editor.view.dom
     const onClick = (e: MouseEvent): void => {
       const target = e.target instanceof Element ? e.target : null
-      const link = target?.closest('a[href]')
+      const link = target?.closest('.editor-link')
       if (!link) return
+
+      const href = link.getAttribute('href') ?? ''
       if (e.metaKey || e.ctrlKey) {
         e.preventDefault()
         e.stopPropagation()
-        handleEditorLink(link.getAttribute('href') ?? '')
+        handleEditorLink(href)
       } else {
         e.preventDefault()
+        e.stopPropagation()
       }
     }
     dom.addEventListener('click', onClick, true)

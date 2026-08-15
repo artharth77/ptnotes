@@ -187,7 +187,8 @@ src/
 
 - **Top bar:** current project name with dropdown (switch / new / rename / delete), Settings, chat toggle.
 - **Middle column:** tabs for Notes (list + create/rename/delete) and Todo (interactive checklist + progress).
-- **Main area:** TipTap WYSIWYG editor for notes; auto-save to `.md` ~800ms after edits (debounced). The toolbar includes an **underline** button (StarterKit v3 registers `Underline`; markdown round-trips as GitLab-style `++text++`). Links in the editor require Cmd/Ctrl+click to navigate: external links open in the OS browser, while `note:`, `skill:`, and `file:` links open the note, skill editor, or reveal the file in Finder, respectively.
+  - **Main area:** TipTap WYSIWYG editor for notes; auto-save to `.md` ~800ms after edits (debounced). The toolbar includes an **underline** button (StarterKit v3 registers `Underline`; markdown round-trips as GitLab-style `++text++`). Links in the editor use a custom `<span>` implementation to disable default browser navigation; they require Cmd/Ctrl+click to navigate: external links open in the OS browser, while `note:`, `skill:`, and `file:` links open the note, skill editor, or reveal the file in Finder, respectively.
+
 - **Format helper (bubble popup):** selecting text shows an icon-only bubble (`BubbleMenu` from `@tiptap/react/menus` — no new dependency) with **Bold / Italic / Underline / Strikethrough / Inline code** buttons (active states + tooltips); a circular `mdiCloseCircle` X button in its top-right corner closes it and turns the feature off. Enabled by default, persisted in `localStorage` (`ptnotes:formatHelper`), and toggled from a status-bar button on the right (icon + label).
 - **Right-click format menu:** right-clicking in the editor (outside a table) always shows a `note-menu` with the same five actions — keeps the selection when the click is inside it, otherwise moves the cursor to the click point. Opening the menu hides the bubble popup (`setMeta('hide')`); closing it never re-shows the bubble (it only returns on a fresh selection). The table right-click menu is unchanged.
 - **Show Raw toggle:** a second status-bar button (left of the Format helper button, label "RAW") swaps the toolbar + TipTap view for a plain markdown `<textarea>` (`editor-raw`: monospace, `spellCheck={false}`, `autoFocus`). Edits auto-save debounced ~800ms (reuses the editor's `saveTimer`); leaving raw mode re-syncs the TipTap doc via `setContent(rawText, { contentType: 'markdown', emitUpdate: false })`. The toggle is **component-local only** — never persisted and resets to off on every note change (the editor remounts via `key={activeNoteId}`).
@@ -241,7 +242,7 @@ ChatPanel (renderer) ──send──▶ Main process
 | `create_note`  | new `.md` in project `notes/`                                                                                   |
 | `update_note`  | overwrite / rename existing note                                                                                |
 | `list_notes`   | model context                                                                                                   |
-| `read_note`    | model context; omit `title` to read the currently active note (the one the user is viewing)                    |
+| `read_note`    | model context; omit `title` to read the currently active note (the one the user is viewing)                     |
 | `search_notes` | search note titles + content, return matching names + snippet                                                   |
 | `delete_note`  | delete one or more notes (requires user confirmation dialog)                                                    |
 | `create_todos` | append `- [ ]` items to `TODO.md`                                                                               |
@@ -254,7 +255,7 @@ ChatPanel (renderer) ──send──▶ Main process
 | `delete_skill` | delete a skill (requires user confirmation dialog)                                                              |
 | `web_search`   | DuckDuckGo HTML search, no API key, Node fetch in main (user-agent header, rate-limit errors surfaced to model) |
 | `web_fetch`    | direct fetch + cheerio local parse (strip scripts/styles/nav, extract title + readable text) — fully private    |
-| `ask_user`     | ask the user 1–8 choice/free-text questions in a wizard dialog (radio / checkboxes / free text); chat-only     |
+| `ask_user`     | ask the user 1–8 choice/free-text questions in a wizard dialog (radio / checkboxes / free text); chat-only      |
 
 ### PDF attachments (drag & drop into chat)
 

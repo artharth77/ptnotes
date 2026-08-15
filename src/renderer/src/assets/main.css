@@ -1461,12 +1461,14 @@ body {
   pointer-events: none;
 }
 
-.ProseMirror a {
+.ProseMirror a,
+.editor-link {
   color: var(--accent);
   text-decoration: underline;
   cursor: text;
 }
 
+.editor-content.mod-key-down .editor-link:hover,
 .editor-content.mod-key-down a:hover {
   cursor: pointer;
 }

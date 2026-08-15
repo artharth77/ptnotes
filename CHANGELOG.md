@@ -1,4 +1,10 @@
-# Changelog
+## [0.7.1] — 2026-08-15
+
+### Fixed
+
+- **Markdown editor link navigation**: fixed a bug where plain clicks on http/https links still triggered navigation in some environments; links now correctly place the text cursor on plain click and only navigate on **Cmd/Ctrl+click**.
+- **External link errors**: added a protocol allowlist (`http`, `https`, `mailto`) and caught promise rejections in `shell.openExternal` to eliminate "No application found to open URL" console errors and improve security.
+- **Editor link rendering**: links in the WYSIWYG editor are now rendered as `<span>` instead of `<a>` to completely disable default browser anchor behavior.
 
 All notable changes to PTNotes are documented in this file.
 
@@ -36,14 +42,13 @@ All notable changes to PTNotes are documented in this file.
 - Table cells use the app's border/header style with a soft highlight for the selected cell.
 
 #### Markdown editor QoL
- 
- - **Underline** is now available in the note editor: a new toolbar button (after Italic) toggles it, and it's included in the format helper and right-click menu too. Underline round-trips to markdown as GitLab-style `++text++` (StarterKit v3 already registers the extension — no new dependency).
- - **Format helper bubble**: selecting text in the editor pops an icon-only bubble above the selection with **Bold / Italic / Underline / Strikethrough / Inline code** buttons (active states + tooltips). A circular **X** button in its top-right corner closes the bubble and turns the feature off.
- - **Right-click format menu**: right-clicking in the editor always shows a context menu with the same five formatting actions (keeps the selection when the click is inside it, otherwise moves the cursor to the click point). Opening the menu hides the bubble popup; closing it does not bring the bubble back — it only returns on a fresh selection. The table right-click menu is unchanged.
- - **Status-bar toggle**: the editor status bar now has an icon + label **Format helper** toggle on the right that turns the bubble popup on/off. The setting is remembered across restarts (default on, stored in `localStorage`).
- - **Show Raw mode**: a second status-bar button (left of the Format helper, label "RAW") swaps the WYSIWYG editor for a plain monospace **markdown `<textarea>`** so you can edit the raw source directly. Edits auto-save (~800ms debounce, same as the WYSIWYG view) and toggling back re-syncs the rich editor. The toggle is **not persisted** — it resets to off every time you switch notes.
- - **Cmd/Ctrl+click link navigation**: links in the WYSIWYG editor no longer navigate on plain click (which now correctly places the text cursor); instead, users must hold **Cmd/Ctrl** to navigate. External links open in the OS browser; internal `note:`, `skill:`, and `file:` links open the respective note, skill editor, or reveal the file in Finder (matching chat behavior). Hovering a link while holding the modifier key changes the cursor to a pointer.
 
+- **Underline** is now available in the note editor: a new toolbar button (after Italic) toggles it, and it's included in the format helper and right-click menu too. Underline round-trips to markdown as GitLab-style `++text++` (StarterKit v3 already registers the extension — no new dependency).
+- **Format helper bubble**: selecting text in the editor pops an icon-only bubble above the selection with **Bold / Italic / Underline / Strikethrough / Inline code** buttons (active states + tooltips). A circular **X** button in its top-right corner closes the bubble and turns the feature off.
+- **Right-click format menu**: right-clicking in the editor always shows a context menu with the same five formatting actions (keeps the selection when the click is inside it, otherwise moves the cursor to the click point). Opening the menu hides the bubble popup; closing it does not bring the bubble back — it only returns on a fresh selection. The table right-click menu is unchanged.
+- **Status-bar toggle**: the editor status bar now has an icon + label **Format helper** toggle on the right that turns the bubble popup on/off. The setting is remembered across restarts (default on, stored in `localStorage`).
+- **Show Raw mode**: a second status-bar button (left of the Format helper, label "RAW") swaps the WYSIWYG editor for a plain monospace **markdown `<textarea>`** so you can edit the raw source directly. Edits auto-save (~800ms debounce, same as the WYSIWYG view) and toggling back re-syncs the rich editor. The toggle is **not persisted** — it resets to off every time you switch notes.
+- **Cmd/Ctrl+click link navigation**: links in the WYSIWYG editor no longer navigate on plain click (which now correctly places the text cursor); instead, users must hold **Cmd/Ctrl** to navigate. External links open in the OS browser; internal `note:`, `skill:`, and `file:` links open the respective note, skill editor, or reveal the file in Finder (matching chat behavior). Hovering a link while holding the modifier key changes the cursor to a pointer.
 
 ### Fixed
 

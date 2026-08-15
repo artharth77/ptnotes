@@ -26,6 +26,16 @@ app.setName('PTNotes')
 
 let mainWindow: BrowserWindow | null = null
 
+function openExternalSafely(url: string): void {
+  try {
+    const parsed = new URL(url)
+    if (!['http:', 'https:', 'mailto:'].includes(parsed.protocol)) return
+    shell.openExternal(url).catch((err) => console.error('openExternal failed:', err))
+  } catch {
+    // Invalid URL or missing protocol, ignore
+  }
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -48,7 +58,7 @@ function createWindow(): void {
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    openExternalSafely(details.url)
     return { action: 'deny' }
   })
 
@@ -57,7 +67,7 @@ function createWindow(): void {
     const allowed = devUrl ? url.startsWith(devUrl) : url.startsWith('file://')
     if (!allowed) {
       event.preventDefault()
-      shell.openExternal(url)
+      openExternalSafely(url)
     }
   })
 
