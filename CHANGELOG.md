@@ -12,6 +12,10 @@
 - **External link errors**: added a protocol allowlist (`http`, `https`, `mailto`) and caught promise rejections in `shell.openExternal` to eliminate "No application found to open URL" console errors and improve security.
 - **Editor link rendering**: links in the WYSIWYG editor are now rendered as `<span>` instead of `<a>` to completely disable default browser anchor behavior.
 
+### Changed
+
+- **No `ask_user` timeout**: the human-in-the-loop question dialog no longer auto-cancels after 120s — the assistant now waits indefinitely for your answers. The pending request stays open until you submit or cancel (or start a new chat).
+
 All notable changes to PTNotes are documented in this file.
 
 ## [0.7.0] — 2026-08-14

@@ -18,7 +18,6 @@ import type {
 } from '@shared/types'
 
 const CONFIRM_TIMEOUT_MS = 60_000
-const ASK_TIMEOUT_MS = 120_000
 
 export interface AskResult {
   answers: AskAnswer[]
@@ -43,10 +42,7 @@ export function createSessionRegistry(
     string,
     { resolve: (approved: boolean) => void; timer: NodeJS.Timeout }
   >()
-  const pendingAsks = new Map<
-    string,
-    { resolve: (res: AskResult) => void; timer: NodeJS.Timeout }
-  >()
+  const pendingAsks = new Map<string, { resolve: (res: AskResult) => void }>()
 
   return {
     getSession(event, project) {
@@ -77,14 +73,8 @@ export function createSessionRegistry(
             },
             ask: (req: Omit<AskRequest, 'id'>) => {
               const id = randomUUID()
-              const timer = setTimeout(() => {
-                const pending = pendingAsks.get(id)
-                if (!pending) return
-                pendingAsks.delete(id)
-                pending.resolve({ answers: [], cancelled: true })
-              }, ASK_TIMEOUT_MS)
               const promise = new Promise<AskResult>((resolve) => {
-                pendingAsks.set(id, { resolve, timer })
+                pendingAsks.set(id, { resolve })
               })
               send({ type: 'ask', ask: { id, ...req } })
               return promise
@@ -113,7 +103,6 @@ export function createSessionRegistry(
     askResponse(resp) {
       const pending = pendingAsks.get(resp.id)
       if (!pending) return
-      clearTimeout(pending.timer)
       pendingAsks.delete(resp.id)
       pending.resolve({ answers: resp.answers, cancelled: !!resp.cancelled })
     }
