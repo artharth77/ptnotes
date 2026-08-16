@@ -312,6 +312,15 @@ function AboutPane(): React.JSX.Element {
           <code>{about.node}</code>
         </div>
       </div>
+      <div className="about-deps">
+        <span className="about-deps-label">Dependencies</span>
+        <textarea
+          className="about-deps-text"
+          readOnly
+          spellCheck={false}
+          value={about.dependencies.join('\n')}
+        />
+      </div>
     </div>
   )
 }

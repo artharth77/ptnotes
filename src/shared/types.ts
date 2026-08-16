@@ -57,6 +57,8 @@ export interface AboutInfo {
   electron: string
   chrome: string
   node: string
+  /** Production dependencies as `name@version` lines, one per entry. */
+  dependencies: string[]
 }
 
 // ---- Skills (named instruction documents the AI can load on demand) ----

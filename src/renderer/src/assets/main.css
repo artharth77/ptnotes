@@ -1060,6 +1060,34 @@ body {
   padding: 1px 6px;
 }
 
+.about-deps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.about-deps-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.about-deps-text {
+  width: 100%;
+  height: 180px;
+  resize: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  overflow-y: auto;
+}
+
 /* ---------- Skills pane ---------- */
 
 .skills-toolbar {
