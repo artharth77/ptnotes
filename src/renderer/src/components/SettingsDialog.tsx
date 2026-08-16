@@ -235,6 +235,17 @@ function ModulesPane({
               <span className="module-settings-info">
                 <span className="module-settings-name">{m.name}</span>
                 <span className="module-settings-desc">{m.summary}</span>
+                {m.link && (
+                  <a
+                    className="module-settings-link"
+                    href={m.link.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {m.link.label}
+                  </a>
+                )}
               </span>
               <button
                 className={`module-settings-toggle${m.enabled ? ' on' : ''}`}

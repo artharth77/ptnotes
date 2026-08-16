@@ -41,6 +41,8 @@ export interface ModuleSettings {
   name: string
   summary: string
   enabled: boolean
+  /** Optional external link shown under the module row (e.g. a template gallery). */
+  link?: { label: string; url: string }
 }
 
 export interface AppSettings {

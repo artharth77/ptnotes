@@ -118,6 +118,10 @@ export function createInfographicModule(): RegisteredModule {
     name: 'Infographic',
     summary:
       'Creates a polished data-story infographic (.svg + .png) from a topic, outline or source notes.',
+    link: {
+      label: 'See more templates here',
+      url: 'https://infographic.antv.vision/gallery'
+    },
     description:
       'Creates a professional infographic using @antv/infographic built-in templates (lists, sequences/timelines, comparisons/SWOT, hierarchies/mindmaps, relations/networks, word clouds, pie charts). When the user asks for an infographic, poster, one-pager or visual summary, prepare a DETAILED prompt: the topic, the key points/data to visualize, and any source notes/files. The module subagent will pick a template, author the design and save a ready-to-share .svg + .png into the project files folder.',
     systemPrompt:

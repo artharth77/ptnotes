@@ -2693,6 +2693,16 @@ body {
   font-size: 12px;
 }
 
+.module-settings-link {
+  color: var(--accent);
+  font-size: 12px;
+  text-decoration: underline;
+}
+
+.module-settings-link:hover {
+  color: var(--accent-hover, var(--accent));
+}
+
 /* ---------- Modules ---------- */
 
 .module-panel {
