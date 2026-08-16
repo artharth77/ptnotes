@@ -819,7 +819,6 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
             onClick={() => setFormatHelperEnabled(!formatHelperEnabled)}
           >
             <MdiIcon path={mdiFormatText} size={14} />
-            Format helper
           </button>
         </div>
       </div>
