@@ -47,13 +47,15 @@ function findNote(
 
 function scopeOf(args: Record<string, unknown>): SkillScope | null {
   const scope = String(args.scope ?? 'project')
-  return scope === 'global' || scope === 'project' ? scope : null
+  return scope === 'global' || scope === 'project' || scope === 'builtin' ? scope : null
 }
 
-/** All enabled skill names (global + project) for error messages. */
+/** All enabled skill names (global + project + builtin) for error messages. */
 async function skillNames(ctx: ToolContext): Promise<string[]> {
   const list = await ctx.service.listSkills(ctx.activeProject)
-  return [...list.global, ...list.project].filter((s) => s.enabled).map((s) => s.name)
+  return [...list.global, ...list.project, ...list.builtin]
+    .filter((s) => s.enabled)
+    .map((s) => s.name)
 }
 
 export const tools: PTTool[] = [
@@ -579,7 +581,18 @@ export const tools: PTTool[] = [
     async execute(args, ctx) {
       const project = projectOf(args, ctx)
       const scope = scopeOf(args)
-      if (!scope) return JSON.stringify({ ok: false, error: 'scope must be "global" or "project"' })
+      if (!scope) {
+        return JSON.stringify({
+          ok: false,
+          error: 'scope must be "global", "project" or "builtin"'
+        })
+      }
+      if (scope === 'builtin') {
+        return JSON.stringify({
+          ok: false,
+          error: 'Builtin skills are read-only and cannot be created'
+        })
+      }
       const name = String(args.name ?? '').trim()
       if (!name) return JSON.stringify({ ok: false, error: 'No skill name provided' })
       const existing = await ctx.service.readSkill(project, scope, name)
@@ -609,8 +622,9 @@ export const tools: PTTool[] = [
           properties: {
             scope: {
               type: 'string',
-              enum: ['global', 'project'],
-              description: 'Where the skill lives: "global" or "project". Defaults to "project".'
+              enum: ['global', 'project', 'builtin'],
+              description:
+                'Where the skill lives: "global" (all projects), "project" (current project) or "builtin" (app-shipped, read-only). Defaults to "project".'
             },
             name: { type: 'string', description: 'Name of the skill to load' },
             project: {
@@ -625,7 +639,12 @@ export const tools: PTTool[] = [
     async execute(args, ctx) {
       const project = projectOf(args, ctx)
       const scope = scopeOf(args)
-      if (!scope) return JSON.stringify({ ok: false, error: 'scope must be "global" or "project"' })
+      if (!scope) {
+        return JSON.stringify({
+          ok: false,
+          error: 'scope must be "global", "project" or "builtin"'
+        })
+      }
       const name = String(args.name ?? '').trim()
       if (!name) return JSON.stringify({ ok: false, error: 'No skill name provided' })
       const skill = await ctx.service.readSkill(project, scope, name)
@@ -671,7 +690,18 @@ export const tools: PTTool[] = [
     async execute(args, ctx) {
       const project = projectOf(args, ctx)
       const scope = scopeOf(args)
-      if (!scope) return JSON.stringify({ ok: false, error: 'scope must be "global" or "project"' })
+      if (!scope) {
+        return JSON.stringify({
+          ok: false,
+          error: 'scope must be "global", "project" or "builtin"'
+        })
+      }
+      if (scope === 'builtin') {
+        return JSON.stringify({
+          ok: false,
+          error: 'Builtin skills are read-only and cannot be deleted'
+        })
+      }
       const name = String(args.name ?? '').trim()
       if (!name) return JSON.stringify({ ok: false, error: 'No skill name provided' })
       const existing = await ctx.service.readSkill(project, scope, name)

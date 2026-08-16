@@ -33,6 +33,11 @@ export function registerSkillsIpc(service: PTNotesService): void {
     ) => service.setSkillEnabled(project, scope, name, enabled)
   )
   ipcMain.handle(
+    'skills:setBuiltinEnabled',
+    async (_e: IpcMainInvokeEvent, name: string, enabled: boolean) =>
+      service.setBuiltinSkillEnabled(name, enabled)
+  )
+  ipcMain.handle(
     'skills:move',
     async (
       _e: IpcMainInvokeEvent,

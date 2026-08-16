@@ -498,7 +498,11 @@ function SkillsPane(): React.JSX.Element {
     if (!activeProject) return
     setError('')
     try {
-      await window.ptnotes.skills.setEnabled(activeProject, meta.scope, meta.name, !meta.enabled)
+      if (meta.scope === 'builtin') {
+        await window.ptnotes.skills.setBuiltinEnabled(meta.name, !meta.enabled)
+      } else {
+        await window.ptnotes.skills.setEnabled(activeProject, meta.scope, meta.name, !meta.enabled)
+      }
       await reload()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -518,8 +522,13 @@ function SkillsPane(): React.JSX.Element {
     }
   }
 
-  function renderSection(title: string, items: SkillMeta[]): React.JSX.Element {
+  function renderSection(
+    title: string,
+    items: SkillMeta[],
+    opts: { badge?: string; manageable?: boolean } = {}
+  ): React.JSX.Element {
     if (items.length === 0) return <></>
+    const manageable = opts.manageable !== false
     return (
       <div className="skills-section">
         <div className="skills-section-title">{title}</div>
@@ -529,7 +538,7 @@ function SkillsPane(): React.JSX.Element {
             <div key={key} className={`skills-row${meta.enabled ? '' : ' disabled'}`}>
               <div className="skills-main">
                 <span className="skills-badge">
-                  {meta.scope === 'global' ? 'Global' : 'Project'}
+                  {opts.badge ?? (meta.scope === 'global' ? 'Global' : 'Project')}
                 </span>
                 <span className="skills-name">{meta.name}</span>
                 <span className="skills-desc">{meta.description || '(no description)'}</span>
@@ -544,13 +553,15 @@ function SkillsPane(): React.JSX.Element {
                   size={32}
                 />
               </button>
-              <button
-                className="icon-btn small skills-menu-btn"
-                title="More actions"
-                onClick={(e) => openMenu(e, key)}
-              >
-                <MdiIcon path={mdiDotsVertical} size={18} />
-              </button>
+              {manageable && (
+                <button
+                  className="icon-btn small skills-menu-btn"
+                  title="More actions"
+                  onClick={(e) => openMenu(e, key)}
+                >
+                  <MdiIcon path={mdiDotsVertical} size={18} />
+                </button>
+              )}
               {menuFor === key && menuPos && (
                 <>
                   <div className="menu-overlay" onClick={() => setMenuFor(null)} />
@@ -605,7 +616,8 @@ function SkillsPane(): React.JSX.Element {
         the current project; global skills apply everywhere. The assistant sees a skills index in
         its system prompt and calls <code>read_skill</code> when a skill is relevant. Toggle a skill
         off to exclude it from the assistant; use the ⋮ menu on a skill to edit, move it between
-        scopes, or delete it.
+        scopes, or delete it. Build-in skills ship with the app and are read-only — you can only
+        enable or disable them here.
       </p>
       <div className="skills-toolbar">
         <button className="btn" onClick={() => setCreating(true)}>
@@ -619,11 +631,17 @@ function SkillsPane(): React.JSX.Element {
         <>
           {renderSection('Global skills', skills.global)}
           {renderSection('Project skills', skills.project)}
-          {skills.global.length === 0 && skills.project.length === 0 && (
-            <p className="hint">
-              No skills yet — create one to teach the assistant reusable instructions.
-            </p>
-          )}
+          {renderSection('Build-in skills', skills.builtin, {
+            badge: 'Build-in',
+            manageable: false
+          })}
+          {skills.global.length === 0 &&
+            skills.project.length === 0 &&
+            skills.builtin.length === 0 && (
+              <p className="hint">
+                No skills yet — create one to teach the assistant reusable instructions.
+              </p>
+            )}
         </>
       )}
       {creating && (

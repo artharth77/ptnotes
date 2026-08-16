@@ -31,6 +31,8 @@ export interface AIProviderConfig {
 export interface StorageSettings {
   rootDir: string
   disabledModules?: string[]
+  /** User enable/disable choices for builtin (app-shipped, read-only) skills, keyed by skill name. */
+  builtinSkillOverrides?: Record<string, boolean>
 }
 
 /** A registered module's availability state shown in Settings ▸ Modules. */
@@ -57,7 +59,7 @@ export interface AboutInfo {
 
 // ---- Skills (named instruction documents the AI can load on demand) ----
 
-export type SkillScope = 'global' | 'project'
+export type SkillScope = 'global' | 'project' | 'builtin'
 
 export interface SkillMeta {
   scope: SkillScope
@@ -70,6 +72,7 @@ export interface SkillMeta {
 export interface SkillList {
   global: SkillMeta[]
   project: SkillMeta[]
+  builtin: SkillMeta[]
 }
 
 export interface SkillContent extends SkillMeta {

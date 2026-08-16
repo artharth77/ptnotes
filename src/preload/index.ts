@@ -128,6 +128,8 @@ const api = {
       name: string,
       enabled: boolean
     ): Promise<SkillMeta> => ipcRenderer.invoke('skills:setEnabled', project, scope, name, enabled),
+    setBuiltinEnabled: (name: string, enabled: boolean): Promise<SkillMeta> =>
+      ipcRenderer.invoke('skills:setBuiltinEnabled', name, enabled),
     move: (
       project: string,
       scope: SkillScope,

@@ -338,10 +338,11 @@ Two-panel dialog (`.settings-layout` with `.settings-nav` + `.settings-pane`):
   `ptnotes-settings.json`. Toggles apply immediately, no Save button.
 - **Skills:** lists global + project skills (name, description, enabled state) with a per-skill
   enable/disable toggle and a `⋮` context menu (Edit skill, Move to Global/Project skills,
-  Delete-with-confirm). Create/edit happens in a modal (scope, name, description, content).
+  Delete-with-confirm). Build-in skills (app-shipped, read-only) are also listed in a separate
+  section with a toggle only. Create/edit happens in a modal (scope, name, description, content).
   Changes apply immediately — the chat system prompt re-renders its skills index on the next
   send. Disabled skills are excluded from the index and refused by `read_skill` (`enabled:`
-  front-matter in `SKILL.md`, default enabled).
+  front-matter in `SKILL.md` or user override in `ptnotes-settings.json`, default enabled).
 - Model downloads auto-load silently when the AI pane opens (best-effort; failures hidden until
   **Load models** is clicked).
 - When the AI isn't configured (empty model, or no API key for a remote provider), the chat panel

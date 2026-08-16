@@ -17,11 +17,13 @@ import type {
 import type { ModuleChatMessage, ModuleInfo, ModuleRun } from '@shared/types'
 import { slugify } from '@shared/slug'
 import { detectFileKind } from '../ai/reader'
+import type { SettingsStore } from '../settings'
 
 const TODO_HEADER = '# Todo\n\n'
 const WELCOME_ID = 'welcome'
 const REGISTRY_FILE = '.ptnotes-projects.json'
 const GLOBAL_SKILLS_DIR = '.skills'
+const BUILTIN_SKILLS_DIR = 'builtin-skills'
 const WELCOME_NOTE = `# Welcome to PTNotes
 
 This is your first note. Everything you write here is stored as markdown in:
@@ -37,9 +39,16 @@ This is your first note. Everything you write here is stored as markdown in:
 
 export class PTNotesService {
   private rootDir: string
+  private readonly builtinSkillsRoot: string
+  private readonly settingsStore?: SettingsStore
+  private builtinOverrides: Record<string, boolean> = {}
+  private builtinOverridesLoaded = false
 
-  constructor(rootDir?: string) {
+  constructor(rootDir?: string, builtinSkillsRoot?: string, settingsStore?: SettingsStore) {
     this.rootDir = rootDir ?? join(app.getPath('documents'), 'PTNotes')
+    this.builtinSkillsRoot =
+      builtinSkillsRoot ?? join(app.getAppPath(), 'resources', BUILTIN_SKILLS_DIR)
+    this.settingsStore = settingsStore
   }
 
   get root(): string {
@@ -157,7 +166,13 @@ export class PTNotesService {
     return join(this.dataDir(name), 'skills')
   }
 
+  /** Builtin (app-shipped, read-only) skills dir, packaged under `resources/builtin-skills`. */
+  private builtinSkillsDir(): string {
+    return this.builtinSkillsRoot
+  }
+
   private skillsDir(scope: SkillScope, name: string): string {
+    if (scope === 'builtin') return this.builtinSkillsDir()
     return scope === 'global' ? this.globalSkillsDir() : this.projectSkillsDir(name)
   }
 
@@ -385,13 +400,35 @@ export class PTNotesService {
 
   // ---- Skills ----
 
-  /** List global + project skills (folders with a SKILL.md manifest + `description:` front-matter). */
+  /** List global + project + builtin skills (folders with a SKILL.md manifest + `description:` front-matter). */
   async listSkills(project: string): Promise<SkillList> {
-    const [global, projectSkills] = await Promise.all([
+    const [global, projectSkills, builtin] = await Promise.all([
       this.readSkillsDir(this.globalSkillsDir(), 'global'),
-      this.readSkillsDir(this.projectSkillsDir(project), 'project')
+      this.readSkillsDir(this.projectSkillsDir(project), 'project'),
+      this.readSkillsDir(this.builtinSkillsDir(), 'builtin')
     ])
-    return { global, project: projectSkills }
+    return { global, project: projectSkills, builtin }
+  }
+
+  /**
+   * User enable/disable choices for builtin skills, loaded once from the settings store
+   * (and cached). Without a store (tests) the choices stay empty.
+   */
+  private async ensureBuiltinOverrides(): Promise<Record<string, boolean>> {
+    if (!this.builtinOverridesLoaded) {
+      this.builtinOverridesLoaded = true
+      if (this.settingsStore) {
+        const settings = await this.settingsStore.load()
+        this.builtinOverrides = settings.builtinSkillOverrides ?? {}
+      }
+    }
+    return this.builtinOverrides
+  }
+
+  /** Effective enabled flag: a user override wins over the developer's front-matter default. */
+  private async applyBuiltinOverride(name: string, defaultEnabled: boolean): Promise<boolean> {
+    const overrides = await this.ensureBuiltinOverrides()
+    return Object.prototype.hasOwnProperty.call(overrides, name) ? overrides[name] : defaultEnabled
   }
 
   private async readSkillsDir(dir: string, scope: SkillScope): Promise<SkillMeta[]> {
@@ -411,7 +448,10 @@ export class PTNotesService {
         scope,
         name: entry.name,
         description: parseSkillDescription(raw),
-        enabled: parseSkillEnabled(raw)
+        enabled:
+          scope === 'builtin'
+            ? await this.applyBuiltinOverride(entry.name, parseSkillEnabled(raw))
+            : parseSkillEnabled(raw)
       })
     }
     skills.sort((a, b) => a.name.localeCompare(b.name))
@@ -426,7 +466,10 @@ export class PTNotesService {
         scope,
         name: slug,
         description: parseSkillDescription(raw),
-        enabled: parseSkillEnabled(raw),
+        enabled:
+          scope === 'builtin'
+            ? await this.applyBuiltinOverride(slug, parseSkillEnabled(raw))
+            : parseSkillEnabled(raw),
         content: stripSkillFrontMatter(raw).trim()
       }
     } catch {
@@ -434,13 +477,14 @@ export class PTNotesService {
     }
   }
 
-  /** Upsert a skill: folder `<name>/SKILL.md` with OpenAI skill-guide front-matter. */
+  /** Upsert a skill: folder `<name>/SKILL.md` with OpenAI skill-guide front-matter. Builtin skills are read-only. */
   async saveSkill(
     project: string,
     scope: SkillScope,
     name: string,
     input: { description: string; content: string; enabled?: boolean }
   ): Promise<SkillMeta> {
+    if (scope === 'builtin') throw new Error('Builtin skills are read-only')
     const slug = slugify(name)
     const dir = this.skillDir(scope, project, slug)
     await fs.mkdir(dir, { recursive: true })
@@ -459,19 +503,21 @@ export class PTNotesService {
   }
 
   async deleteSkill(project: string, scope: SkillScope, name: string): Promise<boolean> {
+    if (scope === 'builtin') throw new Error('Builtin skills are read-only')
     const dir = this.skillDir(scope, project, name)
     if (!(await this.pathExists(dir))) return false
     await fs.rm(dir, { recursive: true, force: true })
     return true
   }
 
-  /** Toggle whether a skill is offered to the AI, preserving its description and content. */
+  /** Toggle whether a skill is offered to the AI, preserving its description and content. Builtin skills are read-only. */
   async setSkillEnabled(
     project: string,
     scope: SkillScope,
     name: string,
     enabled: boolean
   ): Promise<SkillMeta> {
+    if (scope === 'builtin') throw new Error('Builtin skills are read-only')
     const existing = await this.readSkill(project, scope, name)
     if (!existing) throw new Error(`Skill "${name}" (${scope}) not found`)
     return this.saveSkill(project, scope, existing.name, {
@@ -481,13 +527,37 @@ export class PTNotesService {
     })
   }
 
-  /** Move a skill between scopes, relocating its whole folder. */
+  /**
+   * Toggle a builtin (app-shipped, read-only) skill. The choice is persisted in the
+   * settings store (`builtinSkillOverrides`), never written to the packaged SKILL.md.
+   */
+  async setBuiltinSkillEnabled(name: string, enabled: boolean): Promise<SkillMeta> {
+    const slug = slugify(name)
+    const meta = await this.readSkill('', 'builtin', slug)
+    if (!meta) throw new Error(`Builtin skill "${slug}" not found`)
+    const overrides = await this.ensureBuiltinOverrides()
+    overrides[slug] = enabled
+    if (this.settingsStore) {
+      const settings = await this.settingsStore.load()
+      settings.builtinSkillOverrides = {
+        ...(settings.builtinSkillOverrides ?? {}),
+        [slug]: enabled
+      }
+      await this.settingsStore.save(settings)
+    }
+    return { ...meta, enabled }
+  }
+
+  /** Move a skill between scopes, relocating its whole folder. Builtin skills are read-only. */
   async moveSkill(
     project: string,
     fromScope: SkillScope,
     name: string,
     toScope: SkillScope
   ): Promise<SkillMeta> {
+    if (fromScope === 'builtin' || toScope === 'builtin') {
+      throw new Error('Builtin skills are read-only')
+    }
     const slug = slugify(name)
     const fromDir = this.skillDir(fromScope, project, name)
     const toDir = this.skillDir(toScope, project, slug)
@@ -509,12 +579,13 @@ export class PTNotesService {
     return moved
   }
 
-  /** Prompt block listing enabled skills (global + project) for the system prompt. Disabled skills are excluded. */
+  /** Prompt block listing enabled skills (global + project + builtin) for the system prompt. Disabled skills are excluded. */
   async renderSkillsIndex(project: string): Promise<string> {
-    const { global, project: projectSkills } = await this.listSkills(project)
+    const { global, project: projectSkills, builtin } = await this.listSkills(project)
     const lines: string[] = []
     const enabledGlobal = global.filter((s) => s.enabled)
     const enabledProject = projectSkills.filter((s) => s.enabled)
+    const enabledBuiltin = builtin.filter((s) => s.enabled)
     if (enabledGlobal.length > 0) {
       lines.push('Global skills:')
       for (const s of enabledGlobal)
@@ -523,6 +594,11 @@ export class PTNotesService {
     if (enabledProject.length > 0) {
       lines.push('Project skills:')
       for (const s of enabledProject)
+        lines.push(`- ${s.name} — ${s.description || '(no description)'}`)
+    }
+    if (enabledBuiltin.length > 0) {
+      lines.push('Builtin skills:')
+      for (const s of enabledBuiltin)
         lines.push(`- ${s.name} — ${s.description || '(no description)'}`)
     }
     return lines.join('\n')
