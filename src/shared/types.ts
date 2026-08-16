@@ -31,6 +31,8 @@ export interface AIProviderConfig {
 export interface StorageSettings {
   rootDir: string
   disabledModules?: string[]
+  /** User enable/disable choices for builtin (app-shipped, read-only) skills, keyed by skill name. */
+  builtinSkillOverrides?: Record<string, boolean>
 }
 
 /** A registered module's availability state shown in Settings ▸ Modules. */
@@ -39,6 +41,8 @@ export interface ModuleSettings {
   name: string
   summary: string
   enabled: boolean
+  /** Optional external link shown under the module row (e.g. a template gallery). */
+  link?: { label: string; url: string }
 }
 
 export interface AppSettings {
@@ -53,11 +57,13 @@ export interface AboutInfo {
   electron: string
   chrome: string
   node: string
+  /** Production dependencies as `name@version` lines, one per entry. */
+  dependencies: string[]
 }
 
 // ---- Skills (named instruction documents the AI can load on demand) ----
 
-export type SkillScope = 'global' | 'project'
+export type SkillScope = 'global' | 'project' | 'builtin'
 
 export interface SkillMeta {
   scope: SkillScope
@@ -70,6 +76,7 @@ export interface SkillMeta {
 export interface SkillList {
   global: SkillMeta[]
   project: SkillMeta[]
+  builtin: SkillMeta[]
 }
 
 export interface SkillContent extends SkillMeta {

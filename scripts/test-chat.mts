@@ -12,7 +12,7 @@ const origLoad = (Module as { _load: (r: string, p: unknown, m: boolean) => unkn
   isMain
 ) {
   if (request === 'electron') {
-    return { app: { getPath: () => ROOT } }
+    return { app: { getPath: () => ROOT, getAppPath: () => ROOT } }
   }
   return origLoad.call(this, request, parent, isMain)
 }

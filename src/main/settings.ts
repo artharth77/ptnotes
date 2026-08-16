@@ -24,7 +24,17 @@ export class SettingsStore {
       const disabledModules = Array.isArray(parsed.disabledModules)
         ? parsed.disabledModules.filter((id): id is string => typeof id === 'string')
         : []
-      return { rootDir, disabledModules }
+      const builtinSkillOverrides: Record<string, boolean> = {}
+      if (
+        parsed.builtinSkillOverrides &&
+        typeof parsed.builtinSkillOverrides === 'object' &&
+        !Array.isArray(parsed.builtinSkillOverrides)
+      ) {
+        for (const [key, value] of Object.entries(parsed.builtinSkillOverrides)) {
+          if (typeof value === 'boolean') builtinSkillOverrides[key] = value
+        }
+      }
+      return { rootDir, disabledModules, builtinSkillOverrides }
     } catch {
       return defaultSettings()
     }
@@ -39,7 +49,16 @@ export class SettingsStore {
               settings.disabledModules.filter((id): id is string => typeof id === 'string')
             )
           ]
-        : []
+        : [],
+      builtinSkillOverrides: {}
+    }
+    if (settings.builtinSkillOverrides && typeof settings.builtinSkillOverrides === 'object') {
+      for (const [key, value] of Object.entries(settings.builtinSkillOverrides)) {
+        if (typeof value === 'boolean') {
+          next.builtinSkillOverrides = next.builtinSkillOverrides ?? {}
+          next.builtinSkillOverrides[key] = value
+        }
+      }
     }
     await fs.writeFile(this.filePath, JSON.stringify(next, null, 2), {
       encoding: 'utf8',

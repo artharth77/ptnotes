@@ -11,6 +11,8 @@ export interface RegisteredModule {
   name: string
   /** Short user-facing summary. */
   summary: string
+  /** Optional external link shown under the module row in Settings (e.g. a template gallery). */
+  link?: { label: string; url: string }
   /** Long description shown to the main agent so it knows when/when to trigger this module. */
   description: string
   /** Extra system-prompt guidance for the module's subagent. */

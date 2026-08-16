@@ -29,7 +29,7 @@ const createInfographicFileTool: PTTool = {
     type: 'function',
     function: {
       name: 'create_infographic_file',
-      description: `Create the final infographic deliverable in the project files folder. Pure local rendering — NO network, CLI tools, or headless browser. Accepts an @antv/infographic design (DSL string starting with "infographic <template>" or a JSON object { "template", "data", ... }); pick the template with list_infographic_templates first and sanity-check with infographic_preview. Writes "<project>/files/<slug>.svg" (the primary vector deliverable) plus a matching ".png" raster and returns both absolute paths.`,
+      description: `Create the final infographic deliverable in the project files folder. Pure local rendering — NO network, CLI tools, or headless browser. Accepts an @antv/infographic design (DSL string starting with "infographic <template>" or a JSON object { "template", "data", ... }); pick the template with list_infographic_templates first and sanity-check with infographic_preview. Item icons use the local Material Design Icons format "icon": "mdi/<name>" (e.g. "mdi/cog") — only "mdi/<name>" icons render; when an item omits "icon", a matching name is auto-filled from the item label. Writes "<project>/files/<slug>.svg" (the primary vector deliverable) plus a matching ".png" raster and returns both absolute paths.`,
       parameters: {
         type: 'object',
         properties: {
@@ -118,10 +118,14 @@ export function createInfographicModule(): RegisteredModule {
     name: 'Infographic',
     summary:
       'Creates a polished data-story infographic (.svg + .png) from a topic, outline or source notes.',
+    link: {
+      label: 'See more templates here',
+      url: 'https://infographic.antv.vision/gallery'
+    },
     description:
       'Creates a professional infographic using @antv/infographic built-in templates (lists, sequences/timelines, comparisons/SWOT, hierarchies/mindmaps, relations/networks, word clouds, pie charts). When the user asks for an infographic, poster, one-pager or visual summary, prepare a DETAILED prompt: the topic, the key points/data to visualize, and any source notes/files. The module subagent will pick a template, author the design and save a ready-to-share .svg + .png into the project files folder.',
     systemPrompt:
-      'Author clean, data-driven infographics. FIRST call list_infographic_templates to pick a fitting template and follow its data shape: list templates use "lists", sequence use "sequences", compare use "compares", relation use "nodes" + "relations", hierarchy use "root" (with nested "children"), chart use "values". Items are { "label", "desc"?, "value"? }. Prefer 3-8 items so the infographic stays legible. Then call infographic_preview to sanity-check size and totals, iterate on the design if needed, and finally call create_infographic_file to save the .svg (primary) + .png deliverable into the project files folder. Rendering is pure local (in-process; no network, CLI tools or headless browser). Do NOT invent data — use only the numbers, names and facts from the user prompt or read any referenced note:/file: inputs.',
+      'Author clean, data-driven infographics. FIRST call list_infographic_templates to pick a fitting template and follow its data shape: list templates use "lists", sequence use "sequences", compare use "compares", relation use "nodes" + "relations", hierarchy use "root" (with nested "children"), chart use "values". Items are { "label", "desc"?, "value"? }. Prefer 3-8 items so the infographic stays legible. Item icons use the local Material Design Icons format "icon": "mdi/<name>" (kebab-case, e.g. "mdi/cog", "mdi/email", "mdi/rocket"); only "mdi/<name>" icons render. Add a fitting "icon" per item when it adds value — or omit it and a matching name is auto-filled from the item label. Then call infographic_preview to sanity-check size and totals, iterate on the design if needed, and finally call create_infographic_file to save the .svg (primary) + .png deliverable into the project files folder. Rendering is pure local (in-process; no network, CLI tools or headless browser). Do NOT invent data — use only the numbers, names and facts from the user prompt or read any referenced note:/file: inputs.',
     outputTool: 'create_infographic_file',
     tools: [...createInfographicTools(), createInfographicFileTool]
   }

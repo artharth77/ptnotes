@@ -1,4 +1,22 @@
-# Changelog
+## [0.7.1] — 2026-08-15
+
+### Added
+
+- **Build-in skills**: the app now ships read-only **Build-in** skills as markdown files under `resources/builtin-skills/<name>/SKILL.md` (same OpenAI front-matter layout), packaged with the app. Developers add/update them by editing the files; in **Settings ▸ Skills** users see them in a new **Build-in skills** section where they can only **enable/disable** each one (no edit, move, or delete — overrides are persisted in `ptnotes-settings.json`). Enabled Build-in skills are listed in the assistant's system-prompt skills index, readable via `read_skill` (scope `builtin`), and available as `/`-slash skill commands; a `builtin` scope cannot be created or deleted by the AI (`create_skill`/`delete_skill` stay `global`/`project`).
+- **Editor link tooltip**: holding **Cmd/Ctrl** over a link in the WYSIWYG editor now shows a cursor-following tooltip with the contextual action — `Open note: <name>`, `Open skill: <name>`, `Open file location: <name>`, or `Open link: <url>` — previewing where the Cmd/Ctrl+click will take you. The tooltip follows the mouse while hovering and disappears on leaving the link, releasing the key, or leaving the editor.
+- **Find & replace in the markdown editor**: **`Cmd/Ctrl+F`** (or the new magnify toolbar button next to Undo) opens a find bar with live match highlighting, a `current/total` counter, previous/next navigation (moves the caret and scrolls the editor to the match), a match-case toggle, and single **Replace** / **Replace all** actions. As you type, matches highlight immediately and the editor jumps to the first match. Highlights are ProseMirror decorations (non-destructive — markdown source, undo, and auto-save are untouched) and never cross paragraph boundaries. `Escape` closes the bar; the bar is hidden in raw-markdown mode. Freeing `Cmd/Ctrl+F` required replacing the default Electron menu with a custom one that drops the Edit→Find role.
+- **Infographic icons**: infographic designs can now set `icon` on items using the local **`mdi/<name>`** format (e.g. `"icon": "mdi/cog"`, `"mdi/email"`, `"mdi/rocket"`) — the only supported icon source. Icons are resolved **offline** from the bundled `@mdi/js` catalog (7,447 Material Design Icons) via a registered `@antv/infographic` resource loader that embeds inline `<symbol>`s, so the renderer never queries the package's remote icon service; `illus` (remote illustration) fields remain stripped. Bare names like `icon: "rocket"` are canonicalized to `mdi/rocket`, and unsupported sources (URLs, data-URIs, raw SVG, `ref:`) are dropped. When an item omits an icon, a matching name is **auto-filled** from the item's label (keyword match + synonym map, default `mdi/star`) so icon slots render instead of staying blank.
+- **Dependency list in About**: Settings ▸ About now shows every production dependency with its installed version in a read-only textbox (one package per line, e.g. `@antv/infographic@0.2.19`). Versions are resolved from `node_modules`, so they reflect what's actually installed.
+
+### Fixed
+
+- **Markdown editor link navigation**: fixed a bug where plain clicks on http/https links still triggered navigation in some environments; links now correctly place the text cursor on plain click and only navigate on **Cmd/Ctrl+click**.
+- **External link errors**: added a protocol allowlist (`http`, `https`, `mailto`) and caught promise rejections in `shell.openExternal` to eliminate "No application found to open URL" console errors and improve security.
+- **Editor link rendering**: links in the WYSIWYG editor are now rendered as `<span>` instead of `<a>` to completely disable default browser anchor behavior.
+
+### Changed
+
+- **No `ask_user` timeout**: the human-in-the-loop question dialog no longer auto-cancels after 120s — the assistant now waits indefinitely for your answers. The pending request stays open until you submit or cancel (or start a new chat).
 
 All notable changes to PTNotes are documented in this file.
 
@@ -36,14 +54,13 @@ All notable changes to PTNotes are documented in this file.
 - Table cells use the app's border/header style with a soft highlight for the selected cell.
 
 #### Markdown editor QoL
- 
- - **Underline** is now available in the note editor: a new toolbar button (after Italic) toggles it, and it's included in the format helper and right-click menu too. Underline round-trips to markdown as GitLab-style `++text++` (StarterKit v3 already registers the extension — no new dependency).
- - **Format helper bubble**: selecting text in the editor pops an icon-only bubble above the selection with **Bold / Italic / Underline / Strikethrough / Inline code** buttons (active states + tooltips). A circular **X** button in its top-right corner closes the bubble and turns the feature off.
- - **Right-click format menu**: right-clicking in the editor always shows a context menu with the same five formatting actions (keeps the selection when the click is inside it, otherwise moves the cursor to the click point). Opening the menu hides the bubble popup; closing it does not bring the bubble back — it only returns on a fresh selection. The table right-click menu is unchanged.
- - **Status-bar toggle**: the editor status bar now has an icon + label **Format helper** toggle on the right that turns the bubble popup on/off. The setting is remembered across restarts (default on, stored in `localStorage`).
- - **Show Raw mode**: a second status-bar button (left of the Format helper, label "RAW") swaps the WYSIWYG editor for a plain monospace **markdown `<textarea>`** so you can edit the raw source directly. Edits auto-save (~800ms debounce, same as the WYSIWYG view) and toggling back re-syncs the rich editor. The toggle is **not persisted** — it resets to off every time you switch notes.
- - **Cmd/Ctrl+click link navigation**: links in the WYSIWYG editor no longer navigate on plain click (which now correctly places the text cursor); instead, users must hold **Cmd/Ctrl** to navigate. External links open in the OS browser; internal `note:`, `skill:`, and `file:` links open the respective note, skill editor, or reveal the file in Finder (matching chat behavior). Hovering a link while holding the modifier key changes the cursor to a pointer.
 
+- **Underline** is now available in the note editor: a new toolbar button (after Italic) toggles it, and it's included in the format helper and right-click menu too. Underline round-trips to markdown as GitLab-style `++text++` (StarterKit v3 already registers the extension — no new dependency).
+- **Format helper bubble**: selecting text in the editor pops an icon-only bubble above the selection with **Bold / Italic / Underline / Strikethrough / Inline code** buttons (active states + tooltips). A circular **X** button in its top-right corner closes the bubble and turns the feature off.
+- **Right-click format menu**: right-clicking in the editor always shows a context menu with the same five formatting actions (keeps the selection when the click is inside it, otherwise moves the cursor to the click point). Opening the menu hides the bubble popup; closing it does not bring the bubble back — it only returns on a fresh selection. The table right-click menu is unchanged.
+- **Status-bar toggle**: the editor status bar now has an icon + label **Format helper** toggle on the right that turns the bubble popup on/off. The setting is remembered across restarts (default on, stored in `localStorage`).
+- **Show Raw mode**: a second status-bar button (left of the Format helper, label "RAW") swaps the WYSIWYG editor for a plain monospace **markdown `<textarea>`** so you can edit the raw source directly. Edits auto-save (~800ms debounce, same as the WYSIWYG view) and toggling back re-syncs the rich editor. The toggle is **not persisted** — it resets to off every time you switch notes.
+- **Cmd/Ctrl+click link navigation**: links in the WYSIWYG editor no longer navigate on plain click (which now correctly places the text cursor); instead, users must hold **Cmd/Ctrl** to navigate. External links open in the OS browser; internal `note:`, `skill:`, and `file:` links open the respective note, skill editor, or reveal the file in Finder (matching chat behavior). Hovering a link while holding the modifier key changes the cursor to a pointer.
 
 ### Fixed
 

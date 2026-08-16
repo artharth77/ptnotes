@@ -162,7 +162,7 @@ src/
 - Chat HTML is rendered via `react-markdown` with raw HTML escaped (XSS-safe); `<think>` blocks and user/error messages stay plain text.
 - Chart rasterization (Chart.js onto `@napi-rs/canvas`/skia) must stay isolated in the Electron **utility process** (`chart-render-worker.js`, spawned by `chartRenderer.ts`): a native segfault there must only fail the in-flight render tool, never crash the app. Module chart tools must call `renderChartIsolated`, never `renderChartPng` on the main process. The worker is a second `main` entry in `electron.vite.config.ts`; `PTNOTES_CHART_WORKER` env overrides its path for tests.
 - Diagram rendering (mermaid DSL → SVG via the jsdom/svgdom shim, rasterized by `@resvg/resvg-js`) must stay isolated in the Electron **utility process** (`diagram-render-worker.js`, spawned by `diagramRenderer.ts`): heavy DOM parsing and any native crash there must only fail the in-flight render tool, never crash the app. Module diagram tools must call `renderDiagramIsolated`, never render mermaid on the main process. The worker is a `main` entry in `electron.vite.config.ts`; `PTNOTES_DIAGRAM_WORKER` env overrides its path for tests. Mermaid is ESM-only, so it is always loaded via dynamic `import()`.
-- Infographic rendering (`@antv/infographic` SSR entry onto a `linkedom` DOM shim, rasterized by `@resvg/resvg-js`) must stay isolated in the Electron **utility process** (`infographic-render-worker.js`, spawned by `infographicRenderer.ts`): the SSR renderer installs browser-like globals (`window`/`document`/DOM classes) that it never restores, so the shared renderer snapshots/restores those globals around every render, and a heavy SSR/DOM render or native crash must only fail the in-flight render tool, never crash the app. Module infographic tools must call `renderInfographicIsolated`, never render on the main process. The worker is a `main` entry in `electron.vite.config.ts`; `PTNOTES_INFOGRAPHIC_WORKER` env overrides its path for tests. The SSR renderer only completes when the design has a `data` block — `icon`/`illus` fields are stripped (offline validation) so the worker never queries the package's remote icon service.
+- Infographic rendering (`@antv/infographic` SSR entry onto a `linkedom` DOM shim, rasterized by `@resvg/resvg-js`) must stay isolated in the Electron **utility process** (`infographic-render-worker.js`, spawned by `infographicRenderer.ts`): the SSR renderer installs browser-like globals (`window`/`document`/DOM classes) that it never restores, so the shared renderer snapshots/restores those globals around every render, and a heavy SSR/DOM render or native crash must only fail the in-flight render tool, never crash the app. Module infographic tools must call `renderInfographicIsolated`, never render on the main process. The worker is a `main` entry in `electron.vite.config.ts`; `PTNOTES_INFOGRAPHIC_WORKER` env overrides its path for tests. The SSR renderer only completes when the design has a `data` block. Icons are the one resource the package would otherwise fetch remotely, so only local **`mdi/<name>`** icons render (resolved from the bundled `@mdi/js` catalog by a registered `registerResourceLoader` in `loadInfographic` that always returns an inline `<symbol>` and never null); `illus` fields are always stripped, non-`mdi/` icon sources are dropped, and items that omit an icon get a matching name auto-filled from the item label — so the worker never queries the package's remote icon service.
 
 ### Conventions
 
@@ -187,10 +187,12 @@ src/
 
 - **Top bar:** current project name with dropdown (switch / new / rename / delete), Settings, chat toggle.
 - **Middle column:** tabs for Notes (list + create/rename/delete) and Todo (interactive checklist + progress).
-- **Main area:** TipTap WYSIWYG editor for notes; auto-save to `.md` ~800ms after edits (debounced). The toolbar includes an **underline** button (StarterKit v3 registers `Underline`; markdown round-trips as GitLab-style `++text++`). Links in the editor require Cmd/Ctrl+click to navigate: external links open in the OS browser, while `note:`, `skill:`, and `file:` links open the note, skill editor, or reveal the file in Finder, respectively.
+  - **Main area:** TipTap WYSIWYG editor for notes; auto-save to `.md` ~800ms after edits (debounced). The toolbar includes an **underline** button (StarterKit v3 registers `Underline`; markdown round-trips as GitLab-style `++text++`). Links in the editor use a custom `<span>` implementation to disable default browser navigation; they require Cmd/Ctrl+click to navigate: external links open in the OS browser, while `note:`, `skill:`, and `file:` links open the note, skill editor, or reveal the file in Finder, respectively.
+
 - **Format helper (bubble popup):** selecting text shows an icon-only bubble (`BubbleMenu` from `@tiptap/react/menus` — no new dependency) with **Bold / Italic / Underline / Strikethrough / Inline code** buttons (active states + tooltips); a circular `mdiCloseCircle` X button in its top-right corner closes it and turns the feature off. Enabled by default, persisted in `localStorage` (`ptnotes:formatHelper`), and toggled from a status-bar button on the right (icon + label).
 - **Right-click format menu:** right-clicking in the editor (outside a table) always shows a `note-menu` with the same five actions — keeps the selection when the click is inside it, otherwise moves the cursor to the click point. Opening the menu hides the bubble popup (`setMeta('hide')`); closing it never re-shows the bubble (it only returns on a fresh selection). The table right-click menu is unchanged.
 - **Show Raw toggle:** a second status-bar button (left of the Format helper button, label "RAW") swaps the toolbar + TipTap view for a plain markdown `<textarea>` (`editor-raw`: monospace, `spellCheck={false}`, `autoFocus`). Edits auto-save debounced ~800ms (reuses the editor's `saveTimer`); leaving raw mode re-syncs the TipTap doc via `setContent(rawText, { contentType: 'markdown', emitUpdate: false })`. The toggle is **component-local only** — never persisted and resets to off on every note change (the editor remounts via `key={activeNoteId}`).
+- **Find & replace:** `Cmd/Ctrl+F` or the magnify toolbar button (left of Undo) opens a find bar: search input with a `current/total` counter, previous/next, match-case toggle, replace input, and **Replace** / **Replace all**. Highlights are pure **ProseMirror decorations** (never mutate the doc, so markdown round-trip/undo/auto-save are untouched). The engine is a custom `FindReplace` extension (`src/renderer/src/editor/findReplace.ts`) with the match algorithm kept as a pure, unit-tested function in `src/shared/find.ts` (`findMatchesInTextRuns`: regex-escaped literal query, `matchCase` flag, whitespace-only matches skipped). Text runs are grouped per block (`buildTextRuns`), so matches span inline marks (bold/link) but never cross paragraph boundaries. Typing/step/replace-current all select the match and scroll the editor to it via `view.coordsAtPos` + manual `.editor-content` scrolling (`scrollMatchIntoView` — ProseMirror's own `scrollToSelection` silently no-ops when DOM focus is in the find input, not the editor). `Escape` closes and refocuses the editor; the bar is hidden in raw mode.
 
 ## IPC surface (window.ptnotes)
 
@@ -241,7 +243,7 @@ ChatPanel (renderer) ──send──▶ Main process
 | `create_note`  | new `.md` in project `notes/`                                                                                   |
 | `update_note`  | overwrite / rename existing note                                                                                |
 | `list_notes`   | model context                                                                                                   |
-| `read_note`    | model context; omit `title` to read the currently active note (the one the user is viewing)                    |
+| `read_note`    | model context; omit `title` to read the currently active note (the one the user is viewing)                     |
 | `search_notes` | search note titles + content, return matching names + snippet                                                   |
 | `delete_note`  | delete one or more notes (requires user confirmation dialog)                                                    |
 | `create_todos` | append `- [ ]` items to `TODO.md`                                                                               |
@@ -254,7 +256,7 @@ ChatPanel (renderer) ──send──▶ Main process
 | `delete_skill` | delete a skill (requires user confirmation dialog)                                                              |
 | `web_search`   | DuckDuckGo HTML search, no API key, Node fetch in main (user-agent header, rate-limit errors surfaced to model) |
 | `web_fetch`    | direct fetch + cheerio local parse (strip scripts/styles/nav, extract title + readable text) — fully private    |
-| `ask_user`     | ask the user 1–8 choice/free-text questions in a wizard dialog (radio / checkboxes / free text); chat-only     |
+| `ask_user`     | ask the user 1–8 choice/free-text questions in a wizard dialog (radio / checkboxes / free text); chat-only      |
 
 ### PDF attachments (drag & drop into chat)
 
@@ -291,7 +293,10 @@ ChatPanel (renderer) ──send──▶ Main process
   marks (`\p{M}`); only Latin combining accents (`\u0300-\u036f`) are stripped (see `slugify`).
 - **Keyboard shortcuts:** with the cursor in the chat input box, `Cmd/Ctrl+Shift+N` starts a new chat
   and `Cmd/Ctrl+Shift+H` toggles the chat history popup (Shift-modified to avoid the default menu's
-  `Cmd+N` New Window / `Cmd+H` Hide accelerators — no main-process menu changes); opening via the
+  `Cmd+N` New Window / `Cmd+H` Hide accelerators — no main-process menu changes for chat; note that
+  the app *does* install a custom application menu, `buildAppMenu()` in `src/main/index.ts`, whose
+  sole purpose is removing the default Edit→Find role so the renderer owns `Cmd/Ctrl+F` for the
+  markdown editor's find/replace bar); opening via the
   shortcut blurs the input, closing refocuses it. Globally, `Cmd/Ctrl+Shift+C` toggles the chat
   panel (mirrors the top-bar Chat button, handled by a window listener in ChatDrawer, which is
   always mounted); it is suppressed while any dialog/modal is open (a `.modal-overlay` or
@@ -333,10 +338,11 @@ Two-panel dialog (`.settings-layout` with `.settings-nav` + `.settings-pane`):
   `ptnotes-settings.json`. Toggles apply immediately, no Save button.
 - **Skills:** lists global + project skills (name, description, enabled state) with a per-skill
   enable/disable toggle and a `⋮` context menu (Edit skill, Move to Global/Project skills,
-  Delete-with-confirm). Create/edit happens in a modal (scope, name, description, content).
+  Delete-with-confirm). Build-in skills (app-shipped, read-only) are also listed in a separate
+  section with a toggle only. Create/edit happens in a modal (scope, name, description, content).
   Changes apply immediately — the chat system prompt re-renders its skills index on the next
   send. Disabled skills are excluded from the index and refused by `read_skill` (`enabled:`
-  front-matter in `SKILL.md`, default enabled).
+  front-matter in `SKILL.md` or user override in `ptnotes-settings.json`, default enabled).
 - Model downloads auto-load silently when the AI pane opens (best-effort; failures hidden until
   **Load models** is clicked).
 - When the AI isn't configured (empty model, or no API key for a remote provider), the chat panel

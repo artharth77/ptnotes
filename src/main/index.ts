@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow } from 'electron'
+import { app, shell, BrowserWindow, Menu } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -26,6 +26,70 @@ app.setName('PTNotes')
 
 let mainWindow: BrowserWindow | null = null
 
+function buildAppMenu(): Menu {
+  const isMac = process.platform === 'darwin'
+  const template: Electron.MenuItemConstructorOptions[] = [
+    ...(isMac ? [{ role: 'appMenu' } as Electron.MenuItemConstructorOptions] : []),
+    {
+      label: 'File',
+      submenu: [
+        isMac
+          ? { role: 'close' }
+          : ({ role: 'quit', label: 'Quit PTNotes' } as Electron.MenuItemConstructorOptions)
+      ]
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        ...(isMac
+          ? ([
+              { role: 'pasteAndMatchStyle' },
+              { role: 'delete' },
+              { role: 'selectAll' }
+            ] as Electron.MenuItemConstructorOptions[])
+          : ([
+              { role: 'delete' },
+              { type: 'separator' },
+              { role: 'selectAll' }
+            ] as Electron.MenuItemConstructorOptions[]))
+      ]
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' }
+      ]
+    },
+    { role: 'windowMenu' },
+    { role: 'help' }
+  ]
+  return Menu.buildFromTemplate(template)
+}
+
+function openExternalSafely(url: string): void {
+  try {
+    const parsed = new URL(url)
+    if (!['http:', 'https:', 'mailto:'].includes(parsed.protocol)) return
+    shell.openExternal(url).catch((err) => console.error('openExternal failed:', err))
+  } catch {
+    // Invalid URL or missing protocol, ignore
+  }
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -48,7 +112,7 @@ function createWindow(): void {
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    openExternalSafely(details.url)
     return { action: 'deny' }
   })
 
@@ -57,7 +121,7 @@ function createWindow(): void {
     const allowed = devUrl ? url.startsWith(devUrl) : url.startsWith('file://')
     if (!allowed) {
       event.preventDefault()
-      shell.openExternal(url)
+      openExternalSafely(url)
     }
   })
 
@@ -71,6 +135,8 @@ function createWindow(): void {
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.ptnotes.app')
 
+  Menu.setApplicationMenu(buildAppMenu())
+
   if (process.platform === 'darwin' && !app.isPackaged && app.dock) {
     app.dock.setIcon(icon)
   }
@@ -81,7 +147,7 @@ app.whenReady().then(async () => {
 
   const settingsStore = new SettingsStore()
   const settings = await settingsStore.load()
-  const service = new PTNotesService(settings.rootDir)
+  const service = new PTNotesService(settings.rootDir, undefined, settingsStore)
   await service.migrateLegacyFolders()
   const configStore = new AIConfigStore()
 

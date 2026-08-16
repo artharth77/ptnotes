@@ -1022,7 +1022,11 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                 onMouseEnter={() => setSlashIndex(i)}
               >
                 <span className="command-name">/{c.name}</span>
-                {c.scope && <span className="command-badge">{c.scope}</span>}
+                {c.scope && (
+                  <span className="command-badge">
+                    {c.scope === 'builtin' ? 'Build-in' : c.scope}
+                  </span>
+                )}
                 <span className="command-desc">{c.description}</span>
               </div>
             ))}

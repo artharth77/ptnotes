@@ -48,7 +48,10 @@ const origLoad = (Module as { _load: (r: string, p: unknown, m: boolean) => unkn
   isMain
 ) {
   if (request === 'electron') {
-    return { app: { getPath: () => ROOT }, shell: { showItemInFolder: () => {} } }
+    return {
+      app: { getPath: () => ROOT, getAppPath: () => ROOT },
+      shell: { showItemInFolder: () => {} }
+    }
   }
   if (request === 'pdf-parse') {
     return { PDFParse: FakePDFParse }

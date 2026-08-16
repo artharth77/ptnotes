@@ -16,7 +16,10 @@ const origLoad = (Module as { _load: (r: string, p: unknown, m: boolean) => unkn
   isMain
 ) {
   if (request === 'electron') {
-    return { app: { getPath: () => ROOT }, shell: { showItemInFolder: () => {} } }
+    return {
+      app: { getPath: () => ROOT, getAppPath: () => ROOT },
+      shell: { showItemInFolder: () => {} }
+    }
   }
   return origLoad.call(this, request, parent, isMain)
 }
@@ -525,13 +528,103 @@ const infoObjChecked = await validateInfographic({
 })
 assert.equal(infoObjChecked.ok, true, 'infographic object form accepted')
 if (infoObjChecked.ok) {
-  const stripped = infoObjChecked.renderArgs as {
+  const prepared = infoObjChecked.renderArgs as {
     data: { lists: { icon?: unknown }[] }
     icon?: unknown
   }
-  assert.equal(stripped.icon, undefined, 'top-level icon stripped (offline rendering)')
-  assert.equal(stripped.data.lists[0]?.icon, undefined, 'item icon stripped (offline rendering)')
+  assert.equal(prepared.icon, undefined, 'top-level icon stripped (not an item)')
+  assert.equal(
+    prepared.data.lists[0]?.icon,
+    'mdi/rocket',
+    'bare item icon canonicalized to mdi/<name> (local rendering)'
+  )
 }
+
+// ---- icon normalization + auto-fill (mdi/<name> local icons) ----
+const infoIconExplicit = await validateInfographic({
+  template: 'list-column-vertical-icon-arrow',
+  data: {
+    lists: [
+      { label: 'Config', icon: 'mdi/cog' },
+      { label: 'Mail', icon: 'mdi/email' }
+    ]
+  }
+})
+assert.equal(infoIconExplicit.ok, true, 'infographic with explicit mdi icons accepted')
+if (infoIconExplicit.ok) {
+  const items = (infoIconExplicit.renderArgs as { data: { lists: { icon: string }[] } }).data.lists
+  assert.equal(items[0].icon, 'mdi/cog', 'explicit mdi/<name> icon preserved')
+  assert.equal(items[1].icon, 'mdi/email', 'second explicit mdi/<name> icon preserved')
+}
+
+const infoIconAuto = await validateInfographic({
+  template: 'list-column-vertical-icon-arrow',
+  data: { lists: [{ label: 'Configuration' }, { label: 'Email' }] }
+})
+assert.equal(infoIconAuto.ok, true, 'icon-named template accepted without explicit icons')
+if (infoIconAuto.ok) {
+  const items = (infoIconAuto.renderArgs as { data: { lists: { label: string; icon?: string }[] } })
+    .data.lists
+  assert.equal(
+    items[0].icon,
+    'mdi/cog',
+    'auto-filled icon matches item label (Configuration → cog)'
+  )
+  assert.equal(items[1].icon, 'mdi/email', 'auto-filled icon matches item label (Email)')
+}
+
+const infoIconNonTemplate = await validateInfographic({
+  template: 'list-column-simple-vertical-arrow',
+  data: { lists: [{ label: 'a', icon: 'email' }, { label: 'Email' }] }
+})
+if (infoIconNonTemplate.ok) {
+  const items = (
+    infoIconNonTemplate.renderArgs as {
+      data: { lists: { label: string; icon?: string }[] }
+    }
+  ).data.lists
+  assert.equal(items[0].icon, 'mdi/email', 'explicit icon kept on any template')
+  assert.equal(
+    items[1].icon,
+    'mdi/email',
+    'icons auto-filled on any template, not only icon-named ones'
+  )
+}
+
+const infoIconUnsupported = await validateInfographic({
+  template: 'list-column-vertical-icon-arrow',
+  data: {
+    lists: [
+      { label: 'a', icon: 'http://example.com/icon.svg' },
+      { label: 'b', icon: 'gear' }
+    ]
+  }
+})
+if (infoIconUnsupported.ok) {
+  const items = (
+    infoIconUnsupported.renderArgs as { data: { lists: { label: string; icon?: string }[] } }
+  ).data.lists
+  assert.equal(items[0].icon, undefined, 'URL icons are dropped (no remote fetch)')
+  assert.equal(items[1].icon, 'mdi/cog', 'bare icon name matched to mdi name (gear → cog)')
+}
+
+const infoIconRendered = await renderInfographicSvg({
+  template: 'list-column-vertical-icon-arrow',
+  data: {
+    lists: [
+      { label: 'Config', icon: 'mdi/cog' },
+      { label: 'Mail', icon: 'mdi/email' }
+    ]
+  }
+})
+assert.ok(
+  (infoIconRendered.svg.match(/<use\b/g) || []).length >= 2,
+  'infographic with mdi icons renders <use> icon elements'
+)
+assert.ok(
+  (infoIconRendered.svg.match(/<symbol\b/g) || []).length >= 2,
+  'infographic with mdi icons embeds inline <symbol> resources (no remote fetch)'
+)
 
 const tpls = await listInfographicTemplates()
 assert.ok(tpls.length > 100, `infographic template catalog has ${tpls.length} entries`)

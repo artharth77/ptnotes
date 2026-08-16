@@ -57,9 +57,9 @@ export function buildSkillMessage(name: string, scope: SkillScope, args: string)
 }
 
 /**
- * Merge enabled global + project skills into command shapes (no action → AI mode).
- * Dedupes by name (project scope wins over global) and skips names in `exclude`
- * (used to let built-in commands win over same-named skills).
+ * Merge enabled global + project + builtin skills into command shapes (no action → AI mode).
+ * Dedupes by name (project scope wins over global, user skills win over builtin) and skips
+ * names in `exclude` (used to let built-in commands win over same-named skills).
  */
 export function buildSkillCommandList(
   skills: SkillList | null,
@@ -81,6 +81,16 @@ export function buildSkillCommandList(
       description: s.description || '(skill)',
       scope: 'project'
     })
+  }
+  for (const s of skills.builtin) {
+    if (!s.enabled || excluded.has(s.name)) continue
+    if (!byName.has(s.name)) {
+      byName.set(s.name, {
+        name: s.name,
+        description: s.description || '(skill)',
+        scope: 'builtin'
+      })
+    }
   }
   return [...byName.values()]
 }

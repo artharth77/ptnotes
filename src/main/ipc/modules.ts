@@ -25,7 +25,8 @@ function toSettings(registry: ModuleRegistry, disabled: Set<string>): ModuleSett
     id: m.id,
     name: m.name,
     summary: m.summary,
-    enabled: !disabled.has(m.id)
+    enabled: !disabled.has(m.id),
+    ...(m.link ? { link: m.link } : {})
   }))
 }
 

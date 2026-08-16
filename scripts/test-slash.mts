@@ -80,7 +80,8 @@ const skills: SkillList = {
     { scope: 'project', name: 'research', description: 'Research workflow', enabled: true },
     { scope: 'project', name: 'shared', description: 'Project copy', enabled: true },
     { scope: 'project', name: 'new', description: 'A skill that collides with /new', enabled: true }
-  ]
+  ],
+  builtin: []
 }
 
 assert.deepEqual(buildSkillCommandList(null), [], 'null skill list yields no commands')

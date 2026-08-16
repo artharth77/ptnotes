@@ -12,7 +12,7 @@ const origLoad = (Module as { _load: (r: string, p: unknown, m: boolean) => unkn
   isMain
 ) {
   if (request === 'electron') {
-    return { app: { getPath: () => ROOT } }
+    return { app: { getPath: () => ROOT, getAppPath: () => ROOT } }
   }
   return origLoad.call(this, request, parent, isMain)
 }
@@ -284,7 +284,7 @@ assert.ok(!projects.some((p) => p.name === 'Legacy'), 'Legacy project deleted')
 await service.createProject('Skills')
 
 let skills = await service.listSkills('Skills')
-assert.deepEqual(skills, { global: [], project: [] }, 'skills start empty')
+assert.deepEqual(skills, { global: [], project: [], builtin: [] }, 'skills start empty')
 
 const skillMeta = await service.saveSkill('Skills', 'project', 'Style Guide', {
   description: 'House style rules',

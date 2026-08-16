@@ -1,8 +1,34 @@
 import { ipcMain, dialog, app, BrowserWindow } from 'electron'
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import type { IpcMainInvokeEvent, OpenDialogOptions } from 'electron'
 import type { PTNotesService } from '../service/PTNotesService'
 import type { SettingsStore } from '../settings'
 import type { AboutInfo, StorageSettings } from '@shared/types'
+
+function loadDependencies(): string[] {
+  try {
+    const appPath = app.getAppPath()
+    const pkg = JSON.parse(readFileSync(join(appPath, 'package.json'), 'utf-8')) as {
+      dependencies?: Record<string, string>
+    }
+    const deps = pkg.dependencies ?? {}
+    return Object.keys(deps)
+      .sort()
+      .map((name) => {
+        try {
+          const dep = JSON.parse(
+            readFileSync(join(appPath, 'node_modules', name, 'package.json'), 'utf-8')
+          ) as { version?: string }
+          return `${name}@${dep.version ?? deps[name]}`
+        } catch {
+          return `${name}@${deps[name]}`
+        }
+      })
+  } catch {
+    return []
+  }
+}
 
 export function registerSettingsIpc(service: PTNotesService, store: SettingsStore): void {
   ipcMain.handle('settings:get', async (): Promise<StorageSettings> => store.load())
@@ -12,7 +38,8 @@ export function registerSettingsIpc(service: PTNotesService, store: SettingsStor
     version: app.getVersion(),
     electron: process.versions.electron,
     chrome: process.versions.chrome,
-    node: process.versions.node
+    node: process.versions.node,
+    dependencies: loadDependencies()
   }))
 
   ipcMain.handle(

@@ -15,7 +15,14 @@ import {
   mdiFormatStrikethroughVariant,
   mdiFormatText,
   mdiFormatUnderline,
+  mdiChevronDown,
+  mdiChevronUp,
+  mdiClose,
+  mdiFileReplaceOutline,
+  mdiFindReplace,
+  mdiFormatLetterCase,
   mdiLinkVariant,
+  mdiMagnify,
   mdiMinus,
   mdiRedoVariant,
   mdiTableColumnPlusAfter,
@@ -37,6 +44,13 @@ import { Markdown } from '@tiptap/markdown'
 import Placeholder from '@tiptap/extension-placeholder'
 import Typography from '@tiptap/extension-typography'
 import Link from '@tiptap/extension-link'
+import { mergeAttributes } from '@tiptap/core'
+
+const CustomLink = Link.extend({
+  renderHTML({ HTMLAttributes }) {
+    return ['span', mergeAttributes(HTMLAttributes, { class: 'editor-link' }), 0]
+  }
+})
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { TableKit } from '@tiptap/extension-table'
@@ -44,6 +58,15 @@ import { useAppStore } from '../store/useAppStore'
 import { slugify } from '@shared/slug'
 import { PromptModal } from './Modal'
 import { MdiIcon } from './MdiIcon'
+import {
+  FindReplace,
+  clearFind,
+  findStep,
+  getFindState,
+  replaceAll,
+  replaceCurrent,
+  setFind
+} from '../editor/findReplace'
 
 interface MarkdownEditorProps {
   noteId: string
@@ -87,6 +110,14 @@ function internalNameFromHref(href: string, prefix: string): string {
   }
 }
 
+function linkTooltipLabel(href: string): string {
+  if (href.startsWith('note:')) return `Open note: ${slugify(internalNameFromHref(href, 'note:'))}`
+  if (href.startsWith('skill:'))
+    return `Open skill: ${slugify(internalNameFromHref(href, 'skill:'))}`
+  if (href.startsWith('file:')) return `Open file location: ${internalNameFromHref(href, 'file:')}`
+  return `Open link: ${href}`
+}
+
 function handleEditorLink(href: string): void {
   if (href.startsWith('note:')) {
     const name = slugify(internalNameFromHref(href, 'note:'))
@@ -106,7 +137,14 @@ function handleEditorLink(href: string): void {
     const project = useAppStore.getState().activeProject
     if (project) void window.ptnotes.files.revealByName(project, name)
   } else {
-    window.open(href, '_blank')
+    try {
+      const parsed = new URL(href)
+      if (['http:', 'https:', 'mailto:'].includes(parsed.protocol)) {
+        window.open(href, '_blank')
+      }
+    } catch {
+      // Invalid URL, ignore
+    }
   }
 }
 
@@ -213,10 +251,15 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
       }),
       Placeholder.configure({ placeholder: 'Start writing…' }),
       Typography,
-      Link.configure({ openOnClick: false, autolink: true, protocols: ['note', 'skill', 'file'] }),
+      CustomLink.configure({
+        openOnClick: false,
+        autolink: true,
+        protocols: ['note', 'skill', 'file']
+      }),
       TaskList,
       TaskItem.configure({ nested: true }),
-      TableKit
+      TableKit,
+      FindReplace
     ],
     content,
     contentType: 'markdown',
@@ -269,12 +312,28 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
     }
   })
 
+  const findState = useEditorState({
+    editor,
+    selector: (ctx) => {
+      const st = getFindState(ctx.editor)
+      return { count: st.results.length, index: st.index }
+    }
+  })
+
   const [linkPrompt, setLinkPrompt] = useState(false)
   const [tableMenu, setTableMenu] = useState<{ x: number; y: number } | null>(null)
   const [formatMenu, setFormatMenu] = useState<{ x: number; y: number } | null>(null)
   const [rawMode, setRawMode] = useState(false)
   const [rawText, setRawText] = useState('')
   const [modKeyDown, setModKeyDown] = useState(false)
+  const [linkTooltip, setLinkTooltip] = useState<{ label: string; x: number; y: number } | null>(
+    null
+  )
+  const [findOpen, setFindOpen] = useState(false)
+  const [findTerm, setFindTerm] = useState('')
+  const [replaceTerm, setReplaceTerm] = useState('')
+  const [matchCase, setMatchCase] = useState(false)
+  const findInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     if (!tableMenu && !formatMenu) return
@@ -305,25 +364,98 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
       window.removeEventListener('blur', onBlur)
     }
   }, [])
-
+  useEffect(() => {
+    if (!editor) return
+    const dom = editor.view.dom
+    const onMove = (e: MouseEvent): void => {
+      if (!e.metaKey && !e.ctrlKey) {
+        setLinkTooltip(null)
+        return
+      }
+      const target = e.target instanceof Element ? e.target : null
+      const link = target?.closest('.editor-link')
+      if (!link) {
+        setLinkTooltip(null)
+        return
+      }
+      const href = link.getAttribute('href') ?? ''
+      setLinkTooltip({ label: linkTooltipLabel(href), x: e.clientX, y: e.clientY })
+    }
+    const onLeave = (): void => setLinkTooltip(null)
+    const onKeyUp = (e: KeyboardEvent): void => {
+      if (e.key === 'Meta' || e.key === 'Control') setLinkTooltip(null)
+    }
+    dom.addEventListener('mousemove', onMove)
+    dom.addEventListener('mouseleave', onLeave)
+    window.addEventListener('keyup', onKeyUp)
+    return () => {
+      dom.removeEventListener('mousemove', onMove)
+      dom.removeEventListener('mouseleave', onLeave)
+      window.removeEventListener('keyup', onKeyUp)
+    }
+  }, [editor])
   useEffect(() => {
     if (!editor) return
     const dom = editor.view.dom
     const onClick = (e: MouseEvent): void => {
       const target = e.target instanceof Element ? e.target : null
-      const link = target?.closest('a[href]')
+      const link = target?.closest('.editor-link')
       if (!link) return
+
+      const href = link.getAttribute('href') ?? ''
       if (e.metaKey || e.ctrlKey) {
         e.preventDefault()
         e.stopPropagation()
-        handleEditorLink(link.getAttribute('href') ?? '')
+        handleEditorLink(href)
       } else {
         e.preventDefault()
+        e.stopPropagation()
       }
     }
     dom.addEventListener('click', onClick, true)
     return () => dom.removeEventListener('click', onClick, true)
   }, [editor])
+
+  useEffect(() => {
+    if (!editor) return
+    if (findTerm) {
+      setFind(editor, findTerm, matchCase)
+    } else {
+      clearFind(editor)
+    }
+  }, [editor, findTerm, matchCase])
+
+  useEffect(() => {
+    if (!editor) return
+    if (!findOpen) clearFind(editor)
+  }, [editor, findOpen])
+
+  useEffect(() => {
+    if (findOpen && !rawMode) findInputRef.current?.focus()
+  }, [findOpen, rawMode])
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+        if (rawMode) return
+        e.preventDefault()
+        e.stopPropagation()
+        if (findOpen) {
+          findInputRef.current?.focus()
+          findInputRef.current?.select()
+        } else {
+          setFindOpen(true)
+        }
+        return
+      }
+      if (e.key === 'Escape' && findOpen) {
+        setFindOpen(false)
+        editor?.commands.focus()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [findOpen, rawMode, editor])
 
   if (!editor) {
     return <div className="editor empty-state">Loading editor…</div>
@@ -341,6 +473,7 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
       setRawText(editor.getMarkdown())
       setTableMenu(null)
       setFormatMenu(null)
+      setFindOpen(false)
       setRawMode(true)
     }
   }
@@ -497,6 +630,12 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
           />
           <span className="tb-sep" />
           <ToolbarBtn
+            icon={mdiMagnify}
+            title="Find"
+            active={findOpen}
+            onClick={() => setFindOpen(!findOpen)}
+          />
+          <ToolbarBtn
             icon={mdiUndoVariant}
             title="Undo"
             disabled={!state.canUndo}
@@ -508,6 +647,90 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
             disabled={!state.canRedo}
             onClick={() => editor.chain().focus().redo().run()}
           />
+        </div>
+      )}
+      {!rawMode && findOpen && (
+        <div className="find-bar">
+          <input
+            ref={findInputRef}
+            className="find-input"
+            value={findTerm}
+            placeholder="Find"
+            spellCheck={false}
+            onChange={(e) => setFindTerm(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                findStep(editor, 1)
+              }
+            }}
+          />
+          {findTerm && (
+            <span className="find-count">
+              {findState.count ? `${findState.index + 1}/${findState.count}` : '0/0'}
+            </span>
+          )}
+          <button
+            type="button"
+            className="tb-btn"
+            title="Previous match"
+            disabled={!findState.count}
+            onClick={() => findStep(editor, -1)}
+          >
+            <MdiIcon path={mdiChevronUp} size={16} />
+          </button>
+          <button
+            type="button"
+            className="tb-btn"
+            title="Next match"
+            disabled={!findState.count}
+            onClick={() => findStep(editor, 1)}
+          >
+            <MdiIcon path={mdiChevronDown} size={16} />
+          </button>
+          <button
+            type="button"
+            className={`tb-btn ${matchCase ? 'active' : ''}`}
+            title="Match case"
+            onClick={() => setMatchCase(!matchCase)}
+          >
+            <MdiIcon path={mdiFormatLetterCase} size={16} />
+          </button>
+          <span className="tb-sep" />
+          <input
+            className="find-input find-replace-input"
+            value={replaceTerm}
+            placeholder="Replace"
+            spellCheck={false}
+            onChange={(e) => setReplaceTerm(e.target.value)}
+          />
+          <button
+            type="button"
+            className="tb-btn"
+            title="Replace"
+            disabled={!findState.count}
+            onClick={() => replaceCurrent(editor, replaceTerm)}
+          >
+            <MdiIcon path={mdiFileReplaceOutline} size={16} />
+          </button>
+          <button
+            type="button"
+            className="tb-btn"
+            title="Replace all"
+            disabled={!findState.count}
+            onClick={() => replaceAll(editor, replaceTerm)}
+          >
+            <MdiIcon path={mdiFindReplace} size={16} />
+          </button>
+          <span className="find-spacer" />
+          <button
+            type="button"
+            className="tb-btn"
+            title="Close find (Esc)"
+            onClick={() => setFindOpen(false)}
+          >
+            <MdiIcon path={mdiClose} size={16} />
+          </button>
         </div>
       )}
       {rawMode ? (
@@ -596,7 +819,6 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
             onClick={() => setFormatHelperEnabled(!formatHelperEnabled)}
           >
             <MdiIcon path={mdiFormatText} size={14} />
-            Format helper
           </button>
         </div>
       </div>
@@ -742,6 +964,11 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
             editor.chain().focus().setLink({ href: url }).run()
           }}
         />
+      )}
+      {linkTooltip && (
+        <div className="editor-link-tooltip" style={{ left: linkTooltip.x, top: linkTooltip.y }}>
+          {linkTooltip.label}
+        </div>
       )}
     </div>
   )
