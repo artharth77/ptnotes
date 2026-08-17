@@ -222,22 +222,6 @@ function App(): React.JSX.Element {
               ...m,
               toolCalls: [...(m.toolCalls ?? []), evt.toolCall!]
             }))
-            if (evt.toolCall.name === 'start_module') {
-              try {
-                const res = JSON.parse(evt.toolCall.result ?? '{}') as {
-                  ok?: boolean
-                  runId?: string
-                }
-                if (res.ok && res.runId) {
-                  state.updateLastAssistantMessage(project, (m) => ({
-                    ...m,
-                    moduleRunId: res.runId!
-                  }))
-                }
-              } catch {
-                // ignore unparseable start_module result
-              }
-            }
           }
           if (evt.toolCall) {
             if (NOTE_TOOLS.has(evt.toolCall.name)) {

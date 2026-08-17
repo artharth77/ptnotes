@@ -954,6 +954,17 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                       ) : (
                         <pre className="chat-tool-result">{tc.result}</pre>
                       ))}
+                    {tc.name === 'start_module' &&
+                      (() => {
+                        let runId = ''
+                        try {
+                          runId = (JSON.parse(tc.result ?? '{}') as { runId?: string }).runId ?? ''
+                        } catch {
+                          /* unparseable start_module result */
+                        }
+                        const run = runId ? moduleRuns.find((r) => r.runId === runId) : undefined
+                        return run ? <ModuleCard run={run} compact defaultExpanded /> : null
+                      })()}
                   </div>
                 ))}
               </div>
@@ -983,11 +994,6 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                   </div>
                 )
               })}
-            {m.moduleRunId &&
-              (() => {
-                const run = moduleRuns.find((r) => r.runId === m.moduleRunId)
-                return run ? <ModuleCard run={run} compact defaultExpanded /> : null
-              })()}
             {chatBusy &&
               m.id === list[list.length - 1]?.id &&
               m.role === 'assistant' &&

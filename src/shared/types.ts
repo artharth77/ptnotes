@@ -90,7 +90,6 @@ export interface ChatMessage {
   toolCalls?: ToolCallInfo[]
   error?: boolean
   attachments?: ChatAttachment[]
-  moduleRunId?: string
 }
 
 export type PdfAttachmentKind = 'extract' | 'upload'
