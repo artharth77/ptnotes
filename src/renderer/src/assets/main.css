@@ -2349,6 +2349,15 @@ body {
   color: var(--text-dim);
 }
 
+.chat-tool:has(.module-card) {
+  overflow: visible;
+}
+
+.chat-tool .module-card {
+  margin: 6px 10px 10px;
+  border-color: var(--border);
+}
+
 .chat-input {
   display: flex;
   gap: 8px;

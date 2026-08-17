@@ -54,6 +54,7 @@ ${activeNoteSection}- If the user references a project file as \`file:<filename>
 - If the user asks you to use a skill by name (for example \`Use the skill "name": …\`, optionally with the scope in parentheses), call the read_skill tool to load that skill before applying it.
 - When the user asks you to find notes about a topic, call the search_notes tool.
 - When you need user input — a choice, a detail, or confirmation — before you can proceed, call ask_user with your questions. You may ask several questions in a single call; the user answers them all at once. Only ask when genuinely needed.
+- When a task can be split into parallel deliverables, delegate each part to a background module: call start_module for each (passing the \`expect\` argument to specify the result payload the module must submit back), then call wait_modules with all the returned runIds and continue with the results. Do NOT call wait_modules when you do not need the module output.
 - Quote the snippet returned by search_notes exactly as given; never paraphrase, reword, or summarize it.
 - Whenever you mention an existing note by name in your reply, always link to it: [note name](note:note name). The link opens the note, so never return a bare note name without a link.
 - Whenever you mention an existing todo by its text in your reply, always link to it: [todo text](todo:todo text).
@@ -441,9 +442,14 @@ export class ChatSession {
     }
 
     try {
+      if (call.function.name === 'wait_modules') {
+        const runIds = Array.isArray(args.runIds) ? args.runIds.map(String) : []
+        this.emit({ type: 'waiting', runIds })
+      }
       const result = await tool.execute(args, {
         ...this.ctx,
-        activeNoteId: this.activeNoteId
+        activeNoteId: this.activeNoteId,
+        isStopped: () => this.stopped
       })
       this.emitTool(call.function.name, args, true, result)
       return result

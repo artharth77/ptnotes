@@ -13,6 +13,8 @@ export interface ToolContext {
   confirm: (req: Omit<ConfirmRequest, 'id'>) => Promise<boolean>
   /** Present only in the interactive chat (module subagents never provide it). */
   ask?: (req: Omit<AskRequest, 'id'>) => Promise<{ answers: AskAnswer[]; cancelled?: boolean }>
+  /** Present only in the interactive chat; lets long-running tools abort when the chat is stopped. */
+  isStopped?: () => boolean
 }
 
 export interface PTTool {

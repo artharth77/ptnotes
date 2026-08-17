@@ -116,9 +116,10 @@ src/
 │           └── webFetch.ts    # cheerio page extraction
 │   └── modules/
 │       ├── registry.ts   # module registry (extensible)
-│       ├── runs.ts       # ModuleRunManager: start/list/stop + event broadcast + readChat (live in-memory transcript or persisted .chat.json)
-│       ├── runner.ts     # subagent loop; persists a read-only transcript to <project>/.data/modules/<runId>.chat.json each turn (removed on run delete/retry)
-│       ├── tool.ts       # start_module tool (main chat → module run)
+│       ├── runs.ts       # ModuleRunManager: start/list/stop + event broadcast + readChat (live in-memory transcript or persisted .chat.json) + waitForRuns (multi-module waiting for the main chat)
+│       ├── runner.ts     # subagent loop; persists a read-only transcript to <project>/.data/modules/<runId>.chat.json each turn (removed on run delete/retry); submit_result tool for expectResult runs
+│       ├── tool.ts       # start_module tool (with expect result spec) + wait_modules tool (main chat → module run)
+│       ├── subagent/     # general-purpose long-run agent (base tools only, no output file; maxIterations 60)
 │       ├── pptx/         # PowerPoint module (design schema → buildPptx)
 │       ├── infographic/  # standalone infographic module (design schema → create_infographic_file; reuses the shared tool-pack)
 │       ├── docx/         # Word document module (design schema → buildDocx; reuses the shared tool-pack)
@@ -205,7 +206,7 @@ src/
 - **Skills:** `list(project)` (returns `{ global, project }` metas), `read(project, scope, name)` (full content), `save(project, scope, name, { description, content, enabled? })` (upsert → `SkillMeta`), `setEnabled(project, scope, name, enabled)` (toggle → `SkillMeta`), `move(project, scope, name, toScope)` (relocates the skill folder between scopes → `SkillMeta`), `delete(project, scope, name)` (→ boolean)
 - **PDF:** `supportsUpload` (returns the AI settings `uploadPdfEnabled` toggle — user-controlled), `upload` (raw PDF via provider Responses API `input_file` — uploads base64 through the Files API, falling back to inline `file_data`)
 - **Files:** `list` (`<project>/files/*` — PDF + any text file — for the chat `#` picker), `getPathForFile` (dropped file path via `webUtils`, never `File.path`), `copyToProject` (content-based: any text file + PDFs copied into `<project>/files/`; non-PDF binaries rejected), `extract` (local text → `{ text, pageCount, charCount, truncated }`; pdf-parse for `.pdf`, raw text for any text file), `reveal` (`shell.showItemInFolder`)
-- **Modules:** `list`, `listAvailable`, `setEnabled`, `start`, `startModule`, `stop`, `retry`, `reveal` (optional `filePath` to reveal a specific file of a multi-file run; defaults to the primary `outputFile`), `deleteRun`, `clearHistory`, `readChat` (per-run subagent transcript: live in-memory for active runs, persisted `<project>/.data/modules/<runId>.chat.json` otherwise). A run records **every** deliverable in `outputFiles` (one 📄 reveal pill each on the card; the first is also `outputFile`); `deleteRun`/`clearHistory` with the delete-output option removes them all.
+- **Modules:** `list`, `listAvailable`, `setEnabled`, `start`, `startModule`, `stop`, `retry`, `reveal` (optional `filePath` to reveal a specific file of a multi-file run; defaults to the primary `outputFile`), `deleteRun`, `clearHistory`, `readChat` (per-run subagent transcript: live in-memory for active runs, persisted `<project>/.data/modules/<runId>.chat.json` otherwise). A run records **every** deliverable in `outputFiles` (one 📄 reveal pill each on the card; the first is also `outputFile`); `deleteRun`/`clearHistory` with the delete-output option removes them all. A run may also carry a `result` payload (submitted via `submit_result`) and an `expectResult` spec (from `start_module`'s `expect` argument).
 
 ## AI chat feature
 
@@ -235,28 +236,48 @@ ChatPanel (renderer) ──send──▶ Main process
   `file:<filename>` message means it must call `read_file` (content-based local extraction;
   `.pdf` via pdf-parse, any text file as raw text) before responding — so previously dropped
   files can be reused without re-dragging.
+- The system prompt includes an orchestration guideline: delegate parallel deliverables to
+  background modules via `start_module` (passing `expect` to specify the result payload), then
+  call `wait_modules` with all runIds and continue with the returned results; never wait when the
+  module output is not needed.
 
-### Tools (17 total)
+### Module result + multi-module waiting
 
-| Tool           | Action                                                                                                          |
-| -------------- | --------------------------------------------------------------------------------------------------------------- |
-| `create_note`  | new `.md` in project `notes/`                                                                                   |
-| `update_note`  | overwrite / rename existing note                                                                                |
-| `list_notes`   | model context                                                                                                   |
-| `read_note`    | model context; omit `title` to read the currently active note (the one the user is viewing)                     |
-| `search_notes` | search note titles + content, return matching names + snippet                                                   |
-| `delete_note`  | delete one or more notes (requires user confirmation dialog)                                                    |
-| `create_todos` | append `- [ ]` items to `TODO.md`                                                                               |
-| `toggle_todo`  | toggle a checklist item                                                                                         |
-| `delete_todo`  | remove an item                                                                                                  |
-| `list_todos`   | model context                                                                                                   |
-| `read_file`    | extract text of a project file locally via `readFileAsText` (pdf-parse for `.pdf`, raw text for any text file)  |
-| `create_skill` | upsert a skill (`scope`: `global`/`project`) from name + description + content                                  |
-| `read_skill`   | load a skill's full content (skills are listed in the system prompt; no separate `list_skills`)                 |
-| `delete_skill` | delete a skill (requires user confirmation dialog)                                                              |
-| `web_search`   | DuckDuckGo HTML search, no API key, Node fetch in main (user-agent header, rate-limit errors surfaced to model) |
-| `web_fetch`    | direct fetch + cheerio local parse (strip scripts/styles/nav, extract title + readable text) — fully private    |
-| `ask_user`     | ask the user 1–8 choice/free-text questions in a wizard dialog (radio / checkboxes / free text); chat-only      |
+- A module run with an `expectResult` (set via the `expect` argument of `start_module`) requires
+  the subagent to call `submit_result` before finishing; the payload is stored on
+  `ModuleRun.result` and surfaced to the main chat via the `wait_modules` tool result.
+- `ModuleRunManager.waitForRuns(project, runIds, timeoutMs?, isStopped?)` blocks (event-driven,
+  default 600s timeout, ~500ms `isStopped` poll) until every listed run is terminal and returns
+  `status` / `result` / `outputFiles` / `summary` / `error` per run in input order.
+- The `'result'` module event broadcasts the submitted payload (also propagated on the `done`
+  event); runs keep running independently if the chat is stopped — only the wait returns early.
+- While the chat is inside `wait_modules`, a `'waiting'` stream event (with `runIds`) is emitted
+  and the drawer shows "Waiting for N module run(s)…".
+
+### Tools (19 total)
+
+| Tool            | Action                                                                                                        |
+| --------------- | ------------------------------------------------------------------------------------------------------------- |
+| `create_note`   | new `.md` in project `notes/`                                                                                 |
+| `update_note`   | overwrite / rename existing note                                                                              |
+| `list_notes`    | model context                                                                                                 |
+| `read_note`     | model context; omit `title` to read the currently active note (the one the user is viewing)                   |
+| `search_notes`  | search note titles + content, return matching names + snippet                                                 |
+| `delete_note`   | delete one or more notes (requires user confirmation dialog)                                                  |
+| `create_todos`  | append `- [ ]` items to `TODO.md`                                                                             |
+| `toggle_todo`   | toggle a checklist item                                                                                       |
+| `delete_todo`   | remove an item                                                                                                |
+| `list_todos`    | model context                                                                                                 |
+| `read_file`     | extract text of a project file locally via `readFileAsText` (pdf-parse for `.pdf`, raw text for any text file) |
+| `create_skill`  | upsert a skill (`scope`: `global`/`project`) from name + description + content                                |
+| `read_skill`    | load a skill's full content (skills are listed in the system prompt; no separate `list_skills`)               |
+| `delete_skill`  | delete a skill (requires user confirmation dialog)                                                            |
+| `web_search`    | DuckDuckGo HTML search, no API key, Node fetch in main (user-agent header, rate-limit errors surfaced to model) |
+| `web_fetch`     | direct fetch + cheerio local parse (strip scripts/styles/nav, extract title + readable text) — fully private  |
+| `ask_user`      | ask the user 1–8 choice/free-text questions in a wizard dialog (radio / checkboxes / free text); chat-only    |
+| `start_module`  | chat-only; start a background module (with optional `expect` result spec); returns `runId` immediately       |
+| `wait_modules`  | chat-only; block (event-driven, timeout + stop-cancel) until every listed run is terminal, return their `status`/`result`/`outputFiles`/`summary`/`error` |
+| `submit_result` | module-only; a module subagent submits its result payload (JSON/markdown/plain text) before finishing         |
 
 ### PDF attachments (drag & drop into chat)
 
@@ -362,8 +383,9 @@ Two-panel dialog (`.settings-layout` with `.settings-nav` + `.settings-pane`):
 
 - DuckDuckGo scraping can be rate-limited; errors are surfaced to the model so it can retry/adapt.
 - Bing Search API retired Aug 2025 and Brave dropped its free tier — avoid both.
-- Tool count is 17 (AGENTS.md's ~10 is a guideline; acceptable tradeoff for the skills + HITL features).
+- Tool count is 19 (AGENTS.md's ~10 is a guideline; acceptable tradeoff for the skills + HITL + module orchestration features).
 - `ask_user` is **chat-only**: module subagents never receive it (filtered out of the module tool list), and `ToolContext.ask` is absent in module runs so it can never pop a dialog from a background run.
+- `submit_result` is **module-only** and `start_module`/`wait_modules` are **chat-only**: module subagents never receive them (their tool list is `baseTools` minus `ask_user`, plus the module's own tools and `set_plan`/`update_step` — plus `submit_result` only when the run has an `expectResult`), so no module-nesting of module runs.
 - API key must never be committed or bundled into the renderer.
 - The persistent project registry only records known project names/paths — it never stores file contents; the folder on disk remains the source of truth.
 - `note:<notename>` uses the note's slugified file name (as shown in the Notes list), so the `@` picker should insert the exact list name.
