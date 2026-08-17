@@ -1,3 +1,14 @@
+## [0.9.0] — 2026-08-17
+
+### Added
+
+#### Full raw AI trace log
+
+- **Raw AI trace files**: every app↔AI-provider exchange is now persisted as a **readable onversation log** — chat sessions to `<project>/.data/chat/<sessionId>.trace.jsonl` and odule runs to `<project>/.data/modules/<runId>.trace.jsonl`. Each file is **JSONL** one record per line, appended — the file is never rewritten): the first record is a *header** with the chat/module info (`{ type: 'header', project, key, kind, startedAt }`), hen one entry per logical message with a per-file monotonic `seq`, `role` `system` / `user` / `assistant` / `tool`), a timestamp, `durationMs` and `content`: the ystem prompt (written only once per file, on the first send), user prompts, assistant eplies (with the tool calls it issued and their payloads), and tool responses (each ool's result). Assistant entries also keep `reasoning`, finishReason`, `usage` and the model/base-URL/endpoint. Because the file is append-only,  chat session accumulates the trace of **every** send in one file. Auxiliary AI calls — DF uploads via the Responses API and background chat title generation — are traced into he current chat's trace file too.
+- **Never logged**: the API key (entries store `baseUrl`/`model`/params only) and the PDF ase64 payload (only `file_id`/filename). Tracing is best-effort and never fails a send.
+- **Trace viewer**: a read-only modal shows the formatted JSON of any chat session or module un with **Reveal in Finder** and **Copy JSON** — opened from a Trace button on each hat-history item and on the module run's transcript overlay.
+- **Follows lifecycle**: trace files are deleted with their chat/run, cleared on module retry, nd move automatically with the project on a root change.
+
 ## [0.8.0] — 2026-08-17
 
 ### Added

@@ -6,6 +6,7 @@ import { AIConfigStore } from '../ai/config'
 import { ChatSession, isLocalEndpoint } from '../ai/chatSession'
 import type { ToolsProvider } from '../ai/chatSession'
 import { createClient } from '../ai/client'
+import { AiTraceRecorder } from '../ai/trace'
 import type {
   AIProviderConfig,
   AskAnswer,
@@ -111,7 +112,28 @@ export function createSessionRegistry(
 
 export type ListModelsResult = string[] | { error: string }
 
-export function registerAiIpc(registry: SessionRegistry, configStore: AIConfigStore): void {
+/** Build a raw-AI-trace recorder for one chat session, appending to <project>/.data/chat/. */
+export async function chatTraceRecorder(
+  service: PTNotesService,
+  project: string,
+  sessionId: string
+): Promise<AiTraceRecorder> {
+  const meta = await service.chatTraceMeta(project, sessionId)
+  return new AiTraceRecorder({
+    project,
+    key: sessionId,
+    kind: 'chat',
+    initialSeq: meta.count,
+    hasSystem: meta.hasSystem,
+    append: (header, lines) => service.appendChatTrace(project, sessionId, header, lines)
+  })
+}
+
+export function registerAiIpc(
+  registry: SessionRegistry,
+  configStore: AIConfigStore,
+  service: PTNotesService
+): void {
   ipcMain.handle('ai:getConfig', async (): Promise<AIProviderConfig> => configStore.load())
 
   ipcMain.handle(
@@ -142,7 +164,7 @@ export function registerAiIpc(registry: SessionRegistry, configStore: AIConfigSt
 
   ipcMain.handle(
     'ai:generateTitle',
-    async (_e, _project: string, firstMessage: string): Promise<string> => {
+    async (_e, _project: string, sessionId: string, firstMessage: string): Promise<string> => {
       const config = await configStore.load()
       if (!config.model) return ''
       if (!config.apiKey && !isLocalEndpoint(config.baseUrl)) return ''
@@ -153,6 +175,13 @@ export function registerAiIpc(registry: SessionRegistry, configStore: AIConfigSt
         '',
         `User message: "${firstMessage.slice(0, 2000)}"`
       ].join('\n')
+      const trace = await chatTraceRecorder(service, _project, sessionId)
+      const startTs = Date.now()
+      trace.append({
+        role: 'user',
+        ts: startTs,
+        content: prompt
+      })
       try {
         const client = createClient(config)
         const res = await client.chat.completions.create({
@@ -164,8 +193,30 @@ export function registerAiIpc(registry: SessionRegistry, configStore: AIConfigSt
           max_tokens: 30,
           temperature: 0.4
         })
-        return (res.choices?.[0]?.message?.content ?? '').trim()
-      } catch {
+        const title = (res.choices?.[0]?.message?.content ?? '').trim()
+        trace.append({
+          role: 'assistant',
+          ts: Date.now(),
+          durationMs: Date.now() - startTs,
+          model: config.model,
+          baseUrl: config.baseUrl,
+          endpoint: 'title',
+          content: title,
+          finishReason: res.choices?.[0]?.finish_reason
+        })
+        await trace.flush()
+        return title
+      } catch (err) {
+        trace.append({
+          role: 'assistant',
+          ts: Date.now(),
+          durationMs: Date.now() - startTs,
+          model: config.model,
+          baseUrl: config.baseUrl,
+          endpoint: 'title',
+          error: err instanceof Error ? err.message : String(err)
+        })
+        await trace.flush()
         return ''
       }
     }
@@ -188,12 +239,14 @@ export function registerAiIpc(registry: SessionRegistry, configStore: AIConfigSt
     async (
       event: IpcMainInvokeEvent,
       project: string,
+      sessionId: string,
       text: string,
       history?: ChatMessage[],
       activeNoteId?: string | null
     ) => {
       const session = registry.getSession(event, project)
-      await session.send(text, history, activeNoteId)
+      const trace = await chatTraceRecorder(service, project, sessionId)
+      await session.send(text, history, activeNoteId, trace)
     }
   )
 }

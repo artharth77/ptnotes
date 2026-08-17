@@ -3076,6 +3076,80 @@ body {
   color: var(--text);
 }
 
+.module-history-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.module-history-trace-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.module-history-trace-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.trace-modal {
+  width: 680px;
+  max-width: 90vw;
+}
+
+.trace-modal .modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  max-height: 70vh;
+  overflow: hidden;
+}
+
+.trace-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-dim);
+  font-size: 12px;
+  flex: none;
+}
+
+.trace-actions {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+
+.trace-empty {
+  color: var(--text-dim);
+  font-size: 13px;
+  padding: 8px 0;
+}
+
+.trace-json {
+  background: var(--bg-code, #1e1e1e);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  overflow: auto;
+  font-family: var(--mono-font, 'SFMono-Regular', Consolas, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+  color: var(--text);
+  flex: 1;
+  min-height: 120px;
+}
+
 .module-history-steps {
   display: flex;
   gap: 4px;

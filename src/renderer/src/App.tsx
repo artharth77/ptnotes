@@ -9,6 +9,7 @@ import { SettingsDialog } from './components/SettingsDialog'
 import { AskUserDialog } from './components/AskUserDialog'
 import { ModulePanel } from './components/ModulePanel'
 import { ModuleHistoryOverlay } from './components/ModuleHistoryOverlay'
+import { TraceViewerModal } from './components/TraceViewerModal'
 import { PromptModal, Modal } from './components/Modal'
 import { Resizer } from './components/Resizer'
 import type { Tab, ToolCallInfo } from '@shared/types'
@@ -360,6 +361,7 @@ function App(): React.JSX.Element {
       <ConfirmDeleteDialog />
       <AskUserDialog key={askRequest?.id ?? 'none'} />
       <ModuleHistoryOverlay />
+      <TraceViewerModal />
     </div>
   )
 }

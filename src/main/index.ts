@@ -182,7 +182,7 @@ app.whenReady().then(async () => {
   registerNoteIpc(service)
   registerTodoIpc(service)
   registerChatIpc(service)
-  registerAiIpc(registry, configStore)
+  registerAiIpc(registry, configStore, service)
   registerFilesIpc(service, registry, configStore)
   registerSettingsIpc(service, settingsStore)
   registerSkillsIpc(service)

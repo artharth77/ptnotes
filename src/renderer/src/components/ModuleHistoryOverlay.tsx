@@ -90,6 +90,7 @@ function ModuleHistoryPanel({
   const selectNote = useAppStore((s) => s.selectNote)
   const setTab = useAppStore((s) => s.setTab)
   const openSkillEditor = useAppStore((s) => s.openSkillEditor)
+  const openTraceViewer = useAppStore((s) => s.openTraceViewer)
   const notes = useAppStore((s) => s.notes)
   const runs = useAppStore((s) => s.moduleRuns[project] ?? NO_RUNS)
 
@@ -186,9 +187,20 @@ function ModuleHistoryPanel({
               </span>
             )}
           </div>
-          <button className="module-history-close" title="Close (Esc)" onClick={onClose}>
-            ✕
-          </button>
+          <div className="module-history-header-actions">
+            <button
+              className="module-history-trace-btn"
+              title="View raw AI trace"
+              onClick={() =>
+                openTraceViewer({ kind: 'module', key: runId, title: run?.title ?? runId })
+              }
+            >
+              Raw trace
+            </button>
+            <button className="module-history-close" title="Close (Esc)" onClick={onClose}>
+              ✕
+            </button>
+          </div>
         </div>
         {run && run.steps && run.steps.length > 0 && (
           <div className="module-history-steps">

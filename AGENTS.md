@@ -72,9 +72,11 @@ Run `npm run typecheck` and `npm run lint` after any change.
     └── .data/              (app-internal data; dot-prefixed so it stays out of the # file picker)
         ├── modules/*.json        (module run state + prompts)
         ├── modules/*.chat.json   (per-run subagent transcript, read-only history overlay)
+        ├── modules/*.trace.jsonl (per-run raw AI trace, JSONL: header record first, then one record per line; append-only)
         ├── modules/temp/*.{png,svg,json}  (temp module/shared-tool output; deleted once the deck is built)
         ├── skills/*/SKILL.md (project skills — same OpenAI skill-guide layout (`<skill>/SKILL.md` with `name:` + `description:` front-matter) as global skills, scoped to one project)
-        └── chat/*.json         (one file per chat session: messages + timestamps)
+        ├── chat/*.json         (one file per chat session: messages + timestamps)
+        └── chat/*.trace.jsonl  (one raw AI trace per chat session, JSONL: header record first, then one record per line; append-only)
 ```
 
 - On startup (and after `changeRootDir`), legacy per-project `chat/` and `modules/`
@@ -116,8 +118,8 @@ src/
 │           └── webFetch.ts    # cheerio page extraction
 │   └── modules/
 │       ├── registry.ts   # module registry (extensible)
-│       ├── runs.ts       # ModuleRunManager: start/list/stop + event broadcast + readChat (live in-memory transcript or persisted .chat.json) + waitForRuns (multi-module waiting for the main chat)
-│       ├── runner.ts     # subagent loop; persists a read-only transcript to <project>/.data/modules/<runId>.chat.json each turn (removed on run delete/retry); submit_result tool for expectResult runs
+│       ├── runs.ts       # ModuleRunManager: start/list/stop + event broadcast + readChat/readTrace (live in-memory or persisted .chat.json/.trace.jsonl) + waitForRuns (multi-module waiting for the main chat)
+│       ├── runner.ts     # subagent loop; persists a read-only transcript + raw AI trace to <project>/.data/modules/<runId>.chat.json and .trace.jsonl each turn (removed on run delete/retry); submit_result tool for expectResult runs
 │       ├── tool.ts       # start_module tool (with expect result spec) + wait_modules tool (main chat → module run)
 │       ├── subagent/     # general-purpose long-run agent (base tools only, no output file; maxIterations 60)
 │       ├── pptx/         # PowerPoint module (design schema → buildPptx)
@@ -200,13 +202,13 @@ src/
 - **Projects:** `list` (returns `pathExists` per project), `create`, `rename`, `delete`, `recreate` (rebuild folder for a project whose path is missing)
 - **Notes:** `list`, `read`, `save`, `create`, `rename`, `delete`
 - **Todos:** `read` (parse checklist), `save` (serialize `- [ ]`/`- [x]`), `toggle`, `deleteCompleted`, `reorder`
-- **Chat history:** `list`, `read`, `write`, `delete`, `rename`
-- **AI:** `send` (message → streamed reply), `getConfig`, `setConfig`, `listModels(baseUrl, apiKey)`, `generateTitle`, `stop`, `clear`, `confirmResponse`, `askResponse` (human-in-the-loop answers for `ask_user`), `onStreamEvent` (token chunks + tool-call logs + confirm events)
+- **Chat history:** `list`, `read`, `write`, `delete`, `rename`, `readTrace` (raw AI trace `AiTraceFile` for a session, or `null`)
+- **AI:** `send` (message → streamed reply; takes `sessionId` so the run is traced), `getConfig`, `setConfig`, `listModels(baseUrl, apiKey)`, `generateTitle` (takes `sessionId`; the title call is traced into the session's trace file), `stop`, `clear`, `confirmResponse`, `askResponse` (human-in-the-loop answers for `ask_user`), `onStreamEvent` (token chunks + tool-call logs + confirm events)
 - **Settings:** `get` (returns `{ rootDir }`), `getAbout` (app name/version + Electron/Chromium/Node versions for the About pane), `chooseRoot` (native folder picker), `changeRoot` (moves data + persists + returns new `{ rootDir }`)
 - **Skills:** `list(project)` (returns `{ global, project }` metas), `read(project, scope, name)` (full content), `save(project, scope, name, { description, content, enabled? })` (upsert → `SkillMeta`), `setEnabled(project, scope, name, enabled)` (toggle → `SkillMeta`), `move(project, scope, name, toScope)` (relocates the skill folder between scopes → `SkillMeta`), `delete(project, scope, name)` (→ boolean)
-- **PDF:** `supportsUpload` (returns the AI settings `uploadPdfEnabled` toggle — user-controlled), `upload` (raw PDF via provider Responses API `input_file` — uploads base64 through the Files API, falling back to inline `file_data`)
+- **PDF:** `supportsUpload` (returns the AI settings `uploadPdfEnabled` toggle — user-controlled), `upload` (raw PDF via provider Responses API `input_file` — uploads base64 through the Files API, falling back to inline `file_data`; takes `sessionId` so the upload exchange is traced into the session's trace file)
 - **Files:** `list` (`<project>/files/*` — PDF + any text file — for the chat `#` picker), `getPathForFile` (dropped file path via `webUtils`, never `File.path`), `copyToProject` (content-based: any text file + PDFs copied into `<project>/files/`; non-PDF binaries rejected), `extract` (local text → `{ text, pageCount, charCount, truncated }`; pdf-parse for `.pdf`, raw text for any text file), `reveal` (`shell.showItemInFolder`)
-- **Modules:** `list`, `listAvailable`, `setEnabled`, `start`, `startModule`, `stop`, `retry`, `reveal` (optional `filePath` to reveal a specific file of a multi-file run; defaults to the primary `outputFile`), `deleteRun`, `clearHistory`, `readChat` (per-run subagent transcript: live in-memory for active runs, persisted `<project>/.data/modules/<runId>.chat.json` otherwise). A run records **every** deliverable in `outputFiles` (one 📄 reveal pill each on the card; the first is also `outputFile`); `deleteRun`/`clearHistory` with the delete-output option removes them all. A run may also carry a `result` payload (submitted via `submit_result`) and an `expectResult` spec (from `start_module`'s `expect` argument).
+- **Modules:** `list`, `listAvailable`, `setEnabled`, `start`, `startModule`, `stop`, `retry`, `reveal` (optional `filePath` to reveal a specific file of a multi-file run; defaults to the primary `outputFile`), `deleteRun`, `clearHistory`, `readChat` (per-run subagent transcript: live in-memory for active runs, persisted `<project>/.data/modules/<runId>.chat.json` otherwise), `readTrace` (per-run raw AI trace `AiTraceFile`: live from the runner for active runs, else disk). A run records **every** deliverable in `outputFiles` (one 📄 reveal pill each on the card; the first is also `outputFile`); `deleteRun`/`clearHistory` with the delete-output option removes them all. A run may also carry a `result` payload (submitted via `submit_result`) and an `expectResult` spec (from `start_module`'s `expect` argument).
 
 ## AI chat feature
 
@@ -253,6 +255,40 @@ ChatPanel (renderer) ──send──▶ Main process
   event); runs keep running independently if the chat is stopped — only the wait returns early.
 - While the chat is inside `wait_modules`, a `'waiting'` stream event (with `runIds`) is emitted
   and the drawer shows "Waiting for N module run(s)…".
+
+### Raw AI trace
+
+- Every app↔provider exchange is persisted as a readable **JSONL** trace file (one record
+  per line, appended — the file is never rewritten): chat
+  `<project>/.data/chat/<sessionId>.trace.jsonl` and module
+  `<project>/.data/modules/<runId>.trace.jsonl`. The first record is a **header**
+  (`{ type: 'header', project, key, kind, startedAt }`); every following line is one
+  `AiTraceEntry` — one per logical message, with `seq`, `role`
+  (`system` / `user` / `assistant` / `tool`), `ts`, `durationMs`, and `content`:
+  - `system` — the system prompt sent, written only once per trace file (the first send;
+    later sends skip it, detected via `chatTraceMeta`).
+  - `user` — a user prompt (PDF uploads also carry a `file: { filename, file_id }` reference).
+  - `assistant` — an AI reply: `content` / `reasoning`, the `toolCalls` it issued (payload
+    `{ id, name, args }`), `finishReason`, `usage`, plus `model` / `baseUrl` / `endpoint`.
+  - `tool` — a tool response: `name`, `toolCallId`, `content` (the result), and `durationMs`.
+  Auxiliary AI calls (PDF upload via the Responses API, background chat title generation)
+  are traced into the current chat's trace file too.
+- **Never logged:** the API key and the PDF base64 payload (only `file_id`/filename). Tracing
+  is best-effort and non-fatal.
+- Trace files live inside `<project>/.data/`, so they follow the delete (`deleteChat`,
+  `deleteModuleRun`, `clearModuleHistoryRuns`), retry (trace cleared for a new run) and
+  migration paths of their chat/module files. Legacy single-JSON `.trace.json` files are
+  migrated to JSONL lazily on first read.
+- Recording happens entirely in the main process (`AiTraceRecorder` in `src/main/ai/trace.ts`):
+  `chatSession.ts` (`send`/`uploadPdf`/`runTurn`), `modules/runner.ts` (one entry per
+  assistant reply / tool response, flushed alongside `persistChat()`; the runner's
+  `toTranscript` stamps per-message timestamps). The recorder appends its records as JSONL
+  lines (header record first when the file is new); `seq` stays monotonic per file via
+  `initialSeq` (the existing entry count at recorder creation). The renderer only reads
+  traces back over IPC (parsed back into an `AiTraceFile`).
+- **Viewer:** a read-only modal (raw formatted JSON) with **Reveal in Finder** and
+  **Copy JSON** — a Trace button on each chat-history item (`chat.readTrace`) and on the
+  module run's transcript overlay (`modules.readTrace`).
 
 ### Tools (19 total)
 

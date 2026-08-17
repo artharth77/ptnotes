@@ -267,3 +267,68 @@ export interface ModuleEvent {
   summary?: string
   result?: string
 }
+
+// ---- Raw AI trace (readable app ↔ provider conversation log, JSONL) ----
+
+export type AiTraceEndpoint = 'chat.completions' | 'responses' | 'title'
+
+export type AiTraceRole = 'system' | 'user' | 'assistant' | 'tool'
+
+/** A tool call issued by the assistant, with its payload (`args`). */
+export interface AiTraceToolCall {
+  id: string
+  name: string
+  args: Record<string, unknown>
+}
+
+/** First record of a trace file: the chat/module header info. */
+export interface AiTraceHeader {
+  type: 'header'
+  project: string
+  /** Session id (chat) or run id (module). */
+  key: string
+  kind: 'chat' | 'module'
+  startedAt: number
+}
+
+/** One readable record of the conversation — a system/user prompt, an assistant (AI)
+ *  reply, or a tool response — with timing metadata. Serialized as one JSONL line. */
+export interface AiTraceEntry {
+  seq: number
+  role: AiTraceRole
+  ts: number
+  /** Processing time: assistant reply latency or tool execution time. */
+  durationMs?: number
+  /** The message content / prompt / reply / tool result. */
+  content?: string
+  /** Assistant reasoning (thinking) before the reply, if any. */
+  reasoning?: string
+  /** Assistant: tool calls it issued (payload only; results appear as `tool` records). */
+  toolCalls?: AiTraceToolCall[]
+  finishReason?: string
+  usage?: unknown
+  error?: string
+  /** Tool record: the tool name and the call id it answers. */
+  name?: string
+  toolCallId?: string
+  /** Assistant: provider + endpoint used for this reply. */
+  model?: string
+  baseUrl?: string
+  endpoint?: AiTraceEndpoint
+  /** Responses (PDF upload) — the attachment reference, never the base64 payload. */
+  file?: { filename: string; file_id?: string }
+}
+
+/** The raw trace of one chat session or module run, as read back (parsed from the
+ *  JSONL file: header record first, then one record per line). */
+export interface AiTraceFile {
+  project: string
+  /** Session id (chat) or run id (module). */
+  key: string
+  kind: 'chat' | 'module'
+  startedAt: number
+  updatedAt: number
+  entries: AiTraceEntry[]
+  /** Absolute path on disk (populated when read back via IPC). */
+  path?: string
+}

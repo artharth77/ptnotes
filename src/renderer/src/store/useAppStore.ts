@@ -28,6 +28,7 @@ interface AppState {
   chatTitles: Record<string, string>
   moduleRuns: Record<string, ModuleRun[]>
   moduleHistoryRunId: string | null
+  traceViewer: { kind: 'chat' | 'module'; key: string; title: string } | null
   chatBusy: boolean
   chatStreamProject: string | null
   chatWaitRuns: string[]
@@ -54,6 +55,8 @@ interface AppState {
   loadModules: (project: string) => Promise<void>
   applyModuleEvent: (evt: ModuleEvent) => void
   setModuleHistoryRunId: (runId: string | null) => void
+  openTraceViewer: (v: { kind: 'chat' | 'module'; key: string; title: string }) => void
+  closeTraceViewer: () => void
   selectNote: (id: string) => Promise<void>
   saveNote: (content: string) => Promise<void>
   createNote: (title: string) => Promise<void>
@@ -101,6 +104,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   chatTitles: {},
   moduleRuns: {},
   moduleHistoryRunId: null,
+  traceViewer: null,
   chatBusy: false,
   chatStreamProject: null,
   chatWaitRuns: [],
@@ -261,6 +265,14 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setModuleHistoryRunId(moduleHistoryRunId) {
     set({ moduleHistoryRunId })
+  },
+
+  openTraceViewer(traceViewer) {
+    set({ traceViewer })
+  },
+
+  closeTraceViewer() {
+    set({ traceViewer: null })
   },
 
   async selectNote(id) {
