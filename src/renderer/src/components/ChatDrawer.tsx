@@ -121,9 +121,11 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   )
   const chatBusy = useAppStore((s) => s.chatBusy)
   const chatStreamProject = useAppStore((s) => s.chatStreamProject)
+  const chatWaitRuns = useAppStore((s) => s.chatWaitRuns)
   const appendChatMessage = useAppStore((s) => s.appendChatMessage)
   const setChatBusy = useAppStore((s) => s.setChatBusy)
   const setChatStreamProject = useAppStore((s) => s.setChatStreamProject)
+  const setChatWaitRuns = useAppStore((s) => s.setChatWaitRuns)
   const sessions = useAppStore((s) =>
     s.activeProject ? (s.chatSessions[s.activeProject] ?? NO_SESSIONS) : NO_SESSIONS
   )
@@ -468,11 +470,13 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     setMention(null)
     setChatBusy(true)
     setChatStreamProject(project)
+    setChatWaitRuns([])
     try {
       await window.ptnotes.ai.send(project, text, history, activeNoteId)
     } finally {
       setChatBusy(false)
       setChatStreamProject(null)
+      setChatWaitRuns([])
       await saveCurrent(project)
     }
     if (isFirstMessage) {
@@ -571,6 +575,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     await window.ptnotes.ai.stop(project)
     setChatBusy(false)
     setChatStreamProject(null)
+    setChatWaitRuns([])
   }
 
   async function openNote(noteName: string): Promise<void> {
@@ -992,7 +997,13 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
         {chatBusy && (
           <div className="chat-status">
             <span className="chat-spinner" />
-            <span>AI is thinking…</span>
+            {chatWaitRuns.length > 0 ? (
+              <span>
+                Waiting for {chatWaitRuns.length} module run{chatWaitRuns.length > 1 ? 's' : ''}…
+              </span>
+            ) : (
+              <span>AI is thinking…</span>
+            )}
           </div>
         )}
       </div>

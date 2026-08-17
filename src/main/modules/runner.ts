@@ -89,6 +89,7 @@ export interface ModuleNotifyEvent {
   outputFiles?: string[]
   error?: string
   summary?: string
+  result?: string
 }
 
 export interface ModuleRunnerOptions {
@@ -101,7 +102,19 @@ export interface ModuleRunnerOptions {
   notify: (run: ModuleRun, evt: ModuleNotifyEvent) => void
 }
 
-function buildSystemPrompt(module: RegisteredModule, activeProject: string): string {
+function buildSystemPrompt(
+  module: RegisteredModule,
+  activeProject: string,
+  expectResult?: string
+): string {
+  const resultSection = expectResult
+    ? `
+RESULT REQUIREMENT:
+The main chat agent is waiting for a result payload from you. Before you finish, you MUST call the submit_result tool with the exact result requested below:
+${expectResult}
+The result is a free-form string (JSON, markdown or plain text). Do not finish without submitting it.
+`
+    : ''
   return `You are the "${module.name}" module of PTNotes, a background subagent that produces a deliverable file for the user.
 
 You operate inside a project. The currently active project is "${activeProject}". Use it by default.
@@ -113,7 +126,7 @@ MANDATORY WORKFLOW:
 2. Then work through each step, calling update_step with the 1-based step index to mark it "running" when you begin and "done" when you finish. If a step fails, mark it "failed" (with a short detail) and either recover or stop with a clear explanation.
 3. Use whatever tools you need — reading project notes/files, web research, and the module's own creation tools — to complete each step.
 4. When every step is done, produce a short final summary. Mention the output file path. No extra commentary.
-
+${resultSection}
 ${module.systemPrompt ? `MODULE GUIDANCE:\n${module.systemPrompt}` : ''}`
 }
 
@@ -191,7 +204,7 @@ export class ModuleRunner {
     this.messages = []
     this.messages.push({
       role: 'system',
-      content: buildSystemPrompt(this.module, this.activeProject)
+      content: buildSystemPrompt(this.module, this.activeProject, this.run.expectResult)
     })
     this.messages.push({ role: 'user', content: this.run.prompt })
     this.touch({ type: 'status' })
@@ -222,7 +235,9 @@ export class ModuleRunner {
   private toolList(): PTTool[] {
     // ask_user is chat-only (modules are background subagents — they must never pop dialogs).
     const base = baseTools.filter((t) => t.definition.function.name !== 'ask_user')
-    return [...base, ...this.module.tools, setPlanTool(this), updateStepTool(this)]
+    const framework = [setPlanTool(this), updateStepTool(this)]
+    if (this.run.expectResult) framework.push(submitResultTool(this))
+    return [...base, ...this.module.tools, ...framework]
   }
 
   /** Run one completion turn. Returns 'done' when the run produced a final answer. */
@@ -275,6 +290,18 @@ export class ModuleRunner {
         return 'continue'
       }
       if (!this.module.outputTool || this.run.outputFile) {
+        // The deliverable is done (or the module has none). If the main chat asked for a
+        // result payload, nudge the model to submit it before finishing.
+        if (this.run.expectResult && !this.run.result && this.finishHintsSent < MAX_FINISH_HINTS) {
+          this.finishHintsSent++
+          this.messages.push({ role: 'assistant', content: content || '' })
+          this.messages.push({
+            role: 'user',
+            content:
+              'You must not finish yet. The main chat agent is waiting for your result. Call the submit_result tool with the requested result now, then output your final summary.'
+          })
+          return 'continue'
+        }
         return this.finish(content)
       }
       // The module's deliverable file has not been created yet.
@@ -460,6 +487,20 @@ export class ModuleRunner {
     this.notify(this.run, evt)
   }
 
+  applyResult(resultRaw: unknown): string {
+    const result = String(resultRaw ?? '').trim()
+    if (!result) {
+      return JSON.stringify({
+        ok: false,
+        error: 'submit_result requires a non-empty result string.'
+      })
+    }
+    this.run.result = result
+    this.run.updatedAt = Date.now()
+    this.notify(this.run, { type: 'result', result })
+    return JSON.stringify({ ok: true, submitted: true })
+  }
+
   /** Mark the run done with the model's final summary; tidy the step plan. */
   private finish(content: string): 'done' {
     this.persistChat()
@@ -481,7 +522,11 @@ export class ModuleRunner {
     }
     this.run.status = 'done'
     this.run.finishedAt = Date.now()
-    this.touch({ type: 'done', summary: this.run.summary })
+    this.touch({
+      type: 'done',
+      summary: this.run.summary,
+      ...(this.run.result ? { result: this.run.result } : {})
+    })
     return 'done'
   }
 
@@ -552,6 +597,32 @@ function updateStepTool(runner: ModuleRunner): PTTool {
     },
     async execute(args) {
       return runner.applyStep(args.index, args.status, args.detail)
+    }
+  }
+}
+
+function submitResultTool(runner: ModuleRunner): PTTool {
+  return {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'submit_result',
+        description:
+          'Submit the result payload the main chat agent requested (the expect requirement in the system prompt). Must be called before finishing. The result is a free-form string: JSON, markdown or plain text.',
+        parameters: {
+          type: 'object',
+          properties: {
+            result: {
+              type: 'string',
+              description: 'The result payload in the exact format the main chat agent requested'
+            }
+          },
+          required: ['result']
+        }
+      }
+    },
+    async execute(args) {
+      return runner.applyResult(args.result)
     }
   }
 }

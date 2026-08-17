@@ -263,6 +263,7 @@ function App(): React.JSX.Element {
             }
             state.setChatBusy(false)
             state.setChatStreamProject(null)
+            state.setChatWaitRuns([])
           }
           break
         case 'confirm':
@@ -274,6 +275,14 @@ function App(): React.JSX.Element {
           if (evt.ask) {
             state.setAskRequest(evt.ask)
           }
+          break
+        case 'waiting':
+          if (evt.runIds) {
+            state.setChatWaitRuns(evt.runIds)
+          }
+          break
+        case 'message-end':
+          state.setChatWaitRuns([])
           break
       }
     })

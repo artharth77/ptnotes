@@ -11,7 +11,7 @@ import { registerSkillsIpc } from './ipc/skills'
 import { registerModulesIpc } from './ipc/modules'
 import { ModuleRegistry } from './modules/registry'
 import { ModuleRunManager } from './modules/runs'
-import { buildStartModuleTool } from './modules/tool'
+import { buildStartModuleTool, buildWaitModulesTool } from './modules/tool'
 import { shutdownChartRenderer } from './modules/shared/chartRenderer'
 import { shutdownDiagramRenderer } from './modules/shared/diagramRenderer'
 import { shutdownInfographicRenderer } from './modules/shared/infographicRenderer'
@@ -169,7 +169,10 @@ app.whenReady().then(async () => {
   )
   const toolsProvider = async (): Promise<PTTool[]> => {
     const current = await settingsStore.load()
-    return [buildStartModuleTool(moduleManager, moduleRegistry, current.disabledModules ?? [])]
+    return [
+      buildStartModuleTool(moduleManager, moduleRegistry, current.disabledModules ?? []),
+      buildWaitModulesTool(moduleManager)
+    ]
   }
 
   const registry = createSessionRegistry(service, configStore, toolsProvider)

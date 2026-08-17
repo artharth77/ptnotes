@@ -1,3 +1,14 @@
+## [0.8.0] — 2026-08-17
+
+### Added
+
+#### Module result-return + main-chat multi-module waiting
+
+- **`submit_result` module tool (18th)**: when a module run is started with a new `expect` argument on `start_module`, the subagent must call `submit_result` before finishing. The payload (JSON, markdown, or plain text — the main chat specifies the format) is stored on `ModuleRun.result`, broadcast as a new `'result'` module event, and propagated on the `done` event.
+- **`wait_modules` chat tool (19th)**: the main assistant can start several modules in parallel, then call `wait_modules({ runIds })` to block (event-driven, default 600s timeout, cancelable via Stop) until every listed run is terminal, returning each run's `status` / `result` / `outputFiles` / `summary` / `error`. The chat continues its normal tool loop with the results in context.
+- **Orchestration guidance in the system prompt**: the assistant is told to delegate parallel deliverables to `start_module` (passing `expect`), then `wait_modules` with all runIds — and to never wait when it does not need the output.
+- **Waiting UX**: while the chat is inside `wait_modules`, the chat drawer shows "Waiting for N module run(s)…" instead of "AI is thinking…" (driven by a new `'waiting'` stream event with `runIds`).
+
 ## [0.7.1] — 2026-08-15
 
 ### Added

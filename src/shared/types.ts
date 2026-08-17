@@ -139,13 +139,16 @@ export interface ToolCallInfo {
 }
 
 export interface ChatStreamEvent {
-  type: 'message-start' | 'content' | 'tool' | 'message-end' | 'error' | 'confirm' | 'ask'
+  type:
+    'message-start' | 'content' | 'tool' | 'message-end' | 'error' | 'confirm' | 'ask' | 'waiting'
   messageId?: string
   content?: string
   toolCall?: ToolCallInfo
   confirm?: ConfirmRequest
   ask?: AskRequest
   error?: string
+  /** Module run ids the main chat is currently waiting on (`wait_modules`). */
+  runIds?: string[]
 }
 
 // ---- Human-in-the-loop (`ask_user` tool) ----
@@ -229,6 +232,10 @@ export interface ModuleRun {
   outputFiles?: string[]
   summary?: string
   error?: string
+  /** Result payload submitted by the module subagent via `submit_result` (free-form string). */
+  result?: string
+  /** What the main chat asked the module to return, set via the `expect` argument of `start_module`. */
+  expectResult?: string
 }
 
 /** A message in a module run's subagent conversation transcript (read-only history). */
@@ -243,7 +250,7 @@ export interface ModuleChatMessage {
   toolCalls?: ToolCallInfo[]
 }
 
-export type ModuleEventType = 'status' | 'step' | 'output' | 'error' | 'done'
+export type ModuleEventType = 'status' | 'step' | 'output' | 'error' | 'done' | 'result'
 
 export type ModuleStartResult =
   { ok: true; runId: string; module: ModuleInfo; title: string } | { ok: false; error: string }
@@ -259,4 +266,5 @@ export interface ModuleEvent {
   outputFiles?: string[]
   error?: string
   summary?: string
+  result?: string
 }

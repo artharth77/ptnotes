@@ -30,6 +30,7 @@ interface AppState {
   moduleHistoryRunId: string | null
   chatBusy: boolean
   chatStreamProject: string | null
+  chatWaitRuns: string[]
   confirmRequest: ConfirmRequest | null
   askRequest: AskRequest | null
   settingsOpen: boolean
@@ -65,6 +66,7 @@ interface AppState {
   clearChatMessages: (project: string) => void
   setChatBusy: (busy: boolean) => void
   setChatStreamProject: (project: string | null) => void
+  setChatWaitRuns: (runIds: string[]) => void
   setConfirmRequest: (req: ConfirmRequest | null) => void
   setAskRequest: (req: AskRequest | null) => void
   setSettingsOpen: (open: boolean) => void
@@ -101,6 +103,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   moduleHistoryRunId: null,
   chatBusy: false,
   chatStreamProject: null,
+  chatWaitRuns: [],
   confirmRequest: null,
   askRequest: null,
   settingsOpen: false,
@@ -413,6 +416,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setChatStreamProject(project) {
     set({ chatStreamProject: project })
+  },
+
+  setChatWaitRuns(runIds) {
+    set({ chatWaitRuns: runIds })
   },
 
   setConfirmRequest(req) {
