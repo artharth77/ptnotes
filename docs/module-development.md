@@ -60,7 +60,10 @@ interface RegisteredModule {
   summary: string // one-line UI summary
   description: string // LONG prompt shown to the main agent describing when/how to use this module
   systemPrompt: string // extra guidance injected into the module subagent's system prompt
+  outputTool?: string // name of the tool that produces the required deliverable file; omit for
+                      // modules that finish with a summary + optional submit_result payload
   tools: PTTool[] // module-specific tools (PTTool from src/main/ai/tools.ts)
+  maxIterations?: number // optional max model turns for the subagent loop (default 30)
 }
 ```
 

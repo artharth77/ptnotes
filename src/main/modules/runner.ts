@@ -212,7 +212,8 @@ export class ModuleRunner {
 
     const client = this.clientFn(this.config)
     try {
-      for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
+      const maxIterations = this.module.maxIterations ?? MAX_ITERATIONS
+      for (let iter = 0; iter < maxIterations; iter++) {
         if (this.stopped) break
         const next = await this.runTurn(client)
         this.persistChat()

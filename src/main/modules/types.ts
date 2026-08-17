@@ -21,4 +21,6 @@ export interface RegisteredModule {
   outputTool?: string
   /** Module-specific tools added on top of the shared base tool set. */
   tools: PTTool[]
+  /** Max model turns for the subagent loop. Defaults to 30; set higher for long-running agents. */
+  maxIterations?: number
 }

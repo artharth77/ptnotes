@@ -119,6 +119,7 @@ src/
 │       ├── runs.ts       # ModuleRunManager: start/list/stop + event broadcast + readChat (live in-memory transcript or persisted .chat.json) + waitForRuns (multi-module waiting for the main chat)
 │       ├── runner.ts     # subagent loop; persists a read-only transcript to <project>/.data/modules/<runId>.chat.json each turn (removed on run delete/retry); submit_result tool for expectResult runs
 │       ├── tool.ts       # start_module tool (with expect result spec) + wait_modules tool (main chat → module run)
+│       ├── subagent/     # general-purpose long-run agent (base tools only, no output file; maxIterations 60)
 │       ├── pptx/         # PowerPoint module (design schema → buildPptx)
 │       ├── infographic/  # standalone infographic module (design schema → create_infographic_file; reuses the shared tool-pack)
 │       ├── docx/         # Word document module (design schema → buildDocx; reuses the shared tool-pack)

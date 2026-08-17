@@ -19,6 +19,7 @@ import type { PTTool } from './ai/tools'
 import { createPptxModule } from './modules/pptx'
 import { createInfographicModule } from './modules/infographic'
 import { createDocxModule } from './modules/docx'
+import { createSubagentModule } from './modules/subagent'
 import { SettingsStore } from './settings'
 import { AIConfigStore } from './ai/config'
 
@@ -152,6 +153,7 @@ app.whenReady().then(async () => {
   const configStore = new AIConfigStore()
 
   const moduleRegistry = new ModuleRegistry()
+  moduleRegistry.register(createSubagentModule())
   moduleRegistry.register(createPptxModule())
   moduleRegistry.register(createInfographicModule())
   moduleRegistry.register(createDocxModule())

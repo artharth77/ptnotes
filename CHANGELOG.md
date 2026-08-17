@@ -8,6 +8,7 @@
 - **`wait_modules` chat tool (19th)**: the main assistant can start several modules in parallel, then call `wait_modules({ runIds })` to block (event-driven, default 600s timeout, cancelable via Stop) until every listed run is terminal, returning each run's `status` / `result` / `outputFiles` / `summary` / `error`. The chat continues its normal tool loop with the results in context.
 - **Orchestration guidance in the system prompt**: the assistant is told to delegate parallel deliverables to `start_module` (passing `expect`), then `wait_modules` with all runIds — and to never wait when it does not need the output.
 - **Waiting UX**: while the chat is inside `wait_modules`, the chat drawer shows "Waiting for N module run(s)…" instead of "AI is thinking…" (driven by a new `'waiting'` stream event with `runIds`).
+- **General-purpose Subagent module**: a new **Subagent (long-run)** module runs open-ended, autonomous multi-step work (deep research, summarizing many notes/files, drafting content into notes) using only the shared base tools — no required output file and a larger turn budget (`maxIterations` is now per-module, default 30). The AI decides when to start it (or the user asks to "run the subagent"); like every module it supports `start_module`'s `expect` → `submit_result` result return.
 
 ## [0.7.1] — 2026-08-15
 

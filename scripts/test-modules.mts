@@ -1349,4 +1349,76 @@ const wStopped = await slowManager.waitForRuns(PROJECT, [s2RunId], 5000, () => t
 assert.equal(wStopped[0]!.status, 'stopped', 'isStopped cancels the wait early')
 slowManager.stop(s2RunId)
 
+// ---- general-purpose subagent module (long-run agent, no required output file) ----
+const { createSubagentModule } = await import('../src/main/modules/subagent')
+const subRegistry = new ModuleRegistry()
+subRegistry.register(createSubagentModule())
+const subDef = subRegistry.get('subagent')
+assert.ok(subDef, 'subagent module registered')
+assert.equal(subDef!.outputTool, undefined, 'subagent has no required output tool')
+assert.ok((subDef!.maxIterations ?? 30) > 30, 'subagent gets a larger turn budget')
+
+const subagentScript: { content?: string; tool_calls?: FakeToolCall[] }[] = [
+  {
+    tool_calls: [
+      step('sa1', 'set_plan', { steps: ['Research', 'Summarize', 'Save a note', 'Submit result'] })
+    ]
+  },
+  { tool_calls: [step('sa2', 'update_step', { index: 1, status: 'done' })] },
+  { tool_calls: [step('sa3', 'web_search', { query: 'electron security' })] },
+  {
+    tool_calls: [
+      step('sa4', 'create_note', {
+        title: 'Subagent findings',
+        content: '# Findings\n\nDeep research summary.'
+      })
+    ]
+  },
+  {
+    tool_calls: [
+      step('sa5', 'submit_result', { result: '{"note":"subagent-findings","sources":3}' })
+    ]
+  },
+  { content: 'Done. Researched and saved a note.' }
+]
+const subManager = new ModuleRunManager(
+  service,
+  configStore,
+  subRegistry,
+  () => {},
+  makeScriptedClient(subagentScript)
+)
+const subStart = await subManager.start(
+  PROJECT,
+  'subagent',
+  'Deep research',
+  'Research Electron security best practices and save the findings as a note.',
+  'Return a JSON object with keys {note, sources}'
+)
+assert.equal(subStart.ok, true, 'subagent run accepted')
+const subRunId = subStart.ok ? subStart.runId : ''
+await waitFor(async () => {
+  const runs = await subManager.list(PROJECT)
+  return runs.some((r) => r.runId === subRunId && (r.status === 'done' || r.status === 'failed'))
+})
+const subRun = (await subManager.list(PROJECT)).find((r) => r.runId === subRunId)
+assert.ok(subRun, 'subagent run exists')
+assert.equal(subRun!.status, 'done', 'subagent run finished done (no output file required)')
+assert.equal(subRun!.outputFile, undefined, 'subagent run needs no deliverable file')
+assert.equal(
+  subRun!.result,
+  '{"note":"subagent-findings","sources":3}',
+  'subagent submitted its result'
+)
+assert.match(subRun!.summary ?? '', /Researched/, 'subagent finishes with a summary')
+assert.ok(
+  subRun!.steps.every((s) => s.status === 'done'),
+  'subagent steps all done'
+)
+const subNoteExists = await fs
+  .readFile(`${ROOT}/${PROJECT}/notes/subagent-findings.md`, 'utf8')
+  .then((c) => c.includes('Deep research'))
+  .catch(() => false)
+assert.ok(subNoteExists, 'subagent used base tools to persist a note')
+
 console.log('MODULES TESTS PASSED')
