@@ -11,6 +11,9 @@ import type {
   CreateProjectResult,
   NoteMeta,
   Project,
+  ProjectCalendar,
+  Schedule,
+  ScheduleMeta,
   SkillContent,
   SkillList,
   SkillMeta,
@@ -19,6 +22,7 @@ import type {
 } from '@shared/types'
 import type { ModuleChatMessage, ModuleInfo, ModuleRun } from '@shared/types'
 import { slugify } from '@shared/slug'
+import { countTasks, defaultCalendar, normalizeCalendar, validateScheduleId } from '@shared/planner'
 import { detectFileKind } from '../ai/reader'
 import type { SettingsStore } from '../settings'
 
@@ -157,6 +161,18 @@ export class PTNotesService {
 
   private modulesDir(name: string): string {
     return join(this.dataDir(name), 'modules')
+  }
+
+  private plannerDir(name: string): string {
+    return join(this.projectDir(name), 'planner')
+  }
+
+  private schedulePath(project: string, id: string): string {
+    return join(this.plannerDir(project), `${validateScheduleId(id)}.json`)
+  }
+
+  private calendarPath(project: string): string {
+    return join(this.plannerDir(project), 'calendar.json')
   }
 
   /** Global skills dir (shared across all projects), next to the project registry. */
@@ -1094,6 +1110,129 @@ export class PTNotesService {
       if (!exists) return candidate
       candidate = `${base}-${i++}`
     }
+  }
+
+  private async uniqueScheduleId(project: string, base: string): Promise<string> {
+    let candidate = base
+    let i = 2
+    while (await this.pathExists(this.schedulePath(project, candidate))) {
+      candidate = `${base}-${i++}`
+    }
+    return candidate
+  }
+
+  // ---- Planner (project schedules) ----
+
+  async listSchedules(project: string): Promise<ScheduleMeta[]> {
+    const dir = this.plannerDir(project)
+    let entries: string[]
+    try {
+      entries = await fs.readdir(dir)
+    } catch {
+      return []
+    }
+    const schedules: ScheduleMeta[] = []
+    for (const entry of entries) {
+      if (!entry.endsWith('.json') || entry === 'calendar.json') continue
+      const id = entry.slice(0, -5)
+      let meta: { name: string; updatedAt: number; taskCount: number } | null = null
+      try {
+        const schedule = JSON.parse(await fs.readFile(join(dir, entry), 'utf8')) as Schedule
+        if (!schedule || typeof schedule.id !== 'string') throw new Error('Invalid schedule')
+        meta = {
+          name: schedule.name?.trim() || id,
+          updatedAt: schedule.updatedAt ?? 0,
+          taskCount: Array.isArray(schedule.tasks)
+            ? schedule.tasks.reduce((n, t) => n + countTasks(t), 0)
+            : 0
+        }
+      } catch {
+        // ignore corrupt file
+      }
+      schedules.push({
+        id,
+        name: meta?.name ?? id,
+        updatedAt: meta?.updatedAt ?? 0,
+        taskCount: meta?.taskCount ?? 0
+      })
+    }
+    schedules.sort((a, b) => a.name.localeCompare(b.name))
+    return schedules
+  }
+
+  async readSchedule(project: string, id: string): Promise<Schedule | null> {
+    try {
+      const schedule = JSON.parse(
+        await fs.readFile(this.schedulePath(project, id), 'utf8')
+      ) as Schedule
+      if (!schedule || typeof schedule.id !== 'string' || !Array.isArray(schedule.tasks)) {
+        throw new Error('Invalid schedule')
+      }
+      return schedule
+    } catch {
+      return null
+    }
+  }
+
+  async saveSchedule(project: string, schedule: Schedule): Promise<void> {
+    if (!schedule || typeof schedule.id !== 'string') throw new Error('Invalid schedule')
+    const dir = this.plannerDir(project)
+    await fs.mkdir(dir, { recursive: true })
+    const path = this.schedulePath(project, schedule.id)
+    const tmp = `${path}.tmp`
+    await fs.writeFile(tmp, JSON.stringify(schedule, null, 2), 'utf8')
+    await fs.rename(tmp, path)
+  }
+
+  async createSchedule(project: string, name: string): Promise<ScheduleMeta> {
+    const base = slugify(name) || 'untitled'
+    const id = await this.uniqueScheduleId(project, base)
+    const now = Date.now()
+    const display = name.trim() || base
+    const schedule: Schedule = { id, name: display, createdAt: now, updatedAt: now, tasks: [] }
+    await this.saveSchedule(project, schedule)
+    return { id, name: display, updatedAt: now, taskCount: 0 }
+  }
+
+  async renameSchedule(project: string, id: string, newName: string): Promise<ScheduleMeta> {
+    const schedule = await this.readSchedule(project, id)
+    if (!schedule) throw new Error(`Schedule "${id}" not found`)
+    schedule.name = newName.trim() || schedule.name
+    schedule.updatedAt = Date.now()
+    await this.saveSchedule(project, schedule)
+    return {
+      id,
+      name: schedule.name,
+      updatedAt: schedule.updatedAt,
+      taskCount: schedule.tasks.reduce((n, t) => n + countTasks(t), 0)
+    }
+  }
+
+  async deleteSchedule(project: string, id: string): Promise<void> {
+    await fs.unlink(this.schedulePath(project, id)).catch(() => {})
+  }
+
+  // ---- Calendar (shared project working-day config) ----
+
+  async readCalendar(project: string): Promise<ProjectCalendar> {
+    try {
+      const calendar = JSON.parse(
+        await fs.readFile(this.calendarPath(project), 'utf8')
+      ) as ProjectCalendar
+      return normalizeCalendar(calendar)
+    } catch {
+      return defaultCalendar()
+    }
+  }
+
+  async saveCalendar(project: string, calendar: ProjectCalendar): Promise<void> {
+    const dir = this.plannerDir(project)
+    await fs.mkdir(dir, { recursive: true })
+    const normalized = normalizeCalendar(calendar)
+    const path = this.calendarPath(project)
+    const tmp = `${path}.tmp`
+    await fs.writeFile(tmp, JSON.stringify(normalized, null, 2), 'utf8')
+    await fs.rename(tmp, path)
   }
 
   // ---- Todos ----

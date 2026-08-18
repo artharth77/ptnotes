@@ -20,6 +20,9 @@ import type {
   NoteMeta,
   PdfExtractResult,
   Project,
+  ProjectCalendar,
+  Schedule,
+  ScheduleMeta,
   SkillContent,
   SkillList,
   SkillMeta,
@@ -80,6 +83,23 @@ const api = {
       ipcRenderer.invoke('chat:rename', project, sessionId, title),
     readTrace: (project: string, sessionId: string): Promise<AiTraceFile | null> =>
       ipcRenderer.invoke('chat:readTrace', project, sessionId)
+  },
+  planner: {
+    list: (project: string): Promise<ScheduleMeta[]> => ipcRenderer.invoke('planner:list', project),
+    read: (project: string, id: string): Promise<Schedule | null> =>
+      ipcRenderer.invoke('planner:read', project, id),
+    save: (project: string, schedule: Schedule): Promise<void> =>
+      ipcRenderer.invoke('planner:save', project, schedule),
+    create: (project: string, name: string): Promise<ScheduleMeta> =>
+      ipcRenderer.invoke('planner:create', project, name),
+    rename: (project: string, id: string, newName: string): Promise<ScheduleMeta> =>
+      ipcRenderer.invoke('planner:rename', project, id, newName),
+    delete: (project: string, id: string): Promise<void> =>
+      ipcRenderer.invoke('planner:delete', project, id),
+    getCalendar: (project: string): Promise<ProjectCalendar> =>
+      ipcRenderer.invoke('planner:getCalendar', project),
+    saveCalendar: (project: string, calendar: ProjectCalendar): Promise<void> =>
+      ipcRenderer.invoke('planner:saveCalendar', project, calendar)
   },
   ai: {
     send: (

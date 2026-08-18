@@ -3,6 +3,8 @@ import { useAppStore } from './store/useAppStore'
 import { TopBar } from './components/TopBar'
 import { NoteList } from './components/NoteList'
 import { TodoPanel } from './components/TodoPanel'
+import { PlannerPanel } from './components/PlannerPanel'
+import { PlannerEditor } from './components/PlannerEditor'
 import { MarkdownEditor } from './components/MarkdownEditor'
 import { ChatDrawer } from './components/ChatDrawer'
 import { SettingsDialog } from './components/SettingsDialog'
@@ -30,13 +32,19 @@ function SideTabs(): React.JSX.Element {
 
   return (
     <div className="side-tabs">
-      {(['notes', 'todo', 'modules'] as Tab[]).map((t) => (
+      {(['notes', 'todo', 'planner', 'modules'] as Tab[]).map((t) => (
         <button
           key={t}
           className={`side-tab ${tab === t ? 'active' : ''}`}
           onClick={() => setTab(t)}
         >
-          {t === 'notes' ? 'Notes' : t === 'todo' ? 'Todo' : 'Modules'}
+          {t === 'notes'
+            ? 'Notes'
+            : t === 'todo'
+              ? 'Todo'
+              : t === 'planner'
+                ? 'Planner'
+                : 'Modules'}
           {t === 'modules' && modulesBusy && <span className="side-tab-spinner" />}
         </button>
       ))}
@@ -98,6 +106,32 @@ function EmptyNote(): React.JSX.Element {
           onSubmit={(title) => {
             setCreating(false)
             void createNote(title)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+function EmptyPlanner(): React.JSX.Element {
+  const createSchedule = useAppStore((s) => s.createSchedule)
+  const [creating, setCreating] = useState(false)
+
+  return (
+    <div className="empty-state">
+      <p>Select a schedule or create a new one.</p>
+      <button className="btn primary" onClick={() => setCreating(true)}>
+        + New Schedule
+      </button>
+      {creating && (
+        <PromptModal
+          title="New Schedule"
+          placeholder="Schedule name"
+          submitLabel="Create"
+          onClose={() => setCreating(false)}
+          onSubmit={(name) => {
+            setCreating(false)
+            void createSchedule(name)
           }}
         />
       )}
@@ -182,6 +216,7 @@ function App(): React.JSX.Element {
   const init = useAppStore((s) => s.init)
   const activeProject = useAppStore((s) => s.activeProject)
   const activeNoteId = useAppStore((s) => s.activeNoteId)
+  const activeScheduleId = useAppStore((s) => s.activeScheduleId)
   const noteContent = useAppStore((s) => s.noteContent)
   const tab = useAppStore((s) => s.tab)
   const chatOpen = useAppStore((s) => s.chatOpen)
@@ -202,6 +237,15 @@ function App(): React.JSX.Element {
   useEffect(() => {
     const NOTE_TOOLS = new Set(['create_note', 'update_note', 'delete_note'])
     const TODO_TOOLS = new Set(['create_todos', 'toggle_todo', 'delete_todo'])
+    const PLANNER_TOOLS = new Set([
+      'list_schedules',
+      'read_schedule',
+      'create_schedule',
+      'update_schedule',
+      'add_task',
+      'update_task',
+      'set_calendar'
+    ])
     return window.ptnotes.ai.onStreamEvent((evt) => {
       const state = useAppStore.getState()
       const project = state.chatStreamProject
@@ -233,6 +277,18 @@ function App(): React.JSX.Element {
             }
             if (TODO_TOOLS.has(evt.toolCall.name)) {
               void state.refreshTodos()
+            }
+            if (PLANNER_TOOLS.has(evt.toolCall.name)) {
+              void state.refreshSchedules()
+              if (
+                (evt.toolCall.name === 'add_task' || evt.toolCall.name === 'update_task') &&
+                state.activeScheduleId
+              ) {
+                void state.selectSchedule(state.activeScheduleId)
+              }
+              if (evt.toolCall.name === 'set_calendar') {
+                void state.loadCalendar()
+              }
             }
           }
           break
@@ -296,7 +352,15 @@ function App(): React.JSX.Element {
             style={{ width: sidebarVisible ? sidebarWidth : 0 }}
           >
             <SideTabs />
-            {tab === 'todo' ? <TodoPanel /> : tab === 'modules' ? <ModulePanel /> : <NoteList />}
+            {tab === 'todo' ? (
+              <TodoPanel />
+            ) : tab === 'modules' ? (
+              <ModulePanel />
+            ) : tab === 'planner' ? (
+              <PlannerPanel />
+            ) : (
+              <NoteList />
+            )}
           </aside>
           {sidebarVisible && (
             <Resizer
@@ -308,7 +372,13 @@ function App(): React.JSX.Element {
             />
           )}
           <main className="main-area">
-            {activeNoteId ? (
+            {tab === 'planner' ? (
+              activeScheduleId ? (
+                <PlannerEditor key={activeScheduleId} />
+              ) : (
+                <EmptyPlanner />
+              )
+            ) : activeNoteId ? (
               <MarkdownEditor key={activeNoteId} noteId={activeNoteId} content={noteContent} />
             ) : (
               <EmptyNote />

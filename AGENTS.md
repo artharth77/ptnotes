@@ -6,7 +6,7 @@ IPC, AI/chat features, module rendering, or the UI.
 
 ## Project
 
-PTNotes is a desktop app (Electron) for markdown notes, todo task lists, and an AI chat assistant, organized by **project** — each project is a folder on disk.
+PTNotes is a desktop app (Electron) for markdown notes, todo task lists, project schedules/planner, and an AI chat assistant, organized by **project** — each project is a folder on disk.
 
 ## Stack
 
@@ -48,8 +48,10 @@ Run `npm run typecheck` and `npm run lint` after any change.
 ## Conventions
 
 - Follow existing patterns in neighboring files (store actions, IPC handler shapes, component style).
-- Project names and note/chat ids are slugified and validated before building file paths (see `validateNoteId` / `chatDir` in `PTNotesService`).
+- Project names and note/chat ids are slugified and validated before building file paths (see `validateNoteId` / `chatDir` in `PTNotesService`). Planner schedule ids use `validateScheduleId` (same guard).
 - Todo storage is a markdown checklist file (`TODO.md`, `- [ ]` / `- [x]`); the line content derives the id.
+- Planner schedules are JSON in `<project>/planner/<slug>.json` with a shared `calendar.json` working-day config. The pure date/rollup engine lives in `src/shared/planner.ts` and must stay shared (main + renderer + tests) — do not duplicate the math.
+- Planner UI: the store's `scheduleContent` is the single source of truth for the editor; parents' plan fields are rolled up from children (read-only in the UI), `On Hold` is manual-only, and actual dates are never computed.
 - Use existing utilities; do not add new dependencies without checking `package.json`.
 - Do not add comments unless necessary.
 

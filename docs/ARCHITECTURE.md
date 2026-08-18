@@ -9,16 +9,16 @@ on-disk layout, IPC, AI/chat features, module rendering, or the UI.
 
 Read the section(s) relevant to your task rather than the whole file when possible:
 
-| Section | Read when touching |
-| ------- | ------------------ |
-| [Decisions (locked in)](#decisions-locked-in) | Any feature work — product decisions that must not be reverted |
-| [On-disk layout](#on-disk-layout) | Filesystem paths, `.data/`, project root, storage/config files |
-| [Architecture](#architecture) | Finding where code lives (main/preload/renderer/shared) |
-| [Security invariants (do not break)](#security-invariants-do-not-break) | **Always read** — hard constraints (renderer isolation, render workers) |
-| [UI layout](#ui-layout) | Editor, toolbar, format helper, find & replace, top bar |
-| [IPC surface (window.ptnotes)](#ipc-surface-windowptnotes) | Preload/renderer ↔ main IPC handler shapes |
-| [AI chat feature](#ai-chat-feature) | Chat session, tools, module orchestration, trace, PDF, chat UI, settings |
-| [Notes & caveats](#notes--caveats) | Behavioral constraints (tool scoping, mention semantics) |
+| Section                                                                 | Read when touching                                                       |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| [Decisions (locked in)](#decisions-locked-in)                           | Any feature work — product decisions that must not be reverted           |
+| [On-disk layout](#on-disk-layout)                                       | Filesystem paths, `.data/`, project root, storage/config files           |
+| [Architecture](#architecture)                                           | Finding where code lives (main/preload/renderer/shared)                  |
+| [Security invariants (do not break)](#security-invariants-do-not-break) | **Always read** — hard constraints (renderer isolation, render workers)  |
+| [UI layout](#ui-layout)                                                 | Editor, toolbar, format helper, find & replace, top bar                  |
+| [IPC surface (window.ptnotes)](#ipc-surface-windowptnotes)              | Preload/renderer ↔ main IPC handler shapes                               |
+| [AI chat feature](#ai-chat-feature)                                     | Chat session, tools, module orchestration, trace, PDF, chat UI, settings |
+| [Notes & caveats](#notes--caveats)                                      | Behavioral constraints (tool scoping, mention semantics)                 |
 
 ---
 
@@ -89,6 +89,9 @@ Run `npm run typecheck` and `npm run lint` after any change.
     ├── notes/*.md          (one file per note)
     ├── TODO.md             (markdown checklist: `- [ ]` / `- [x]`)
     ├── files/*.{pdf,md,txt,json,log,yaml,yml} (attachments copied on chat drop) + module deliverables (.pptx, .svg/.png, .docx)
+    ├── planner/            (project schedules + calendar)
+    │   ├── <slug>.json     (one file per schedule: id, name, timestamps, nested task tree)
+    │   └── calendar.json   (shared working-day calendar: weekStart/weekEnd + holidays)
     └── .data/              (app-internal data; dot-prefixed so it stays out of the # file picker)
         ├── modules/*.json        (module run state + prompts)
         ├── modules/*.chat.json   (per-run subagent transcript, read-only history overlay)
@@ -122,6 +125,7 @@ src/
 │   │   ├── projects.ts
 │   │   ├── notes.ts
 │   │   ├── todos.ts
+│   │   ├── planner.ts  # planner:list/read/save/create/rename/delete/getCalendar/saveCalendar
 │   │   ├── chat.ts      # chat history persistence (list/read/write/delete/rename)
 │   │   ├── ai.ts        # chat session registry + ai:generateTitle (chat titles)
 │   │   ├── files.ts     # files:* attach/extract/list/reveal + pdf:upload (multi-file drop: .pdf/.md/.txt)
@@ -168,6 +172,9 @@ src/
 │   │   │   ├── ProjectDropdown.tsx
 │   │   │   ├── NoteList.tsx         # Notes tab
 │   │   │   ├── TodoPanel.tsx        # Todo tab (checkboxes + progress)
+│   │   │   ├── PlannerPanel.tsx     # Planner tab (schedule list + create/rename/delete)
+│   │   │   ├── PlannerEditor.tsx    # schedule grid editor (hierarchical tasks, rollups, autosave)
+│   │   │   ├── CalendarModal.tsx    # project working-day calendar editor (week + holidays)
 │   │   │   ├── MarkdownEditor.tsx   # TipTap WYSIWYG + markdown sync + auto-save
 │   │   │   ├── MarkdownContent.tsx  # react-markdown chat rendering + note:/skill: link handling
 │   │   │   ├── ChatDrawer.tsx       # right drawer, streaming, mentions, history, titles
@@ -175,7 +182,8 @@ src/
 │   │   │   └── SettingsDialog.tsx  # two-panel Settings (Storage + AI Settings)
 │   └── ...
 └── shared/
-    └── types.ts         # Project, NoteMeta, Todo, ChatMessage, tool types
+    ├── types.ts         # Project, NoteMeta, Todo, ChatMessage, tool types
+    └── planner.ts       # pure planner engine (dates, status rules, rollups) shared by main + renderer + tests
 ```
 
 ### Security invariants (do not break)
@@ -201,15 +209,16 @@ src/
 ┌──────────────────────────────────────────────────────────────┐
 │ ⚙ Project A ▾ [New Project]      [Settings] [💬 Chat]     │
 ├─────────────────┬────────────────────────────────────────────┤
-│ Notes │ Todo    │  Editor area        │  Chat drawer         │
-│ ▸ note 1        │  ┌ toolbar ───────┐ │  (collapsible,      │
-│ ▸ note 2        │  │ TipTap editor  │ │  streaming +        │
-│ [+ New note]    │  └────────────────┘ │  tool-call log)     │
+│ Notes│Todo│      │  Editor area        │  Chat drawer         │
+│ Modules│Planner  │  ┌ toolbar ───────┐ │  (collapsible,      │
+│ ▸ note 1        │  │ TipTap editor  │ │  streaming +        │
+│ ▸ note 2        │  └────────────────┘ │  tool-call log)     │
+│ [+ New note]    │                     │                      │
 └─────────────────┴────────────────────┴──────────────────────┘
 ```
 
 - **Top bar:** current project name with dropdown (switch / new / rename / delete), Settings, chat toggle.
-- **Middle column:** tabs for Notes (list + create/rename/delete) and Todo (interactive checklist + progress).
+- **Middle column:** tabs for Notes (list + create/rename/delete), Todo (interactive checklist + progress), Modules, and Planner (project schedules — see [Planner](#planner)).
   - **Main area:** TipTap WYSIWYG editor for notes; auto-save to `.md` ~800ms after edits (debounced). The toolbar includes an **underline** button (StarterKit v3 registers `Underline`; markdown round-trips as GitLab-style `++text++`). Links in the editor use a custom `<span>` implementation to disable default browser navigation; they require Cmd/Ctrl+click to navigate: external links open in the OS browser, while `note:`, `skill:`, and `file:` links open the note, skill editor, or reveal the file in Finder, respectively.
 
 - **Format helper (bubble popup):** selecting text shows an icon-only bubble (`BubbleMenu` from `@tiptap/react/menus` — no new dependency) with **Bold / Italic / Underline / Strikethrough / Inline code** buttons (active states + tooltips); a circular `mdiCloseCircle` X button in its top-right corner closes it and turns the feature off. Enabled by default, persisted in `localStorage` (`ptnotes:formatHelper`), and toggled from a status-bar button on the right (icon + label).
@@ -222,6 +231,7 @@ src/
 - **Projects:** `list` (returns `pathExists` per project), `create`, `rename`, `delete`, `recreate` (rebuild folder for a project whose path is missing)
 - **Notes:** `list`, `read`, `save`, `create`, `rename`, `delete`
 - **Todos:** `read` (parse checklist), `save` (serialize `- [ ]`/`- [x]`), `toggle`, `deleteCompleted`, `reorder`
+- **Planner:** `list` (schedule metas), `read` (full schedule or `null`), `save` (atomic tmp+rename), `create` (slugified id), `rename`, `delete`; `getCalendar` (defaults to Mon–Fri), `saveCalendar` (normalized). All ids validated with `validateScheduleId` (same rule as the note-id guard).
 - **Chat history:** `list`, `read`, `write`, `delete`, `rename`, `readTrace` (raw AI trace `AiTraceFile` for a session, or `null`)
 - **AI:** `send` (message → streamed reply; takes `sessionId` so the run is traced), `getConfig`, `setConfig`, `listModels(baseUrl, apiKey)`, `generateTitle` (takes `sessionId`; the title call is traced into the session's trace file), `stop`, `clear`, `confirmResponse`, `askResponse` (human-in-the-loop answers for `ask_user`), `onStreamEvent` (token chunks + tool-call logs + confirm events)
 - **Settings:** `get` (returns `{ rootDir }`), `getAbout` (app name/version + Electron/Chromium/Node versions for the About pane), `chooseRoot` (native folder picker), `changeRoot` (moves data + persists + returns new `{ rootDir }`)
@@ -291,8 +301,8 @@ ChatPanel (renderer) ──send──▶ Main process
   - `assistant` — an AI reply: `content` / `reasoning`, the `toolCalls` it issued (payload
     `{ id, name, args }`), `finishReason`, `usage`, plus `model` / `baseUrl` / `endpoint`.
   - `tool` — a tool response: `name`, `toolCallId`, `content` (the result), and `durationMs`.
-  Auxiliary AI calls (PDF upload via the Responses API, background chat title generation)
-  are traced into the current chat's trace file too.
+    Auxiliary AI calls (PDF upload via the Responses API, background chat title generation)
+    are traced into the current chat's trace file too.
 - **Never logged:** the API key and the PDF base64 payload (only `file_id`/filename). Tracing
   is best-effort and non-fatal.
 - Trace files live inside `<project>/.data/`, so they follow the delete (`deleteChat`,
@@ -312,30 +322,37 @@ ChatPanel (renderer) ──send──▶ Main process
   icon button on the module run's transcript overlay (`modules.readTrace`). If no trace
   exists, the modal shows "No trace data found for this session." instead of loading.
 
-### Tools (19 total)
+### Tools (26 total)
 
-| Tool            | Action                                                                                                        |
-| --------------- | ------------------------------------------------------------------------------------------------------------- |
-| `create_note`   | new `.md` in project `notes/`                                                                                 |
-| `update_note`   | overwrite / rename existing note                                                                              |
-| `list_notes`    | model context                                                                                                 |
-| `read_note`     | model context; omit `title` to read the currently active note (the one the user is viewing)                   |
-| `search_notes`  | search note titles + content, return matching names + snippet                                                 |
-| `delete_note`   | delete one or more notes (requires user confirmation dialog)                                                  |
-| `create_todos`  | append `- [ ]` items to `TODO.md`                                                                             |
-| `toggle_todo`   | toggle a checklist item                                                                                       |
-| `delete_todo`   | remove an item                                                                                                |
-| `list_todos`    | model context                                                                                                 |
-| `read_file`     | extract text of a project file locally via `readFileAsText` (pdf-parse for `.pdf`, raw text for any text file) |
-| `create_skill`  | upsert a skill (`scope`: `global`/`project`) from name + description + content                                |
-| `read_skill`    | load a skill's full content (skills are listed in the system prompt; no separate `list_skills`)               |
-| `delete_skill`  | delete a skill (requires user confirmation dialog)                                                            |
-| `web_search`    | DuckDuckGo HTML search, no API key, Node fetch in main (user-agent header, rate-limit errors surfaced to model) |
-| `web_fetch`     | direct fetch + cheerio local parse (strip scripts/styles/nav, extract title + readable text) — fully private  |
-| `ask_user`      | ask the user 1–8 choice/free-text questions in a wizard dialog (radio / checkboxes / free text); chat-only    |
-| `start_module`  | chat-only; start a background module (with optional `expect` result spec); returns `runId` immediately       |
-| `wait_modules`  | chat-only; block (event-driven, timeout + stop-cancel) until every listed run is terminal, return their `status`/`result`/`outputFiles`/`summary`/`error` |
-| `submit_result` | module-only; a module subagent submits its result payload (JSON/markdown/plain text) before finishing         |
+| Tool              | Action                                                                                                                                                    |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `create_note`     | new `.md` in project `notes/`                                                                                                                             |
+| `update_note`     | overwrite / rename existing note                                                                                                                          |
+| `list_notes`      | model context                                                                                                                                             |
+| `read_note`       | model context; omit `title` to read the currently active note (the one the user is viewing)                                                               |
+| `search_notes`    | search note titles + content, return matching names + snippet                                                                                             |
+| `delete_note`     | delete one or more notes (requires user confirmation dialog)                                                                                              |
+| `create_todos`    | append `- [ ]` items to `TODO.md`                                                                                                                         |
+| `toggle_todo`     | toggle a checklist item                                                                                                                                   |
+| `delete_todo`     | remove an item                                                                                                                                            |
+| `list_todos`      | model context                                                                                                                                             |
+| `read_file`       | extract text of a project file locally via `readFileAsText` (pdf-parse for `.pdf`, raw text for any text file)                                            |
+| `create_skill`    | upsert a skill (`scope`: `global`/`project`) from name + description + content                                                                            |
+| `read_skill`      | load a skill's full content (skills are listed in the system prompt; no separate `list_skills`)                                                           |
+| `delete_skill`    | delete a skill (requires user confirmation dialog)                                                                                                        |
+| `web_search`      | DuckDuckGo HTML search, no API key, Node fetch in main (user-agent header, rate-limit errors surfaced to model)                                           |
+| `web_fetch`       | direct fetch + cheerio local parse (strip scripts/styles/nav, extract title + readable text) — fully private                                              |
+| `ask_user`        | ask the user 1–8 choice/free-text questions in a wizard dialog (radio / checkboxes / free text); chat-only                                                |
+| `start_module`    | chat-only; start a background module (with optional `expect` result spec); returns `runId` immediately                                                    |
+| `wait_modules`    | chat-only; block (event-driven, timeout + stop-cancel) until every listed run is terminal, return their `status`/`result`/`outputFiles`/`summary`/`error` |
+| `submit_result`   | module-only; a module subagent submits its result payload (JSON/markdown/plain text) before finishing                                                     |
+| `list_schedules`  | model context (id, name, task count)                                                                                                                      |
+| `read_schedule`   | full task tree with rolled-up parent values; match schedule by id or name                                                                                 |
+| `create_schedule` | new empty schedule; returns id + name                                                                                                                     |
+| `update_schedule` | rename a schedule (match by id or name)                                                                                                                   |
+| `add_task`        | add a task (optional parent nesting); planStart+planEnd or planStart+duration — the missing value is computed                                             |
+| `update_task`     | update a task's fields (match by id or title); plan date edits re-derive the other value (end-date-fixed)                                                 |
+| `set_calendar`    | set week + holidays; re-rolls all schedules so parent durations reflect the new calendar                                                                  |
 
 ### PDF attachments (drag & drop into chat)
 
@@ -373,7 +390,7 @@ ChatPanel (renderer) ──send──▶ Main process
 - **Keyboard shortcuts:** with the cursor in the chat input box, `Cmd/Ctrl+Shift+N` starts a new chat
   and `Cmd/Ctrl+Shift+H` toggles the chat history popup (Shift-modified to avoid the default menu's
   `Cmd+N` New Window / `Cmd+H` Hide accelerators — no main-process menu changes for chat; note that
-  the app *does* install a custom application menu, `buildAppMenu()` in `src/main/index.ts`, whose
+  the app _does_ install a custom application menu, `buildAppMenu()` in `src/main/index.ts`, whose
   sole purpose is removing the default Edit→Find role so the renderer owns `Cmd/Ctrl+F` for the
   markdown editor's find/replace bar); opening via the
   shortcut blurs the input, closing refocuses it. Globally, `Cmd/Ctrl+Shift+C` toggles the chat
@@ -428,10 +445,55 @@ Two-panel dialog (`.settings-layout` with `.settings-nav` + `.settings-pane`):
   shows an **"AI not configured"** banner at the top with a button that opens **Settings → AI
   Settings** (`ai:getConfig` → `aiReady` check in `ChatDrawer`).
 
+## Planner
+
+Project schedules with hierarchical tasks, working-day date math, and parent rollups. Stored as
+JSON in `<project>/planner/<slug>.json`; the whole feature is pure data — no markdown, no new deps.
+
+### Data model
+
+- `ScheduleTask`: `id`, `title`, `status` (`not-started` | `in-progress` | `completed` | `on-hold`),
+  `owner`, `duration` (working days, `number|null`), `planStart`/`planEnd`/`actualStart`/`actualEnd`
+  (`'YYYY-MM-DD'` or `null`), `percentComplete` (0–100), `note`, `children: ScheduleTask[]`.
+- `ProjectCalendar`: `weekStart`/`weekEnd` (weekday 0=Sun..6=Sat, default Mon–Fri = 1..5) +
+  `holidays: string[]` — the **shared project working-day config** used for all plan math.
+- Dates are stored as local `YYYY-MM-DD` strings (no timezone); the outline **No.** column is
+  derived at render time (`deriveTaskNo`), never persisted.
+
+### Rules
+
+- **Working-day math** (`computeEndDate`/`computeDuration`): `planEnd = start + duration - 1` working
+  days (start counts as day 1); weekends and `calendar.holidays` are skipped. Applies to **plan**
+  dates only — actual dates are free-form and never computed.
+- **Date rule** (`applyDateRule`): editing `planStart` keeps `planEnd` fixed and recomputes
+  `duration` — but when `planEnd` is still unset and a `duration` is assigned, a `planStart` edit
+  recomputes `planEnd` (`start + duration - 1` working days). Editing `duration` recomputes
+  `planEnd`; editing `planEnd` recomputes `duration`.
+- **Status rules** (`deriveStatus`): `On Hold` is manual only — never auto-changed. Otherwise
+  `%Complete ≤ 0` → Not Started, `< 100` → In Progress, `100` → Completed. Derived on every recompute.
+- **Parent rollup** (`rollupChildren`): `planStart` = min child, `planEnd` = max child,
+  `duration` = working days between them, `%Complete` = duration-weighted mean (plain average when
+  children have no durations), `status` = derived (on-hold preserved). `rollupScheduleTasks` recurses
+  bottom-up; the editor and AI tools recompute the whole tree after every edit.
+- **Leaf fields are manual**: title, owner, duration, plan dates, actuals, %complete, note. Parent
+  plan/duration/% fields are read-only in the UI (show the rolled-up values); title/owner/actuals/
+  note and status (for on-hold) remain editable.
+
+### Editor (PlannerEditor)
+
+- Grid with columns: **No. · Title · Status · Owner · Duration · Plan Start · Plan End · Actual
+  Start · Actual End · %Complete · Note**, plus per-row actions (add subtask, add sibling, delete —
+  deleting a parent requires a child-confirmation modal).
+- Single source of truth is the store's `scheduleContent`; every edit recomputes the tree and
+  auto-saves ~800ms debounced (flushed on unmount). Calendar button opens `CalendarModal` (week
+  selects + holiday date list with add/remove).
+- 4th sidebar tab (`mdiChartTimeline`) → PlannerPanel (schedule list) → PlannerEditor (keyed by
+  `activeScheduleId`); an empty-state "New Schedule" flow otherwise.
+
 ## Notes & caveats
 
 - DuckDuckGo scraping can be rate-limited; errors are surfaced to the model so it can retry/adapt.
-- Tool count is 19 (a guideline; acceptable tradeoff for the skills + HITL + module orchestration features).
+- Tool count is 26 (a guideline; acceptable tradeoff for the skills + HITL + module orchestration + planner features).
 - `ask_user` is **chat-only**: module subagents never receive it (filtered out of the module tool list), and `ToolContext.ask` is absent in module runs so it can never pop a dialog from a background run.
 - `submit_result` is **module-only** and `start_module`/`wait_modules` are **chat-only**: module subagents never receive them (their tool list is `baseTools` minus `ask_user`, plus the module's own tools and `set_plan`/`update_step` — plus `submit_result` only when the run has an `expectResult`), so no module-nesting of module runs.
 - API key must never be committed or bundled into the renderer.

@@ -4,6 +4,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { PTNotesService } from './service/PTNotesService'
 import { registerProjectIpc, registerNoteIpc, registerTodoIpc, registerChatIpc } from './ipc'
+import { registerPlannerIpc } from './ipc/planner'
 import { registerAiIpc, createSessionRegistry } from './ipc/ai'
 import { registerFilesIpc } from './ipc/files'
 import { registerSettingsIpc } from './ipc/settings'
@@ -182,6 +183,7 @@ app.whenReady().then(async () => {
   registerNoteIpc(service)
   registerTodoIpc(service)
   registerChatIpc(service)
+  registerPlannerIpc(service)
   registerAiIpc(registry, configStore, service)
   registerFilesIpc(service, registry, configStore)
   registerSettingsIpc(service, settingsStore)

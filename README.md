@@ -4,11 +4,12 @@ Markdown notes + todo lists + AI assistant, organized by project. Electron + Rea
 
 ## Features
 
-- **Projects** — each project is a folder on disk with its own notes, todo list, and chat history. Create, rename, delete, and switch projects from the top bar.
+- **Projects** — each project is a folder on disk with its own notes, todo list, schedules, and chat history. Create, rename, delete, and switch projects from the top bar.
 - **Markdown notes** — TipTap WYSIWYG editor with markdown as the source of truth; auto-save ~800ms after edits. Notes are one `.md` file each, with create / rename / delete / refresh.
 - **Todo lists** — markdown checklist per project with toggle, progress counts, **Show All** toggle, **Delete completed**, and drag & drop reorder.
+- **Planner** — project schedules in a fourth **Planner** tab: hierarchical tasks with status, owner, duration, plan/actual dates, %complete and notes in a grid editor. Working-day math computes plan end dates from start + duration (skipping weekends and project holidays — configurable via the **Calendar** button), parents roll up their children's dates, duration, %complete, and status (with a manual-only **On Hold**), and actual dates are never computed.
 - **AI chat assistant** — collapsible right-side drawer with real-time streaming replies. Works with any OpenAI-compatible endpoint (OpenAI, OpenRouter, Groq, LM Studio, Ollama, …); base URL, API key, and model configured in-app.
-- **AI tools** — the assistant can create/update/read/delete/search notes, manage todos, search the web (DuckDuckGo, keyless), and read pages locally. Destructive actions (like note deletion) require your confirmation.
+- **AI tools** — the assistant can create/update/read/delete/search notes, manage todos, read and update project schedules and calendars, search the web (DuckDuckGo, keyless), and read pages locally. Destructive actions (like note deletion) require your confirmation.
 - **Skills** — teach the assistant reusable instructions: named markdown documents (global or per-project) listed in its system prompt and loaded on demand via the `read_skill` tool, with per-skill enable/disable toggles. Managed from **Settings → Skills**.
 - **File attachments** — drag & drop files into the chat; supported files (any text file plus PDFs, detected by content) are copied locally to the project and can be reused via `#` mentions. The assistant reads them locally with the `read_file` tool.
 - **Chat mentions** — type `@` to insert a note, `!` to insert a todo, `#` to attach a project file; the AI can link to your notes with clickable `[name](note:name)` links.
@@ -50,6 +51,9 @@ Data lives under `~/Documents/PTNotes/`:
     ├── notes/*.md          (one file per note)
     ├── TODO.md             (markdown checklist)
     ├── files/*             (attachments dropped into the chat, module outputs)
+    ├── planner/            (project schedules + calendar)
+    │   ├── <slug>.json     (one file per schedule)
+    │   └── calendar.json   (shared working-day calendar)
     └── .data/              (app-internal data: chat history, module run state, project skills)
         ├── modules/*.json      (module run state + prompts)
         ├── modules/*.chat.json (per-run module conversation transcript)
