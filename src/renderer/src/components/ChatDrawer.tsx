@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   mdiChevronDown,
-  mdiCodeBraces,
   mdiFileOutline,
   mdiHistory,
   mdiPencil,
+  mdiTimelineClockOutline,
   mdiTrashCanOutline
 } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
@@ -842,7 +842,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                             openTraceViewer({ kind: 'chat', key: s.sessionId, title: s.title })
                           }
                         >
-                          <MdiIcon path={mdiCodeBraces} size={14} />
+                          <MdiIcon path={mdiTimelineClockOutline} size={14} />
                         </button>
                         <button
                           className="chat-history-rename-btn"
@@ -861,6 +861,17 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                 document.body
               )}
           </div>
+          <button
+            className="btn small ghost"
+            onClick={() => {
+              if (!activeProject) return
+              const id = getActiveSessionId(activeProject)
+              if (id) openTraceViewer({ kind: 'chat', key: id, title: chatTitle || 'AI Assistant' })
+            }}
+            title="View AI trace"
+          >
+            <MdiIcon path={mdiTimelineClockOutline} size={16} />
+          </button>
           <button
             className="btn small ghost"
             onClick={async () => {

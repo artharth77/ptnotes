@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useAppStore } from '../store/useAppStore'
+import { mdiTimelineClockOutline } from '@mdi/js'
 import { MarkdownContent } from './MarkdownContent'
 import { MdiIcon } from './MdiIcon'
 import { NOTE_LINK_ICON } from './contentIcons'
@@ -195,7 +196,7 @@ function ModuleHistoryPanel({
                 openTraceViewer({ kind: 'module', key: runId, title: run?.title ?? runId })
               }
             >
-              Raw trace
+              <MdiIcon path={mdiTimelineClockOutline} size={14} />
             </button>
             <button className="module-history-close" title="Close (Esc)" onClick={onClose}>
               ✕
