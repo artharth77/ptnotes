@@ -1,11 +1,13 @@
 import Module from 'node:module'
 import http from 'node:http'
 import { promises as fs } from 'node:fs'
+import { join } from 'node:path'
 import assert from 'node:assert/strict'
 import type { OpenAI } from 'openai'
 import type { AIProviderConfig } from '../src/shared/types'
 import type { AIConfigStore } from '../src/main/ai/config'
 import type { PTTool } from '../src/main/ai/tools'
+import { AiTraceRecorder } from '../src/main/ai/trace'
 
 const ROOT = '/tmp/ptnotes-chat-test-root'
 
@@ -556,6 +558,306 @@ assert.ok(waitingEvents.length >= 1, "'waiting' stream event emitted for wait_mo
 assert.ok(
   (waitingEvents[0]?.runIds?.length ?? 0) >= 1,
   "'waiting' event carries the awaited runIds"
+)
+
+// ---- Raw AI trace: session.send records each exchange to <project>/.data/chat/ ----
+const traceKey = 'trace-session-1'
+let traceTurn = 0
+const traceServer = http.createServer((req, res) => {
+  let body = ''
+  req.on('data', (d) => (body += d))
+  req.on('end', () => {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive'
+    })
+    if (traceTurn === 0) {
+      // Turn 1: stream a create_note tool call, then finish with tool_calls.
+      res.write(
+        sse({
+          id: 't',
+          object: 'chat.completion.chunk',
+          created: 1,
+          model: 't',
+          choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }]
+        })
+      )
+      res.write(
+        sse({
+          id: 't',
+          object: 'chat.completion.chunk',
+          created: 1,
+          model: 't',
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'call_trace_note',
+                    type: 'function',
+                    function: { name: 'create_note', arguments: '{"title":"Trace Note"}' }
+                  }
+                ]
+              },
+              finish_reason: null
+            }
+          ]
+        })
+      )
+      res.write(
+        sse({
+          id: 't',
+          object: 'chat.completion.chunk',
+          created: 1,
+          model: 't',
+          choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }]
+        })
+      )
+      traceTurn = 1
+    } else {
+      // Turn 2: final text.
+      res.write(
+        sse({
+          id: 't',
+          object: 'chat.completion.chunk',
+          created: 1,
+          model: 't',
+          choices: [
+            { index: 0, delta: { role: 'assistant', content: 'Trace reply' }, finish_reason: null }
+          ]
+        })
+      )
+      res.write(
+        sse({
+          id: 't',
+          object: 'chat.completion.chunk',
+          created: 1,
+          model: 't',
+          choices: [{ index: 0, delta: {}, finish_reason: 'stop' }]
+        })
+      )
+    }
+    res.write('data: [DONE]\n\n')
+    res.end()
+  })
+})
+await new Promise<void>((r) => traceServer.listen(0, '127.0.0.1', r))
+const tracePort = (traceServer.address() as { port: number }).port
+
+const trace = new AiTraceRecorder({
+  project: 'Test',
+  key: traceKey,
+  kind: 'chat',
+  append: (header, lines) => service.appendChatTrace('Test', traceKey, header, lines)
+})
+const traceEvents: unknown[] = []
+const traceSession = new ChatSession(
+  async () => ({
+    baseUrl: `http://127.0.0.1:${tracePort}/v1`,
+    apiKey: 'secret-key',
+    model: 'test-model'
+  }),
+  { service, activeProject: 'Test' },
+  (evt) => traceEvents.push(evt)
+)
+await traceSession.send('hello from trace', [], null, trace)
+
+const traceFile = await service.readChatTrace('Test', traceKey)
+assert.ok(traceFile, 'trace file written for the chat session')
+assert.equal(traceFile!.key, traceKey)
+assert.equal(traceFile!.kind, 'chat')
+assert.equal(traceFile!.project, 'Test')
+const roles = traceFile!.entries.map((e) => e.role)
+assert.deepEqual(
+  roles,
+  ['system', 'user', 'assistant', 'tool', 'assistant'],
+  'trace is a readable log: system → user → assistant → tool → assistant'
+)
+
+const sysEntry = traceFile!.entries[0]!
+assert.equal(sysEntry.role, 'system')
+assert.ok(sysEntry.content?.startsWith('You are PTNotes assistant'), 'system prompt recorded')
+assert.equal(typeof sysEntry.ts, 'number')
+
+const userEntry = traceFile!.entries[1]!
+assert.equal(userEntry.role, 'user')
+assert.match(userEntry.content ?? '', /hello from trace/, 'user prompt recorded')
+
+const assistantToolEntry = traceFile!.entries[2]!
+assert.equal(assistantToolEntry.role, 'assistant')
+assert.equal(assistantToolEntry.endpoint, 'chat.completions')
+assert.equal(assistantToolEntry.model, 'test-model')
+assert.equal(assistantToolEntry.baseUrl, `http://127.0.0.1:${tracePort}/v1`)
+assert.equal(assistantToolEntry.finishReason, 'tool_calls')
+assert.ok(
+  typeof assistantToolEntry.durationMs === 'number' && assistantToolEntry.durationMs >= 0,
+  'assistant entry records duration'
+)
+assert.equal(assistantToolEntry.toolCalls?.length, 1, 'assistant entry records the tool call')
+const traceToolCall = assistantToolEntry.toolCalls![0]!
+assert.equal(traceToolCall.name, 'create_note')
+assert.equal(traceToolCall.args.title, 'Trace Note', 'tool call payload (args) captured')
+
+const toolEntry = traceFile!.entries[3]!
+assert.equal(toolEntry.role, 'tool')
+assert.equal(toolEntry.name, 'create_note')
+assert.equal(toolEntry.toolCallId, 'call_trace_note')
+assert.match(toolEntry.content ?? '', /"ok":true/, 'tool response recorded')
+assert.match(toolEntry.content ?? '', /trace-note/, 'tool response carries the created note')
+assert.ok(
+  typeof toolEntry.durationMs === 'number' && toolEntry.durationMs >= 0,
+  'tool entry records duration'
+)
+
+const assistantFinalEntry = traceFile!.entries[4]!
+assert.equal(assistantFinalEntry.role, 'assistant')
+assert.match(assistantFinalEntry.content ?? '', /Trace reply/, 'final assistant reply recorded')
+assert.equal(assistantFinalEntry.finishReason, 'stop')
+
+assert.ok(!JSON.stringify(traceFile).includes('secret-key'), 'trace never contains the API key')
+assert.ok(
+  typeof traceFile!.path === 'string' && traceFile!.path.length > 0,
+  'read trace exposes its path'
+)
+assert.ok(traceFile!.path!.endsWith('.trace.jsonl'), 'trace file uses the .trace.jsonl extension')
+
+const traceRaw = await fs.readFile(traceFile!.path!, 'utf8')
+const traceLines = traceRaw.split('\n').filter((l) => l.trim() !== '')
+assert.equal(
+  traceLines.length,
+  traceFile!.entries.length + 1,
+  'trace file is JSONL: header record + one line per entry'
+)
+const traceHeader = JSON.parse(traceLines[0]!) as Record<string, unknown>
+assert.equal(traceHeader.type, 'header', 'first record is the chat header')
+assert.equal(traceHeader.key, traceKey)
+assert.equal(traceHeader.kind, 'chat')
+assert.equal(traceHeader.project, 'Test')
+assert.equal(typeof traceHeader.startedAt, 'number')
+traceLines.slice(1).forEach((line, i) => {
+  const rec = JSON.parse(line) as { seq?: number }
+  assert.equal(rec.seq, i, 'entry records keep a monotonic seq')
+})
+
+// ---- system prompt is traced only once per trace file ----
+const traceMeta2 = await service.chatTraceMeta('Test', traceKey)
+assert.equal(traceMeta2.count, 5, 'chatTraceMeta counts the existing entries')
+assert.equal(traceMeta2.hasSystem, true, 'chatTraceMeta reports the existing system entry')
+const trace2 = new AiTraceRecorder({
+  project: 'Test',
+  key: traceKey,
+  kind: 'chat',
+  initialSeq: traceMeta2.count,
+  hasSystem: traceMeta2.hasSystem,
+  append: (header, lines) => service.appendChatTrace('Test', traceKey, header, lines)
+})
+await traceSession.send('second trace message', [], null, trace2)
+traceServer.close()
+
+const traceFile2 = await service.readChatTrace('Test', traceKey)
+assert.ok(traceFile2, 'trace file readable after the second send')
+assert.deepEqual(
+  traceFile2!.entries.map((e) => e.role),
+  ['system', 'user', 'assistant', 'tool', 'assistant', 'user', 'assistant'],
+  'second send appends user → assistant without a new system entry'
+)
+assert.equal(
+  traceFile2!.entries.filter((e) => e.role === 'system').length,
+  1,
+  'system prompt traced only on the first send'
+)
+traceFile2!.entries.forEach((e, i) => assert.equal(e.seq, i, 'seq stays monotonic across sends'))
+
+// ---- legacy single-JSON trace migration ----
+const legacyEntries = [
+  { seq: 0, role: 'system' as const, ts: 1000, content: 'legacy system' },
+  { seq: 1, role: 'user' as const, ts: 2000, content: 'legacy user' }
+]
+
+// read path: a legacy .trace.json is migrated to JSONL on first read
+const legacyReadKey = 'legacy-read'
+await fs.mkdir(join(ROOT, 'Test', '.data', 'chat'), { recursive: true })
+await fs.writeFile(
+  service.legacyChatTracePath('Test', legacyReadKey),
+  JSON.stringify({
+    project: 'Test',
+    key: legacyReadKey,
+    kind: 'chat',
+    startedAt: 1000,
+    updatedAt: 2000,
+    entries: legacyEntries
+  }),
+  'utf8'
+)
+const migratedRead = await service.readChatTrace('Test', legacyReadKey)
+assert.ok(migratedRead, 'legacy .trace.json is readable')
+assert.equal(migratedRead!.entries.length, 2, 'legacy entries preserved')
+assert.equal(migratedRead!.entries[0]!.content, 'legacy system')
+assert.ok(
+  migratedRead!.path!.endsWith('.trace.jsonl'),
+  'legacy trace migrated to the .trace.jsonl path'
+)
+assert.equal(
+  await fs
+    .access(service.legacyChatTracePath('Test', legacyReadKey))
+    .then(() => true)
+    .catch(() => false),
+  false,
+  'legacy .trace.json removed after migration'
+)
+const migratedReadRaw = await fs.readFile(migratedRead!.path!, 'utf8')
+assert.equal(
+  migratedReadRaw.split('\n').filter((l) => l.trim() !== '').length,
+  3,
+  'migrated file is JSONL: header + 2 legacy entries'
+)
+
+// append path: appending to a session with only a legacy trace migrates it and keeps seq monotonic
+const legacyAppendKey = 'legacy-append'
+await fs.writeFile(
+  service.legacyChatTracePath('Test', legacyAppendKey),
+  JSON.stringify({
+    project: 'Test',
+    key: legacyAppendKey,
+    kind: 'chat',
+    startedAt: 1000,
+    updatedAt: 2000,
+    entries: legacyEntries
+  }),
+  'utf8'
+)
+const legacyMeta = await service.chatTraceMeta('Test', legacyAppendKey)
+assert.equal(legacyMeta.count, 2, 'chatTraceMeta falls back to the legacy entry count')
+assert.equal(legacyMeta.hasSystem, true, 'chatTraceMeta reports the legacy system entry')
+const legacyRecorder = new AiTraceRecorder({
+  project: 'Test',
+  key: legacyAppendKey,
+  kind: 'chat',
+  initialSeq: legacyMeta.count,
+  hasSystem: legacyMeta.hasSystem,
+  append: (header, lines) => service.appendChatTrace('Test', legacyAppendKey, header, lines)
+})
+legacyRecorder.append({ role: 'assistant', ts: 3000, content: 'new after legacy' })
+await legacyRecorder.flush()
+const migratedAppend = await service.readChatTrace('Test', legacyAppendKey)
+assert.ok(migratedAppend, 'appended trace readable')
+assert.equal(migratedAppend!.entries.length, 3, 'legacy entries + appended entry')
+assert.deepEqual(
+  migratedAppend!.entries.map((e) => e.seq),
+  [0, 1, 2],
+  'seq stays monotonic across the legacy migration'
+)
+assert.equal(migratedAppend!.entries[2]!.content, 'new after legacy')
+assert.equal(
+  await fs
+    .access(service.legacyChatTracePath('Test', legacyAppendKey))
+    .then(() => true)
+    .catch(() => false),
+  false,
+  'legacy .trace.json removed after append migration'
 )
 
 console.log('CHAT SESSION TEST PASSED')

@@ -1421,4 +1421,82 @@ const subNoteExists = await fs
   .catch(() => false)
 assert.ok(subNoteExists, 'subagent used base tools to persist a note')
 
+// ---- raw AI trace: module runs record every turn to <project>/.data/modules/ ----
+let modTrace: Awaited<ReturnType<typeof service.readModuleTrace>> = null
+await waitFor(async () => {
+  modTrace = await service.readModuleTrace(PROJECT, rRunId)
+  return modTrace !== null
+})
+assert.ok(modTrace, 'module trace file written for the result run')
+assert.equal(modTrace!.key, rRunId)
+assert.equal(modTrace!.kind, 'module')
+assert.equal(modTrace!.project, PROJECT)
+assert.deepEqual(
+  modTrace!.entries.map((e) => e.role),
+  ['system', 'user', 'assistant', 'tool', 'assistant', 'tool', 'assistant', 'tool', 'assistant'],
+  'module trace is a readable log: system → user → (assistant → tool) × 3 → final assistant'
+)
+const assistantRoles = modTrace!.entries.filter((e) => e.role === 'assistant')
+assistantRoles.forEach((e) => {
+  assert.equal(e.endpoint, 'chat.completions')
+  assert.equal(e.model, 'fake-model')
+  assert.ok(typeof e.durationMs === 'number', 'module assistant entry records duration')
+})
+const setPlanAssistant = modTrace!.entries[2]!
+const setPlanTrace = (setPlanAssistant.toolCalls ?? []).find((tc) => tc.name === 'set_plan')
+assert.ok(setPlanTrace, 'module trace captures the set_plan tool call')
+assert.ok(
+  Array.isArray(setPlanTrace!.args.steps) && setPlanTrace!.args.steps.length === 3,
+  'module trace captures the tool call payload (args)'
+)
+const setPlanTool = modTrace!.entries[3]!
+assert.equal(setPlanTool.role, 'tool')
+assert.equal(setPlanTool.name, 'set_plan')
+assert.equal(setPlanTool.toolCallId, setPlanTrace!.id)
+assert.match(setPlanTool.content ?? '', /steps/, 'module tool response recorded')
+assert.ok(typeof setPlanTool.durationMs === 'number', 'module tool entry records duration')
+assert.ok(
+  modTrace!.entries[0]!.content?.includes('You are the'),
+  'module trace includes the system prompt'
+)
+assert.match(
+  modTrace!.entries[8]!.content ?? '',
+  /Done/,
+  'final module trace entry carries the assistant reply'
+)
+assert.ok(
+  !JSON.stringify(modTrace).includes('fake-api-key'),
+  'module trace never contains the API key'
+)
+
+const liveTrace = await resultManager.readTrace(PROJECT, rRunId)
+assert.ok(liveTrace, 'manager.readTrace returns the persisted module trace')
+assert.ok(
+  typeof liveTrace!.path === 'string' && liveTrace!.path.endsWith('.trace.jsonl'),
+  'module trace read exposes the absolute path'
+)
+const modTraceRaw = await fs.readFile(modTrace!.path!, 'utf8')
+const modTraceLines = modTraceRaw.split('\n').filter((l) => l.trim() !== '')
+assert.equal(
+  modTraceLines.length,
+  modTrace!.entries.length + 1,
+  'module trace file is JSONL: header record + one line per entry'
+)
+const modTraceHeader = JSON.parse(modTraceLines[0]!) as Record<string, unknown>
+assert.equal(modTraceHeader.type, 'header', 'first module trace record is the run header')
+assert.equal(modTraceHeader.key, rRunId)
+assert.equal(modTraceHeader.kind, 'module')
+assert.ok(
+  (await service.listStoredModuleRuns(PROJECT)).every((r) => !r.runId.includes('.trace')),
+  'trace files never surface as module runs'
+)
+
+const delTraceRun = await resultManager.deleteRun(PROJECT, rRunId, false)
+assert.equal(delTraceRun, true, 'result run deletable')
+assert.equal(
+  await service.readModuleTrace(PROJECT, rRunId),
+  null,
+  'deleting a run removes its .trace.jsonl file'
+)
+
 console.log('MODULES TESTS PASSED')

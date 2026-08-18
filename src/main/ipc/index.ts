@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
 import type { PTNotesService } from '../service/PTNotesService'
-import type { ChatThread } from '@shared/types'
+import type { AiTraceFile, ChatThread } from '@shared/types'
 
 export function registerProjectIpc(service: PTNotesService): void {
   ipcMain.handle('projects:list', async () => service.listProjects())
@@ -62,6 +62,14 @@ export function registerChatIpc(service: PTNotesService): void {
     'chat:rename',
     async (_e: IpcMainInvokeEvent, project: string, sessionId: string, title: string) =>
       service.renameChat(project, sessionId, title)
+  )
+  ipcMain.handle(
+    'chat:readTrace',
+    async (
+      _e: IpcMainInvokeEvent,
+      project: string,
+      sessionId: string
+    ): Promise<AiTraceFile | null> => service.readChatTrace(project, sessionId)
   )
 }
 

@@ -4,6 +4,7 @@ import { promises as fs } from 'fs'
 import OpenAI from 'openai'
 import type {
   AIProviderConfig,
+  AiTraceFile,
   ModuleChatMessage,
   ModuleEvent,
   ModuleInfo,
@@ -203,6 +204,7 @@ export class ModuleRunManager {
     await this.service.writeModuleRun(project, runId, run)
     this.emit({ runId, project, type: 'status', run })
     await this.service.writeModuleChat(project, runId, []).catch(() => {})
+    await this.service.deleteModuleTrace(project, runId).catch(() => {})
 
     this.active.get(runId)?.stop()
     const runner = new ModuleRunner({
@@ -307,6 +309,19 @@ export class ModuleRunManager {
       return runner.transcript
     }
     return this.service.readModuleChat(project, runId)
+  }
+
+  /** Read a module run's raw AI trace: live from the runner, else disk. */
+  async readTrace(project: string, runId: string): Promise<AiTraceFile | null> {
+    const runner = this.active.get(runId)
+    if (runner && runner.snapshot?.project === project) {
+      const trace = runner.traceFile
+      if (trace.entries.length > 0) {
+        trace.path = this.service.moduleTracePath(project, runId)
+        return trace
+      }
+    }
+    return this.service.readModuleTrace(project, runId)
   }
 
   private static terminalStatuses = new Set<ModuleRun['status']>(['done', 'failed', 'cancelled'])

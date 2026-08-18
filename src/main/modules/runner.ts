@@ -1,6 +1,8 @@
 import OpenAI from 'openai'
 import type {
   AIProviderConfig,
+  AiTraceFile,
+  AiTraceToolCall,
   ModuleChatMessage,
   ModuleEventType,
   ModuleRun,
@@ -10,6 +12,7 @@ import type {
 import { tools as baseTools, type PTTool, type ToolContext } from '../ai/tools'
 import { createClient } from '../ai/client'
 import { isLocalEndpoint } from '../ai/chatSession'
+import { AiTraceRecorder } from '../ai/trace'
 import type { PTNotesService } from '../service/PTNotesService'
 import type { RegisteredModule } from './types'
 
@@ -46,13 +49,13 @@ function toolResultOk(content: string | null): boolean {
 }
 
 /** Map the in-memory session messages to a persisted read-only transcript. */
-function toTranscript(messages: SessionMessage[]): ModuleChatMessage[] {
+function toTranscript(messages: SessionMessage[], tsStamps: number[]): ModuleChatMessage[] {
   const out: ModuleChatMessage[] = []
   const callById = new Map<string, ToolCallInfo>()
-  const ts = Date.now()
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i]
     const id = `m${i}`
+    const ts = tsStamps[i] ?? Date.now()
     if (m.role === 'system') {
       out.push({ id, role: 'system', content: m.content, ts })
     } else if (m.role === 'user') {
@@ -132,6 +135,8 @@ ${module.systemPrompt ? `MODULE GUIDANCE:\n${module.systemPrompt}` : ''}`
 
 export class ModuleRunner {
   private messages: SessionMessage[] = []
+  private messageTs: number[] = []
+  private readonly trace: AiTraceRecorder
   private readonly service: PTNotesService
   private readonly activeProject: string
   private readonly module: RegisteredModule
@@ -154,6 +159,13 @@ export class ModuleRunner {
     this.getConfig = opts.getConfig
     this.notify = opts.notify
     this.clientFn = opts.createClientFn ? opts.createClientFn : createClient
+    this.trace = new AiTraceRecorder({
+      project: this.activeProject,
+      key: this.run.runId,
+      kind: 'module',
+      append: (header, lines) =>
+        this.service.appendModuleTrace(this.activeProject, this.run.runId, header, lines)
+    })
   }
 
   get runId(): string {
@@ -166,16 +178,31 @@ export class ModuleRunner {
 
   /** Current conversation transcript, as exposed for the read-only history overlay. */
   get transcript(): ModuleChatMessage[] {
-    return toTranscript(this.messages)
+    return toTranscript(this.messages, this.messageTs)
+  }
+
+  /** Live raw AI trace (like `transcript`) so the overlay can show it mid-run. */
+  get traceFile(): AiTraceFile {
+    return this.trace.snapshot()
   }
 
   /** Persist the latest transcript to <project>/.data/modules/<runId>.chat.json (best-effort). */
   private persistChat(): void {
     void this.service
-      .writeModuleChat(this.activeProject, this.run.runId, toTranscript(this.messages))
+      .writeModuleChat(
+        this.activeProject,
+        this.run.runId,
+        toTranscript(this.messages, this.messageTs)
+      )
       .catch(() => {
         // persistence is best-effort; the in-memory transcript still serves live reads
       })
+  }
+
+  /** Append a session message, stamping its timestamp for the transcript. */
+  private push(msg: SessionMessage): void {
+    this.messages.push(msg)
+    this.messageTs.push(Date.now())
   }
 
   stop(): void {
@@ -202,11 +229,12 @@ export class ModuleRunner {
     }
 
     this.messages = []
-    this.messages.push({
-      role: 'system',
-      content: buildSystemPrompt(this.module, this.activeProject, this.run.expectResult)
-    })
-    this.messages.push({ role: 'user', content: this.run.prompt })
+    this.messageTs = []
+    const systemContent = buildSystemPrompt(this.module, this.activeProject, this.run.expectResult)
+    this.push({ role: 'system', content: systemContent })
+    this.push({ role: 'user', content: this.run.prompt })
+    this.trace.append({ role: 'system', ts: Date.now(), content: systemContent })
+    this.trace.append({ role: 'user', ts: Date.now(), content: this.run.prompt })
     this.touch({ type: 'status' })
     this.persistChat()
 
@@ -217,6 +245,7 @@ export class ModuleRunner {
         if (this.stopped) break
         const next = await this.runTurn(client)
         this.persistChat()
+        await this.trace.flush()
         if (next === 'done') break
       }
     } catch (err) {
@@ -251,6 +280,7 @@ export class ModuleRunner {
     }) as OpenAI.Chat.ChatCompletionMessageParam[]
 
     const tools = this.toolList()
+    const startTs = Date.now()
     this.abortController = new AbortController()
     const signal = this.abortController.signal
 
@@ -266,6 +296,16 @@ export class ModuleRunner {
         { signal }
       )
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      this.trace.append({
+        role: 'assistant',
+        ts: Date.now(),
+        durationMs: Date.now() - startTs,
+        model: this.config.model,
+        baseUrl: this.config.baseUrl,
+        endpoint: 'chat.completions',
+        error: message
+      })
       if (this.stopped) return 'done'
       throw err
     }
@@ -277,13 +317,33 @@ export class ModuleRunner {
       (tc): tc is OpenAI.Chat.ChatCompletionMessageFunctionToolCall =>
         'function' in tc && typeof tc.function?.name === 'string'
     )
+    const tracedToolCalls: AiTraceToolCall[] = called.map((tc) => ({
+      id: tc.id,
+      name: tc.function.name,
+      args: toToolArgs(tc.function.arguments)
+    }))
+
+    this.trace.append({
+      role: 'assistant',
+      ts: Date.now(),
+      durationMs: Date.now() - startTs,
+      model: this.config.model,
+      baseUrl: this.config.baseUrl,
+      endpoint: 'chat.completions',
+      content,
+      ...(tracedToolCalls.length > 0 ? { toolCalls: tracedToolCalls } : {}),
+      ...(reply.choices?.[0]?.finish_reason
+        ? { finishReason: reply.choices[0].finish_reason }
+        : {}),
+      ...(reply.usage ? { usage: reply.usage } : {})
+    })
 
     if (called.length === 0) {
       // The model wants to finish with a text response.
       if (!this.planned && !this.plannedHintSent) {
         this.plannedHintSent = true
-        this.messages.push({ role: 'assistant', content: content || '' })
-        this.messages.push({
+        this.push({ role: 'assistant', content: content || '' })
+        this.push({
           role: 'user',
           content:
             'You must not finish yet. Your FIRST action must be the set_plan tool call listing the steps you will take for this task. Call set_plan now, then work through each step.'
@@ -295,8 +355,8 @@ export class ModuleRunner {
         // result payload, nudge the model to submit it before finishing.
         if (this.run.expectResult && !this.run.result && this.finishHintsSent < MAX_FINISH_HINTS) {
           this.finishHintsSent++
-          this.messages.push({ role: 'assistant', content: content || '' })
-          this.messages.push({
+          this.push({ role: 'assistant', content: content || '' })
+          this.push({
             role: 'user',
             content:
               'You must not finish yet. The main chat agent is waiting for your result. Call the submit_result tool with the requested result now, then output your final summary.'
@@ -308,8 +368,8 @@ export class ModuleRunner {
       // The module's deliverable file has not been created yet.
       if (this.finishHintsSent < MAX_FINISH_HINTS) {
         this.finishHintsSent++
-        this.messages.push({ role: 'assistant', content: content || '' })
-        this.messages.push({
+        this.push({ role: 'assistant', content: content || '' })
+        this.push({
           role: 'user',
           content: `You must not finish yet. The deliverable file for this task has not been created. Call the ${this.module.outputTool} tool with the completed design now, then output your final summary.`
         })
@@ -323,8 +383,8 @@ export class ModuleRunner {
 
     // Planning is mandatory as the first tool call.
     if (!this.planned && !called.some((c) => c.function?.name === 'set_plan')) {
-      this.messages.push({ role: 'assistant', content: content || '', tool_calls: called })
-      this.messages.push({
+      this.push({ role: 'assistant', content: content || '', tool_calls: called })
+      this.push({
         role: 'tool',
         tool_call_id: called[0]?.id ?? 'call_unplanned',
         content: JSON.stringify({
@@ -336,11 +396,20 @@ export class ModuleRunner {
       return 'continue'
     }
 
-    this.messages.push({ role: 'assistant', content: content || '', tool_calls: called })
+    this.push({ role: 'assistant', content: content || '', tool_calls: called })
     for (const call of called ?? []) {
       if (this.stopped) break
+      const toolTs = Date.now()
       const result = await this.executeTool(call, tools)
-      this.messages.push({ role: 'tool', tool_call_id: call.id, content: result })
+      this.push({ role: 'tool', tool_call_id: call.id, content: result })
+      this.trace.append({
+        role: 'tool',
+        ts: Date.now(),
+        durationMs: Date.now() - toolTs,
+        name: call.function.name,
+        toolCallId: call.id,
+        content: result
+      })
     }
     if (this.stopped) return 'done'
     return 'continue'

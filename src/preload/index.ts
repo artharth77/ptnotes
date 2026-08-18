@@ -3,6 +3,7 @@ import { electronAPI } from '@electron-toolkit/preload'
 import type {
   AboutInfo,
   AIProviderConfig,
+  AiTraceFile,
   AskResponse,
   ChatMessage,
   ChatSessionMeta,
@@ -76,22 +77,26 @@ const api = {
     delete: (project: string, sessionId: string): Promise<void> =>
       ipcRenderer.invoke('chat:delete', project, sessionId),
     rename: (project: string, sessionId: string, title: string): Promise<void> =>
-      ipcRenderer.invoke('chat:rename', project, sessionId, title)
+      ipcRenderer.invoke('chat:rename', project, sessionId, title),
+    readTrace: (project: string, sessionId: string): Promise<AiTraceFile | null> =>
+      ipcRenderer.invoke('chat:readTrace', project, sessionId)
   },
   ai: {
     send: (
       project: string,
+      sessionId: string,
       text: string,
       history?: ChatMessage[],
       activeNoteId?: string | null
-    ): Promise<void> => ipcRenderer.invoke('ai:send', project, text, history, activeNoteId),
+    ): Promise<void> =>
+      ipcRenderer.invoke('ai:send', project, sessionId, text, history, activeNoteId),
     stop: (project: string): Promise<void> => ipcRenderer.invoke('ai:stop', project),
     confirmResponse: (resp: ConfirmResponse): Promise<void> =>
       ipcRenderer.invoke('ai:confirmResponse', resp),
     askResponse: (resp: AskResponse): Promise<void> => ipcRenderer.invoke('ai:askResponse', resp),
     clear: (project: string): Promise<void> => ipcRenderer.invoke('ai:clear', project),
-    generateTitle: (project: string, firstMessage: string): Promise<string> =>
-      ipcRenderer.invoke('ai:generateTitle', project, firstMessage),
+    generateTitle: (project: string, sessionId: string, firstMessage: string): Promise<string> =>
+      ipcRenderer.invoke('ai:generateTitle', project, sessionId, firstMessage),
     getConfig: (): Promise<AIProviderConfig> => ipcRenderer.invoke('ai:getConfig'),
     listModels: (baseUrl: string, apiKey: string): Promise<string[] | { error: string }> =>
       ipcRenderer.invoke('ai:listModels', baseUrl, apiKey),
@@ -141,8 +146,8 @@ const api = {
   },
   pdf: {
     supportsUpload: (): Promise<boolean> => ipcRenderer.invoke('pdf:supportsUpload'),
-    upload: (project: string, path: string, prompt: string): Promise<void> =>
-      ipcRenderer.invoke('pdf:upload', project, path, prompt)
+    upload: (project: string, sessionId: string, path: string, prompt: string): Promise<void> =>
+      ipcRenderer.invoke('pdf:upload', project, sessionId, path, prompt)
   },
   files: {
     list: (project: string): Promise<string[]> => ipcRenderer.invoke('files:list', project),
@@ -175,6 +180,8 @@ const api = {
       ipcRenderer.invoke('modules:deleteRun', project, runId, deleteOutputFiles),
     readChat: (project: string, runId: string): Promise<ModuleChatMessage[]> =>
       ipcRenderer.invoke('modules:readChat', project, runId),
+    readTrace: (project: string, runId: string): Promise<AiTraceFile | null> =>
+      ipcRenderer.invoke('modules:readTrace', project, runId),
     onEvent: (callback: (event: ModuleEvent) => void): (() => void) => {
       const listener = (_e: unknown, event: ModuleEvent): void => callback(event)
       ipcRenderer.on('modules:event', listener)
