@@ -11,7 +11,7 @@ import { registerSkillsIpc } from './ipc/skills'
 import { registerModulesIpc } from './ipc/modules'
 import { ModuleRegistry } from './modules/registry'
 import { ModuleRunManager } from './modules/runs'
-import { buildStartModuleTool } from './modules/tool'
+import { buildStartModuleTool, buildWaitModulesTool } from './modules/tool'
 import { shutdownChartRenderer } from './modules/shared/chartRenderer'
 import { shutdownDiagramRenderer } from './modules/shared/diagramRenderer'
 import { shutdownInfographicRenderer } from './modules/shared/infographicRenderer'
@@ -19,6 +19,7 @@ import type { PTTool } from './ai/tools'
 import { createPptxModule } from './modules/pptx'
 import { createInfographicModule } from './modules/infographic'
 import { createDocxModule } from './modules/docx'
+import { createSubagentModule } from './modules/subagent'
 import { SettingsStore } from './settings'
 import { AIConfigStore } from './ai/config'
 
@@ -152,6 +153,7 @@ app.whenReady().then(async () => {
   const configStore = new AIConfigStore()
 
   const moduleRegistry = new ModuleRegistry()
+  moduleRegistry.register(createSubagentModule())
   moduleRegistry.register(createPptxModule())
   moduleRegistry.register(createInfographicModule())
   moduleRegistry.register(createDocxModule())
@@ -169,7 +171,10 @@ app.whenReady().then(async () => {
   )
   const toolsProvider = async (): Promise<PTTool[]> => {
     const current = await settingsStore.load()
-    return [buildStartModuleTool(moduleManager, moduleRegistry, current.disabledModules ?? [])]
+    return [
+      buildStartModuleTool(moduleManager, moduleRegistry, current.disabledModules ?? []),
+      buildWaitModulesTool(moduleManager)
+    ]
   }
 
   const registry = createSessionRegistry(service, configStore, toolsProvider)
@@ -177,7 +182,7 @@ app.whenReady().then(async () => {
   registerNoteIpc(service)
   registerTodoIpc(service)
   registerChatIpc(service)
-  registerAiIpc(registry, configStore)
+  registerAiIpc(registry, configStore, service)
   registerFilesIpc(service, registry, configStore)
   registerSettingsIpc(service, settingsStore)
   registerSkillsIpc(service)

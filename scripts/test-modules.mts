@@ -1177,4 +1177,326 @@ assert.equal(pRun!.status, 'failed', 'run without an output file ends failed, no
 assert.ok(!pRun!.outputFile, 'no output file produced')
 assert.match(pRun!.error ?? '', /output file/, 'failure mentions the missing output file')
 
+// ---- module result channel: submit_result stores the payload + 'result' event ----
+const resultEvents: string[] = []
+const resultScript: { content?: string; tool_calls?: FakeToolCall[] }[] = [
+  {
+    tool_calls: [
+      step('r1', 'set_plan', { steps: ['Build deck', 'Generate file', 'Submit result'] })
+    ]
+  },
+  {
+    tool_calls: [
+      step('r2', 'create_pptx_file', {
+        filename: 'result-deck',
+        design: JSON.stringify({
+          title: 'Result deck',
+          slides: [{ layout: 'title', title: 'Result deck' }]
+        })
+      })
+    ]
+  },
+  {
+    tool_calls: [step('r3', 'submit_result', { result: '{"title":"Result deck","slides":1}' })]
+  },
+  { content: 'Done.' }
+]
+const resultManager = new ModuleRunManager(
+  service,
+  configStore,
+  registry,
+  (evt) => {
+    if (evt.type === 'result') resultEvents.push(evt.result ?? '')
+  },
+  makeScriptedClient(resultScript)
+)
+const rStart = await resultManager.start(
+  PROJECT,
+  'pptx',
+  'Result deck',
+  'Build a deck and submit the result.',
+  'Return a JSON object with keys {title, slides}'
+)
+assert.equal(rStart.ok, true, 'result run accepted')
+const rRunId = rStart.ok ? rStart.runId : ''
+await waitFor(async () => {
+  const runs = await resultManager.list(PROJECT)
+  return runs.some((r) => r.runId === rRunId && (r.status === 'done' || r.status === 'failed'))
+})
+const rRun = (await resultManager.list(PROJECT)).find((r) => r.runId === rRunId)
+assert.ok(rRun, 'result run exists')
+assert.equal(rRun!.status, 'done', 'result run finished done')
+assert.equal(
+  rRun!.expectResult,
+  'Return a JSON object with keys {title, slides}',
+  'expectResult stored on the run'
+)
+assert.equal(rRun!.result, '{"title":"Result deck","slides":1}', 'submit_result stored the payload')
+assert.ok(
+  resultEvents.includes('{"title":"Result deck","slides":1}'),
+  "'result' event broadcast to listeners"
+)
+const rStored = (await service.listStoredModuleRuns(PROJECT)).find((s) => s.runId === rRunId)
+assert.equal(
+  rStored?.result,
+  '{"title":"Result deck","slides":1}',
+  'result persisted in the stored run JSON'
+)
+assert.equal(rStored?.expectResult, 'Return a JSON object with keys {title, slides}')
+
+// ---- waitForRuns unit cases ----
+// already-terminal run resolves immediately with its result
+const wRes = await resultManager.waitForRuns(PROJECT, [rRunId], 200)
+assert.equal(wRes.length, 1, 'one wait result returned')
+assert.equal(wRes[0]!.runId, rRunId, 'wait result runId matches')
+assert.equal(wRes[0]!.status, 'done', 'already-terminal run resolves immediately')
+assert.equal(wRes[0]!.module, 'PowerPoint (PPTX)', 'wait result includes the module name')
+assert.equal(
+  wRes[0]!.result,
+  '{"title":"Result deck","slides":1}',
+  'wait result surfaces the payload'
+)
+
+// unknown run returns an error entry
+const wUnknown = await resultManager.waitForRuns(PROJECT, ['no-such-run'], 200)
+assert.equal(wUnknown.length, 1, 'unknown run returns one entry')
+assert.equal(wUnknown[0]!.status, 'unknown', 'unknown run entry status is unknown')
+assert.match(wUnknown[0]!.error ?? '', /Unknown run/, 'unknown run entry carries an error')
+
+// input order preserved across mixed terminal + unknown ids
+const wMixed = await resultManager.waitForRuns(PROJECT, ['no-such-run', rRunId], 200)
+assert.equal(wMixed.length, 2, 'mixed wait returns both entries')
+assert.equal(wMixed[0]!.status, 'unknown', 'first mixed entry is the unknown run')
+assert.equal(wMixed[1]!.status, 'done', 'second mixed entry is the terminal run')
+
+// in-flight run resolves when it completes
+function makeDelayedScriptedClient(
+  scriptArr: { content?: string; tool_calls?: FakeToolCall[] }[],
+  delayMs: number
+): (cfg: AIProviderConfig) => OpenAI {
+  let i = 0
+  return () => {
+    return {
+      chat: {
+        completions: {
+          create: async () => {
+            await new Promise((r) => setTimeout(r, delayMs))
+            const entry = scriptArr[i++] ?? scriptArr[scriptArr.length - 1]!
+            const message: Record<string, unknown> = {
+              role: 'assistant',
+              content: entry.content ?? ''
+            }
+            if (entry.tool_calls) message.tool_calls = entry.tool_calls
+            return { choices: [{ message }] }
+          }
+        }
+      }
+    } as unknown as OpenAI
+  }
+}
+
+const inflightScript: { content?: string; tool_calls?: FakeToolCall[] }[] = [
+  { tool_calls: [step('w1', 'set_plan', { steps: ['Build deck', 'Generate'] })] },
+  {
+    tool_calls: [
+      step('w2', 'create_pptx_file', {
+        filename: 'inflight-deck',
+        design: JSON.stringify({
+          title: 'Inflight',
+          slides: [{ layout: 'title', title: 'Inflight' }]
+        })
+      })
+    ]
+  },
+  { content: 'Done.' }
+]
+const inflightManager = new ModuleRunManager(
+  service,
+  configStore,
+  registry,
+  () => {},
+  makeDelayedScriptedClient(inflightScript, 150)
+)
+const iStart = await inflightManager.start(PROJECT, 'pptx', 'Inflight deck', 'Build a deck.')
+assert.equal(iStart.ok, true, 'inflight run accepted')
+const iRunId = iStart.ok ? iStart.runId : ''
+const waitStart = Date.now()
+const wInflight = await inflightManager.waitForRuns(PROJECT, [iRunId], 5000)
+assert.equal(wInflight[0]!.status, 'done', 'in-flight run resolves when it completes')
+assert.equal(wInflight[0]!.result, undefined, 'no result expected on a plain run')
+assert.ok(Date.now() - waitStart >= 100, 'waitForRuns actually waited for the run to finish')
+
+// timeout marks still-pending entries
+const slowManager = new ModuleRunManager(
+  service,
+  configStore,
+  registry,
+  () => {},
+  makeDelayedScriptedClient(inflightScript, 300)
+)
+const sStart = await slowManager.start(PROJECT, 'pptx', 'Slow deck', 'Build a deck.')
+assert.equal(sStart.ok, true, 'slow run accepted')
+const sRunId = sStart.ok ? sStart.runId : ''
+const wTimeout = await slowManager.waitForRuns(PROJECT, [sRunId], 150)
+assert.equal(wTimeout[0]!.status, 'timeout', 'timeout marks still-pending entries')
+slowManager.stop(sRunId)
+
+// isStopped resolves early with status stopped
+const s2Start = await slowManager.start(PROJECT, 'pptx', 'Slow deck 2', 'Build a deck.')
+assert.equal(s2Start.ok, true, 'second slow run accepted')
+const s2RunId = s2Start.ok ? s2Start.runId : ''
+const wStopped = await slowManager.waitForRuns(PROJECT, [s2RunId], 5000, () => true)
+assert.equal(wStopped[0]!.status, 'stopped', 'isStopped cancels the wait early')
+slowManager.stop(s2RunId)
+
+// ---- general-purpose subagent module (long-run agent, no required output file) ----
+const { createSubagentModule } = await import('../src/main/modules/subagent')
+const subRegistry = new ModuleRegistry()
+subRegistry.register(createSubagentModule())
+const subDef = subRegistry.get('subagent')
+assert.ok(subDef, 'subagent module registered')
+assert.equal(subDef!.outputTool, undefined, 'subagent has no required output tool')
+assert.ok((subDef!.maxIterations ?? 30) > 30, 'subagent gets a larger turn budget')
+
+const subagentScript: { content?: string; tool_calls?: FakeToolCall[] }[] = [
+  {
+    tool_calls: [
+      step('sa1', 'set_plan', { steps: ['Research', 'Summarize', 'Save a note', 'Submit result'] })
+    ]
+  },
+  { tool_calls: [step('sa2', 'update_step', { index: 1, status: 'done' })] },
+  { tool_calls: [step('sa3', 'web_search', { query: 'electron security' })] },
+  {
+    tool_calls: [
+      step('sa4', 'create_note', {
+        title: 'Subagent findings',
+        content: '# Findings\n\nDeep research summary.'
+      })
+    ]
+  },
+  {
+    tool_calls: [
+      step('sa5', 'submit_result', { result: '{"note":"subagent-findings","sources":3}' })
+    ]
+  },
+  { content: 'Done. Researched and saved a note.' }
+]
+const subManager = new ModuleRunManager(
+  service,
+  configStore,
+  subRegistry,
+  () => {},
+  makeScriptedClient(subagentScript)
+)
+const subStart = await subManager.start(
+  PROJECT,
+  'subagent',
+  'Deep research',
+  'Research Electron security best practices and save the findings as a note.',
+  'Return a JSON object with keys {note, sources}'
+)
+assert.equal(subStart.ok, true, 'subagent run accepted')
+const subRunId = subStart.ok ? subStart.runId : ''
+await waitFor(async () => {
+  const runs = await subManager.list(PROJECT)
+  return runs.some((r) => r.runId === subRunId && (r.status === 'done' || r.status === 'failed'))
+})
+const subRun = (await subManager.list(PROJECT)).find((r) => r.runId === subRunId)
+assert.ok(subRun, 'subagent run exists')
+assert.equal(subRun!.status, 'done', 'subagent run finished done (no output file required)')
+assert.equal(subRun!.outputFile, undefined, 'subagent run needs no deliverable file')
+assert.equal(
+  subRun!.result,
+  '{"note":"subagent-findings","sources":3}',
+  'subagent submitted its result'
+)
+assert.match(subRun!.summary ?? '', /Researched/, 'subagent finishes with a summary')
+assert.ok(
+  subRun!.steps.every((s) => s.status === 'done'),
+  'subagent steps all done'
+)
+const subNoteExists = await fs
+  .readFile(`${ROOT}/${PROJECT}/notes/subagent-findings.md`, 'utf8')
+  .then((c) => c.includes('Deep research'))
+  .catch(() => false)
+assert.ok(subNoteExists, 'subagent used base tools to persist a note')
+
+// ---- raw AI trace: module runs record every turn to <project>/.data/modules/ ----
+let modTrace: Awaited<ReturnType<typeof service.readModuleTrace>> = null
+await waitFor(async () => {
+  modTrace = await service.readModuleTrace(PROJECT, rRunId)
+  return modTrace !== null
+})
+assert.ok(modTrace, 'module trace file written for the result run')
+assert.equal(modTrace!.key, rRunId)
+assert.equal(modTrace!.kind, 'module')
+assert.equal(modTrace!.project, PROJECT)
+assert.deepEqual(
+  modTrace!.entries.map((e) => e.role),
+  ['system', 'user', 'assistant', 'tool', 'assistant', 'tool', 'assistant', 'tool', 'assistant'],
+  'module trace is a readable log: system → user → (assistant → tool) × 3 → final assistant'
+)
+const assistantRoles = modTrace!.entries.filter((e) => e.role === 'assistant')
+assistantRoles.forEach((e) => {
+  assert.equal(e.endpoint, 'chat.completions')
+  assert.equal(e.model, 'fake-model')
+  assert.ok(typeof e.durationMs === 'number', 'module assistant entry records duration')
+})
+const setPlanAssistant = modTrace!.entries[2]!
+const setPlanTrace = (setPlanAssistant.toolCalls ?? []).find((tc) => tc.name === 'set_plan')
+assert.ok(setPlanTrace, 'module trace captures the set_plan tool call')
+assert.ok(
+  Array.isArray(setPlanTrace!.args.steps) && setPlanTrace!.args.steps.length === 3,
+  'module trace captures the tool call payload (args)'
+)
+const setPlanTool = modTrace!.entries[3]!
+assert.equal(setPlanTool.role, 'tool')
+assert.equal(setPlanTool.name, 'set_plan')
+assert.equal(setPlanTool.toolCallId, setPlanTrace!.id)
+assert.match(setPlanTool.content ?? '', /steps/, 'module tool response recorded')
+assert.ok(typeof setPlanTool.durationMs === 'number', 'module tool entry records duration')
+assert.ok(
+  modTrace!.entries[0]!.content?.includes('You are the'),
+  'module trace includes the system prompt'
+)
+assert.match(
+  modTrace!.entries[8]!.content ?? '',
+  /Done/,
+  'final module trace entry carries the assistant reply'
+)
+assert.ok(
+  !JSON.stringify(modTrace).includes('fake-api-key'),
+  'module trace never contains the API key'
+)
+
+const liveTrace = await resultManager.readTrace(PROJECT, rRunId)
+assert.ok(liveTrace, 'manager.readTrace returns the persisted module trace')
+assert.ok(
+  typeof liveTrace!.path === 'string' && liveTrace!.path.endsWith('.trace.jsonl'),
+  'module trace read exposes the absolute path'
+)
+const modTraceRaw = await fs.readFile(modTrace!.path!, 'utf8')
+const modTraceLines = modTraceRaw.split('\n').filter((l) => l.trim() !== '')
+assert.equal(
+  modTraceLines.length,
+  modTrace!.entries.length + 1,
+  'module trace file is JSONL: header record + one line per entry'
+)
+const modTraceHeader = JSON.parse(modTraceLines[0]!) as Record<string, unknown>
+assert.equal(modTraceHeader.type, 'header', 'first module trace record is the run header')
+assert.equal(modTraceHeader.key, rRunId)
+assert.equal(modTraceHeader.kind, 'module')
+assert.ok(
+  (await service.listStoredModuleRuns(PROJECT)).every((r) => !r.runId.includes('.trace')),
+  'trace files never surface as module runs'
+)
+
+const delTraceRun = await resultManager.deleteRun(PROJECT, rRunId, false)
+assert.equal(delTraceRun, true, 'result run deletable')
+assert.equal(
+  await service.readModuleTrace(PROJECT, rRunId),
+  null,
+  'deleting a run removes its .trace.jsonl file'
+)
+
 console.log('MODULES TESTS PASSED')

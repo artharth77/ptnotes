@@ -4,6 +4,7 @@ import { promises as fs } from 'fs'
 import OpenAI from 'openai'
 import type {
   AIProviderConfig,
+  AiTraceFile,
   ModuleChatMessage,
   ModuleEvent,
   ModuleInfo,
@@ -22,12 +23,26 @@ export type ModuleEventBroadcaster = (evt: ModuleEvent) => void
 
 export type ModuleClientFactory = (cfg: AIProviderConfig) => OpenAI
 
+export interface ModuleWaitResult {
+  runId: string
+  title?: string
+  module?: string
+  status: 'done' | 'failed' | 'cancelled' | 'timeout' | 'stopped' | 'unknown'
+  result?: string
+  outputFiles?: string[]
+  summary?: string
+  error?: string
+}
+
+const DEFAULT_WAIT_TIMEOUT_MS = 600_000
+
 /**
  * Owns active module runs, their persistence in <project>/.data/modules/ and the
  * broadcast of progress events to the renderer.
  */
 export class ModuleRunManager {
   private readonly active = new Map<string, ModuleRunner>()
+  private readonly waiters = new Map<string, Set<() => void>>()
   private readonly service: PTNotesService
   private readonly configStore: AIConfigStore
   private readonly registry: ModuleRegistry
@@ -56,7 +71,8 @@ export class ModuleRunManager {
     project: string,
     moduleId: string,
     title: string,
-    prompt: string
+    prompt: string,
+    expectResult?: string
   ): Promise<ModuleStartResult> {
     const def = this.registry.get(moduleId)
     if (!def) {
@@ -79,6 +95,7 @@ export class ModuleRunManager {
         error: 'Both a title and a detailed prompt are required to start a module.'
       }
     }
+    const cleanExpect = String(expectResult ?? '').trim()
 
     const cfg: AIProviderConfig = await this.configStore.load()
     if (!cfg.model) {
@@ -103,7 +120,8 @@ export class ModuleRunManager {
       status: 'planning',
       steps: [],
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
+      ...(cleanExpect ? { expectResult: cleanExpect } : {})
     }
 
     await this.service.writeModulePrompt(project, runId, {
@@ -180,11 +198,13 @@ export class ModuleRunManager {
     run.outputFiles = undefined
     run.summary = undefined
     run.error = undefined
+    run.result = undefined
     run.updatedAt = now
 
     await this.service.writeModuleRun(project, runId, run)
     this.emit({ runId, project, type: 'status', run })
     await this.service.writeModuleChat(project, runId, []).catch(() => {})
+    await this.service.deleteModuleTrace(project, runId).catch(() => {})
 
     this.active.get(runId)?.stop()
     const runner = new ModuleRunner({
@@ -291,6 +311,153 @@ export class ModuleRunManager {
     return this.service.readModuleChat(project, runId)
   }
 
+  /** Read a module run's raw AI trace: live from the runner, else disk. */
+  async readTrace(project: string, runId: string): Promise<AiTraceFile | null> {
+    const runner = this.active.get(runId)
+    if (runner && runner.snapshot?.project === project) {
+      const trace = runner.traceFile
+      if (trace.entries.length > 0) {
+        trace.path = this.service.moduleTracePath(project, runId)
+        return trace
+      }
+    }
+    return this.service.readModuleTrace(project, runId)
+  }
+
+  private static terminalStatuses = new Set<ModuleRun['status']>(['done', 'failed', 'cancelled'])
+
+  private static toWaitResult(run: ModuleRun | undefined): ModuleWaitResult | undefined {
+    if (!run || !ModuleRunManager.terminalStatuses.has(run.status)) return undefined
+    return {
+      runId: run.runId,
+      title: run.title,
+      module: run.module.name,
+      status: run.status as ModuleWaitResult['status'],
+      ...(run.result ? { result: run.result } : {}),
+      ...(run.outputFiles && run.outputFiles.length > 0
+        ? { outputFiles: [...run.outputFiles] }
+        : {}),
+      ...(run.summary ? { summary: run.summary } : {}),
+      ...(run.error ? { error: run.error } : {})
+    }
+  }
+
+  /**
+   * Wait until every listed run is terminal (event-driven), then return each run's
+   * status/result/outputFiles/summary/error in input order. Already-terminal runs resolve
+   * immediately; unknown run ids get an error entry; a timeout (default 600s, clamped
+   * 30–3600s) marks still-pending entries `status: 'timeout'`; an `isStopped` poll
+   * (~500ms) resolves early with `status: 'stopped'` for prompt stop-cancellation.
+   */
+  async waitForRuns(
+    project: string,
+    runIds: string[],
+    timeoutMs = DEFAULT_WAIT_TIMEOUT_MS,
+    isStopped?: () => boolean
+  ): Promise<ModuleWaitResult[]> {
+    const ids = [...new Set(runIds.map((r) => String(r ?? '').trim()).filter(Boolean))]
+    const results = new Map<string, ModuleWaitResult>()
+
+    for (const id of ids) {
+      results.set(id, { runId: id, status: 'unknown', error: 'Unknown run' })
+    }
+    for (const run of await this.list(project)) {
+      const entry = ModuleRunManager.toWaitResult(run)
+      if (entry) results.set(run.runId, entry)
+    }
+
+    const pending = new Set<string>()
+    for (const id of ids) {
+      const entry = results.get(id)!
+      if (ModuleRunManager.terminalStatuses.has(entry.status as ModuleRun['status'])) continue
+      const live = this.active.get(id)?.snapshot
+      const liveEntry = ModuleRunManager.toWaitResult(live)
+      if (liveEntry) {
+        results.set(id, liveEntry)
+        continue
+      }
+      // Unknown ids never resolve via events; keep their error entry. Real non-terminal
+      // runs are waited on.
+      if (live) pending.add(id)
+    }
+
+    if (pending.size === 0) {
+      return ids.map(
+        (id) => results.get(id) ?? { runId: id, status: 'unknown', error: 'Unknown run' }
+      )
+    }
+
+    return new Promise<ModuleWaitResult[]>((resolve) => {
+      const timers: ReturnType<typeof setTimeout>[] = []
+      const fires = new Map<string, () => void>()
+      let done = false
+
+      const finish = (): void => {
+        if (done) return
+        done = true
+        for (const t of timers) clearTimeout(t)
+        for (const [id, fire] of fires) {
+          const set = this.waiters.get(id)
+          if (set) {
+            set.delete(fire)
+            if (set.size === 0) this.waiters.delete(id)
+          }
+        }
+        resolve(
+          ids.map((id) => results.get(id) ?? { runId: id, status: 'unknown', error: 'Unknown run' })
+        )
+      }
+
+      const check = (): void => {
+        if (pending.size === 0) finish()
+      }
+
+      for (const id of pending) {
+        const fire = (): void => {
+          if (done) return
+          const entry = ModuleRunManager.toWaitResult(this.active.get(id)?.snapshot)
+          if (entry) results.set(id, entry)
+          pending.delete(id)
+          check()
+        }
+        fires.set(id, fire)
+        const set = this.waiters.get(id) ?? new Set<() => void>()
+        set.add(fire)
+        this.waiters.set(id, set)
+      }
+
+      timers.push(
+        setTimeout(() => {
+          for (const id of pending) {
+            results.set(id, { ...(results.get(id) ?? { runId: id }), status: 'timeout' })
+          }
+          pending.clear()
+          check()
+        }, timeoutMs)
+      )
+
+      if (isStopped) {
+        timers.push(
+          setInterval(() => {
+            if (isStopped()) {
+              for (const id of pending) {
+                results.set(id, { ...(results.get(id) ?? { runId: id }), status: 'stopped' })
+              }
+              pending.clear()
+              check()
+            }
+          }, 500) as unknown as ReturnType<typeof setTimeout>
+        )
+      }
+    })
+  }
+
+  private fireWaiters(runId: string): void {
+    const set = this.waiters.get(runId)
+    if (!set) return
+    for (const fire of [...set]) fire()
+  }
+
   private handleUpdate(run: ModuleRun, evt: ModuleNotifyEvent): void {
     void this.service.writeModuleRun(run.project, run.runId, run).catch(() => {
       // persistence is best-effort; broadcast still proceeds
@@ -305,8 +472,12 @@ export class ModuleRunManager {
       ...(evt.outputFile ? { outputFile: evt.outputFile } : {}),
       ...(evt.outputFiles ? { outputFiles: evt.outputFiles } : {}),
       ...(evt.error ? { error: evt.error } : {}),
-      ...(evt.summary ? { summary: evt.summary } : {})
+      ...(evt.summary ? { summary: evt.summary } : {}),
+      ...(evt.result ? { result: evt.result } : {})
     })
+    if (ModuleRunManager.terminalStatuses.has(run.status)) {
+      this.fireWaiters(run.runId)
+    }
   }
 
   private emit(evt: ModuleEvent): void {

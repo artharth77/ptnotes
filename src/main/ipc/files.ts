@@ -5,7 +5,7 @@ import type { IpcMainInvokeEvent } from 'electron'
 import type { PTNotesService } from '../service/PTNotesService'
 import { AIConfigStore } from '../ai/config'
 import { readFileAsText } from '../ai/reader'
-import type { SessionRegistry } from './ai'
+import { chatTraceRecorder, type SessionRegistry } from './ai'
 import type { PdfExtractResult } from '@shared/types'
 
 export function registerFilesIpc(
@@ -53,12 +53,14 @@ export function registerFilesIpc(
     async (
       event: IpcMainInvokeEvent,
       project: string,
+      sessionId: string,
       path: string,
       prompt: string
     ): Promise<void> => {
       const buffer = await fs.readFile(path)
       const session = registry.getSession(event, project)
-      await session.uploadPdf(prompt, basename(path), buffer.toString('base64'))
+      const trace = await chatTraceRecorder(service, project, sessionId)
+      await session.uploadPdf(prompt, basename(path), buffer.toString('base64'), trace)
     }
   )
 }

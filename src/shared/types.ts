@@ -90,7 +90,6 @@ export interface ChatMessage {
   toolCalls?: ToolCallInfo[]
   error?: boolean
   attachments?: ChatAttachment[]
-  moduleRunId?: string
 }
 
 export type PdfAttachmentKind = 'extract' | 'upload'
@@ -139,13 +138,16 @@ export interface ToolCallInfo {
 }
 
 export interface ChatStreamEvent {
-  type: 'message-start' | 'content' | 'tool' | 'message-end' | 'error' | 'confirm' | 'ask'
+  type:
+    'message-start' | 'content' | 'tool' | 'message-end' | 'error' | 'confirm' | 'ask' | 'waiting'
   messageId?: string
   content?: string
   toolCall?: ToolCallInfo
   confirm?: ConfirmRequest
   ask?: AskRequest
   error?: string
+  /** Module run ids the main chat is currently waiting on (`wait_modules`). */
+  runIds?: string[]
 }
 
 // ---- Human-in-the-loop (`ask_user` tool) ----
@@ -229,6 +231,10 @@ export interface ModuleRun {
   outputFiles?: string[]
   summary?: string
   error?: string
+  /** Result payload submitted by the module subagent via `submit_result` (free-form string). */
+  result?: string
+  /** What the main chat asked the module to return, set via the `expect` argument of `start_module`. */
+  expectResult?: string
 }
 
 /** A message in a module run's subagent conversation transcript (read-only history). */
@@ -243,7 +249,7 @@ export interface ModuleChatMessage {
   toolCalls?: ToolCallInfo[]
 }
 
-export type ModuleEventType = 'status' | 'step' | 'output' | 'error' | 'done'
+export type ModuleEventType = 'status' | 'step' | 'output' | 'error' | 'done' | 'result'
 
 export type ModuleStartResult =
   { ok: true; runId: string; module: ModuleInfo; title: string } | { ok: false; error: string }
@@ -259,4 +265,70 @@ export interface ModuleEvent {
   outputFiles?: string[]
   error?: string
   summary?: string
+  result?: string
+}
+
+// ---- Raw AI trace (readable app ↔ provider conversation log, JSONL) ----
+
+export type AiTraceEndpoint = 'chat.completions' | 'responses' | 'title'
+
+export type AiTraceRole = 'system' | 'user' | 'assistant' | 'tool'
+
+/** A tool call issued by the assistant, with its payload (`args`). */
+export interface AiTraceToolCall {
+  id: string
+  name: string
+  args: Record<string, unknown>
+}
+
+/** First record of a trace file: the chat/module header info. */
+export interface AiTraceHeader {
+  type: 'header'
+  project: string
+  /** Session id (chat) or run id (module). */
+  key: string
+  kind: 'chat' | 'module'
+  startedAt: number
+}
+
+/** One readable record of the conversation — a system/user prompt, an assistant (AI)
+ *  reply, or a tool response — with timing metadata. Serialized as one JSONL line. */
+export interface AiTraceEntry {
+  seq: number
+  role: AiTraceRole
+  ts: number
+  /** Processing time: assistant reply latency or tool execution time. */
+  durationMs?: number
+  /** The message content / prompt / reply / tool result. */
+  content?: string
+  /** Assistant reasoning (thinking) before the reply, if any. */
+  reasoning?: string
+  /** Assistant: tool calls it issued (payload only; results appear as `tool` records). */
+  toolCalls?: AiTraceToolCall[]
+  finishReason?: string
+  usage?: unknown
+  error?: string
+  /** Tool record: the tool name and the call id it answers. */
+  name?: string
+  toolCallId?: string
+  /** Assistant: provider + endpoint used for this reply. */
+  model?: string
+  baseUrl?: string
+  endpoint?: AiTraceEndpoint
+  /** Responses (PDF upload) — the attachment reference, never the base64 payload. */
+  file?: { filename: string; file_id?: string }
+}
+
+/** The raw trace of one chat session or module run, as read back (parsed from the
+ *  JSONL file: header record first, then one record per line). */
+export interface AiTraceFile {
+  project: string
+  /** Session id (chat) or run id (module). */
+  key: string
+  kind: 'chat' | 'module'
+  startedAt: number
+  updatedAt: number
+  entries: AiTraceEntry[]
+  /** Absolute path on disk (populated when read back via IPC). */
+  path?: string
 }

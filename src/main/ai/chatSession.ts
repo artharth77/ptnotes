@@ -1,9 +1,16 @@
 import OpenAI from 'openai'
 import { randomUUID } from 'crypto'
 import { toFile } from 'openai/uploads'
-import type { AIProviderConfig, ChatMessage, ChatStreamEvent } from '@shared/types'
+import type {
+  AIProviderConfig,
+  AiTraceEntry,
+  AiTraceToolCall,
+  ChatMessage,
+  ChatStreamEvent
+} from '@shared/types'
 import { tools, type PTTool, type ToolContext } from './tools'
 import { createClient } from './client'
+import type { AiTraceRecorder } from './trace'
 
 type Role = 'system' | 'user' | 'assistant' | 'tool'
 
@@ -22,6 +29,16 @@ export type StreamEmitter = (event: ChatStreamEvent) => void
 export type ToolsProvider = () => Promise<PTTool[]>
 
 const MAX_TOOL_ITERATIONS = 12
+
+function toToolArgs(args: string | undefined): Record<string, unknown> {
+  if (!args) return {}
+  try {
+    const parsed = JSON.parse(args) as unknown
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {}
+  } catch {
+    return {}
+  }
+}
 
 export function buildSystemPrompt(
   activeProject: string,
@@ -54,6 +71,7 @@ ${activeNoteSection}- If the user references a project file as \`file:<filename>
 - If the user asks you to use a skill by name (for example \`Use the skill "name": …\`, optionally with the scope in parentheses), call the read_skill tool to load that skill before applying it.
 - When the user asks you to find notes about a topic, call the search_notes tool.
 - When you need user input — a choice, a detail, or confirmation — before you can proceed, call ask_user with your questions. You may ask several questions in a single call; the user answers them all at once. Only ask when genuinely needed.
+- When a task can be split into parallel deliverables, delegate each part to a background module: call start_module for each (passing the \`expect\` argument to specify the result payload the module must submit back), then call wait_modules with all the returned runIds and continue with the results. Do NOT call wait_modules when you do not need the module output.
 - Quote the snippet returned by search_notes exactly as given; never paraphrase, reword, or summarize it.
 - Whenever you mention an existing note by name in your reply, always link to it: [note name](note:note name). The link opens the note, so never return a bare note name without a link.
 - Whenever you mention an existing todo by its text in your reply, always link to it: [todo text](todo:todo text).
@@ -72,6 +90,7 @@ export class ChatSession {
   private abortController: AbortController | undefined
   private readonly toolsProvider?: ToolsProvider
   private activeNoteId: string | null = null
+  private trace: AiTraceRecorder | undefined
 
   constructor(
     getConfig: () => Promise<AIProviderConfig>,
@@ -94,7 +113,8 @@ export class ChatSession {
   async send(
     userText: string,
     history?: ChatMessage[],
-    activeNoteId?: string | null
+    activeNoteId?: string | null,
+    trace?: AiTraceRecorder
   ): Promise<void> {
     this.stopped = false
     this.abortController = undefined
@@ -115,8 +135,11 @@ export class ChatSession {
     if (history && history.length > 0) this.loadContext(history)
 
     const date = new Date().toISOString().slice(0, 10)
-    await this.ensureSystemPrompt(date)
+    this.trace = trace
+    const systemContent = await this.ensureSystemPrompt(date)
+    this.traceSystem(systemContent)
     this.messages.push({ role: 'user', content: userText })
+    this.traceUser(userText)
 
     const client = createClient(this.config)
     const messageId = randomUUID()
@@ -131,11 +154,19 @@ export class ChatSession {
       if (this.stopped) return
       const message = err instanceof Error ? err.message : String(err)
       this.emit({ type: 'error', error: message })
+    } finally {
+      await this.trace?.flush()
+      this.trace = undefined
     }
   }
 
   /** Send a PDF as a raw file attachment via the provider's Responses API (single-turn, no tools). */
-  async uploadPdf(prompt: string, filename: string, base64: string): Promise<void> {
+  async uploadPdf(
+    prompt: string,
+    filename: string,
+    base64: string,
+    trace?: AiTraceRecorder
+  ): Promise<void> {
     this.stopped = false
     this.abortController = undefined
     this.config = await this.getConfig()
@@ -154,6 +185,8 @@ export class ChatSession {
     const cleanPrompt = prompt.trim() || 'Summarize this PDF and highlight its key points.'
     const date = new Date().toISOString().slice(0, 10)
     const skillsIndex = await this.ctx.service.renderSkillsIndex(this.ctx.activeProject)
+    this.trace = trace
+    this.traceSystem(buildSystemPrompt(this.ctx.activeProject, date, skillsIndex))
     this.messages.push({ role: 'user', content: cleanPrompt })
 
     const client = createClient(this.config)
@@ -182,11 +215,16 @@ export class ChatSession {
       // provider without a Files API: fall back to inline base64 in file_data
     }
 
+    const startTs = Date.now()
+    const instructions = buildSystemPrompt(this.ctx.activeProject, date, skillsIndex)
+    // The raw PDF base64 is never traced — only the resolved file id / filename.
+    this.traceUser(cleanPrompt, { filename, file_id: filePart.file_id })
+
     try {
       const stream = await client.responses.create(
         {
           model: this.config.model,
-          instructions: buildSystemPrompt(this.ctx.activeProject, date, skillsIndex),
+          instructions,
           input: [
             {
               role: 'user',
@@ -200,8 +238,9 @@ export class ChatSession {
 
       let content = ''
       let started = false
+      let failedMessage: string | null = null
       for await (const evt of stream) {
-        if (this.stopped) return
+        if (this.stopped) break
         if (evt.type === 'response.output_text.delta') {
           if (!started) {
             started = true
@@ -212,26 +251,52 @@ export class ChatSession {
         }
         if (evt.type === 'response.failed') {
           const msg = evt.response.error?.message
+          failedMessage = msg || 'The provider rejected the PDF upload.'
           this.emit({
             type: 'error',
-            error: `${msg || 'The provider rejected the PDF upload.'} — try Extract text mode instead.`
+            error: `${failedMessage} — try Extract text mode instead.`
           })
-          return
+          break
         }
         if (evt.type === 'response.completed') {
           break
         }
       }
-      if (this.stopped) return
+      this.trace?.append({
+        role: 'assistant',
+        ts: Date.now(),
+        durationMs: Date.now() - startTs,
+        model: this.config.model,
+        baseUrl: this.config.baseUrl,
+        endpoint: 'responses',
+        file: { filename, file_id: filePart.file_id },
+        ...(content ? { content } : {}),
+        ...(failedMessage ? { error: failedMessage } : {}),
+        ...(this.stopped && !failedMessage ? { error: 'stopped' } : {})
+      })
+      if (this.stopped || failedMessage) return
       this.messages.push({ role: 'assistant', content: content || '…' })
       this.emit({ type: 'message-end', messageId })
     } catch (err) {
-      if (this.stopped) return
       const message = err instanceof Error ? err.message : String(err)
+      this.trace?.append({
+        role: 'assistant',
+        ts: Date.now(),
+        durationMs: Date.now() - startTs,
+        model: this.config.model,
+        baseUrl: this.config.baseUrl,
+        endpoint: 'responses',
+        file: { filename, file_id: filePart.file_id },
+        error: message
+      })
+      if (this.stopped) return
       this.emit({
         type: 'error',
         error: `${message} — try Extract text mode instead.`
       })
+    } finally {
+      await this.trace?.flush()
+      this.trace = undefined
     }
   }
 
@@ -288,7 +353,7 @@ export class ChatSession {
   }
 
   /** (Re)build the system message on every send so mid-session changes (e.g. skills) apply. */
-  private async ensureSystemPrompt(date: string): Promise<void> {
+  private async ensureSystemPrompt(date: string): Promise<string> {
     const skillsIndex = await this.ctx.service.renderSkillsIndex(this.ctx.activeProject)
     let activeNote: string | null = null
     if (this.activeNoteId) {
@@ -302,6 +367,7 @@ export class ChatSession {
     } else {
       this.messages[idx] = { role: 'system', content }
     }
+    return content
   }
 
   /** Run one streaming turn. Returns 'done' when the model produced a final answer. */
@@ -313,12 +379,14 @@ export class ChatSession {
       return base
     }) as OpenAI.Chat.ChatCompletionMessageParam[]
 
+    const toolList = await this.currentTools()
+    const startTs = Date.now()
+
     this.abortController = new AbortController()
     const signal = this.abortController.signal
 
     let stream: AsyncIterable<OpenAI.Chat.ChatCompletionChunk>
     try {
-      const toolList = await this.currentTools()
       stream = await client.chat.completions.create(
         {
           model: this.config.model,
@@ -329,6 +397,11 @@ export class ChatSession {
         { signal }
       )
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      this.traceAssistant({
+        durationMs: Date.now() - startTs,
+        error: message
+      })
       if (this.stopped) return 'done'
       throw err
     }
@@ -340,11 +413,17 @@ export class ChatSession {
       name?: string
       args: string
     }[] = []
+    let finishReason: string | undefined
+    let usage: unknown
 
     let firstChunk = true
     let reasoningOpen = false
+    let reasoning = ''
     try {
       for await (const chunk of stream) {
+        if (chunk.usage) usage = chunk.usage
+        const finish = chunk.choices?.[0]?.finish_reason
+        if (finish) finishReason = finish
         if (this.stopped) break
         const delta = chunk.choices?.[0]?.delta as
           | (OpenAI.Chat.ChatCompletionChunk.Choice.Delta & { reasoning_content?: string })
@@ -359,6 +438,7 @@ export class ChatSession {
             reasoningOpen = true
             this.emit({ type: 'content', messageId, content: '<think>' })
           }
+          reasoning += delta.reasoning_content
           this.emit({ type: 'content', messageId, content: delta.reasoning_content })
         }
         if (delta.content) {
@@ -385,11 +465,34 @@ export class ChatSession {
         this.emit({ type: 'content', messageId, content: '</think>' })
       }
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      this.traceAssistant({
+        durationMs: Date.now() - startTs,
+        ...(content ? { content } : {}),
+        ...(reasoning ? { reasoning } : {}),
+        error: message
+      })
       if (this.stopped) return 'done'
       throw err
     }
 
-    if (this.stopped) return 'done'
+    const tracedToolCalls: AiTraceToolCall[] = toolCalls
+      .filter((tc) => tc.name)
+      .map((tc) => ({
+        id: tc.id ?? `call_${tc.index}`,
+        name: tc.name!,
+        args: toToolArgs(tc.args)
+      }))
+
+    this.traceAssistant({
+      durationMs: Date.now() - startTs,
+      ...(content ? { content } : {}),
+      ...(reasoning ? { reasoning } : {}),
+      ...(tracedToolCalls.length > 0 ? { toolCalls: tracedToolCalls } : {}),
+      ...(finishReason ? { finishReason } : {}),
+      ...(usage !== undefined ? { usage } : {}),
+      ...(this.stopped ? { error: 'stopped' } : {})
+    })
 
     if (toolCalls.length > 0) {
       const completed: OpenAI.Chat.ChatCompletionMessageFunctionToolCall[] = toolCalls.map(
@@ -405,12 +508,14 @@ export class ChatSession {
 
       for (const call of completed) {
         if (this.stopped) break
+        const toolTs = Date.now()
         const result = await this.executeTool(call)
         this.messages.push({
           role: 'tool',
           tool_call_id: call.id,
           content: result
         })
+        this.traceTool(call.function.name, call.id, result, Date.now() - toolTs)
       }
       if (this.stopped) return 'done'
       return 'continue'
@@ -441,9 +546,14 @@ export class ChatSession {
     }
 
     try {
+      if (call.function.name === 'wait_modules') {
+        const runIds = Array.isArray(args.runIds) ? args.runIds.map(String) : []
+        this.emit({ type: 'waiting', runIds })
+      }
       const result = await tool.execute(args, {
         ...this.ctx,
-        activeNoteId: this.activeNoteId
+        activeNoteId: this.activeNoteId,
+        isStopped: () => this.stopped
       })
       this.emitTool(call.function.name, args, true, result)
       return result
@@ -460,6 +570,34 @@ export class ChatSession {
       type: 'tool',
       toolCall: { id: randomUUID(), name, args, ok, result }
     })
+  }
+
+  // ---- raw trace recording (readable conversation log: system/user/assistant/tool) ----
+
+  private traceSystem(content: string): void {
+    this.trace?.appendSystem(content)
+  }
+
+  private traceUser(content: string, file?: { filename: string; file_id?: string }): void {
+    this.trace?.append({ role: 'user', ts: Date.now(), content, ...(file ? { file } : {}) })
+  }
+
+  private traceAssistant(
+    partial: Omit<AiTraceEntry, 'seq' | 'role' | 'ts'>
+  ): AiTraceEntry | undefined {
+    if (!this.trace) return undefined
+    return this.trace.append({
+      role: 'assistant',
+      ts: Date.now(),
+      model: this.config.model,
+      baseUrl: this.config.baseUrl,
+      endpoint: 'chat.completions',
+      ...partial
+    })
+  }
+
+  private traceTool(name: string, toolCallId: string, content: string, durationMs: number): void {
+    this.trace?.append({ role: 'tool', ts: Date.now(), name, toolCallId, content, durationMs })
   }
 }
 

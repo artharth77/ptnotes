@@ -28,8 +28,10 @@ interface AppState {
   chatTitles: Record<string, string>
   moduleRuns: Record<string, ModuleRun[]>
   moduleHistoryRunId: string | null
+  traceViewer: { kind: 'chat' | 'module'; key: string; title: string } | null
   chatBusy: boolean
   chatStreamProject: string | null
+  chatWaitRuns: string[]
   confirmRequest: ConfirmRequest | null
   askRequest: AskRequest | null
   settingsOpen: boolean
@@ -53,6 +55,8 @@ interface AppState {
   loadModules: (project: string) => Promise<void>
   applyModuleEvent: (evt: ModuleEvent) => void
   setModuleHistoryRunId: (runId: string | null) => void
+  openTraceViewer: (v: { kind: 'chat' | 'module'; key: string; title: string }) => void
+  closeTraceViewer: () => void
   selectNote: (id: string) => Promise<void>
   saveNote: (content: string) => Promise<void>
   createNote: (title: string) => Promise<void>
@@ -65,6 +69,7 @@ interface AppState {
   clearChatMessages: (project: string) => void
   setChatBusy: (busy: boolean) => void
   setChatStreamProject: (project: string | null) => void
+  setChatWaitRuns: (runIds: string[]) => void
   setConfirmRequest: (req: ConfirmRequest | null) => void
   setAskRequest: (req: AskRequest | null) => void
   setSettingsOpen: (open: boolean) => void
@@ -99,8 +104,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   chatTitles: {},
   moduleRuns: {},
   moduleHistoryRunId: null,
+  traceViewer: null,
   chatBusy: false,
   chatStreamProject: null,
+  chatWaitRuns: [],
   confirmRequest: null,
   askRequest: null,
   settingsOpen: false,
@@ -260,6 +267,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ moduleHistoryRunId })
   },
 
+  openTraceViewer(traceViewer) {
+    set({ traceViewer })
+  },
+
+  closeTraceViewer() {
+    set({ traceViewer: null })
+  },
+
   async selectNote(id) {
     const project = get().activeProject
     if (!project) return
@@ -413,6 +428,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setChatStreamProject(project) {
     set({ chatStreamProject: project })
+  },
+
+  setChatWaitRuns(runIds) {
+    set({ chatWaitRuns: runIds })
   },
 
   setConfirmRequest(req) {

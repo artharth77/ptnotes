@@ -4,9 +4,9 @@ import type { ModuleRunManager } from '../modules/runs'
 import type { ModuleRegistry } from '../modules/registry'
 import type { RegisteredModule } from '../modules/types'
 import type { SettingsStore } from '../settings'
-import type { ModuleChatMessage, ModuleSettings } from '@shared/types'
+import type { AiTraceFile, ModuleChatMessage, ModuleSettings } from '@shared/types'
 
-const MODULE_DISPLAY_ORDER = ['docx', 'pptx', 'infographic']
+const MODULE_DISPLAY_ORDER = ['subagent', 'docx', 'pptx', 'infographic']
 
 /** Sort modules for the Settings ▸ Modules list (known ids first, unknowns after in registry order). */
 function orderedModules(registry: ModuleRegistry): RegisteredModule[] {
@@ -103,5 +103,11 @@ export function registerModulesIpc(
     'modules:readChat',
     async (_e: IpcMainInvokeEvent, project: string, runId: string): Promise<ModuleChatMessage[]> =>
       manager.readChat(project, runId)
+  )
+
+  ipcMain.handle(
+    'modules:readTrace',
+    async (_e: IpcMainInvokeEvent, project: string, runId: string): Promise<AiTraceFile | null> =>
+      manager.readTrace(project, runId)
   )
 }

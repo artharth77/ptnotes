@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { mdiChevronDown, mdiFileOutline, mdiHistory, mdiPencil, mdiTrashCanOutline } from '@mdi/js'
+import {
+  mdiChevronDown,
+  mdiFileOutline,
+  mdiHistory,
+  mdiPencil,
+  mdiTimelineClockOutline,
+  mdiTrashCanOutline
+} from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
 import { MarkdownContent } from './MarkdownContent'
 import { ModuleCard } from './ModuleCard'
@@ -121,9 +128,11 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   )
   const chatBusy = useAppStore((s) => s.chatBusy)
   const chatStreamProject = useAppStore((s) => s.chatStreamProject)
+  const chatWaitRuns = useAppStore((s) => s.chatWaitRuns)
   const appendChatMessage = useAppStore((s) => s.appendChatMessage)
   const setChatBusy = useAppStore((s) => s.setChatBusy)
   const setChatStreamProject = useAppStore((s) => s.setChatStreamProject)
+  const setChatWaitRuns = useAppStore((s) => s.setChatWaitRuns)
   const sessions = useAppStore((s) =>
     s.activeProject ? (s.chatSessions[s.activeProject] ?? NO_SESSIONS) : NO_SESSIONS
   )
@@ -140,6 +149,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   const setChatTitle = useAppStore((s) => s.setChatTitle)
   const renameChat = useAppStore((s) => s.renameChat)
   const deleteChat = useAppStore((s) => s.deleteChat)
+  const openTraceViewer = useAppStore((s) => s.openTraceViewer)
   const selectNote = useAppStore((s) => s.selectNote)
   const moduleRuns = useAppStore((s) =>
     s.activeProject ? (s.moduleRuns[s.activeProject] ?? NO_MODULE_RUNS) : NO_MODULE_RUNS
@@ -456,6 +466,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
 
     const isFirstMessage = list.length === 0
     const history = list
+    const sessionId = getActiveSessionId(project)
     const userMsg: ChatMessage = { id: uid(), role: 'user', content: text, toolCalls: [] }
     const assistantMsg: ChatMessage = { id: uid(), role: 'assistant', content: '', toolCalls: [] }
     appendChatMessage(project, userMsg)
@@ -468,11 +479,13 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     setMention(null)
     setChatBusy(true)
     setChatStreamProject(project)
+    setChatWaitRuns([])
     try {
-      await window.ptnotes.ai.send(project, text, history, activeNoteId)
+      await window.ptnotes.ai.send(project, sessionId ?? '', text, history, activeNoteId)
     } finally {
       setChatBusy(false)
       setChatStreamProject(null)
+      setChatWaitRuns([])
       await saveCurrent(project)
     }
     if (isFirstMessage) {
@@ -539,7 +552,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     if (!sessionId) return
     let aiTitle = ''
     try {
-      aiTitle = (await window.ptnotes.ai.generateTitle(project, text)).trim()
+      aiTitle = (await window.ptnotes.ai.generateTitle(project, sessionId, text)).trim()
     } catch {
       aiTitle = ''
     }
@@ -571,6 +584,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     await window.ptnotes.ai.stop(project)
     setChatBusy(false)
     setChatStreamProject(null)
+    setChatWaitRuns([])
   }
 
   async function openNote(noteName: string): Promise<void> {
@@ -823,6 +837,15 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                         </button>
                         <button
                           className="chat-history-rename-btn"
+                          title="View raw AI trace"
+                          onClick={() =>
+                            openTraceViewer({ kind: 'chat', key: s.sessionId, title: s.title })
+                          }
+                        >
+                          <MdiIcon path={mdiTimelineClockOutline} size={14} />
+                        </button>
+                        <button
+                          className="chat-history-rename-btn"
                           title="Delete chat"
                           onClick={() => {
                             if (activeProject) void deleteChat(activeProject, s.sessionId)
@@ -838,6 +861,17 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                 document.body
               )}
           </div>
+          <button
+            className="btn small ghost"
+            onClick={() => {
+              if (!activeProject) return
+              const id = getActiveSessionId(activeProject)
+              if (id) openTraceViewer({ kind: 'chat', key: id, title: chatTitle || 'AI Assistant' })
+            }}
+            title="View AI trace"
+          >
+            <MdiIcon path={mdiTimelineClockOutline} size={16} />
+          </button>
           <button
             className="btn small ghost"
             onClick={async () => {
@@ -949,6 +983,17 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                       ) : (
                         <pre className="chat-tool-result">{tc.result}</pre>
                       ))}
+                    {tc.name === 'start_module' &&
+                      (() => {
+                        let runId = ''
+                        try {
+                          runId = (JSON.parse(tc.result ?? '{}') as { runId?: string }).runId ?? ''
+                        } catch {
+                          /* unparseable start_module result */
+                        }
+                        const run = runId ? moduleRuns.find((r) => r.runId === runId) : undefined
+                        return run ? <ModuleCard run={run} compact defaultExpanded /> : null
+                      })()}
                   </div>
                 ))}
               </div>
@@ -978,11 +1023,6 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                   </div>
                 )
               })}
-            {m.moduleRunId &&
-              (() => {
-                const run = moduleRuns.find((r) => r.runId === m.moduleRunId)
-                return run ? <ModuleCard run={run} compact defaultExpanded /> : null
-              })()}
             {chatBusy &&
               m.id === list[list.length - 1]?.id &&
               m.role === 'assistant' &&
@@ -992,7 +1032,13 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
         {chatBusy && (
           <div className="chat-status">
             <span className="chat-spinner" />
-            <span>AI is thinking…</span>
+            {chatWaitRuns.length > 0 ? (
+              <span>
+                Waiting for {chatWaitRuns.length} module run{chatWaitRuns.length > 1 ? 's' : ''}…
+              </span>
+            ) : (
+              <span>AI is thinking…</span>
+            )}
           </div>
         )}
       </div>

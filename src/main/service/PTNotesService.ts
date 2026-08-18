@@ -3,6 +3,9 @@ import { createHash } from 'crypto'
 import { basename, extname, join, relative, sep } from 'path'
 import { app, shell } from 'electron'
 import type {
+  AiTraceEntry,
+  AiTraceFile,
+  AiTraceHeader,
   ChatSessionMeta,
   ChatThread,
   CreateProjectResult,
@@ -614,7 +617,7 @@ export class PTNotesService {
     }
     const sessions: ChatSessionMeta[] = []
     for (const entry of entries) {
-      if (!entry.endsWith('.json')) continue
+      if (!entry.endsWith('.json') || entry.endsWith('.trace.json')) continue
       const sessionId = entry.slice(0, -5)
       let meta: Pick<ChatSessionMeta, 'createdAt' | 'updatedAt' | 'messageCount' | 'title'> | null =
         null
@@ -671,10 +674,60 @@ export class PTNotesService {
 
   async deleteChat(project: string, sessionId: string): Promise<void> {
     await fs.unlink(this.chatPath(project, sessionId)).catch(() => {})
+    await this.deleteChatTrace(project, sessionId)
   }
 
   async deleteProjectChatDir(project: string): Promise<void> {
     await fs.rm(this.chatDir(project), { recursive: true, force: true })
+  }
+
+  // ---- Chat raw AI trace (<project>/.data/chat/<sessionId>.trace.jsonl, append-only) ----
+
+  chatTracePath(project: string, sessionId: string): string {
+    return join(this.chatDir(project), `${validateNoteId(sessionId)}.trace.jsonl`)
+  }
+
+  legacyChatTracePath(project: string, sessionId: string): string {
+    return join(this.chatDir(project), `${validateNoteId(sessionId)}.trace.json`)
+  }
+
+  async appendChatTrace(
+    project: string,
+    sessionId: string,
+    header: AiTraceHeader,
+    lines: string[]
+  ): Promise<void> {
+    await fs.mkdir(this.chatDir(project), { recursive: true })
+    await appendTraceFile(
+      this.chatTracePath(project, sessionId),
+      this.legacyChatTracePath(project, sessionId),
+      header,
+      lines
+    )
+  }
+
+  /** Entry count (for monotonic `seq`) + whether a `system` entry already exists (the
+   * system prompt is traced only once per trace file). */
+  async chatTraceMeta(
+    project: string,
+    sessionId: string
+  ): Promise<{ count: number; hasSystem: boolean }> {
+    return traceMeta(
+      this.chatTracePath(project, sessionId),
+      this.legacyChatTracePath(project, sessionId)
+    )
+  }
+
+  async readChatTrace(project: string, sessionId: string): Promise<AiTraceFile | null> {
+    return readTraceFile(
+      this.chatTracePath(project, sessionId),
+      this.legacyChatTracePath(project, sessionId)
+    )
+  }
+
+  async deleteChatTrace(project: string, sessionId: string): Promise<void> {
+    await fs.unlink(this.chatTracePath(project, sessionId)).catch(() => {})
+    await fs.unlink(this.legacyChatTracePath(project, sessionId)).catch(() => {})
   }
 
   async copyFileToProject(project: string, sourcePath: string, fileName?: string): Promise<string> {
@@ -803,6 +856,43 @@ export class PTNotesService {
     }
   }
 
+  // ---- Module raw AI trace (<project>/.data/modules/<runId>.trace.jsonl, append-only) ----
+
+  moduleTracePath(project: string, runId: string): string {
+    return join(this.modulesDir(project), `${validateNoteId(runId)}.trace.jsonl`)
+  }
+
+  legacyModuleTracePath(project: string, runId: string): string {
+    return join(this.modulesDir(project), `${validateNoteId(runId)}.trace.json`)
+  }
+
+  async appendModuleTrace(
+    project: string,
+    runId: string,
+    header: AiTraceHeader,
+    lines: string[]
+  ): Promise<void> {
+    await fs.mkdir(this.modulesDir(project), { recursive: true })
+    await appendTraceFile(
+      this.moduleTracePath(project, runId),
+      this.legacyModuleTracePath(project, runId),
+      header,
+      lines
+    )
+  }
+
+  async readModuleTrace(project: string, runId: string): Promise<AiTraceFile | null> {
+    return readTraceFile(
+      this.moduleTracePath(project, runId),
+      this.legacyModuleTracePath(project, runId)
+    )
+  }
+
+  async deleteModuleTrace(project: string, runId: string): Promise<void> {
+    await fs.unlink(this.moduleTracePath(project, runId)).catch(() => {})
+    await fs.unlink(this.legacyModuleTracePath(project, runId)).catch(() => {})
+  }
+
   /** Read all persisted run snapshots for a project (used to list history across restarts). */
   async listStoredModuleRuns(project: string): Promise<ModuleRun[]> {
     const dir = this.modulesDir(project)
@@ -814,7 +904,12 @@ export class PTNotesService {
     }
     const runs: ModuleRun[] = []
     for (const entry of entries) {
-      if (!entry.endsWith('.json') || entry.endsWith('.prompt.json')) continue
+      if (
+        !entry.endsWith('.json') ||
+        entry.endsWith('.prompt.json') ||
+        entry.endsWith('.trace.json')
+      )
+        continue
       try {
         const run = JSON.parse(await fs.readFile(join(dir, entry), 'utf8')) as ModuleRun
         if (run && typeof run.runId === 'string' && Array.isArray(run.steps)) {
@@ -870,6 +965,10 @@ export class PTNotesService {
       await fs.rm(prompt, { force: true })
       const chat = join(dir, `${run.runId}.chat.json`)
       await fs.rm(chat, { force: true })
+      const trace = join(dir, `${run.runId}.trace.jsonl`)
+      await fs.rm(trace, { force: true })
+      const legacyTrace = join(dir, `${run.runId}.trace.json`)
+      await fs.rm(legacyTrace, { force: true })
       removed++
     }
     return removed
@@ -909,6 +1008,10 @@ export class PTNotesService {
     await fs.rm(prompt, { force: true })
     const chat = this.moduleChatPath(project, runId)
     await fs.rm(chat, { force: true })
+    const trace = this.moduleTracePath(project, runId)
+    await fs.rm(trace, { force: true })
+    const legacyTrace = this.legacyModuleTracePath(project, runId)
+    await fs.rm(legacyTrace, { force: true })
     await fs.rm(runPath, { force: true })
     return existed
   }
@@ -1210,6 +1313,170 @@ async function pathExists(path: string): Promise<boolean> {
     .access(path)
     .then(() => true)
     .catch(() => false)
+}
+
+/** Append JSONL lines to a trace file, writing the header record first when the file is
+ *  new. A legacy single-JSON trace is migrated to JSONL first so its entries are not lost. */
+async function appendTraceFile(
+  path: string,
+  legacyPath: string,
+  header: AiTraceHeader,
+  lines: string[]
+): Promise<void> {
+  if (lines.length === 0) return
+  let prefix = ''
+  try {
+    await fs.access(path)
+  } catch {
+    // new file — carry over a legacy single-JSON trace if one exists
+    let legacyRaw: string | null = null
+    try {
+      legacyRaw = await fs.readFile(legacyPath, 'utf8')
+    } catch {
+      legacyRaw = null
+    }
+    if (legacyRaw !== null) {
+      try {
+        const legacy = JSON.parse(legacyRaw) as AiTraceFile
+        if (legacy && typeof legacy.key === 'string' && Array.isArray(legacy.entries)) {
+          const trace: AiTraceFile = {
+            project: legacy.project,
+            key: legacy.key,
+            kind: legacy.kind,
+            startedAt: legacy.startedAt,
+            updatedAt: legacy.updatedAt,
+            entries: legacy.entries
+          }
+          await fs.writeFile(path, traceToJsonl(trace), 'utf8')
+          await fs.unlink(legacyPath).catch(() => {})
+          await fs.access(path)
+        }
+      } catch {
+        // corrupt legacy file — start fresh
+      }
+    }
+    try {
+      await fs.access(path)
+    } catch {
+      prefix = `${JSON.stringify(header)}\n`
+    }
+  }
+  await fs.appendFile(path, prefix + lines.join('\n') + '\n', 'utf8')
+}
+
+/** Count the entry records in a (possibly legacy) trace file and report whether a
+ *  `system` entry already exists — keeps `seq` monotonic and the system prompt traced
+ *  once per file. */
+async function traceMeta(
+  path: string,
+  legacyPath: string
+): Promise<{ count: number; hasSystem: boolean }> {
+  try {
+    const raw = await fs.readFile(path, 'utf8')
+    let count = 0
+    let hasSystem = false
+    for (const line of raw.split('\n')) {
+      if (line.trim() === '') continue
+      count++
+      if (hasSystem) continue
+      try {
+        if ((JSON.parse(line) as AiTraceEntry).role === 'system') hasSystem = true
+      } catch {
+        // skip a corrupt line
+      }
+    }
+    return { count: Math.max(0, count - 1), hasSystem }
+  } catch {
+    // no JSONL file yet — fall back to a legacy single-JSON trace
+  }
+  try {
+    const legacy = JSON.parse(await fs.readFile(legacyPath, 'utf8')) as AiTraceFile
+    const entries = Array.isArray(legacy?.entries) ? legacy.entries : []
+    return { count: entries.length, hasSystem: entries.some((e) => e.role === 'system') }
+  } catch {
+    return { count: 0, hasSystem: false }
+  }
+}
+
+/** Read a persisted JSONL trace file, populating its `path`. A legacy single-JSON trace
+ *  is migrated to JSONL on first read. Returns null on missing/corrupt file. */
+async function readTraceFile(path: string, legacyPath: string): Promise<AiTraceFile | null> {
+  let raw: string | null = null
+  try {
+    raw = await fs.readFile(path, 'utf8')
+  } catch {
+    raw = null
+  }
+  if (raw !== null) {
+    const trace = parseTraceJsonl(raw)
+    if (!trace) return null
+    trace.path = path
+    return trace
+  }
+  try {
+    const legacy = JSON.parse(await fs.readFile(legacyPath, 'utf8')) as AiTraceFile
+    if (!legacy || typeof legacy.key !== 'string' || !Array.isArray(legacy.entries)) return null
+    const trace: AiTraceFile = {
+      project: legacy.project,
+      key: legacy.key,
+      kind: legacy.kind,
+      startedAt: legacy.startedAt,
+      updatedAt: legacy.updatedAt,
+      entries: legacy.entries
+    }
+    await fs
+      .writeFile(path, traceToJsonl(trace), 'utf8')
+      .then(() => fs.unlink(legacyPath).catch(() => {}))
+      .catch(() => {})
+    trace.path = path
+    return trace
+  } catch {
+    return null
+  }
+}
+
+/** Parse a JSONL trace: the header record first, then one record per line. */
+function parseTraceJsonl(raw: string): AiTraceFile | null {
+  const lines = raw.split('\n').filter((l) => l.trim() !== '')
+  if (lines.length === 0) return null
+  let header: AiTraceHeader
+  try {
+    const first = JSON.parse(lines[0]!) as AiTraceHeader
+    if (!first || first.type !== 'header' || typeof first.key !== 'string') return null
+    header = first
+  } catch {
+    return null
+  }
+  const entries: AiTraceEntry[] = []
+  for (let i = 1; i < lines.length; i++) {
+    try {
+      const entry = JSON.parse(lines[i]!) as AiTraceEntry
+      if (entry && typeof entry.role === 'string') entries.push(entry)
+    } catch {
+      // skip a corrupt line
+    }
+  }
+  const last = entries[entries.length - 1]
+  return {
+    project: header.project,
+    key: header.key,
+    kind: header.kind,
+    startedAt: header.startedAt,
+    updatedAt: last ? last.ts : header.startedAt,
+    entries
+  }
+}
+
+/** Serialize a trace to JSONL: the header record first, then one record per line. */
+function traceToJsonl(trace: AiTraceFile): string {
+  const header: AiTraceHeader = {
+    type: 'header',
+    project: trace.project,
+    key: trace.key,
+    kind: trace.kind,
+    startedAt: trace.startedAt
+  }
+  return [JSON.stringify(header), ...trace.entries.map((e) => JSON.stringify(e))].join('\n') + '\n'
 }
 
 async function hashFile(path: string): Promise<string> {

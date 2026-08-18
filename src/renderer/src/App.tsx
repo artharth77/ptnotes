@@ -9,6 +9,7 @@ import { SettingsDialog } from './components/SettingsDialog'
 import { AskUserDialog } from './components/AskUserDialog'
 import { ModulePanel } from './components/ModulePanel'
 import { ModuleHistoryOverlay } from './components/ModuleHistoryOverlay'
+import { TraceViewerModal } from './components/TraceViewerModal'
 import { PromptModal, Modal } from './components/Modal'
 import { Resizer } from './components/Resizer'
 import type { Tab, ToolCallInfo } from '@shared/types'
@@ -222,22 +223,6 @@ function App(): React.JSX.Element {
               ...m,
               toolCalls: [...(m.toolCalls ?? []), evt.toolCall!]
             }))
-            if (evt.toolCall.name === 'start_module') {
-              try {
-                const res = JSON.parse(evt.toolCall.result ?? '{}') as {
-                  ok?: boolean
-                  runId?: string
-                }
-                if (res.ok && res.runId) {
-                  state.updateLastAssistantMessage(project, (m) => ({
-                    ...m,
-                    moduleRunId: res.runId!
-                  }))
-                }
-              } catch {
-                // ignore unparseable start_module result
-              }
-            }
           }
           if (evt.toolCall) {
             if (NOTE_TOOLS.has(evt.toolCall.name)) {
@@ -263,6 +248,7 @@ function App(): React.JSX.Element {
             }
             state.setChatBusy(false)
             state.setChatStreamProject(null)
+            state.setChatWaitRuns([])
           }
           break
         case 'confirm':
@@ -274,6 +260,14 @@ function App(): React.JSX.Element {
           if (evt.ask) {
             state.setAskRequest(evt.ask)
           }
+          break
+        case 'waiting':
+          if (evt.runIds) {
+            state.setChatWaitRuns(evt.runIds)
+          }
+          break
+        case 'message-end':
+          state.setChatWaitRuns([])
           break
       }
     })
@@ -367,6 +361,7 @@ function App(): React.JSX.Element {
       <ConfirmDeleteDialog />
       <AskUserDialog key={askRequest?.id ?? 'none'} />
       <ModuleHistoryOverlay />
+      <TraceViewerModal />
     </div>
   )
 }
