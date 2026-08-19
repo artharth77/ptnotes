@@ -23,11 +23,14 @@ import { createDocxModule } from './modules/docx'
 import { createSubagentModule } from './modules/subagent'
 import { SettingsStore } from './settings'
 import { AIConfigStore } from './ai/config'
+import { WindowStateStore } from './windowState'
+import type { WindowState } from '@shared/types'
 
 app.setName('PTNotes')
 
 let mainWindow: BrowserWindow | null = null
 let plannerEditActive = false
+let windowStateStore: WindowStateStore
 
 function buildAppMenu(): Menu {
   const isMac = process.platform === 'darwin'
@@ -93,10 +96,18 @@ function openExternalSafely(url: string): void {
   }
 }
 
-function createWindow(): void {
+function createWindow(windowState: WindowState): void {
+  const state = windowState.isMaximized
+    ? { width: windowState.width, height: windowState.height }
+    : {
+        x: windowState.x,
+        y: windowState.y,
+        width: windowState.width,
+        height: windowState.height
+      }
+
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 820,
+    ...state,
     minWidth: 900,
     minHeight: 600,
     show: false,
@@ -109,6 +120,22 @@ function createWindow(): void {
       contextIsolation: true
     }
   })
+
+  if (windowState.isMaximized) {
+    mainWindow.maximize()
+  }
+
+  const saveWindowState = (): void => {
+    if (!mainWindow) return
+    if (mainWindow.isDestroyed()) return
+    const bounds = mainWindow.getNormalBounds()
+    void windowStateStore.save({
+      ...bounds,
+      isMaximized: mainWindow.isMaximized()
+    })
+  }
+
+  mainWindow.on('close', saveWindowState)
 
   mainWindow.on('ready-to-show', () => {
     mainWindow?.show()
@@ -212,10 +239,12 @@ app.whenReady().then(async () => {
   registerSkillsIpc(service)
   registerModulesIpc(moduleManager, settingsStore, moduleRegistry)
 
-  createWindow()
+  windowStateStore = new WindowStateStore()
+  const windowState = await windowStateStore.load()
+  createWindow(windowState)
 
   app.on('activate', function () {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) createWindow({ width: 1280, height: 820 })
   })
 })
 
