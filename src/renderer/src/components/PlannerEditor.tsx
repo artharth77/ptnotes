@@ -81,12 +81,12 @@ const COL_WIDTHS: Record<PlannerColumnKey, string> = {
   title: 'minmax(180px, 1fr)',
   status: '110px',
   owner: '120px',
-  duration: '70px',
+  duration: '84px',
   planStart: '125px',
   planEnd: '125px',
   actualStart: '125px',
   actualEnd: '125px',
-  percent: '70px',
+  percent: '84px',
   note: 'minmax(160px, auto)'
 }
 
