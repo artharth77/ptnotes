@@ -74,6 +74,28 @@ const COLUMNS: { key: PlannerColumnKey; label: string }[] = [
   { key: 'note', label: 'Note' }
 ]
 
+const COL_WIDTHS: Record<PlannerColumnKey, string> = {
+  no: '46px',
+  title: 'minmax(180px, 1fr)',
+  status: '110px',
+  owner: '120px',
+  duration: '70px',
+  planStart: '125px',
+  planEnd: '125px',
+  actualStart: '125px',
+  actualEnd: '125px',
+  percent: '70px',
+  note: 'minmax(160px, auto)'
+}
+
+function colTemplate(visible: Set<PlannerColumnKey>): string {
+  const cols: string[] = ['28px']
+  for (const c of COLUMNS) {
+    if (visible.has(c.key)) cols.push(COL_WIDTHS[c.key])
+  }
+  return cols.join(' ')
+}
+
 function initVisibleCols(saved: Record<string, boolean> | undefined): Set<PlannerColumnKey> {
   const defaults: Record<string, boolean> = {
     owner: false,
@@ -349,6 +371,220 @@ export function PlannerEditor(): React.JSX.Element {
   const sc: Schedule = schedule
   const cal = calendar ?? defaultCalendar()
   const rows = flattenTasks(sc.tasks, null, 0, collapsed, [])
+  const template = colTemplate(visibleCols)
+
+  function renderRow(task: ScheduleTask, no: string, depth: number): React.JSX.Element {
+    const isParent = task.children.length > 0
+    return (
+      <div
+        className={`planner-grid-row${selected.has(task.id) ? ' planner-row-selected' : ''}`}
+        style={{ gridTemplateColumns: template }}
+        onClick={(e) => handleRowClick(e, task.id)}
+      >
+        <div className="planner-col-toggle planner-cell">
+          {isParent ? (
+            <button
+              className="icon-btn small planner-toggle"
+              title={collapsed.has(task.id) ? 'Expand' : 'Collapse'}
+              onClick={() => toggleCollapse(task.id)}
+            >
+              <MdiIcon path={collapsed.has(task.id) ? mdiChevronRight : mdiChevronDown} size={15} />
+            </button>
+          ) : (
+            <span className="planner-toggle-spacer" />
+          )}
+        </div>
+        {visibleCols.has('no') && <div className="planner-col-no planner-cell">{no}</div>}
+        {visibleCols.has('title') && (
+          <div
+            className="planner-col-title planner-cell"
+            style={{ left: visibleCols.has('no') ? '74px' : '28px' }}
+          >
+            <input
+              className="planner-input"
+              ref={(el) => {
+                if (el && pendingFocusId.current === task.id) {
+                  pendingFocusId.current = null
+                  el.focus()
+                }
+              }}
+              style={{
+                paddingLeft: depth * 14,
+                fontWeight: isParent ? 600 : undefined
+              }}
+              value={task.title}
+              placeholder={isParent ? 'Group task' : 'Task title'}
+              onChange={(e) => editField(sc, task.id, 'title', e.target.value)}
+            />
+          </div>
+        )}
+        {visibleCols.has('status') && (
+          <div className="planner-col-status planner-cell">
+            <button
+              type="button"
+              className={`planner-status-label${
+                task.status === 'on-hold' || task.status === 'pending'
+                  ? ` planner-status-manual`
+                  : ''
+              }${task.status === 'in-progress' ? ' planner-status-inprogress' : ''}${
+                task.status === 'completed' ? ' planner-status-completed' : ''
+              }`}
+              title="Status — click to change"
+              onClick={(e) => {
+                e.stopPropagation()
+                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                setStatusMenu({
+                  id: task.id,
+                  x: Math.min(rect.left, window.innerWidth - 160),
+                  y: rect.bottom + 2,
+                  mode:
+                    task.status === 'on-hold' || task.status === 'pending'
+                      ? task.status
+                      : 'not-started'
+                })
+              }}
+            >
+              {statusLabel(task.status)}
+            </button>
+          </div>
+        )}
+        {visibleCols.has('owner') && (
+          <div className="planner-col-owner planner-cell">
+            <input
+              className={`planner-input${!task.owner ? ' planner-value-empty' : ''}`}
+              value={task.owner}
+              placeholder="Owner"
+              onChange={(e) => editField(sc, task.id, 'owner', e.target.value)}
+            />
+          </div>
+        )}
+        {visibleCols.has('duration') && (
+          <div className="planner-col-num planner-cell">
+            <input
+              type="number"
+              min={1}
+              className="planner-input planner-num"
+              value={numberDrafts[numberDraftKey(task.id, 'duration')] ?? task.duration ?? ''}
+              readOnly={isParent}
+              disabled={isParent}
+              onChange={(e) => {
+                setNumberDrafts((d) => ({
+                  ...d,
+                  [numberDraftKey(task.id, 'duration')]: e.target.value
+                }))
+                commitNumber(sc, task.id, 'duration', e.target.value)
+              }}
+              onBlur={() =>
+                normalizeNumber(
+                  task.id,
+                  'duration',
+                  numberDrafts[numberDraftKey(task.id, 'duration')] ?? ''
+                )
+              }
+            />
+          </div>
+        )}
+        {visibleCols.has('planStart') && (
+          <div className="planner-col-date planner-cell">
+            <DateField
+              value={task.planStart}
+              readOnly={isParent}
+              disabled={isParent}
+              onChange={(v) => editField(sc, task.id, 'planStart', v)}
+            />
+          </div>
+        )}
+        {visibleCols.has('planEnd') && (
+          <div className="planner-col-date planner-cell">
+            <DateField
+              value={task.planEnd}
+              readOnly={isParent}
+              disabled={isParent}
+              onChange={(v) => editField(sc, task.id, 'planEnd', v)}
+            />
+          </div>
+        )}
+        {visibleCols.has('actualStart') && (
+          <div className="planner-col-date planner-cell">
+            <DateField
+              value={task.actualStart}
+              onChange={(v) => editField(sc, task.id, 'actualStart', v)}
+            />
+          </div>
+        )}
+        {visibleCols.has('actualEnd') && (
+          <div className="planner-col-date planner-cell">
+            <DateField
+              value={task.actualEnd}
+              onChange={(v) => editField(sc, task.id, 'actualEnd', v)}
+            />
+          </div>
+        )}
+        {visibleCols.has('percent') && (
+          <div className="planner-col-num planner-cell">
+            <input
+              type="number"
+              min={0}
+              max={100}
+              className="planner-input planner-num"
+              value={
+                numberDrafts[numberDraftKey(task.id, 'percentComplete')] ?? task.percentComplete
+              }
+              readOnly={isParent}
+              disabled={isParent}
+              onChange={(e) => {
+                setNumberDrafts((d) => ({
+                  ...d,
+                  [numberDraftKey(task.id, 'percentComplete')]: e.target.value
+                }))
+                commitNumber(sc, task.id, 'percentComplete', e.target.value)
+              }}
+              onBlur={() =>
+                normalizeNumber(
+                  task.id,
+                  'percentComplete',
+                  numberDrafts[numberDraftKey(task.id, 'percentComplete')] ?? ''
+                )
+              }
+            />
+          </div>
+        )}
+        {visibleCols.has('note') && (
+          <div className="planner-col-note planner-cell">
+            <input
+              className={`planner-input${!task.note ? ' planner-value-empty' : ''}`}
+              value={task.note}
+              placeholder="Note"
+              onChange={(e) => editField(sc, task.id, 'note', e.target.value)}
+            />
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  function renderTaskTree(
+    tasks: ScheduleTask[],
+    parentNo: string | null,
+    depth: number
+  ): React.JSX.Element[] {
+    return tasks.map((task, i) => {
+      const no = deriveTaskNo(parentNo, i)
+      const isParent = task.children.length > 0
+      return (
+        <div key={task.id} className="planner-task-group">
+          {renderRow(task, no, depth)}
+          {isParent && (
+            <div className={`planner-children-collapse${collapsed.has(task.id) ? '' : ' open'}`}>
+              <div className="planner-children-collapse-inner">
+                {renderTaskTree(task.children, no, depth + 1)}
+              </div>
+            </div>
+          )}
+        </div>
+      )
+    })
+  }
 
   function commit(base: Schedule, tasks: ScheduleTask[], override?: Partial<Schedule>): void {
     const nextSchedule = {
@@ -749,222 +985,48 @@ export function PlannerEditor(): React.JSX.Element {
           </div>
         ) : (
           <div className="planner-grid-scroll">
-            <table className="planner-grid">
-              <thead>
-                <tr>
-                  <th className="planner-col-toggle"></th>
-                  {visibleCols.has('no') && <th className="planner-col-no">No.</th>}
-                  {visibleCols.has('title') && <th className="planner-col-title">Title</th>}
-                  {visibleCols.has('status') && <th className="planner-col-status">Status</th>}
-                  {visibleCols.has('owner') && <th className="planner-col-owner">Owner</th>}
-                  {visibleCols.has('duration') && <th className="planner-col-num">Dur.</th>}
-                  {visibleCols.has('planStart') && <th className="planner-col-date">Plan Start</th>}
-                  {visibleCols.has('planEnd') && <th className="planner-col-date">Plan End</th>}
-                  {visibleCols.has('actualStart') && (
-                    <th className="planner-col-date">Actual Start</th>
-                  )}
-                  {visibleCols.has('actualEnd') && <th className="planner-col-date">Actual End</th>}
-                  {visibleCols.has('percent') && <th className="planner-col-num">%</th>}
-                  {visibleCols.has('note') && <th className="planner-col-note">Note</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map(({ task, no, depth }) => {
-                  const isParent = task.children.length > 0
-                  return (
-                    <tr
-                      key={task.id}
-                      className={selected.has(task.id) ? 'planner-row-selected' : undefined}
-                      onClick={(e) => handleRowClick(e, task.id)}
-                    >
-                      <td className="planner-col-toggle planner-cell">
-                        {isParent && (
-                          <button
-                            className="icon-btn small planner-toggle"
-                            title={collapsed.has(task.id) ? 'Expand' : 'Collapse'}
-                            onClick={() => toggleCollapse(task.id)}
-                          >
-                            <MdiIcon
-                              path={collapsed.has(task.id) ? mdiChevronRight : mdiChevronDown}
-                              size={15}
-                            />
-                          </button>
-                        )}
-                      </td>
-                      {visibleCols.has('no') && (
-                        <td className="planner-col-no planner-cell">{no}</td>
-                      )}
-                      {visibleCols.has('title') && (
-                        <td className="planner-col-title planner-cell">
-                          <input
-                            className="planner-input"
-                            ref={(el) => {
-                              if (el && pendingFocusId.current === task.id) {
-                                pendingFocusId.current = null
-                                el.focus()
-                              }
-                            }}
-                            style={{
-                              paddingLeft: depth * 14,
-                              fontWeight: isParent ? 600 : undefined
-                            }}
-                            value={task.title}
-                            placeholder={isParent ? 'Group task' : 'Task title'}
-                            onChange={(e) => editField(sc, task.id, 'title', e.target.value)}
-                          />
-                        </td>
-                      )}
-                      {visibleCols.has('status') && (
-                        <td className="planner-col-status planner-cell">
-                          <button
-                            type="button"
-                            className={`planner-status-label${
-                              task.status === 'on-hold' || task.status === 'pending'
-                                ? ` planner-status-manual`
-                                : ''
-                            }${task.status === 'in-progress' ? ' planner-status-inprogress' : ''}${
-                              task.status === 'completed' ? ' planner-status-completed' : ''
-                            }`}
-                            title="Status — click to change"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                              setStatusMenu({
-                                id: task.id,
-                                x: Math.min(rect.left, window.innerWidth - 160),
-                                y: rect.bottom + 2,
-                                mode:
-                                  task.status === 'on-hold' || task.status === 'pending'
-                                    ? task.status
-                                    : 'not-started'
-                              })
-                            }}
-                          >
-                            {statusLabel(task.status)}
-                          </button>
-                        </td>
-                      )}
-                      {visibleCols.has('owner') && (
-                        <td className="planner-col-owner planner-cell">
-                          <input
-                            className={`planner-input${!task.owner ? ' planner-value-empty' : ''}`}
-                            value={task.owner}
-                            placeholder="Owner"
-                            onChange={(e) => editField(sc, task.id, 'owner', e.target.value)}
-                          />
-                        </td>
-                      )}
-                      {visibleCols.has('duration') && (
-                        <td className="planner-col-num planner-cell">
-                          <input
-                            type="number"
-                            min={1}
-                            className="planner-input planner-num"
-                            value={
-                              numberDrafts[numberDraftKey(task.id, 'duration')] ??
-                              task.duration ??
-                              ''
-                            }
-                            readOnly={isParent}
-                            disabled={isParent}
-                            onChange={(e) => {
-                              setNumberDrafts((d) => ({
-                                ...d,
-                                [numberDraftKey(task.id, 'duration')]: e.target.value
-                              }))
-                              commitNumber(sc, task.id, 'duration', e.target.value)
-                            }}
-                            onBlur={() =>
-                              normalizeNumber(
-                                task.id,
-                                'duration',
-                                numberDrafts[numberDraftKey(task.id, 'duration')] ?? ''
-                              )
-                            }
-                          />
-                        </td>
-                      )}
-                      {visibleCols.has('planStart') && (
-                        <td className="planner-col-date planner-cell">
-                          <DateField
-                            value={task.planStart}
-                            readOnly={isParent}
-                            disabled={isParent}
-                            onChange={(v) => editField(sc, task.id, 'planStart', v)}
-                          />
-                        </td>
-                      )}
-                      {visibleCols.has('planEnd') && (
-                        <td className="planner-col-date planner-cell">
-                          <DateField
-                            value={task.planEnd}
-                            readOnly={isParent}
-                            disabled={isParent}
-                            onChange={(v) => editField(sc, task.id, 'planEnd', v)}
-                          />
-                        </td>
-                      )}
-                      {visibleCols.has('actualStart') && (
-                        <td className="planner-col-date planner-cell">
-                          <DateField
-                            value={task.actualStart}
-                            onChange={(v) => editField(sc, task.id, 'actualStart', v)}
-                          />
-                        </td>
-                      )}
-                      {visibleCols.has('actualEnd') && (
-                        <td className="planner-col-date planner-cell">
-                          <DateField
-                            value={task.actualEnd}
-                            onChange={(v) => editField(sc, task.id, 'actualEnd', v)}
-                          />
-                        </td>
-                      )}
-                      {visibleCols.has('percent') && (
-                        <td className="planner-col-num planner-cell">
-                          <input
-                            type="number"
-                            min={0}
-                            max={100}
-                            className="planner-input planner-num"
-                            value={
-                              numberDrafts[numberDraftKey(task.id, 'percentComplete')] ??
-                              task.percentComplete
-                            }
-                            readOnly={isParent}
-                            disabled={isParent}
-                            onChange={(e) => {
-                              setNumberDrafts((d) => ({
-                                ...d,
-                                [numberDraftKey(task.id, 'percentComplete')]: e.target.value
-                              }))
-                              commitNumber(sc, task.id, 'percentComplete', e.target.value)
-                            }}
-                            onBlur={() =>
-                              normalizeNumber(
-                                task.id,
-                                'percentComplete',
-                                numberDrafts[numberDraftKey(task.id, 'percentComplete')] ?? ''
-                              )
-                            }
-                          />
-                        </td>
-                      )}
-                      {visibleCols.has('note') && (
-                        <td className="planner-col-note planner-cell">
-                          <input
-                            className={`planner-input${!task.note ? ' planner-value-empty' : ''}`}
-                            value={task.note}
-                            placeholder="Note"
-                            onChange={(e) => editField(sc, task.id, 'note', e.target.value)}
-                          />
-                        </td>
-                      )}
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+            <div className="planner-grid">
+              <div className="planner-grid-head" style={{ gridTemplateColumns: template }}>
+                <div className="planner-col-toggle planner-cell"></div>
+                {visibleCols.has('no') && <div className="planner-col-no planner-cell">No.</div>}
+                {visibleCols.has('title') && (
+                  <div
+                    className="planner-col-title planner-cell"
+                    style={{ left: visibleCols.has('no') ? '74px' : '28px' }}
+                  >
+                    Title
+                  </div>
+                )}
+                {visibleCols.has('status') && (
+                  <div className="planner-col-status planner-cell">Status</div>
+                )}
+                {visibleCols.has('owner') && (
+                  <div className="planner-col-owner planner-cell">Owner</div>
+                )}
+                {visibleCols.has('duration') && (
+                  <div className="planner-col-num planner-cell">Dur.</div>
+                )}
+                {visibleCols.has('planStart') && (
+                  <div className="planner-col-date planner-cell">Plan Start</div>
+                )}
+                {visibleCols.has('planEnd') && (
+                  <div className="planner-col-date planner-cell">Plan End</div>
+                )}
+                {visibleCols.has('actualStart') && (
+                  <div className="planner-col-date planner-cell">Actual Start</div>
+                )}
+                {visibleCols.has('actualEnd') && (
+                  <div className="planner-col-date planner-cell">Actual End</div>
+                )}
+                {visibleCols.has('percent') && (
+                  <div className="planner-col-num planner-cell">%</div>
+                )}
+                {visibleCols.has('note') && (
+                  <div className="planner-col-note planner-cell">Note</div>
+                )}
+              </div>
+              <div className="planner-grid-body">{renderTaskTree(sc.tasks, null, 0)}</div>
+            </div>
           </div>
         )}
       </div>

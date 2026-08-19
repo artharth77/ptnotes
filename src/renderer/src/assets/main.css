@@ -4070,18 +4070,24 @@ body {
 }
 
 .planner-grid {
-  border-collapse: collapse;
-  width: 100%;
+  display: block;
+  width: max-content;
+  min-width: 100%;
   font-size: 13px;
   white-space: nowrap;
 }
 
-.planner-grid th {
+.planner-grid-head {
   position: sticky;
   top: 0;
   z-index: 2;
+  display: grid;
+  align-items: center;
   background: var(--bg-elev);
   border-bottom: 1px solid var(--border);
+}
+
+.planner-grid-head .planner-cell {
   padding: 7px 6px;
   font-size: 11px;
   font-weight: 600;
@@ -4091,35 +4097,66 @@ body {
   text-align: left;
 }
 
-.planner-grid td {
-  padding: 2px 6px;
+.planner-grid-row {
+  display: grid;
+  align-items: center;
+  --row-bg: var(--bg);
+  background: var(--row-bg);
+}
+
+.planner-grid-row > .planner-cell {
   border-bottom: 1px solid var(--border);
-  vertical-align: middle;
 }
 
-.planner-grid tr:hover td {
-  background: var(--bg-hover);
+.planner-grid-row:hover {
+  --row-bg: var(--bg-hover);
 }
 
-.planner-grid tr.planner-row-selected td {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+.planner-grid-row.planner-row-selected {
+  --row-bg: color-mix(in srgb, var(--accent) 12%, var(--bg));
 }
 
-.planner-grid tr.planner-row-selected:hover td {
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
+.planner-grid-row.planner-row-selected:hover {
+  --row-bg: color-mix(in srgb, var(--accent) 16%, var(--bg));
+}
+
+.planner-col-toggle,
+.planner-col-no,
+.planner-col-title {
+  position: sticky;
+  z-index: 1;
+  background: var(--row-bg, var(--bg-elev));
 }
 
 .planner-cell {
   overflow: hidden;
+  padding: 2px 6px;
+}
+
+.planner-children-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.25s ease;
+}
+
+.planner-children-collapse.open {
+  grid-template-rows: 1fr;
+}
+
+.planner-children-collapse-inner {
+  overflow: clip;
+  min-height: 0;
 }
 
 .planner-col-no {
+  left: 28px;
   width: 46px;
   cursor: pointer;
   user-select: none;
 }
 
 .planner-col-toggle {
+  left: 0;
   width: 28px;
   text-align: center;
 }
@@ -4128,12 +4165,19 @@ body {
   opacity: 0.5;
 }
 
-.planner-grid tr:hover .planner-toggle,
+.planner-toggle-spacer {
+  display: inline-flex;
+  width: 25px;
+  height: 19px;
+}
+
+.planner-grid-row:hover .planner-toggle,
 .planner-toggle:focus {
   opacity: 1;
 }
 
 .planner-col-title {
+  left: 74px;
   min-width: 180px;
 }
 
