@@ -242,11 +242,12 @@ export function registerAiIpc(
       sessionId: string,
       text: string,
       history?: ChatMessage[],
-      activeNoteId?: string | null
+      activeNoteId?: string | null,
+      activeScheduleId?: string | null
     ) => {
       const session = registry.getSession(event, project)
       const trace = await chatTraceRecorder(service, project, sessionId)
-      await session.send(text, history, activeNoteId, trace)
+      await session.send(text, history, activeNoteId, activeScheduleId, trace)
     }
   )
 }

@@ -1,9 +1,10 @@
-import { app, shell, BrowserWindow, Menu } from 'electron'
+import { app, shell, BrowserWindow, Menu, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { PTNotesService } from './service/PTNotesService'
 import { registerProjectIpc, registerNoteIpc, registerTodoIpc, registerChatIpc } from './ipc'
+import { registerPlannerIpc } from './ipc/planner'
 import { registerAiIpc, createSessionRegistry } from './ipc/ai'
 import { registerFilesIpc } from './ipc/files'
 import { registerSettingsIpc } from './ipc/settings'
@@ -26,6 +27,7 @@ import { AIConfigStore } from './ai/config'
 app.setName('PTNotes')
 
 let mainWindow: BrowserWindow | null = null
+let plannerEditActive = false
 
 function buildAppMenu(): Menu {
   const isMac = process.platform === 'darwin'
@@ -126,6 +128,23 @@ function createWindow(): void {
     }
   })
 
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (!plannerEditActive) return
+    const key = input.key.toLowerCase()
+    const mod = input.meta || input.control
+    const isUndo = mod && !input.alt && !input.shift && key === 'z'
+    const isRedo =
+      (mod && !input.alt && input.shift && key === 'z') ||
+      (key === 'y' && input.control && !input.meta && !input.alt && !input.shift)
+    if (isUndo) {
+      event.preventDefault()
+      mainWindow?.webContents.send('planner:undo-redo', { redo: false })
+    } else if (isRedo) {
+      event.preventDefault()
+      mainWindow?.webContents.send('planner:undo-redo', { redo: true })
+    }
+  })
+
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
@@ -137,6 +156,10 @@ app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.ptnotes.app')
 
   Menu.setApplicationMenu(buildAppMenu())
+
+  ipcMain.on('planner:set-edit-active', (_e, active: boolean) => {
+    plannerEditActive = !!active
+  })
 
   if (process.platform === 'darwin' && !app.isPackaged && app.dock) {
     app.dock.setIcon(icon)
@@ -182,6 +205,7 @@ app.whenReady().then(async () => {
   registerNoteIpc(service)
   registerTodoIpc(service)
   registerChatIpc(service)
+  registerPlannerIpc(service)
   registerAiIpc(registry, configStore, service)
   registerFilesIpc(service, registry, configStore)
   registerSettingsIpc(service, settingsStore)

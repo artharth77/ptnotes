@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { rollupScheduleTasks } from '@shared/planner'
 import type {
   AskRequest,
   ChatMessage,
@@ -8,6 +9,9 @@ import type {
   ModuleRun,
   NoteMeta,
   Project,
+  ProjectCalendar,
+  Schedule,
+  ScheduleMeta,
   Tab,
   Todo
 } from '@shared/types'
@@ -20,6 +24,12 @@ interface AppState {
   noteContent: string
   todos: Todo[]
   projectFiles: string[]
+  schedules: ScheduleMeta[]
+  activeScheduleId: string | null
+  scheduleContent: Schedule | null
+  calendar: ProjectCalendar | null
+  plannerUndo: Record<string, Schedule[]>
+  plannerRedo: Record<string, Schedule[]>
   tab: Tab
   chatOpen: boolean
   chatMessages: Record<string, ChatMessage[]>
@@ -52,6 +62,20 @@ interface AppState {
   refreshNotes: () => Promise<void>
   refreshTodos: () => Promise<void>
   refreshFiles: () => Promise<void>
+  refreshSchedules: () => Promise<void>
+  loadCalendar: () => Promise<void>
+  selectSchedule: (id: string) => Promise<void>
+  updateScheduleContent: (schedule: Schedule) => void
+  saveSchedule: (schedule: Schedule) => Promise<void>
+  createSchedule: (name: string) => Promise<void>
+  renameSchedule: (id: string, newName: string) => Promise<void>
+  deleteSchedule: (id: string) => Promise<void>
+  saveCalendar: (calendar: ProjectCalendar) => Promise<void>
+  plannerPushUndo: (scheduleId: string, snapshot: Schedule) => void
+  plannerClearRedo: (scheduleId: string) => void
+  plannerTruncateUndo: (scheduleId: string, length: number) => void
+  undoPlanner: () => Schedule | null
+  redoPlanner: () => Schedule | null
   loadModules: (project: string) => Promise<void>
   applyModuleEvent: (evt: ModuleEvent) => void
   setModuleHistoryRunId: (runId: string | null) => void
@@ -96,6 +120,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   noteContent: '',
   todos: [],
   projectFiles: [],
+  schedules: [],
+  activeScheduleId: null,
+  scheduleContent: null,
+  calendar: null,
+  plannerUndo: {},
+  plannerRedo: {},
   tab: 'notes',
   chatOpen: false,
   chatMessages: {},
@@ -202,6 +232,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       activeProject: name,
       activeNoteId: null,
       noteContent: '',
+      activeScheduleId: null,
+      scheduleContent: null,
       loading: true,
       moduleHistoryRunId: null
     })
@@ -209,6 +241,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().refreshNotes(),
       get().refreshTodos(),
       get().refreshFiles(),
+      get().refreshSchedules(),
+      get().loadCalendar(),
       get().loadModules(name),
       get().loadChatSessions(name)
     ])
@@ -243,6 +277,152 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!project) return set({ projectFiles: [] })
     const projectFiles = await window.ptnotes.files.list(project)
     set({ projectFiles })
+  },
+
+  async refreshSchedules() {
+    const project = get().activeProject
+    if (!project) return set({ schedules: [] })
+    const schedules = await window.ptnotes.planner.list(project)
+    set({ schedules })
+  },
+
+  async loadCalendar() {
+    const project = get().activeProject
+    if (!project) return set({ calendar: null })
+    const calendar = await window.ptnotes.planner.getCalendar(project)
+    set({ calendar })
+  },
+
+  async selectSchedule(id) {
+    const project = get().activeProject
+    if (!project) return
+    const schedule = await window.ptnotes.planner.read(project, id)
+    if (!schedule) return
+    set({ activeScheduleId: id, scheduleContent: schedule })
+  },
+
+  updateScheduleContent(schedule) {
+    set({ scheduleContent: schedule })
+  },
+
+  async saveSchedule(schedule) {
+    const project = get().activeProject
+    if (!project) return
+    const updated = { ...schedule, updatedAt: Date.now() }
+    set({ scheduleContent: updated })
+    await window.ptnotes.planner.save(project, updated)
+    await get().refreshSchedules()
+  },
+
+  async createSchedule(name) {
+    const project = get().activeProject
+    if (!project) return
+    const meta = await window.ptnotes.planner.create(project, name)
+    await get().refreshSchedules()
+    await get().selectSchedule(meta.id)
+    set({ tab: 'planner' })
+  },
+
+  async renameSchedule(id, newName) {
+    const project = get().activeProject
+    if (!project) return
+    const meta = await window.ptnotes.planner.rename(project, id, newName)
+    const wasActive = get().activeScheduleId === id
+    if (wasActive) {
+      const content = get().scheduleContent
+      if (content && content.id === id) {
+        set({ scheduleContent: { ...content, id: meta.id, name: meta.name } })
+      }
+      set({ activeScheduleId: meta.id })
+    }
+    await get().refreshSchedules()
+  },
+
+  async deleteSchedule(id) {
+    const project = get().activeProject
+    if (!project) return
+    await window.ptnotes.planner.delete(project, id)
+    if (get().activeScheduleId === id) {
+      set({ activeScheduleId: null, scheduleContent: null })
+    }
+    const plannerUndo = { ...get().plannerUndo }
+    const plannerRedo = { ...get().plannerRedo }
+    delete plannerUndo[id]
+    delete plannerRedo[id]
+    set({ plannerUndo, plannerRedo })
+    await get().refreshSchedules()
+  },
+
+  async saveCalendar(calendar) {
+    const project = get().activeProject
+    if (!project) return
+    await window.ptnotes.planner.saveCalendar(project, calendar)
+    set({ calendar })
+    const active = get().scheduleContent
+    if (active) {
+      const recomputed = {
+        ...active,
+        tasks: rollupScheduleTasks(active.tasks, calendar),
+        updatedAt: Date.now()
+      }
+      set({ scheduleContent: recomputed })
+      await window.ptnotes.planner.save(project, recomputed)
+      await get().refreshSchedules()
+    }
+  },
+
+  plannerPushUndo(scheduleId, snapshot) {
+    const undo = get().plannerUndo[scheduleId] ?? []
+    set({
+      plannerUndo: { ...get().plannerUndo, [scheduleId]: [...undo, snapshot].slice(-100) }
+    })
+  },
+
+  plannerClearRedo(scheduleId) {
+    if (!get().plannerRedo[scheduleId]?.length) return
+    const plannerRedo = { ...get().plannerRedo }
+    delete plannerRedo[scheduleId]
+    set({ plannerRedo })
+  },
+
+  plannerTruncateUndo(scheduleId, length) {
+    const undo = get().plannerUndo[scheduleId] ?? []
+    if (undo.length <= length) return
+    set({
+      plannerUndo: { ...get().plannerUndo, [scheduleId]: undo.slice(0, length) }
+    })
+  },
+
+  undoPlanner() {
+    const state = get()
+    if (!state.activeScheduleId || !state.scheduleContent) return null
+    const id = state.activeScheduleId
+    const undo = state.plannerUndo[id] ?? []
+    if (undo.length === 0) return null
+    const prev = undo[undo.length - 1]
+    const redo = state.plannerRedo[id] ?? []
+    set({
+      plannerUndo: { ...state.plannerUndo, [id]: undo.slice(0, -1) },
+      plannerRedo: { ...state.plannerRedo, [id]: [...redo, state.scheduleContent].slice(-100) },
+      scheduleContent: prev
+    })
+    return prev
+  },
+
+  redoPlanner() {
+    const state = get()
+    if (!state.activeScheduleId || !state.scheduleContent) return null
+    const id = state.activeScheduleId
+    const redo = state.plannerRedo[id] ?? []
+    if (redo.length === 0) return null
+    const next = redo[redo.length - 1]
+    const undo = state.plannerUndo[id] ?? []
+    set({
+      plannerRedo: { ...state.plannerRedo, [id]: redo.slice(0, -1) },
+      plannerUndo: { ...state.plannerUndo, [id]: [...undo, state.scheduleContent].slice(-100) },
+      scheduleContent: next
+    })
+    return next
   },
 
   async loadModules(project) {

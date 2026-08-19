@@ -19,7 +19,7 @@ export interface Todo {
   done: boolean
 }
 
-export type Tab = 'notes' | 'todo' | 'modules'
+export type Tab = 'notes' | 'todo' | 'modules' | 'planner'
 
 export interface AIProviderConfig {
   baseUrl: string
@@ -332,3 +332,14 @@ export interface AiTraceFile {
   /** Absolute path on disk (populated when read back via IPC). */
   path?: string
 }
+
+// ---- Planner (project schedules + calendar) ----
+
+export type {
+  ProjectCalendar,
+  RolledUpTask,
+  Schedule,
+  ScheduleMeta,
+  ScheduleStatus,
+  ScheduleTask
+} from './planner'

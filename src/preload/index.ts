@@ -20,6 +20,9 @@ import type {
   NoteMeta,
   PdfExtractResult,
   Project,
+  ProjectCalendar,
+  Schedule,
+  ScheduleMeta,
   SkillContent,
   SkillList,
   SkillMeta,
@@ -81,15 +84,53 @@ const api = {
     readTrace: (project: string, sessionId: string): Promise<AiTraceFile | null> =>
       ipcRenderer.invoke('chat:readTrace', project, sessionId)
   },
+  planner: {
+    list: (project: string): Promise<ScheduleMeta[]> => ipcRenderer.invoke('planner:list', project),
+    read: (project: string, id: string): Promise<Schedule | null> =>
+      ipcRenderer.invoke('planner:read', project, id),
+    save: (project: string, schedule: Schedule): Promise<void> =>
+      ipcRenderer.invoke('planner:save', project, schedule),
+    create: (project: string, name: string): Promise<ScheduleMeta> =>
+      ipcRenderer.invoke('planner:create', project, name),
+    rename: (project: string, id: string, newName: string): Promise<ScheduleMeta> =>
+      ipcRenderer.invoke('planner:rename', project, id, newName),
+    delete: (project: string, id: string): Promise<void> =>
+      ipcRenderer.invoke('planner:delete', project, id),
+    reveal: (project: string, id: string): Promise<void> =>
+      ipcRenderer.invoke('planner:reveal', project, id),
+    getCalendar: (project: string): Promise<ProjectCalendar> =>
+      ipcRenderer.invoke('planner:getCalendar', project),
+    saveCalendar: (project: string, calendar: ProjectCalendar): Promise<void> =>
+      ipcRenderer.invoke('planner:saveCalendar', project, calendar),
+    setEditActive: (active: boolean): void => {
+      ipcRenderer.send('planner:set-edit-active', active)
+    },
+    onUndoRedo: (callback: (data: { redo: boolean }) => void): (() => void) => {
+      const listener = (_e: unknown, data: { redo: boolean }): void => callback(data)
+      ipcRenderer.on('planner:undo-redo', listener)
+      return () => {
+        ipcRenderer.removeListener('planner:undo-redo', listener)
+      }
+    }
+  },
   ai: {
     send: (
       project: string,
       sessionId: string,
       text: string,
       history?: ChatMessage[],
-      activeNoteId?: string | null
+      activeNoteId?: string | null,
+      activeScheduleId?: string | null
     ): Promise<void> =>
-      ipcRenderer.invoke('ai:send', project, sessionId, text, history, activeNoteId),
+      ipcRenderer.invoke(
+        'ai:send',
+        project,
+        sessionId,
+        text,
+        history,
+        activeNoteId,
+        activeScheduleId
+      ),
     stop: (project: string): Promise<void> => ipcRenderer.invoke('ai:stop', project),
     confirmResponse: (resp: ConfirmResponse): Promise<void> =>
       ipcRenderer.invoke('ai:confirmResponse', resp),

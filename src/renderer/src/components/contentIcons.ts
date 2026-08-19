@@ -6,12 +6,14 @@ import {
   mdiFilePowerpointOutline,
   mdiFileWordOutline,
   mdiImageOutline,
-  mdiNoteTextOutline
+  mdiNoteTextOutline,
+  mdiNotebookMultiple
 } from '@mdi/js'
 
 export const NOTE_LINK_ICON = mdiNoteTextOutline
 export const TODO_LINK_ICON = mdiCalendarCheckOutline
 export const SKILL_LINK_ICON = mdiBookOpenVariant
+export const PLAN_LINK_ICON = mdiNotebookMultiple
 
 export function fileTypeIcon(file: string): string {
   const ext = file.toLowerCase().split('.').pop() ?? ''
