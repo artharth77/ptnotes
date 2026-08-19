@@ -376,6 +376,10 @@ export function PlannerEditor(): React.JSX.Element {
     useAppStore.getState().plannerClearRedo(base.id)
   }
 
+  function scheduleKey(s: Schedule): string {
+    return JSON.stringify({ name: s.name, tasks: s.tasks, columnVisibility: s.columnVisibility })
+  }
+
   function startEditSession(): void {
     if (editSession.current) return
     const current = useAppStore.getState().scheduleContent
@@ -391,7 +395,7 @@ export function PlannerEditor(): React.JSX.Element {
     if (!session) return
     editSession.current = null
     const current = useAppStore.getState().scheduleContent
-    if (current && JSON.stringify(current) !== JSON.stringify(session.snapshot)) {
+    if (current && scheduleKey(current) !== scheduleKey(session.snapshot)) {
       useAppStore.getState().plannerPushUndo(session.scheduleId, session.snapshot)
       useAppStore.getState().plannerClearRedo(session.scheduleId)
     }
@@ -425,7 +429,7 @@ export function PlannerEditor(): React.JSX.Element {
     const session = editSession.current
     if (!session) return
     const current = useAppStore.getState().scheduleContent
-    if (current && JSON.stringify(current) !== JSON.stringify(session.snapshot)) {
+    if (current && scheduleKey(current) !== scheduleKey(session.snapshot)) {
       useAppStore.getState().plannerPushUndo(session.scheduleId, session.snapshot)
       useAppStore.getState().plannerClearRedo(session.scheduleId)
     }
