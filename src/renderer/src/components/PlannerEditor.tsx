@@ -556,7 +556,11 @@ export function PlannerEditor(): React.JSX.Element {
   useEffect(() => {
     const update = (): void => {
       const el = document.activeElement as HTMLElement | null
-      window.ptnotes.planner.setEditActive(!!el?.closest('.planner-editor'))
+      const inPlanner = !!el?.closest('.planner-editor')
+      const plannerTab = useAppStore.getState().tab === 'planner'
+      window.ptnotes.planner.setEditActive(
+        inPlanner || (plannerTab && (!el || el === document.body))
+      )
     }
     window.addEventListener('focusin', update)
     window.addEventListener('focusout', update)
@@ -566,7 +570,7 @@ export function PlannerEditor(): React.JSX.Element {
       window.removeEventListener('focusout', update)
       window.ptnotes.planner.setEditActive(false)
     }
-  }, [])
+  })
 
   useEffect(() => {
     return window.ptnotes.planner.onUndoRedo(({ redo }) => {
