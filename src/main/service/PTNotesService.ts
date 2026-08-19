@@ -417,6 +417,10 @@ export class PTNotesService {
     shell.showItemInFolder(this.notePath(project, noteId))
   }
 
+  async revealScheduleInFolder(project: string, id: string): Promise<void> {
+    shell.showItemInFolder(this.schedulePath(project, id))
+  }
+
   // ---- Skills ----
 
   /** List global + project + builtin skills (folders with a SKILL.md manifest + `description:` front-matter). */

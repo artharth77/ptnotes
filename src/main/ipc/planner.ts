@@ -26,6 +26,9 @@ export function registerPlannerIpc(service: PTNotesService): void {
   ipcMain.handle('planner:delete', async (_e: IpcMainInvokeEvent, project: string, id: string) =>
     service.deleteSchedule(project, id)
   )
+  ipcMain.handle('planner:reveal', async (_e: IpcMainInvokeEvent, project: string, id: string) =>
+    service.revealScheduleInFolder(project, id)
+  )
   ipcMain.handle('planner:getCalendar', async (_e: IpcMainInvokeEvent, project: string) =>
     service.readCalendar(project)
   )

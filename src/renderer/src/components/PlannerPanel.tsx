@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { mdiDotsVertical, mdiPencil, mdiRefresh, mdiTrashCanOutline } from '@mdi/js'
+import {
+  mdiDotsVertical,
+  mdiFolderOpenOutline,
+  mdiPencil,
+  mdiRefresh,
+  mdiTrashCanOutline
+} from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
 import { friendlyError } from '../errors'
 import { Modal, TextField } from './Modal'
@@ -80,6 +86,15 @@ export function PlannerPanel(): React.JSX.Element {
     if (!confirmDeleteId) return
     await deleteSchedule(confirmDeleteId)
     setConfirmDeleteId(null)
+  }
+
+  const activeProject = useAppStore((s) => s.activeProject)
+
+  async function handleReveal(id: string): Promise<void> {
+    setMenuFor(null)
+    if (activeProject) {
+      await window.ptnotes.planner.reveal(activeProject, id)
+    }
   }
 
   function openMenu(e: React.MouseEvent, id: string): void {
@@ -190,6 +205,12 @@ export function PlannerPanel(): React.JSX.Element {
                       <MdiIcon path={mdiPencil} size={15} />
                     </span>{' '}
                     Rename
+                  </button>
+                  <button className="note-menu-item" onClick={() => void handleReveal(menuFor)}>
+                    <span className="note-menu-icon">
+                      <MdiIcon path={mdiFolderOpenOutline} size={15} />
+                    </span>{' '}
+                    Show in Folder
                   </button>
                   <button
                     className="note-menu-item danger"

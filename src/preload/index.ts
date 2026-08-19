@@ -96,6 +96,8 @@ const api = {
       ipcRenderer.invoke('planner:rename', project, id, newName),
     delete: (project: string, id: string): Promise<void> =>
       ipcRenderer.invoke('planner:delete', project, id),
+    reveal: (project: string, id: string): Promise<void> =>
+      ipcRenderer.invoke('planner:reveal', project, id),
     getCalendar: (project: string): Promise<ProjectCalendar> =>
       ipcRenderer.invoke('planner:getCalendar', project),
     saveCalendar: (project: string, calendar: ProjectCalendar): Promise<void> =>
