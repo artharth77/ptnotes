@@ -687,8 +687,10 @@ body {
   cursor: pointer;
 }
 
-.note-menu-item:hover {
+.note-menu-item:hover,
+.note-menu-item:focus-visible {
   background: var(--bg-hover);
+  outline: none;
 }
 
 .note-menu-sep {

@@ -299,12 +299,16 @@ function DateField({
   value,
   onChange,
   readOnly,
-  disabled
+  disabled,
+  cellId,
+  col
 }: {
   value: string | null
   onChange: (v: string | null) => void
   readOnly?: boolean
   disabled?: boolean
+  cellId?: string
+  col?: string
 }): React.JSX.Element {
   const ref = useRef<HTMLInputElement>(null)
   return (
@@ -315,6 +319,8 @@ function DateField({
       value={value ?? ''}
       readOnly={readOnly}
       disabled={disabled}
+      data-cell={cellId}
+      data-col={col}
       onChange={(e) => onChange(e.target.value || null)}
       onBlur={() => {
         if (!value && ref.current) ref.current.value = ''
@@ -354,7 +360,9 @@ export function PlannerEditor(): React.JSX.Element {
   }
   const [clipboard, setClipboard] = useState<ScheduleTask[]>([])
   const [clipboardMode, setClipboardMode] = useState<'copy' | 'cut' | null>(null)
-  const pendingFocusId = useRef<string | null>(null)
+  const gridRef = useRef<HTMLDivElement>(null)
+  const statusMenuRef = useRef<HTMLDivElement>(null)
+  const pendingFocus = useRef<{ id: string; col: string } | null>(null)
   const saveTimer = useRef<number | null>(null)
 
   useEffect(() => {
@@ -366,6 +374,26 @@ export function PlannerEditor(): React.JSX.Element {
       }
     }
   }, [])
+
+  useEffect(() => {
+    const target = pendingFocus.current
+    if (!target) return
+    pendingFocus.current = null
+    const el = gridRef.current?.querySelector<HTMLElement>(
+      `[data-cell="${target.id}"][data-col="${target.col}"]`
+    )
+    if (el) {
+      el.focus()
+      el.scrollIntoView({ block: 'nearest' })
+    }
+  })
+
+  useEffect(() => {
+    if (!statusMenu) return
+    const items = statusMenuRef.current?.querySelectorAll<HTMLButtonElement>('.note-menu-item')
+    const activeIdx = statusMenu.mode === 'pending' ? 1 : statusMenu.mode === 'on-hold' ? 2 : 0
+    items?.[activeIdx]?.focus()
+  }, [statusMenu])
 
   if (!schedule) return <></>
   const sc: Schedule = schedule
@@ -402,12 +430,8 @@ export function PlannerEditor(): React.JSX.Element {
           >
             <input
               className="planner-input"
-              ref={(el) => {
-                if (el && pendingFocusId.current === task.id) {
-                  pendingFocusId.current = null
-                  el.focus()
-                }
-              }}
+              data-cell={task.id}
+              data-col="title"
               style={{
                 paddingLeft: depth * 14,
                 fontWeight: isParent ? 600 : undefined
@@ -430,6 +454,8 @@ export function PlannerEditor(): React.JSX.Element {
                 task.status === 'completed' ? ' planner-status-completed' : ''
               }`}
               title="Status — click to change"
+              data-cell={task.id}
+              data-col="status"
               onClick={(e) => {
                 e.stopPropagation()
                 const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
@@ -452,6 +478,8 @@ export function PlannerEditor(): React.JSX.Element {
           <div className="planner-col-owner planner-cell">
             <input
               className={`planner-input${!task.owner ? ' planner-value-empty' : ''}`}
+              data-cell={task.id}
+              data-col="owner"
               value={task.owner}
               placeholder="Owner"
               onChange={(e) => editField(sc, task.id, 'owner', e.target.value)}
@@ -464,6 +492,8 @@ export function PlannerEditor(): React.JSX.Element {
               type="number"
               min={1}
               className="planner-input planner-num"
+              data-cell={task.id}
+              data-col="duration"
               value={numberDrafts[numberDraftKey(task.id, 'duration')] ?? task.duration ?? ''}
               readOnly={isParent}
               disabled={isParent}
@@ -490,6 +520,8 @@ export function PlannerEditor(): React.JSX.Element {
               value={task.planStart}
               readOnly={isParent}
               disabled={isParent}
+              cellId={task.id}
+              col="planStart"
               onChange={(v) => editField(sc, task.id, 'planStart', v)}
             />
           </div>
@@ -500,6 +532,8 @@ export function PlannerEditor(): React.JSX.Element {
               value={task.planEnd}
               readOnly={isParent}
               disabled={isParent}
+              cellId={task.id}
+              col="planEnd"
               onChange={(v) => editField(sc, task.id, 'planEnd', v)}
             />
           </div>
@@ -508,6 +542,8 @@ export function PlannerEditor(): React.JSX.Element {
           <div className="planner-col-date planner-cell">
             <DateField
               value={task.actualStart}
+              cellId={task.id}
+              col="actualStart"
               onChange={(v) => editField(sc, task.id, 'actualStart', v)}
             />
           </div>
@@ -516,6 +552,8 @@ export function PlannerEditor(): React.JSX.Element {
           <div className="planner-col-date planner-cell">
             <DateField
               value={task.actualEnd}
+              cellId={task.id}
+              col="actualEnd"
               onChange={(v) => editField(sc, task.id, 'actualEnd', v)}
             />
           </div>
@@ -527,6 +565,8 @@ export function PlannerEditor(): React.JSX.Element {
               min={0}
               max={100}
               className="planner-input planner-num"
+              data-cell={task.id}
+              data-col="percent"
               value={
                 numberDrafts[numberDraftKey(task.id, 'percentComplete')] ?? task.percentComplete
               }
@@ -553,6 +593,8 @@ export function PlannerEditor(): React.JSX.Element {
           <div className="planner-col-note planner-cell">
             <input
               className={`planner-input${!task.note ? ' planner-value-empty' : ''}`}
+              data-cell={task.id}
+              data-col="note"
               value={task.note}
               placeholder="Note"
               onChange={(e) => editField(sc, task.id, 'note', e.target.value)}
@@ -626,6 +668,14 @@ export function PlannerEditor(): React.JSX.Element {
     }))
   }
 
+  function applyStatusMode(mode: 'auto' | 'pending' | 'on-hold'): void {
+    if (statusMenu) {
+      setTaskStatusMode(statusMenu.id, mode)
+      pendingFocus.current = { id: statusMenu.id, col: 'status' }
+    }
+    setStatusMenu(null)
+  }
+
   function toggleCollapse(id: string): void {
     setCollapsed((prev) => {
       const next = new Set(prev)
@@ -669,17 +719,37 @@ export function PlannerEditor(): React.JSX.Element {
     setAnchorId(id)
   }
 
+  function insertNewTasksForSelection(): ScheduleTask[] {
+    const selRows = rows.filter((r) => selected.has(r.task.id))
+    if (selRows.length > 1) {
+      const firstIdx = rows.findIndex((r) => selected.has(r.task.id))
+      const newTasks = Array.from({ length: selRows.length }, () => emptyTask())
+      const next =
+        firstIdx > 0
+          ? insertTasksAfter(sc.tasks, rows[firstIdx - 1].task.id, newTasks)
+          : [...newTasks, ...sc.tasks]
+      commit(sc, next)
+      setSelected(new Set(newTasks.map((t) => t.id)))
+      setAnchorId(newTasks[0].id)
+      pendingFocus.current = { id: newTasks[0].id, col: 'title' }
+      return newTasks
+    }
+    return []
+  }
+
   function handleNewTask(): void {
+    if (insertNewTasksForSelection().length > 0) return
     const task = emptyTask()
     const targetId = lastSelectedId()
     if (targetId) commit(sc, addSibling(sc.tasks, targetId, task))
     else commit(sc, [...sc.tasks, task])
     setSelected(new Set([task.id]))
     setAnchorId(task.id)
-    pendingFocusId.current = task.id
+    pendingFocus.current = { id: task.id, col: 'title' }
   }
 
   function handleNewSubtask(): void {
+    if (insertNewTasksForSelection().length > 0) return
     const targetId = lastSelectedId()
     if (!targetId) return
     const task = emptyTask()
@@ -691,7 +761,7 @@ export function PlannerEditor(): React.JSX.Element {
     })
     setSelected(new Set([task.id]))
     setAnchorId(task.id)
-    pendingFocusId.current = task.id
+    pendingFocus.current = { id: task.id, col: 'title' }
   }
 
   function handleDeleteSelected(): void {
@@ -806,6 +876,97 @@ export function PlannerEditor(): React.JSX.Element {
     commit(sc, tasks)
   }
 
+  function focusCell(id: string, col: string): boolean {
+    const el = gridRef.current?.querySelector<HTMLElement>(`[data-cell="${id}"][data-col="${col}"]`)
+    if (!el || (el as HTMLInputElement).disabled) return false
+    el.focus()
+    el.scrollIntoView({ block: 'nearest' })
+    setSelected(new Set([id]))
+    setAnchorId(id)
+    return true
+  }
+
+  function moveFocusFrom(rowIdx: number, col: string, dir: -1 | 1): void {
+    let i = rowIdx + dir
+    while (i >= 0 && i < rows.length) {
+      if (focusCell(rows[i].task.id, col)) return
+      i += dir
+    }
+  }
+
+  function handleGridKeyDown(e: React.KeyboardEvent): void {
+    const active = document.activeElement
+    const cellEl = active instanceof HTMLElement ? active.closest<HTMLElement>('[data-cell]') : null
+    const cellId = cellEl?.dataset.cell
+    const col = cellEl?.dataset.col
+    const rowIdx = cellId ? rows.findIndex((r) => r.task.id === cellId) : -1
+
+    if (e.key === 'Enter') {
+      if (cellId && col && rowIdx !== -1) {
+        if (col === 'status') return
+        e.preventDefault()
+        ;(active as HTMLElement).blur()
+        if (rowIdx === rows.length - 1) {
+          const task = emptyTask()
+          commit(sc, addSibling(sc.tasks, rows[rows.length - 1].task.id, task))
+          setSelected(new Set([task.id]))
+          setAnchorId(task.id)
+          pendingFocus.current = { id: task.id, col: 'title' }
+        } else {
+          moveFocusFrom(rowIdx, col, 1)
+        }
+        return
+      }
+      e.preventDefault()
+      const id = lastSelectedId() ?? rows[0]?.task.id
+      if (id) focusCell(id, 'title')
+      return
+    }
+
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      const dir: -1 | 1 = e.key === 'ArrowDown' ? 1 : -1
+      if (cellId && col && rowIdx !== -1) {
+        e.preventDefault()
+        moveFocusFrom(rowIdx, col, dir)
+        return
+      }
+      e.preventDefault()
+      const from = lastSelectedId()
+      const curIdx = from ? rows.findIndex((r) => r.task.id === from) : -1
+      const targetIdx = Math.max(0, Math.min(rows.length - 1, (curIdx === -1 ? 0 : curIdx) + dir))
+      if (rows[targetIdx]) {
+        setSelected(new Set([rows[targetIdx].task.id]))
+        setAnchorId(rows[targetIdx].task.id)
+      }
+    }
+  }
+
+  function handleStatusMenuKeyDown(e: React.KeyboardEvent): void {
+    const items = statusMenuRef.current?.querySelectorAll<HTMLButtonElement>('.note-menu-item')
+    if (!items || items.length === 0) return
+    const curIdx = Array.from(items).indexOf(document.activeElement as HTMLButtonElement)
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      const dir = e.key === 'ArrowDown' ? 1 : -1
+      const next = Math.max(0, Math.min(items.length - 1, (curIdx === -1 ? 0 : curIdx) + dir))
+      items[next].focus()
+      return
+    }
+    if (e.key === 'Enter' || e.key === ' ') {
+      if (curIdx === -1) {
+        e.preventDefault()
+        const activeIdx =
+          statusMenu?.mode === 'pending' ? 1 : statusMenu?.mode === 'on-hold' ? 2 : 0
+        items[activeIdx].click()
+      }
+      return
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      setStatusMenu(null)
+    }
+  }
+
   const canIndent = rows.some(
     (r) => selected.has(r.task.id) && hasPrecedingSibling(sc.tasks, r.task.id)
   )
@@ -845,19 +1006,22 @@ export function PlannerEditor(): React.JSX.Element {
   function normalizeNumber(id: string, field: 'duration' | 'percentComplete', raw: string): void {
     const trimmed = raw.trim()
     const key = numberDraftKey(id, field)
-    const next = { ...numberDrafts }
     if (trimmed === '') {
+      if (!(key in numberDrafts)) return
+      const next = { ...numberDrafts }
       delete next[key]
+      setNumberDrafts(next)
       commitNumber(sc, id, field, '')
+      return
+    }
+    const n = Math.floor(Number(trimmed))
+    const next = { ...numberDrafts }
+    if (!isNaN(n)) {
+      const clamped = field === 'duration' ? Math.max(1, n) : Math.min(100, Math.max(0, n))
+      next[key] = String(clamped)
+      commitNumber(sc, id, field, String(clamped))
     } else {
-      const n = Math.floor(Number(trimmed))
-      if (!isNaN(n)) {
-        const clamped = field === 'duration' ? Math.max(1, n) : Math.min(100, Math.max(0, n))
-        next[key] = String(clamped)
-        commitNumber(sc, id, field, String(clamped))
-      } else {
-        delete next[key]
-      }
+      delete next[key]
     }
     setNumberDrafts(next)
   }
@@ -985,7 +1149,7 @@ export function PlannerEditor(): React.JSX.Element {
           </div>
         ) : (
           <div className="planner-grid-scroll">
-            <div className="planner-grid">
+            <div className="planner-grid" ref={gridRef} onKeyDown={handleGridKeyDown}>
               <div className="planner-grid-head" style={{ gridTemplateColumns: template }}>
                 <div className="planner-col-toggle planner-cell"></div>
                 {visibleCols.has('no') && <div className="planner-col-no planner-cell">No.</div>}
@@ -1035,17 +1199,16 @@ export function PlannerEditor(): React.JSX.Element {
         <>
           <div className="menu-overlay" onClick={() => setStatusMenu(null)} />
           <div
+            ref={statusMenuRef}
             className="note-menu planner-status-menu"
             style={{ left: statusMenu.x, top: statusMenu.y }}
             onClick={(e) => e.stopPropagation()}
+            onKeyDown={handleStatusMenuKeyDown}
           >
             <button
               type="button"
               className={`note-menu-item${statusMenu.mode === 'not-started' ? ' active' : ''}`}
-              onClick={() => {
-                setTaskStatusMode(statusMenu.id, 'auto')
-                setStatusMenu(null)
-              }}
+              onClick={() => applyStatusMode('auto')}
             >
               [Auto]
             </button>
@@ -1053,20 +1216,14 @@ export function PlannerEditor(): React.JSX.Element {
             <button
               type="button"
               className={`note-menu-item${statusMenu.mode === 'pending' ? ' active' : ''}`}
-              onClick={() => {
-                setTaskStatusMode(statusMenu.id, 'pending')
-                setStatusMenu(null)
-              }}
+              onClick={() => applyStatusMode('pending')}
             >
               Pending
             </button>
             <button
               type="button"
               className={`note-menu-item${statusMenu.mode === 'on-hold' ? ' active' : ''}`}
-              onClick={() => {
-                setTaskStatusMode(statusMenu.id, 'on-hold')
-                setStatusMenu(null)
-              }}
+              onClick={() => applyStatusMode('on-hold')}
             >
               On Hold
             </button>
