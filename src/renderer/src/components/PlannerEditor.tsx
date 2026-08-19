@@ -369,6 +369,9 @@ export function PlannerEditor(): React.JSX.Element {
   const pendingFocus = useRef<{ id: string; col: string } | null>(null)
   const saveTimer = useRef<number | null>(null)
   const editSession = useRef<{ scheduleId: string; snapshot: Schedule } | null>(null)
+  const focusValueRef = useRef<{ id: string; col: string; value: string | number | null } | null>(
+    null
+  )
 
   function recordHistory(base: Schedule): void {
     const snapshot = JSON.parse(JSON.stringify(base)) as Schedule
@@ -448,6 +451,54 @@ export function PlannerEditor(): React.JSX.Element {
       }
     }
     editSession.current = null
+  }
+
+  function handleGridFocusCapture(e: React.FocusEvent): void {
+    const el = e.target as HTMLElement
+    if (el.tagName !== 'INPUT') return
+    const id = el.dataset.cell
+    const col = el.dataset.col
+    if (!id || !col) return
+    const current = useAppStore.getState().scheduleContent
+    if (!current) return
+    const ctx = findTaskCtx(current.tasks, id)
+    if (!ctx) return
+    const value = ctx.parent[ctx.index][col as keyof ScheduleTask]
+    focusValueRef.current = { id, col, value: (value ?? null) as string | number | null }
+  }
+
+  function cancelEdit(): void {
+    const active = document.activeElement
+    const el = active instanceof HTMLElement ? active : null
+    if (!el || el.tagName !== 'INPUT') return
+    const session = editSession.current
+    if (session) {
+      editSession.current = null
+      if (saveTimer.current !== null) clearTimeout(saveTimer.current)
+      setNumberDrafts({})
+      const restored = session.snapshot
+      updateScheduleContent(restored)
+      saveTimer.current = window.setTimeout(() => {
+        saveTimer.current = null
+        void saveSchedule(restored)
+      }, 800)
+    } else {
+      const f = focusValueRef.current
+      if (f) {
+        const current = useAppStore.getState().scheduleContent
+        if (current) {
+          const tasks = updateTask(current.tasks, f.id, (prev) => {
+            const next = { ...prev, [f.col]: f.value } as ScheduleTask
+            if (f.col === 'planStart' || f.col === 'planEnd') {
+              return applyDateRule(prev, next, cal)
+            }
+            return next
+          })
+          commit(current, tasks, undefined, false)
+        }
+      }
+    }
+    el.blur()
   }
 
   function handleUndo(): void {
@@ -757,8 +808,13 @@ export function PlannerEditor(): React.JSX.Element {
     })
   }
 
-  function commit(base: Schedule, tasks: ScheduleTask[], override?: Partial<Schedule>): void {
-    if (!editSession.current) recordHistory(base)
+  function commit(
+    base: Schedule,
+    tasks: ScheduleTask[],
+    override?: Partial<Schedule>,
+    record = true
+  ): void {
+    if (record && !editSession.current) recordHistory(base)
     const nextSchedule = {
       ...base,
       ...override,
@@ -1031,6 +1087,12 @@ export function PlannerEditor(): React.JSX.Element {
     const col = cellEl?.dataset.col
     const rowIdx = cellId ? rows.findIndex((r) => r.task.id === cellId) : -1
 
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      cancelEdit()
+      return
+    }
+
     if (e.key === 'Enter') {
       if (cellId && col && rowIdx !== -1) {
         if (col === 'status') return
@@ -1298,7 +1360,12 @@ export function PlannerEditor(): React.JSX.Element {
           </div>
         ) : (
           <div className="planner-grid-scroll">
-            <div className="planner-grid" ref={gridRef} onKeyDown={handleGridKeyDown}>
+            <div
+              className="planner-grid"
+              ref={gridRef}
+              onKeyDown={handleGridKeyDown}
+              onFocusCapture={handleGridFocusCapture}
+            >
               <div className="planner-grid-head" style={{ gridTemplateColumns: template }}>
                 <div className="planner-col-toggle planner-cell"></div>
                 {visibleCols.has('no') && <div className="planner-col-no planner-cell">No.</div>}
