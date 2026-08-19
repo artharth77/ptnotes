@@ -369,9 +369,12 @@ export function PlannerEditor(): React.JSX.Element {
   const pendingFocus = useRef<{ id: string; col: string } | null>(null)
   const saveTimer = useRef<number | null>(null)
   const editSession = useRef<{ scheduleId: string; snapshot: Schedule } | null>(null)
-  const focusValueRef = useRef<{ id: string; col: string; value: string | number | null } | null>(
-    null
-  )
+  const focusValueRef = useRef<{
+    id: string
+    col: string
+    value: string | number | null
+    undoLen: number
+  } | null>(null)
 
   function recordHistory(base: Schedule): void {
     const snapshot = JSON.parse(JSON.stringify(base)) as Schedule
@@ -464,7 +467,13 @@ export function PlannerEditor(): React.JSX.Element {
     const ctx = findTaskCtx(current.tasks, id)
     if (!ctx) return
     const value = ctx.parent[ctx.index][col as keyof ScheduleTask]
-    focusValueRef.current = { id, col, value: (value ?? null) as string | number | null }
+    const undo = useAppStore.getState().plannerUndo[current.id] ?? []
+    focusValueRef.current = {
+      id,
+      col,
+      value: (value ?? null) as string | number | null,
+      undoLen: undo.length
+    }
   }
 
   function cancelEdit(): void {
@@ -495,6 +504,7 @@ export function PlannerEditor(): React.JSX.Element {
             return next
           })
           commit(current, tasks, undefined, false)
+          useAppStore.getState().plannerTruncateUndo(current.id, f.undoLen)
         }
       }
     }
