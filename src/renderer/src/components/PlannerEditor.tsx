@@ -409,14 +409,53 @@ export function PlannerEditor(): React.JSX.Element {
     }, 800)
   }
 
+  function isTrackedField(el: HTMLElement | null): boolean {
+    if (!el || el.tagName !== 'INPUT') return false
+    const col = el.dataset.col
+    return (
+      col === 'title' ||
+      col === 'owner' ||
+      col === 'duration' ||
+      col === 'percent' ||
+      col === 'note'
+    )
+  }
+
+  function prepareUndoRedo(): void {
+    const session = editSession.current
+    if (!session) return
+    const current = useAppStore.getState().scheduleContent
+    if (current && JSON.stringify(current) !== JSON.stringify(session.snapshot)) {
+      useAppStore.getState().plannerPushUndo(session.scheduleId, session.snapshot)
+      useAppStore.getState().plannerClearRedo(session.scheduleId)
+    }
+  }
+
+  function rearmEditSession(): void {
+    const el = document.activeElement as HTMLElement | null
+    if (isTrackedField(el)) {
+      const current = useAppStore.getState().scheduleContent
+      if (current) {
+        editSession.current = {
+          scheduleId: current.id,
+          snapshot: JSON.parse(JSON.stringify(current)) as Schedule
+        }
+        return
+      }
+    }
+    editSession.current = null
+  }
+
   function handleUndo(): void {
-    endEditSession()
+    prepareUndoRedo()
     restoreSchedule(useAppStore.getState().undoPlanner())
+    rearmEditSession()
   }
 
   function handleRedo(): void {
-    endEditSession()
+    prepareUndoRedo()
     restoreSchedule(useAppStore.getState().redoPlanner())
+    rearmEditSession()
   }
 
   useEffect(() => {
