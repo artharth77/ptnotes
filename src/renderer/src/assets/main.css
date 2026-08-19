@@ -4101,7 +4101,7 @@ body {
 
 .planner-grid-row {
   display: grid;
-  align-items: center;
+  align-items: stretch;
   --row-bg: var(--bg);
   background: var(--row-bg);
 }
@@ -4155,6 +4155,8 @@ body {
   width: 46px;
   cursor: pointer;
   user-select: none;
+  display: flex;
+  align-items: center;
 }
 
 .planner-col-toggle {
