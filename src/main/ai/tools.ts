@@ -1084,8 +1084,12 @@ export const tools: PTTool[] = [
       if (!name) {
         return JSON.stringify({ ok: false, error: 'name is required' })
       }
-      const meta = await ctx.service.createSchedule(project, name)
-      return JSON.stringify({ ok: true, project, id: meta.id, name: meta.name })
+      try {
+        const meta = await ctx.service.createSchedule(project, name)
+        return JSON.stringify({ ok: true, project, id: meta.id, name: meta.name })
+      } catch (err) {
+        return JSON.stringify({ ok: false, error: (err as Error).message })
+      }
     }
   },
   {

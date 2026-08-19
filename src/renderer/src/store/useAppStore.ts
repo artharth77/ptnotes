@@ -326,11 +326,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   async renameSchedule(id, newName) {
     const project = get().activeProject
     if (!project) return
-    await window.ptnotes.planner.rename(project, id, newName)
-    await get().refreshSchedules()
-    if (get().activeScheduleId === id) {
-      await get().selectSchedule(id)
+    const meta = await window.ptnotes.planner.rename(project, id, newName)
+    const wasActive = get().activeScheduleId === id
+    if (wasActive) {
+      const content = get().scheduleContent
+      if (content && content.id === id) {
+        set({ scheduleContent: { ...content, id: meta.id, name: meta.name } })
+      }
+      set({ activeScheduleId: meta.id })
     }
+    await get().refreshSchedules()
   },
 
   async deleteSchedule(id) {

@@ -222,8 +222,15 @@ assert.deepEqual(schedules, [], 'no schedules initially')
 
 const meta1 = await service.createSchedule('Build', 'Release Plan')
 assert.equal(meta1.id, 'release-plan')
-const meta2 = await service.createSchedule('Build', 'Release Plan')
-assert.notEqual(meta2.id, meta1.id, 'duplicate names get unique ids')
+let dupErr = false
+try {
+  await service.createSchedule('Build', 'Release Plan')
+} catch (err) {
+  dupErr = (err as Error).message.includes('already exists')
+}
+assert.ok(dupErr, 'creating a duplicate schedule name throws')
+const meta2 = await service.createSchedule('Build', 'Roadmap')
+assert.equal(meta2.id, 'roadmap')
 
 schedules = await service.listSchedules('Build')
 assert.equal(schedules.length, 2)
@@ -240,6 +247,21 @@ assert.equal((await service.readSchedule('Build', meta1.id))!.tasks.length, 1)
 
 const renamed = await service.renameSchedule('Build', meta1.id, 'Ship It')
 assert.equal(renamed.name, 'Ship It')
+assert.equal(renamed.id, 'ship-it')
+assert.ok(renamed.id !== meta1.id, 'rename also re-slugifies the schedule id')
+assert.equal(await service.readSchedule('Build', meta1.id), null, 'old id/file removed on rename')
+assert.equal((await service.readSchedule('Build', 'ship-it'))!.name, 'Ship It')
+// renaming to the same slug keeps the same id (no duplicate file bump)
+const same = await service.renameSchedule('Build', renamed.id, 'Ship It')
+assert.equal(same.id, 'ship-it')
+// renaming onto an existing slug throws (no auto -2 suffix)
+dupErr = false
+try {
+  await service.renameSchedule('Build', renamed.id, 'Roadmap')
+} catch (err) {
+  dupErr = (err as Error).message.includes('already exists')
+}
+assert.ok(dupErr, 'renaming onto an existing schedule name throws')
 
 assert.equal(await service.readSchedule('Build', 'nope'), null, 'missing schedule -> null')
 await service.deleteSchedule('Build', meta2.id)

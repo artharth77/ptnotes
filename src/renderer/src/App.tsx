@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from './store/useAppStore'
+import { friendlyError } from './errors'
 import { TopBar } from './components/TopBar'
 import { NoteList } from './components/NoteList'
 import { TodoPanel } from './components/TodoPanel'
@@ -116,11 +117,18 @@ function EmptyNote(): React.JSX.Element {
 function EmptyPlanner(): React.JSX.Element {
   const createSchedule = useAppStore((s) => s.createSchedule)
   const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState('')
 
   return (
     <div className="empty-state">
       <p>Select a schedule or create a new one.</p>
-      <button className="btn primary" onClick={() => setCreating(true)}>
+      <button
+        className="btn primary"
+        onClick={() => {
+          setCreateError('')
+          setCreating(true)
+        }}
+      >
         + New Schedule
       </button>
       {creating && (
@@ -128,10 +136,18 @@ function EmptyPlanner(): React.JSX.Element {
           title="New Schedule"
           placeholder="Schedule name"
           submitLabel="Create"
+          error={createError}
           onClose={() => setCreating(false)}
           onSubmit={(name) => {
-            setCreating(false)
-            void createSchedule(name)
+            void (async () => {
+              try {
+                await createSchedule(name)
+                setCreateError('')
+                setCreating(false)
+              } catch (e) {
+                setCreateError(friendlyError(e))
+              }
+            })()
           }}
         />
       )}

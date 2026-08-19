@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { mdiDotsVertical, mdiPencil, mdiRefresh, mdiTrashCanOutline } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
+import { friendlyError } from '../errors'
 import { Modal, TextField } from './Modal'
 import { MdiIcon } from './MdiIcon'
 
@@ -22,6 +23,7 @@ export function PlannerPanel(): React.JSX.Element {
   const [creating, setCreating] = useState(false)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [name, setName] = useState('')
+  const [formError, setFormError] = useState('')
   const [filter, setFilter] = useState('')
   const [menuFor, setMenuFor] = useState<string | null>(null)
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null)
@@ -51,17 +53,27 @@ export function PlannerPanel(): React.JSX.Element {
   async function handleCreate(): Promise<void> {
     const trimmed = name.trim()
     if (!trimmed) return
-    await createSchedule(trimmed)
-    setName('')
-    setCreating(false)
+    try {
+      await createSchedule(trimmed)
+      setName('')
+      setFormError('')
+      setCreating(false)
+    } catch (e) {
+      setFormError(friendlyError(e))
+    }
   }
 
   async function handleRename(): Promise<void> {
     const trimmed = name.trim()
     if (!trimmed || !renaming) return
-    await renameSchedule(renaming, trimmed)
-    setName('')
-    setRenaming(null)
+    try {
+      await renameSchedule(renaming, trimmed)
+      setName('')
+      setFormError('')
+      setRenaming(null)
+    } catch (e) {
+      setFormError(friendlyError(e))
+    }
   }
 
   async function doDelete(): Promise<void> {
@@ -110,7 +122,13 @@ export function PlannerPanel(): React.JSX.Element {
           >
             <MdiIcon path={mdiRefresh} size={16} />
           </button>
-          <button className="btn small" onClick={() => setCreating(true)}>
+          <button
+            className="btn small"
+            onClick={() => {
+              setFormError('')
+              setCreating(true)
+            }}
+          >
             + New
           </button>
         </div>
@@ -163,6 +181,7 @@ export function PlannerPanel(): React.JSX.Element {
                     onClick={() => {
                       if (!schedule) return
                       setName(schedule.name)
+                      setFormError('')
                       setRenaming(schedule.id)
                       setMenuFor(null)
                     }}
@@ -200,6 +219,7 @@ export function PlannerPanel(): React.JSX.Element {
             placeholder="Schedule name"
             autoFocus
           />
+          {formError && <p className="form-error">{formError}</p>}
           <div className="modal-actions">
             <button className="btn" onClick={() => setCreating(false)}>
               Cancel
@@ -217,6 +237,9 @@ export function PlannerPanel(): React.JSX.Element {
 
       {renaming && (
         <Modal title="Rename Schedule" onClose={() => setRenaming(null)}>
+          <p className="confirm-message">
+            Rename file &quot;{renaming}.json&quot; — type the new name below.
+          </p>
           <TextField
             value={name}
             onChange={setName}
@@ -224,6 +247,7 @@ export function PlannerPanel(): React.JSX.Element {
             placeholder="New name"
             autoFocus
           />
+          {formError && <p className="form-error">{formError}</p>}
           <div className="modal-actions">
             <button className="btn" onClick={() => setRenaming(null)}>
               Cancel

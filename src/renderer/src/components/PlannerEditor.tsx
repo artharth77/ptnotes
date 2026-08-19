@@ -22,6 +22,7 @@ import {
 import { useAppStore } from '../store/useAppStore'
 import { MdiIcon } from './MdiIcon'
 import { Modal, PromptModal } from './Modal'
+import { friendlyError } from '../errors'
 import { CalendarModal } from './CalendarModal'
 import { PlannerColumnModal } from './PlannerColumnModal'
 import {
@@ -343,6 +344,7 @@ export function PlannerEditor(): React.JSX.Element {
   const [calendarOpen, setCalendarOpen] = useState(false)
   const [columnsOpen, setColumnsOpen] = useState(false)
   const [renaming, setRenaming] = useState(false)
+  const [renameError, setRenameError] = useState('')
   const [confirmDelete, setConfirmDelete] = useState<{ tasks: ScheduleTask[] } | null>(null)
   const [statusMenu, setStatusMenu] = useState<{
     id: string
@@ -1243,7 +1245,10 @@ export function PlannerEditor(): React.JSX.Element {
         <button
           className="icon-btn small"
           title="Rename schedule"
-          onClick={() => setRenaming(true)}
+          onClick={() => {
+            setRenameError('')
+            setRenaming(true)
+          }}
         >
           <MdiIcon path={mdiPencil} size={14} />
         </button>
@@ -1518,14 +1523,22 @@ export function PlannerEditor(): React.JSX.Element {
 
       {renaming && (
         <PromptModal
-          title="Rename schedule"
+          title={`Rename schedule`}
           placeholder="Schedule name"
           initialValue={schedule.name}
           submitLabel="Rename"
+          error={renameError}
           onClose={() => setRenaming(false)}
           onSubmit={(value) => {
-            setRenaming(false)
-            void renameSchedule(schedule.id, value)
+            void (async () => {
+              try {
+                await renameSchedule(schedule.id, value)
+                setRenameError('')
+                setRenaming(false)
+              } catch (e) {
+                setRenameError(friendlyError(e))
+              }
+            })()
           }}
         />
       )}

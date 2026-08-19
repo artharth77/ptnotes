@@ -1112,13 +1112,8 @@ export class PTNotesService {
     }
   }
 
-  private async uniqueScheduleId(project: string, base: string): Promise<string> {
-    let candidate = base
-    let i = 2
-    while (await this.pathExists(this.schedulePath(project, candidate))) {
-      candidate = `${base}-${i++}`
-    }
-    return candidate
+  private async scheduleIdExists(project: string, id: string): Promise<boolean> {
+    return this.pathExists(this.schedulePath(project, id))
   }
 
   // ---- Planner (project schedules) ----
@@ -1186,7 +1181,10 @@ export class PTNotesService {
 
   async createSchedule(project: string, name: string): Promise<ScheduleMeta> {
     const base = slugify(name) || 'untitled'
-    const id = await this.uniqueScheduleId(project, base)
+    if (await this.scheduleIdExists(project, base)) {
+      throw new Error(`A schedule with the name "${name.trim()}" already exists`)
+    }
+    const id = base
     const now = Date.now()
     const display = name.trim() || base
     const schedule: Schedule = { id, name: display, createdAt: now, updatedAt: now, tasks: [] }
@@ -1197,11 +1195,29 @@ export class PTNotesService {
   async renameSchedule(project: string, id: string, newName: string): Promise<ScheduleMeta> {
     const schedule = await this.readSchedule(project, id)
     if (!schedule) throw new Error(`Schedule "${id}" not found`)
-    schedule.name = newName.trim() || schedule.name
+    const trimmed = newName.trim()
+    if (trimmed) schedule.name = trimmed
+    const newId = slugify(schedule.name)
+    if (newId !== id && (await this.scheduleIdExists(project, newId))) {
+      throw new Error(
+        `A schedule with the name "${schedule.name}" already exists (file ${newId}.json)`
+      )
+    }
+    schedule.id = newId
     schedule.updatedAt = Date.now()
-    await this.saveSchedule(project, schedule)
+    if (newId === id) {
+      await this.saveSchedule(project, schedule)
+    } else {
+      const dir = this.plannerDir(project)
+      await fs.mkdir(dir, { recursive: true })
+      const path = this.schedulePath(project, newId)
+      const tmp = `${path}.tmp`
+      await fs.writeFile(tmp, JSON.stringify(schedule, null, 2), 'utf8')
+      await fs.rename(tmp, path)
+      await fs.unlink(this.schedulePath(project, id)).catch(() => {})
+    }
     return {
-      id,
+      id: newId,
       name: schedule.name,
       updatedAt: schedule.updatedAt,
       taskCount: schedule.tasks.reduce((n, t) => n + countTasks(t), 0)
