@@ -1,11 +1,6 @@
-## [0.9.0] — 2026-08-18
+## [0.9.0] — 2026-08-19
 
 ### Added
-
-#### Planner — undo/redo
-
-- **Undo/redo for the planner editor**: toolbar **Undo**/**Redo** buttons plus `⌘Z` / `⇧⌘Z` (on Windows/Linux `Ctrl+Z` / `Ctrl+Shift+Z` or `Ctrl+Y`). History is kept in the app store as per-schedule stacks (capped at 100 entries), so switching schedules preserves each one's history; deleting a schedule prunes it. Text/number fields (title, owner, duration, %complete, note) capture the pre-edit state on focus and record a single undo step when the field loses focus — so typing a whole field undoes once, not per character — while discrete actions (add/delete/move/status/date/columns) record immediately. Undo/redo restore the snapshot, cancel any pending autosave, and re-save the restored state.
-- **Focus-aware shortcuts**: keyboard undo/redo is intercepted in the **main process** (`before-input-event`, gated by a `planner:set-edit-active` flag driven by the editor's focus) because the app menu's `undo`/`redo` roles swallow `⌘Z` before the renderer can act. This keeps the markdown editor, chat input, and native text fields on their own undo behavior.
 
 #### Planner — project schedules with working-day math
 
@@ -15,6 +10,11 @@
 - **Calendar modal**: edit the project week (start/end weekday) and holiday list (add/remove); saving re-rolls all schedules so parent durations reflect the new calendar.
 - **AI planner tools** (20th–26th): `list_schedules`, `read_schedule`, `create_schedule`, `update_schedule` (rename), `add_task` (with optional parent nesting; planStart+duration or both dates — the missing value is computed), `update_task` (end-date-fixed date edits, status/percent handling; plan-field edits on parent tasks are rejected — they are derived from children; `parent`/`addAfter` move a task — and its subtree — to a new parent/position, cycle-safe), and `set_calendar` (week + holiday changes that re-roll schedules).
 - **Tests**: `scripts/test-planner.mts` covers date math, holidays, status rules, rollups, service CRUD, calendar persistence, and all seven AI tools.
+
+#### Planner — undo/redo
+
+- **Undo/redo for the planner editor**: toolbar **Undo**/**Redo** buttons plus `⌘Z` / `⇧⌘Z` (on Windows/Linux `Ctrl+Z` / `Ctrl+Shift+Z` or `Ctrl+Y`). History is kept in the app store as per-schedule stacks (capped at 100 entries), so switching schedules preserves each one's history; deleting a schedule prunes it. Text/number fields (title, owner, duration, %complete, note) capture the pre-edit state on focus and record a single undo step when the field loses focus — so typing a whole field undoes once, not per character — while discrete actions (add/delete/move/status/date/columns) record immediately. Undo/redo restore the snapshot, cancel any pending autosave, and re-save the restored state.
+- **Focus-aware shortcuts**: keyboard undo/redo is intercepted in the **main process** (`before-input-event`, gated by a `planner:set-edit-active` flag driven by the editor's focus) because the app menu's `undo`/`redo` roles swallow `⌘Z` before the renderer can act. This keeps the markdown editor, chat input, and native text fields on their own undo behavior.
 
 ## [0.8.0] — 2026-08-17
 
