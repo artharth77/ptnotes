@@ -70,18 +70,26 @@ assert.deepEqual(
   'garbage calendar -> default'
 )
 
-// ---- date rule (end-date-fixed) ----
+// ---- date rule (duration-fixed) ----
 
 const prev = { ...emptyTask(), planStart: '2024-01-01', planEnd: '2024-01-05', duration: 5 }
 
 let next = applyDateRule(prev, { ...prev, planStart: '2024-01-02' }, cal)
-assert.equal(next.duration, 4, 'start edited -> duration recomputed')
+assert.equal(next.duration, 5, 'start edited keeps duration')
+assert.equal(next.planEnd, '2024-01-08', 'start edited -> end recomputed from duration')
 
 next = applyDateRule(prev, { ...prev, duration: 3 }, cal)
 assert.equal(next.planEnd, '2024-01-03', 'duration edited -> end recomputed')
 
 next = applyDateRule(prev, { ...prev, planEnd: '2024-01-10' }, cal)
 assert.equal(next.duration, 8, 'end edited -> duration recomputed')
+
+next = applyDateRule(
+  { ...emptyTask(), planStart: '2024-01-01', planEnd: '2024-01-05' },
+  { ...emptyTask(), planStart: '2024-01-02', planEnd: '2024-01-05' },
+  cal
+)
+assert.equal(next.duration, 4, 'start edited with no duration -> duration recomputed, end fixed')
 
 next = applyDateRule(
   { ...emptyTask(), duration: 3 },

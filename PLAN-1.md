@@ -45,7 +45,7 @@ schedules.
    - `defaultCalendar()`, `isWorkingDay(date, calendar)`, `isHoliday(date, holidays)`.
    - `computeEndDate(start, duration, calendar)` → skips weekends/holidays (start counts as day 1).
    - `computeDuration(start, end, calendar)` → working-day count (default 1).
-   - `applyDateRule(prev, next, calendar)` → end-date-fixed recompute.
+   - `applyDateRule(prev, next, calendar)` → recomputes the derived date field (duration-fixed).
    - `deriveStatus(percent, currentStatus)` → auto except `On Hold` preserved.
    - `rollupChildren(children, calendar)` → parent `%`/dates/duration/status.
    - `validateScheduleId`.

@@ -465,10 +465,10 @@ JSON in `<project>/planner/<slug>.json`; the whole feature is pure data — no m
 - **Working-day math** (`computeEndDate`/`computeDuration`): `planEnd = start + duration - 1` working
   days (start counts as day 1); weekends and `calendar.holidays` are skipped. Applies to **plan**
   dates only — actual dates are free-form and never computed.
-- **Date rule** (`applyDateRule`): editing `planStart` keeps `planEnd` fixed and recomputes
-  `duration` — but when `planEnd` is still unset and a `duration` is assigned, a `planStart` edit
-  recomputes `planEnd` (`start + duration - 1` working days). Editing `duration` recomputes
-  `planEnd`; editing `planEnd` recomputes `duration`.
+- **Date rule** (`applyDateRule`): editing `planStart` or `duration` keeps `duration` fixed and
+  recomputes `planEnd` (`start + duration - 1` working days) — but when no `duration` is assigned
+  and a `planEnd` is set, a `planStart` edit keeps `planEnd` fixed and recomputes `duration`.
+  Editing `planEnd` recomputes `duration`.
 - **Status rules** (`deriveStatus`): `On Hold` is manual only — never auto-changed. Otherwise
   `%Complete ≤ 0` → Not Started, `< 100` → In Progress, `100` → Completed. Derived on every recompute.
 - **Parent rollup** (`rollupChildren`): `planStart` = min child, `planEnd` = max child,

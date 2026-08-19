@@ -157,9 +157,10 @@ export function computeDuration(start: string, end: string, calendar: ProjectCal
 }
 
 /**
- * End-date-fixed recompute. Decide which field was edited and recompute the other:
- * - start edited → keep `planEnd` fixed, recompute `duration`; if `planEnd` is not set yet
- *   but a `duration` is assigned, recompute `planEnd` (`start + duration - 1` working days).
+ * Recomputed-field rule. Decide which field was edited and recompute the derived one,
+ * preferring to keep `duration` fixed when it's set:
+ * - start edited → keep `duration`, recompute `planEnd`; if no `duration` is set but a
+ *   `planEnd` is assigned, keep `planEnd` and recompute `duration`.
  * - duration edited → recompute `planEnd` (`start + duration - 1` working days).
  * - end edited → keep the new `planEnd`, recompute `duration`.
  */
@@ -170,10 +171,10 @@ export function applyDateRule(
 ): ScheduleTask {
   const result: ScheduleTask = { ...next }
   if (next.planStart !== prev.planStart) {
-    if (next.planStart && next.planEnd) {
-      result.duration = computeDuration(next.planStart, next.planEnd, calendar)
-    } else if (next.planStart && next.duration && next.duration > 0) {
+    if (next.planStart && next.duration && next.duration > 0) {
       result.planEnd = computeEndDate(next.planStart, next.duration, calendar)
+    } else if (next.planStart && next.planEnd) {
+      result.duration = computeDuration(next.planStart, next.planEnd, calendar)
     }
   } else if (next.duration !== prev.duration) {
     if (next.planStart && next.duration && next.duration > 0) {
