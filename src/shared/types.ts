@@ -35,6 +35,15 @@ export interface StorageSettings {
   builtinSkillOverrides?: Record<string, boolean>
 }
 
+/** Persisted main-window geometry restored on next launch. */
+export interface WindowState {
+  x?: number
+  y?: number
+  width: number
+  height: number
+  isMaximized?: boolean
+}
+
 /** A registered module's availability state shown in Settings ▸ Modules. */
 export interface ModuleSettings {
   id: string
