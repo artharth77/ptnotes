@@ -4,12 +4,13 @@ import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import { slugify } from '@shared/slug'
 import { MdiIcon } from './MdiIcon'
-import { NOTE_LINK_ICON, SKILL_LINK_ICON } from './contentIcons'
+import { NOTE_LINK_ICON, PLAN_LINK_ICON, SKILL_LINK_ICON } from './contentIcons'
 
 interface MarkdownContentProps {
   content: string
   onOpenNote?: (noteName: string) => void
   onOpenSkill?: (skillName: string) => void
+  onOpenPlan?: (planName: string) => void
 }
 
 function internalNameFromHref(href: string, prefix: string): string {
@@ -25,12 +26,18 @@ function normalizeInternalLinks(md: string): string {
   return md
     .replace(/\[([^\]]*)\]\(\s*(note:[^()]*?)\s*\)/g, (_m, text, dest) => `[${text}](<${dest}>)`)
     .replace(/\[([^\]]*)\]\(\s*(skill:[^()]*?)\s*\)/g, (_m, text, dest) => `[${text}](<${dest}>)`)
+    .replace(/\[([^\]]*)\]\(\s*(plan:[^()]*?)\s*\)/g, (_m, text, dest) => `[${text}](<${dest}>)`)
+    .replace(
+      /\[([^\]]*)\]\(\s*(schedule:[^()]*?)\s*\)/g,
+      (_m, text, dest) => `[${text}](<${dest}>)`
+    )
 }
 
 export const MarkdownContent = memo(function MarkdownContent({
   content,
   onOpenNote,
-  onOpenSkill
+  onOpenSkill,
+  onOpenPlan
 }: MarkdownContentProps): React.JSX.Element {
   const safeContent = normalizeInternalLinks(content)
   return (
@@ -38,7 +45,13 @@ export const MarkdownContent = memo(function MarkdownContent({
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkBreaks]}
         urlTransform={(url) => {
-          if (url.startsWith('note:') || url.startsWith('skill:')) return url
+          if (
+            url.startsWith('note:') ||
+            url.startsWith('skill:') ||
+            url.startsWith('plan:') ||
+            url.startsWith('schedule:')
+          )
+            return url
           return defaultUrlTransform(url)
         }}
         components={{
@@ -57,6 +70,26 @@ export const MarkdownContent = memo(function MarkdownContent({
                 >
                   <span className="chat-note-link-icon">
                     <MdiIcon path={NOTE_LINK_ICON} size={16} />
+                  </span>
+                  {children}
+                </a>
+              )
+            }
+            if (href?.startsWith('plan:') || href?.startsWith('schedule:')) {
+              const prefix = href.startsWith('plan:') ? 'plan:' : 'schedule:'
+              const planName = slugify(internalNameFromHref(href, prefix))
+              return (
+                <a
+                  href="#"
+                  className="chat-note-link"
+                  title={planName}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    onOpenPlan?.(planName)
+                  }}
+                >
+                  <span className="chat-note-link-icon">
+                    <MdiIcon path={PLAN_LINK_ICON} size={16} />
                   </span>
                   {children}
                 </a>

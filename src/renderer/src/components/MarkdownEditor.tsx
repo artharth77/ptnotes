@@ -114,6 +114,10 @@ function linkTooltipLabel(href: string): string {
   if (href.startsWith('note:')) return `Open note: ${slugify(internalNameFromHref(href, 'note:'))}`
   if (href.startsWith('skill:'))
     return `Open skill: ${slugify(internalNameFromHref(href, 'skill:'))}`
+  if (href.startsWith('plan:') || href.startsWith('schedule:')) {
+    const prefix = href.startsWith('plan:') ? 'plan:' : 'schedule:'
+    return `Open plan: ${slugify(internalNameFromHref(href, prefix))}`
+  }
   if (href.startsWith('file:')) return `Open file location: ${internalNameFromHref(href, 'file:')}`
   return `Open link: ${href}`
 }
@@ -129,6 +133,17 @@ function handleEditorLink(href: string): void {
     if (!note) return
     void st.selectNote(note.id)
     st.setTab('notes')
+  } else if (href.startsWith('plan:') || href.startsWith('schedule:')) {
+    const prefix = href.startsWith('plan:') ? 'plan:' : 'schedule:'
+    const name = slugify(internalNameFromHref(href, prefix))
+    const st = useAppStore.getState()
+    const plan =
+      st.schedules.find((s) => s.id === name) ??
+      st.schedules.find((s) => s.name === name) ??
+      st.schedules.find((s) => s.name.includes(name))
+    if (!plan) return
+    void st.selectSchedule(plan.id)
+    st.setTab('planner')
   } else if (href.startsWith('skill:')) {
     const name = slugify(internalNameFromHref(href, 'skill:'))
     useAppStore.getState().openSkillEditor(name)

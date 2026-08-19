@@ -3,7 +3,27 @@ import { duckDuckGoSearch } from './search/duckduckgo'
 import { fetchWebPage } from './search/webFetch'
 import { slugify } from '@shared/slug'
 import { readFileAsText } from './reader'
-import type { AskAnswer, AskQuestion, AskRequest, ConfirmRequest, SkillScope } from '@shared/types'
+import {
+  applyDateRule,
+  computeDuration,
+  computeEndDate,
+  countTasks,
+  deriveTaskNo,
+  emptyTask,
+  findTaskByTitle,
+  rollupScheduleTasks
+} from '@shared/planner'
+import type {
+  AskAnswer,
+  AskQuestion,
+  AskRequest,
+  ConfirmRequest,
+  Schedule,
+  ScheduleMeta,
+  ScheduleStatus,
+  ScheduleTask,
+  SkillScope
+} from '@shared/types'
 
 export interface ToolContext {
   service: PTNotesService
@@ -58,6 +78,146 @@ async function skillNames(ctx: ToolContext): Promise<string[]> {
   return [...list.global, ...list.project, ...list.builtin]
     .filter((s) => s.enabled)
     .map((s) => s.name)
+}
+
+// ---- Planner helpers ----
+
+function findSchedule(schedules: ScheduleMeta[], target: string): ScheduleMeta | undefined {
+  const raw = target.toLowerCase()
+  const slug = slugify(target)
+  return (
+    schedules.find((s) => s.id === slug) ??
+    schedules.find((s) => s.name === slug) ??
+    schedules.find((s) => s.name.toLowerCase() === raw) ??
+    schedules.find((s) => s.name.toLowerCase().includes(raw))
+  )
+}
+
+function findTaskById(tasks: ScheduleTask[], id: string): ScheduleTask | null {
+  for (const task of tasks) {
+    if (task.id === id) return task
+    const found = findTaskById(task.children, id)
+    if (found) return found
+  }
+  return null
+}
+
+function findTaskByTaskNo(tasks: ScheduleTask[], taskNo: string): ScheduleTask | null {
+  const walk = (list: ScheduleTask[], parentNo: string | null): ScheduleTask | null => {
+    for (let i = 0; i < list.length; i++) {
+      const no = deriveTaskNo(parentNo, i)
+      if (no === taskNo) return list[i]
+      const found = walk(list[i].children, no)
+      if (found) return found
+    }
+    return null
+  }
+  return walk(tasks, null)
+}
+
+function findTask(tasks: ScheduleTask[], target: string): ScheduleTask | null {
+  return (
+    findTaskById(tasks, target) ?? findTaskByTaskNo(tasks, target) ?? findTaskByTitle(tasks, target)
+  )
+}
+
+function updateTaskNode(
+  tasks: ScheduleTask[],
+  id: string,
+  fn: (task: ScheduleTask) => ScheduleTask
+): ScheduleTask[] {
+  return tasks.map((t) => {
+    if (t.id === id) return fn(t)
+    if (t.children.length > 0) return { ...t, children: updateTaskNode(t.children, id, fn) }
+    return t
+  })
+}
+
+function insertAfterId(tasks: ScheduleTask[], afterId: string, task: ScheduleTask): ScheduleTask[] {
+  if (!afterId) return [...tasks, task]
+  const i = tasks.findIndex((t) => t.id === afterId)
+  if (i === -1) return [...tasks, task]
+  return [...tasks.slice(0, i + 1), task, ...tasks.slice(i + 1)]
+}
+
+function removeTaskNode(tasks: ScheduleTask[], id: string): ScheduleTask[] {
+  return tasks
+    .filter((t) => t.id !== id)
+    .map((t) => (t.children.length > 0 ? { ...t, children: removeTaskNode(t.children, id) } : t))
+}
+
+function containsTask(root: ScheduleTask, id: string): boolean {
+  if (root.id === id) return true
+  return root.children.some((c) => containsTask(c, id))
+}
+
+function str(v: unknown): string | null {
+  return typeof v === 'string' ? v : null
+}
+
+function numOrNull(v: unknown): number | null {
+  if (v === null || v === undefined || v === '') return null
+  const n = Number(v)
+  return isNaN(n) ? null : n
+}
+
+function dateOrNull(v: unknown): string | null {
+  const s = str(v)
+  if (!s) return null
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null
+}
+
+const STATUSES: ScheduleStatus[] = ['not-started', 'in-progress', 'completed', 'pending', 'on-hold']
+
+function statusOf(v: unknown): ScheduleStatus | null {
+  const s = str(v)
+  return s && (STATUSES as string[]).includes(s) ? (s as ScheduleStatus) : null
+}
+
+function clampPercent(v: number): number {
+  return Math.min(100, Math.max(0, Math.round(v)))
+}
+
+function taskCount(schedule: Schedule): number {
+  return schedule.tasks.reduce((n, t) => n + countTasks(t), 0)
+}
+
+function scheduleSummary(
+  schedule: Schedule,
+  project: string
+): { ok: boolean; project: string; schedule: string; taskCount: number } {
+  return {
+    ok: true,
+    project,
+    schedule: schedule.name,
+    taskCount: taskCount(schedule)
+  }
+}
+
+type TaskView = ScheduleTask & { taskNo: string }
+
+function withTaskNo(tasks: ScheduleTask[], parentNo: string | null): TaskView[] {
+  return tasks.map((t, i) => {
+    const no = deriveTaskNo(parentNo, i)
+    return { ...t, taskNo: no, children: withTaskNo(t.children, no) }
+  })
+}
+
+async function requireSchedule(
+  ctx: ToolContext,
+  project: string,
+  target: string
+): Promise<{ meta: ScheduleMeta; schedule: Schedule }> {
+  const schedules = await ctx.service.listSchedules(project)
+  const meta = findSchedule(schedules, target)
+  if (!meta) {
+    throw new Error(`Schedule "${target}" not found`)
+  }
+  const schedule = await ctx.service.readSchedule(project, meta.id)
+  if (!schedule) {
+    throw new Error(`Schedule "${target}" not found`)
+  }
+  return { meta, schedule }
 }
 
 export const tools: PTTool[] = [
@@ -810,6 +970,505 @@ export const tools: PTTool[] = [
         ok: !res.cancelled,
         cancelled: !!res.cancelled,
         answers: res.answers
+      })
+    }
+  },
+  {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'list_schedules',
+        description:
+          'List project schedules (schedules are project plans with tasks and dates). Provide a query to search for a specific schedule by id or name; omit to list all.',
+        parameters: {
+          type: 'object',
+          properties: {
+            project: {
+              type: 'string',
+              description: 'Project name. Defaults to the current project.'
+            },
+            query: {
+              type: 'string',
+              description: 'Optional search query for schedule id or name.'
+            }
+          }
+        }
+      }
+    },
+    async execute(args, ctx) {
+      const project = projectOf(args, ctx)
+      let schedules = await ctx.service.listSchedules(project)
+      const query = String(args.query ?? '').trim()
+      if (query) {
+        const found = findSchedule(schedules, query)
+        schedules = found ? [found] : []
+      }
+      return JSON.stringify({
+        ok: true,
+        project,
+        schedules: schedules.map((s) => ({
+          id: s.id,
+          name: s.name,
+          taskCount: s.taskCount,
+          updatedAt: s.updatedAt
+        }))
+      })
+    }
+  },
+  {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'read_schedule',
+        description:
+          'Read a full schedule (its task tree with status, owner, durations, plan/actual dates, %complete, notes). Each task carries a taskNo outline number (1, 1.1, 1.2, 2, ...) matching the editor, including children. Parent task values are rolled up from children. Match the schedule by id.',
+        parameters: {
+          type: 'object',
+          properties: {
+            project: {
+              type: 'string',
+              description: 'Project name. Defaults to the current project.'
+            },
+            schedule: {
+              type: 'string',
+              description: 'Schedule id'
+            }
+          },
+          required: ['schedule']
+        }
+      }
+    },
+    async execute(args, ctx) {
+      const project = projectOf(args, ctx)
+      try {
+        const { meta, schedule } = await requireSchedule(ctx, project, String(args.schedule ?? ''))
+        const calendar = await ctx.service.readCalendar(project)
+        const tasks = withTaskNo(rollupScheduleTasks(schedule.tasks, calendar), null)
+        return JSON.stringify({
+          ok: true,
+          project,
+          id: meta.id,
+          name: meta.name,
+          createdAt: schedule.createdAt,
+          updatedAt: schedule.updatedAt,
+          tasks
+        })
+      } catch (err) {
+        return JSON.stringify({ ok: false, error: (err as Error).message })
+      }
+    }
+  },
+  {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'create_schedule',
+        description:
+          'Create a new empty schedule in a project. Returns the new schedule id and name.',
+        parameters: {
+          type: 'object',
+          properties: {
+            project: {
+              type: 'string',
+              description: 'Project name. Defaults to the current project.'
+            },
+            name: { type: 'string', description: 'Schedule name' }
+          },
+          required: ['name']
+        }
+      }
+    },
+    async execute(args, ctx) {
+      const project = projectOf(args, ctx)
+      const name = String(args.name ?? '').trim()
+      if (!name) {
+        return JSON.stringify({ ok: false, error: 'name is required' })
+      }
+      try {
+        const meta = await ctx.service.createSchedule(project, name)
+        return JSON.stringify({ ok: true, project, id: meta.id, name: meta.name })
+      } catch (err) {
+        return JSON.stringify({ ok: false, error: (err as Error).message })
+      }
+    }
+  },
+  {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'update_schedule',
+        description: 'Rename a project schedule. Match the schedule by id.',
+        parameters: {
+          type: 'object',
+          properties: {
+            project: {
+              type: 'string',
+              description: 'Project name. Defaults to the current project.'
+            },
+            schedule: {
+              type: 'string',
+              description: 'Schedule id to rename'
+            },
+            name: { type: 'string', description: 'New schedule name' }
+          },
+          required: ['schedule', 'name']
+        }
+      }
+    },
+    async execute(args, ctx) {
+      const project = projectOf(args, ctx)
+      const name = String(args.name ?? '').trim()
+      if (!name) {
+        return JSON.stringify({ ok: false, error: 'name is required' })
+      }
+      try {
+        const { meta } = await requireSchedule(ctx, project, String(args.schedule ?? ''))
+        const updated = await ctx.service.renameSchedule(project, meta.id, name)
+        return JSON.stringify({
+          ok: true,
+          project,
+          id: updated.id,
+          name: updated.name
+        })
+      } catch (err) {
+        return JSON.stringify({ ok: false, error: (err as Error).message })
+      }
+    }
+  },
+  {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'add_task',
+        description:
+          'Add a task to a project schedule. Match the schedule by id. Optionally nest it under an existing parent task (match the parent by id, task number or title) and/or position it directly after an existing sibling task (match addAfter by id, task number or title). Plan dates follow the project working-day calendar: set both planStart and planEnd, or planStart + duration; the missing value is computed.',
+        parameters: {
+          type: 'object',
+          properties: {
+            project: {
+              type: 'string',
+              description: 'Project name. Defaults to the current project.'
+            },
+            schedule: { type: 'string', description: 'Schedule id' },
+            parent: {
+              type: 'string',
+              description:
+                'Optional parent task id, task number (e.g. 1.2) or title to nest this task under'
+            },
+            addAfter: {
+              type: 'string',
+              description:
+                'Optional task id, task number (e.g. 1.2) or title to insert this new task directly after. Positions within the sibling list chosen by `parent` (defaults to top level). If the task is not found in that list, the new task is appended.'
+            },
+            title: { type: 'string', description: 'Task title' },
+            owner: { type: 'string', description: 'Owner (optional)' },
+            duration: {
+              type: 'number',
+              description: 'Duration in working days (used with planStart to compute planEnd)'
+            },
+            planStart: {
+              type: 'string',
+              description: 'Plan start date (YYYY-MM-DD)'
+            },
+            planEnd: { type: 'string', description: 'Plan end date (YYYY-MM-DD)' },
+            actualStart: { type: 'string', description: 'Actual start date (YYYY-MM-DD)' },
+            actualEnd: { type: 'string', description: 'Actual end date (YYYY-MM-DD)' },
+            percentComplete: {
+              type: 'number',
+              description: 'Percent complete 0-100'
+            },
+            status: {
+              type: 'string',
+              description:
+                'Status: not-started, in-progress, completed, pending, on-hold (auto-derived from percent unless pending/on-hold)'
+            },
+            note: { type: 'string', description: 'Note (optional)' }
+          },
+          required: ['schedule', 'title']
+        }
+      }
+    },
+    async execute(args, ctx) {
+      const project = projectOf(args, ctx)
+      try {
+        const { schedule } = await requireSchedule(ctx, project, String(args.schedule ?? ''))
+        const calendar = await ctx.service.readCalendar(project)
+
+        const task = emptyTask()
+        const title = String(args.title ?? '').trim()
+        task.title = title
+        const owner = str(args.owner)
+        if (owner !== null) task.owner = owner
+        const note = str(args.note)
+        if (note !== null) task.note = note
+        const status = statusOf(args.status)
+        if (status) task.status = status
+        const percent = numOrNull(args.percentComplete)
+        if (percent !== null) task.percentComplete = clampPercent(percent)
+        const planStart = dateOrNull(args.planStart)
+        if (planStart) task.planStart = planStart
+        const planEnd = dateOrNull(args.planEnd)
+        if (planEnd) task.planEnd = planEnd
+        const duration = numOrNull(args.duration)
+        const explicitDuration = duration !== null
+        if (explicitDuration) task.duration = Math.max(1, Math.round(duration))
+        const actualStart = dateOrNull(args.actualStart)
+        if (actualStart) task.actualStart = actualStart
+        const actualEnd = dateOrNull(args.actualEnd)
+        if (actualEnd) task.actualEnd = actualEnd
+
+        const resolved = { ...task }
+        if (resolved.planStart && resolved.planEnd) {
+          resolved.duration = computeDuration(resolved.planStart, resolved.planEnd, calendar)
+        } else if (
+          explicitDuration &&
+          resolved.planStart &&
+          resolved.duration !== null &&
+          resolved.duration > 0
+        ) {
+          resolved.planEnd = computeEndDate(resolved.planStart, resolved.duration, calendar)
+        }
+
+        let tasks: ScheduleTask[]
+        const parent = args.parent ? findTask(schedule.tasks, String(args.parent)) : null
+        const afterId = args.addAfter
+          ? (findTask(schedule.tasks, String(args.addAfter))?.id ?? '')
+          : ''
+        if (parent) {
+          const children = insertAfterId(parent.children, afterId, resolved)
+          tasks = updateTaskNode(schedule.tasks, parent.id, (t) => ({ ...t, children }))
+        } else {
+          tasks = insertAfterId(schedule.tasks, afterId, resolved)
+        }
+        const saved = {
+          ...schedule,
+          tasks: rollupScheduleTasks(tasks, calendar),
+          updatedAt: Date.now()
+        }
+        await ctx.service.saveSchedule(project, saved)
+        return JSON.stringify({
+          ...scheduleSummary(saved, project),
+          taskId: resolved.id,
+          parent: parent ? parent.id : null
+        })
+      } catch (err) {
+        return JSON.stringify({ ok: false, error: (err as Error).message })
+      }
+    }
+  },
+  {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'update_task',
+        description:
+          'Update an existing task in a project schedule. Match the schedule by id and the task by id, task number (e.g. 1.2) or title. Only provided fields change. For plan dates/duration, the project working-day calendar applies: change one of planStart/planEnd/duration and the other is recomputed. For parent tasks, plan start/end, %complete and duration are derived from children — update the child tasks instead (plan-field edits on a parent are rejected). Parent status and %complete are derived from children. To move a task, set `parent` to the new parent task id, task number (e.g. 1.2) or title (omit or pass empty to move it to the top level); the task and its subtree move together and `addAfter` positions it within the new sibling list (defaults to append).',
+        parameters: {
+          type: 'object',
+          properties: {
+            project: {
+              type: 'string',
+              description: 'Project name. Defaults to the current project.'
+            },
+            schedule: { type: 'string', description: 'Schedule id' },
+            task: {
+              type: 'string',
+              description: 'Task id (uuid), task number (e.g. 1.2) or title to update'
+            },
+            parent: {
+              type: 'string',
+              description:
+                'Optional new parent task id, task number (e.g. 1.2) or title to move this task under. Omit or pass empty to move it to the top level. The task and its subtree move together. The new parent must not be the task itself or one of its descendants.'
+            },
+            addAfter: {
+              type: 'string',
+              description:
+                'Optional task id, task number (e.g. 1.2) or title to position this task directly after within the sibling list chosen by `parent` (defaults to top level). If the task is not found in that list, the task is appended.'
+            },
+            title: { type: 'string', description: 'New title' },
+            owner: { type: 'string', description: 'New owner' },
+            duration: {
+              type: 'number',
+              description: 'New duration in working days'
+            },
+            planStart: { type: 'string', description: 'New plan start date (YYYY-MM-DD)' },
+            planEnd: { type: 'string', description: 'New plan end date (YYYY-MM-DD)' },
+            actualStart: { type: 'string', description: 'New actual start date (YYYY-MM-DD)' },
+            actualEnd: { type: 'string', description: 'New actual end date (YYYY-MM-DD)' },
+            percentComplete: { type: 'number', description: 'New percent complete 0-100' },
+            status: {
+              type: 'string',
+              description: 'New status: not-started, in-progress, completed, pending, on-hold'
+            },
+            note: { type: 'string', description: 'New note' }
+          },
+          required: ['schedule', 'task']
+        }
+      }
+    },
+    async execute(args, ctx) {
+      const project = projectOf(args, ctx)
+      try {
+        const { schedule } = await requireSchedule(ctx, project, String(args.schedule ?? ''))
+        const target = String(args.task ?? '')
+        const task = findTask(schedule.tasks, target)
+        if (!task) {
+          return JSON.stringify({ ok: false, error: `Task "${target}" not found` })
+        }
+        if (
+          task.children.length > 0 &&
+          (args.planStart !== undefined ||
+            args.planEnd !== undefined ||
+            args.duration !== undefined)
+        ) {
+          return JSON.stringify({
+            ok: false,
+            error: `Task "${task.title}" is a parent task: plan start/end and duration are derived from its children. Update the child tasks instead.`
+          })
+        }
+        const calendar = await ctx.service.readCalendar(project)
+
+        const next = { ...task } as ScheduleTask
+        const title = str(args.title)
+        if (title !== null) next.title = title
+        const owner = str(args.owner)
+        if (owner !== null) next.owner = owner
+        const note = str(args.note)
+        if (note !== null) next.note = note
+        const status = statusOf(args.status)
+        if (status) next.status = status
+        const percent = numOrNull(args.percentComplete)
+        if (percent !== null) next.percentComplete = clampPercent(percent)
+        const planStart = dateOrNull(args.planStart)
+        if (planStart !== null) next.planStart = planStart
+        const planEnd = dateOrNull(args.planEnd)
+        if (planEnd !== null) next.planEnd = planEnd
+        const duration = numOrNull(args.duration)
+        if (duration !== null) next.duration = Math.max(1, Math.round(duration))
+        const actualStart = dateOrNull(args.actualStart)
+        if (actualStart !== null) next.actualStart = actualStart
+        const actualEnd = dateOrNull(args.actualEnd)
+        if (actualEnd !== null) next.actualEnd = actualEnd
+
+        const resolved = applyDateRule(task, next, calendar)
+
+        const parentArg = args.parent ? findTask(schedule.tasks, String(args.parent)) : null
+        if (parentArg && (parentArg.id === task.id || containsTask(task, parentArg.id))) {
+          return JSON.stringify({
+            ok: false,
+            error: `Cannot move task "${task.title}" under itself or one of its descendants.`
+          })
+        }
+        const afterId = args.addAfter
+          ? (findTask(schedule.tasks, String(args.addAfter))?.id ?? '')
+          : ''
+        const moveRequested = args.parent !== undefined || args.addAfter !== undefined
+
+        let tasks: ScheduleTask[]
+        if (moveRequested) {
+          tasks = removeTaskNode(schedule.tasks, task.id)
+          if (parentArg) {
+            const parentNode = findTask(tasks, parentArg.id)
+            const children = insertAfterId(parentNode!.children, afterId, resolved)
+            tasks = updateTaskNode(tasks, parentNode!.id, (t) => ({ ...t, children }))
+          } else {
+            tasks = insertAfterId(tasks, afterId, resolved)
+          }
+        } else {
+          tasks = updateTaskNode(schedule.tasks, task.id, () => resolved)
+        }
+        const saved = {
+          ...schedule,
+          tasks: rollupScheduleTasks(tasks, calendar),
+          updatedAt: Date.now()
+        }
+        await ctx.service.saveSchedule(project, saved)
+        return JSON.stringify({
+          ...scheduleSummary(saved, project),
+          updated: { id: task.id, title: resolved.title },
+          parent: parentArg ? parentArg.id : null
+        })
+      } catch (err) {
+        return JSON.stringify({ ok: false, error: (err as Error).message })
+      }
+    }
+  },
+  {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'set_calendar',
+        description:
+          'Set the project working-day calendar (week + holidays) used for plan start/end computation. Provide weekStart/weekEnd as weekday numbers (0=Sun..6=Sat; e.g. Monday-Friday = 1..5). holidays replaces the full list; addHolidays/removeHolidays adjust it. All schedules are re-rolled so parent durations reflect the new calendar.',
+        parameters: {
+          type: 'object',
+          properties: {
+            project: {
+              type: 'string',
+              description: 'Project name. Defaults to the current project.'
+            },
+            weekStart: { type: 'number', description: 'First working weekday (0=Sun..6=Sat)' },
+            weekEnd: { type: 'number', description: 'Last working weekday (0=Sun..6=Sat)' },
+            holidays: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Replace the full holiday list (YYYY-MM-DD)'
+            },
+            addHolidays: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Dates to add to the holiday list (YYYY-MM-DD)'
+            },
+            removeHolidays: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Dates to remove from the holiday list (YYYY-MM-DD)'
+            }
+          }
+        }
+      }
+    },
+    async execute(args, ctx) {
+      const project = projectOf(args, ctx)
+      const calendar = await ctx.service.readCalendar(project)
+      const weekStart = numOrNull(args.weekStart)
+      if (weekStart !== null && weekStart >= 0 && weekStart <= 6) calendar.weekStart = weekStart
+      const weekEnd = numOrNull(args.weekEnd)
+      if (weekEnd !== null && weekEnd >= 0 && weekEnd <= 6) calendar.weekEnd = weekEnd
+      if (Array.isArray(args.holidays)) {
+        calendar.holidays = [
+          ...new Set(args.holidays.map((h) => dateOrNull(h)).filter((h): h is string => h !== null))
+        ]
+      }
+      for (const h of Array.isArray(args.addHolidays) ? args.addHolidays : []) {
+        const d = dateOrNull(h)
+        if (d && !calendar.holidays.includes(d)) calendar.holidays.push(d)
+      }
+      for (const h of Array.isArray(args.removeHolidays) ? args.removeHolidays : []) {
+        const d = dateOrNull(h)
+        if (d) calendar.holidays = calendar.holidays.filter((x) => x !== d)
+      }
+      calendar.holidays.sort()
+      await ctx.service.saveCalendar(project, calendar)
+      const metas = await ctx.service.listSchedules(project)
+      let reRolled = 0
+      for (const meta of metas) {
+        const schedule = await ctx.service.readSchedule(project, meta.id)
+        if (!schedule) continue
+        await ctx.service.saveSchedule(project, {
+          ...schedule,
+          tasks: rollupScheduleTasks(schedule.tasks, calendar),
+          updatedAt: Date.now()
+        })
+        reRolled++
+      }
+      return JSON.stringify({
+        ok: true,
+        project,
+        weekStart: calendar.weekStart,
+        weekEnd: calendar.weekEnd,
+        holidays: calendar.holidays,
+        reRolledSchedules: reRolled
       })
     }
   }

@@ -79,6 +79,7 @@ export function PromptModal({
   placeholder,
   initialValue = '',
   submitLabel = 'OK',
+  error,
   onClose,
   onSubmit
 }: {
@@ -86,6 +87,7 @@ export function PromptModal({
   placeholder?: string
   initialValue?: string
   submitLabel?: string
+  error?: string | null
   onClose: () => void
   onSubmit: (value: string) => void
 }): React.JSX.Element {
@@ -103,6 +105,7 @@ export function PromptModal({
         placeholder={placeholder}
         autoFocus
       />
+      {error && <p className="form-error">{error}</p>}
       <div className="modal-actions">
         <button className="btn" onClick={onClose}>
           Cancel

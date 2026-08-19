@@ -19,7 +19,7 @@ export interface Todo {
   done: boolean
 }
 
-export type Tab = 'notes' | 'todo' | 'modules'
+export type Tab = 'notes' | 'todo' | 'modules' | 'planner'
 
 export interface AIProviderConfig {
   baseUrl: string
@@ -33,6 +33,15 @@ export interface StorageSettings {
   disabledModules?: string[]
   /** User enable/disable choices for builtin (app-shipped, read-only) skills, keyed by skill name. */
   builtinSkillOverrides?: Record<string, boolean>
+}
+
+/** Persisted main-window geometry restored on next launch. */
+export interface WindowState {
+  x?: number
+  y?: number
+  width: number
+  height: number
+  isMaximized?: boolean
 }
 
 /** A registered module's availability state shown in Settings ▸ Modules. */
@@ -332,3 +341,14 @@ export interface AiTraceFile {
   /** Absolute path on disk (populated when read back via IPC). */
   path?: string
 }
+
+// ---- Planner (project schedules + calendar) ----
+
+export type {
+  ProjectCalendar,
+  RolledUpTask,
+  Schedule,
+  ScheduleMeta,
+  ScheduleStatus,
+  ScheduleTask
+} from './planner'

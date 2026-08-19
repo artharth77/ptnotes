@@ -1,9 +1,10 @@
-import { app, shell, BrowserWindow, Menu } from 'electron'
+import { app, shell, BrowserWindow, Menu, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { PTNotesService } from './service/PTNotesService'
 import { registerProjectIpc, registerNoteIpc, registerTodoIpc, registerChatIpc } from './ipc'
+import { registerPlannerIpc } from './ipc/planner'
 import { registerAiIpc, createSessionRegistry } from './ipc/ai'
 import { registerFilesIpc } from './ipc/files'
 import { registerSettingsIpc } from './ipc/settings'
@@ -22,10 +23,14 @@ import { createDocxModule } from './modules/docx'
 import { createSubagentModule } from './modules/subagent'
 import { SettingsStore } from './settings'
 import { AIConfigStore } from './ai/config'
+import { WindowStateStore } from './windowState'
+import type { WindowState } from '@shared/types'
 
 app.setName('PTNotes')
 
 let mainWindow: BrowserWindow | null = null
+let plannerEditActive = false
+let windowStateStore: WindowStateStore
 
 function buildAppMenu(): Menu {
   const isMac = process.platform === 'darwin'
@@ -91,10 +96,18 @@ function openExternalSafely(url: string): void {
   }
 }
 
-function createWindow(): void {
+function createWindow(windowState: WindowState): void {
+  const state = windowState.isMaximized
+    ? { width: windowState.width, height: windowState.height }
+    : {
+        x: windowState.x,
+        y: windowState.y,
+        width: windowState.width,
+        height: windowState.height
+      }
+
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 820,
+    ...state,
     minWidth: 900,
     minHeight: 600,
     show: false,
@@ -107,6 +120,22 @@ function createWindow(): void {
       contextIsolation: true
     }
   })
+
+  if (windowState.isMaximized) {
+    mainWindow.maximize()
+  }
+
+  const saveWindowState = (): void => {
+    if (!mainWindow) return
+    if (mainWindow.isDestroyed()) return
+    const bounds = mainWindow.getNormalBounds()
+    void windowStateStore.save({
+      ...bounds,
+      isMaximized: mainWindow.isMaximized()
+    })
+  }
+
+  mainWindow.on('close', saveWindowState)
 
   mainWindow.on('ready-to-show', () => {
     mainWindow?.show()
@@ -126,6 +155,23 @@ function createWindow(): void {
     }
   })
 
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (!plannerEditActive) return
+    const key = input.key.toLowerCase()
+    const mod = input.meta || input.control
+    const isUndo = mod && !input.alt && !input.shift && key === 'z'
+    const isRedo =
+      (mod && !input.alt && input.shift && key === 'z') ||
+      (key === 'y' && input.control && !input.meta && !input.alt && !input.shift)
+    if (isUndo) {
+      event.preventDefault()
+      mainWindow?.webContents.send('planner:undo-redo', { redo: false })
+    } else if (isRedo) {
+      event.preventDefault()
+      mainWindow?.webContents.send('planner:undo-redo', { redo: true })
+    }
+  })
+
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
@@ -137,6 +183,10 @@ app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.ptnotes.app')
 
   Menu.setApplicationMenu(buildAppMenu())
+
+  ipcMain.on('planner:set-edit-active', (_e, active: boolean) => {
+    plannerEditActive = !!active
+  })
 
   if (process.platform === 'darwin' && !app.isPackaged && app.dock) {
     app.dock.setIcon(icon)
@@ -182,16 +232,19 @@ app.whenReady().then(async () => {
   registerNoteIpc(service)
   registerTodoIpc(service)
   registerChatIpc(service)
+  registerPlannerIpc(service)
   registerAiIpc(registry, configStore, service)
   registerFilesIpc(service, registry, configStore)
   registerSettingsIpc(service, settingsStore)
   registerSkillsIpc(service)
   registerModulesIpc(moduleManager, settingsStore, moduleRegistry)
 
-  createWindow()
+  windowStateStore = new WindowStateStore()
+  const windowState = await windowStateStore.load()
+  createWindow(windowState)
 
   app.on('activate', function () {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) createWindow({ width: 1280, height: 820 })
   })
 })
 
