@@ -5,10 +5,14 @@ import {
   mdiArrowRightCircleOutline,
   mdiArrowUpCircleOutline,
   mdiCalendarMonth,
+  mdiChartTimeline,
   mdiChevronDown,
   mdiChevronRight,
   mdiContentCopy,
   mdiContentCut,
+  mdiGrid,
+  mdiMagnifyMinus,
+  mdiMagnifyPlus,
   mdiPencil,
   mdiPlaylistPlus,
   mdiPlus,
@@ -26,7 +30,15 @@ import { friendlyError } from '../errors'
 import { CalendarModal } from './CalendarModal'
 import { PlannerColumnModal } from './PlannerColumnModal'
 import {
+  GanttChart,
+  GANTT_DAY_WIDTH_DEFAULT,
+  GANTT_DAY_WIDTH_MAX,
+  GANTT_DAY_WIDTH_MIN
+} from './GanttChart'
+import {
   applyDateRule,
+  computeDuration,
+  computeEndDate,
   countTasks,
   defaultCalendar,
   deriveTaskNo,
@@ -92,9 +104,9 @@ const COL_WIDTHS: Record<PlannerColumnKey, string> = {
 }
 
 function colTemplate(visible: Set<PlannerColumnKey>): string {
-  const cols: string[] = ['28px']
+  const cols: string[] = ['28px', COL_WIDTHS.no, COL_WIDTHS.title]
   for (const c of COLUMNS) {
-    if (visible.has(c.key)) cols.push(COL_WIDTHS[c.key])
+    if (c.key !== 'no' && c.key !== 'title' && visible.has(c.key)) cols.push(COL_WIDTHS[c.key])
   }
   return cols.join(' ')
 }
@@ -343,6 +355,8 @@ export function PlannerEditor(): React.JSX.Element {
 
   const [calendarOpen, setCalendarOpen] = useState(false)
   const [columnsOpen, setColumnsOpen] = useState(false)
+  const [view, setView] = useState<'table' | 'gantt'>('table')
+  const [ganttDayWidth, setGanttDayWidth] = useState(GANTT_DAY_WIDTH_DEFAULT)
   const [renaming, setRenaming] = useState(false)
   const [renameError, setRenameError] = useState('')
   const [confirmDelete, setConfirmDelete] = useState<{ tasks: ScheduleTask[] } | null>(null)
@@ -363,10 +377,14 @@ export function PlannerEditor(): React.JSX.Element {
   if (schedule?.id !== prevScheduleId) {
     setPrevScheduleId(schedule?.id)
     setVisibleCols(initVisibleCols(schedule?.columnVisibility))
+    setView('table')
   }
   const [clipboard, setClipboard] = useState<ScheduleTask[]>([])
   const [clipboardMode, setClipboardMode] = useState<'copy' | 'cut' | null>(null)
   const gridRef = useRef<HTMLDivElement>(null)
+  const gridScrollRef = useRef<HTMLDivElement>(null)
+  const ganttBodyRef = useRef<HTMLDivElement>(null)
+  const pendingScrollTop = useRef<number | null>(null)
   const statusMenuRef = useRef<HTMLDivElement>(null)
   const pendingFocus = useRef<{ id: string; col: string } | null>(null)
   const saveTimer = useRef<number | null>(null)
@@ -525,6 +543,23 @@ export function PlannerEditor(): React.JSX.Element {
     rearmEditSession()
   }
 
+  function switchView(next: 'table' | 'gantt'): void {
+    if (next === view) return
+    endEditSession()
+    const current = useAppStore.getState().scheduleContent
+    if (current) useAppStore.getState().plannerClearHistory(current.id)
+    const outgoing = view === 'table' ? gridScrollRef.current : ganttBodyRef.current
+    pendingScrollTop.current = outgoing ? outgoing.scrollTop : 0
+    setView(next)
+  }
+
+  useEffect(() => {
+    if (pendingScrollTop.current === null) return
+    const target = view === 'table' ? gridScrollRef.current : ganttBodyRef.current
+    if (target) target.scrollTop = pendingScrollTop.current
+    pendingScrollTop.current = null
+  }, [view])
+
   useEffect(() => {
     return () => {
       if (saveTimer.current !== null) {
@@ -608,28 +643,23 @@ export function PlannerEditor(): React.JSX.Element {
             <span className="planner-toggle-spacer" />
           )}
         </div>
-        {visibleCols.has('no') && <div className="planner-col-no planner-cell">{no}</div>}
-        {visibleCols.has('title') && (
-          <div
-            className="planner-col-title planner-cell"
-            style={{ left: visibleCols.has('no') ? '74px' : '28px' }}
-          >
-            <input
-              className="planner-input"
-              data-cell={task.id}
-              data-col="title"
-              style={{
-                paddingLeft: depth * 14,
-                fontWeight: isParent ? 600 : undefined
-              }}
-              value={task.title}
-              placeholder={isParent ? 'Group task' : 'Task title'}
-              onFocus={startEditSession}
-              onBlur={endEditSession}
-              onChange={(e) => editField(sc, task.id, 'title', e.target.value)}
-            />
-          </div>
-        )}
+        <div className="planner-col-no planner-cell">{no}</div>
+        <div className="planner-col-title planner-cell" style={{ left: '74px' }}>
+          <input
+            className="planner-input"
+            data-cell={task.id}
+            data-col="title"
+            style={{
+              paddingLeft: depth * 14,
+              fontWeight: isParent ? 600 : undefined
+            }}
+            value={task.title}
+            placeholder={isParent ? 'Group task' : 'Task title'}
+            onFocus={startEditSession}
+            onBlur={endEditSession}
+            onChange={(e) => editField(sc, task.id, 'title', e.target.value)}
+          />
+        </div>
         {visibleCols.has('status') && (
           <div className="planner-col-status planner-cell">
             <button
@@ -861,6 +891,52 @@ export function PlannerEditor(): React.JSX.Element {
       }
       return next
     })
+  }
+
+  function handleGanttResize(
+    id: string,
+    start: string | null,
+    end: string | null,
+    mode: 'start' | 'end' | 'move'
+  ): void {
+    editTask(sc, id, (prev) => {
+      const next = { ...prev }
+      if (mode === 'start') {
+        next.planStart = start
+        if (next.planStart && next.planEnd) {
+          next.duration = computeDuration(next.planStart, next.planEnd, cal)
+        }
+      } else if (mode === 'end') {
+        next.planEnd = end
+        if (next.planStart && next.planEnd) {
+          next.duration = computeDuration(next.planStart, next.planEnd, cal)
+        }
+      } else if (mode === 'move') {
+        next.planStart = start
+        next.planEnd = end
+      }
+      return next
+    })
+  }
+
+  function handleGanttSetDates(id: string, date: string): void {
+    editTask(sc, id, (prev) => {
+      const duration = prev.duration && prev.duration > 0 ? prev.duration : 1
+      return {
+        ...prev,
+        duration,
+        planStart: date,
+        planEnd: computeEndDate(date, duration, cal)
+      }
+    })
+  }
+
+  function handleGanttClearPlan(id: string): void {
+    editTask(sc, id, (prev) => ({
+      ...prev,
+      planStart: null,
+      planEnd: null
+    }))
   }
 
   function setTaskStatusMode(id: string, mode: 'auto' | 'pending' | 'on-hold'): void {
@@ -1234,6 +1310,7 @@ export function PlannerEditor(): React.JSX.Element {
     setNumberDrafts(next)
   }
 
+  const ganttMode = view === 'gantt'
   const deleteTotal = confirmDelete ? confirmDelete.tasks.reduce((n, t) => n + countTasks(t), 0) : 0
 
   return (
@@ -1274,13 +1351,18 @@ export function PlannerEditor(): React.JSX.Element {
         </div>
         <span className="planner-toolbar-divider" />
         <div className="planner-toolbar-group">
-          <button className="icon-btn" title="New task" onClick={handleNewTask}>
+          <button
+            className="icon-btn"
+            title="New task"
+            disabled={ganttMode}
+            onClick={handleNewTask}
+          >
             <MdiIcon path={mdiPlus} size={16} />
           </button>
           <button
             className="icon-btn"
             title="New subtask"
-            disabled={!lastSelectedId()}
+            disabled={ganttMode || !lastSelectedId()}
             onClick={handleNewSubtask}
           >
             <MdiIcon path={mdiPlaylistPlus} size={16} />
@@ -1288,7 +1370,7 @@ export function PlannerEditor(): React.JSX.Element {
           <button
             className="icon-btn danger"
             title="Delete selected"
-            disabled={selected.size === 0}
+            disabled={ganttMode || selected.size === 0}
             onClick={handleDeleteSelected}
           >
             <MdiIcon path={mdiTrashCan} size={16} />
@@ -1299,7 +1381,7 @@ export function PlannerEditor(): React.JSX.Element {
           <button
             className="icon-btn"
             title="Copy"
-            disabled={selected.size === 0}
+            disabled={ganttMode || selected.size === 0}
             onClick={handleCopy}
           >
             <MdiIcon path={mdiContentCopy} size={16} />
@@ -1307,7 +1389,7 @@ export function PlannerEditor(): React.JSX.Element {
           <button
             className="icon-btn"
             title="Cut"
-            disabled={selected.size === 0}
+            disabled={ganttMode || selected.size === 0}
             onClick={handleCut}
           >
             <MdiIcon path={mdiContentCut} size={16} />
@@ -1315,7 +1397,7 @@ export function PlannerEditor(): React.JSX.Element {
           <button
             className="icon-btn"
             title="Paste after"
-            disabled={clipboard.length === 0}
+            disabled={ganttMode || clipboard.length === 0}
             onClick={handlePasteAfter}
           >
             <MdiIcon path={mdiTableRowPlusAfter} size={16} />
@@ -1323,7 +1405,7 @@ export function PlannerEditor(): React.JSX.Element {
           <button
             className="icon-btn"
             title="Paste before"
-            disabled={clipboard.length === 0}
+            disabled={ganttMode || clipboard.length === 0}
             onClick={handlePasteBefore}
           >
             <MdiIcon path={mdiTableRowPlusBefore} size={16} />
@@ -1334,7 +1416,7 @@ export function PlannerEditor(): React.JSX.Element {
           <button
             className="icon-btn"
             title="Move to child level"
-            disabled={!canIndent}
+            disabled={ganttMode || !canIndent}
             onClick={handleIndent}
           >
             <MdiIcon path={mdiArrowRightCircleOutline} size={16} />
@@ -1342,18 +1424,23 @@ export function PlannerEditor(): React.JSX.Element {
           <button
             className="icon-btn"
             title="Move to parent level"
-            disabled={!canOutdent}
+            disabled={ganttMode || !canOutdent}
             onClick={handleOutdent}
           >
             <MdiIcon path={mdiArrowLeftCircleOutline} size={16} />
           </button>
-          <button className="icon-btn" title="Move up" disabled={!canMoveUp} onClick={handleMoveUp}>
+          <button
+            className="icon-btn"
+            title="Move up"
+            disabled={ganttMode || !canMoveUp}
+            onClick={handleMoveUp}
+          >
             <MdiIcon path={mdiArrowUpCircleOutline} size={16} />
           </button>
           <button
             className="icon-btn"
             title="Move down"
-            disabled={!canMoveDown}
+            disabled={ganttMode || !canMoveDown}
             onClick={handleMoveDown}
           >
             <MdiIcon path={mdiArrowDownCircleOutline} size={16} />
@@ -1361,10 +1448,20 @@ export function PlannerEditor(): React.JSX.Element {
         </div>
         <span className="planner-toolbar-divider" />
         <div className="planner-toolbar-group">
-          <button className="icon-btn" title="View columns" onClick={() => setColumnsOpen(true)}>
+          <button
+            className="icon-btn"
+            title="View columns"
+            disabled={ganttMode}
+            onClick={() => setColumnsOpen(true)}
+          >
             <MdiIcon path={mdiViewColumnOutline} size={16} />
           </button>
-          <button className="icon-btn" title="Calendar" onClick={() => setCalendarOpen(true)}>
+          <button
+            className="icon-btn"
+            title="Calendar"
+            disabled={ganttMode}
+            onClick={() => setCalendarOpen(true)}
+          >
             <MdiIcon path={mdiCalendarMonth} size={16} />
           </button>
         </div>
@@ -1378,58 +1475,96 @@ export function PlannerEditor(): React.JSX.Element {
             </button>
           </div>
         ) : (
-          <div className="planner-grid-scroll">
-            <div
-              className="planner-grid"
-              ref={gridRef}
-              onKeyDown={handleGridKeyDown}
-              onFocusCapture={handleGridFocusCapture}
-            >
-              <div className="planner-grid-head" style={{ gridTemplateColumns: template }}>
-                <div className="planner-col-toggle planner-cell"></div>
-                {visibleCols.has('no') && <div className="planner-col-no planner-cell">No.</div>}
-                {visibleCols.has('title') && (
-                  <div
-                    className="planner-col-title planner-cell"
-                    style={{ left: visibleCols.has('no') ? '74px' : '28px' }}
-                  >
+          <div className="planner-grid-scroll" ref={gridScrollRef}>
+            {view === 'table' ? (
+              <div
+                className="planner-grid"
+                ref={gridRef}
+                onKeyDown={handleGridKeyDown}
+                onFocusCapture={handleGridFocusCapture}
+              >
+                <div className="planner-grid-head" style={{ gridTemplateColumns: template }}>
+                  <div className="planner-col-toggle planner-cell"></div>
+                  <div className="planner-col-no planner-cell">No.</div>
+                  <div className="planner-col-title planner-cell" style={{ left: '74px' }}>
                     Title
                   </div>
-                )}
-                {visibleCols.has('status') && (
-                  <div className="planner-col-status planner-cell">Status</div>
-                )}
-                {visibleCols.has('owner') && (
-                  <div className="planner-col-owner planner-cell">Owner</div>
-                )}
-                {visibleCols.has('duration') && (
-                  <div className="planner-col-num planner-cell">Dur.</div>
-                )}
-                {visibleCols.has('planStart') && (
-                  <div className="planner-col-date planner-cell">Plan Start</div>
-                )}
-                {visibleCols.has('planEnd') && (
-                  <div className="planner-col-date planner-cell">Plan End</div>
-                )}
-                {visibleCols.has('actualStart') && (
-                  <div className="planner-col-date planner-cell">Actual Start</div>
-                )}
-                {visibleCols.has('actualEnd') && (
-                  <div className="planner-col-date planner-cell">Actual End</div>
-                )}
-                {visibleCols.has('percent') && (
-                  <div className="planner-col-num planner-cell">%</div>
-                )}
-                {visibleCols.has('note') && (
-                  <div className="planner-col-note planner-cell">Note</div>
-                )}
+                  {visibleCols.has('status') && (
+                    <div className="planner-col-status planner-cell">Status</div>
+                  )}
+                  {visibleCols.has('owner') && (
+                    <div className="planner-col-owner planner-cell">Owner</div>
+                  )}
+                  {visibleCols.has('duration') && (
+                    <div className="planner-col-num planner-cell">Dur.</div>
+                  )}
+                  {visibleCols.has('planStart') && (
+                    <div className="planner-col-date planner-cell">Plan Start</div>
+                  )}
+                  {visibleCols.has('planEnd') && (
+                    <div className="planner-col-date planner-cell">Plan End</div>
+                  )}
+                  {visibleCols.has('actualStart') && (
+                    <div className="planner-col-date planner-cell">Actual Start</div>
+                  )}
+                  {visibleCols.has('actualEnd') && (
+                    <div className="planner-col-date planner-cell">Actual End</div>
+                  )}
+                  {visibleCols.has('percent') && (
+                    <div className="planner-col-num planner-cell">%</div>
+                  )}
+                  {visibleCols.has('note') && (
+                    <div className="planner-col-note planner-cell">Note</div>
+                  )}
+                </div>
+                <div className="planner-grid-body">{renderTaskTree(sc.tasks, null, 0)}</div>
               </div>
-              <div className="planner-grid-body">{renderTaskTree(sc.tasks, null, 0)}</div>
-            </div>
+            ) : (
+              <GanttChart
+                tasks={sc.tasks}
+                calendar={cal}
+                collapsed={collapsed}
+                dayWidth={ganttDayWidth}
+                onToggle={toggleCollapse}
+                onResize={handleGanttResize}
+                onSetDates={handleGanttSetDates}
+                onClearPlan={handleGanttClearPlan}
+                bodyRef={ganttBodyRef}
+              />
+            )}
           </div>
         )}
       </div>
-
+      <div className="planner-statusbar">
+        {ganttMode && (
+          <div className="planner-gantt-zoom" title="Gantt zoom">
+            <MdiIcon path={mdiMagnifyMinus} size={14} />
+            <input
+              type="range"
+              min={GANTT_DAY_WIDTH_MIN}
+              max={GANTT_DAY_WIDTH_MAX}
+              step={4}
+              value={ganttDayWidth}
+              onChange={(e) => setGanttDayWidth(Number(e.target.value))}
+            />
+            <MdiIcon path={mdiMagnifyPlus} size={14} />
+          </div>
+        )}
+        <div className="planner-view-toggle">
+          <button
+            className={`view-btn ${view === 'table' ? 'active' : ''}`}
+            onClick={() => switchView('table')}
+          >
+            <MdiIcon path={mdiGrid} size={14} /> Grid View
+          </button>
+          <button
+            className={`view-btn ${view === 'gantt' ? 'active' : ''}`}
+            onClick={() => switchView('gantt')}
+          >
+            <MdiIcon path={mdiChartTimeline} size={14} /> Gantt Chart View
+          </button>
+        </div>
+      </div>
       {statusMenu && (
         <>
           <div className="menu-overlay" onClick={() => setStatusMenu(null)} />
@@ -1504,6 +1639,7 @@ export function PlannerEditor(): React.JSX.Element {
         <PlannerColumnModal
           columns={COLUMNS}
           visible={visibleCols}
+          disabledKeys={new Set(['no', 'title'])}
           onToggle={(key) => {
             const next = new Set(visibleCols)
             if (next.has(key)) next.delete(key)
@@ -1513,6 +1649,8 @@ export function PlannerEditor(): React.JSX.Element {
           onClose={() => {
             const visibility = { ...(sc.columnVisibility ?? {}) }
             for (const c of COLUMNS) visibility[c.key] = visibleCols.has(c.key)
+            visibility.no = true
+            visibility.title = true
             commit(sc, sc.tasks, { columnVisibility: visibility })
             setColumnsOpen(false)
           }}

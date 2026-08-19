@@ -173,7 +173,8 @@ src/
 │   │   │   ├── NoteList.tsx         # Notes tab
 │   │   │   ├── TodoPanel.tsx        # Todo tab (checkboxes + progress)
 │   │   │   ├── PlannerPanel.tsx     # Planner tab (schedule list + create/rename/delete)
-│   │   │   ├── PlannerEditor.tsx    # schedule grid editor (hierarchical tasks, rollups, autosave, undo/redo history)
+│   │   │   ├── PlannerEditor.tsx    # schedule grid editor (hierarchical tasks, rollups, autosave, undo/redo history) + view toggle
+│   │   │   ├── GanttChart.tsx       # planner Gantt view (day-grid timeline, draggable bars, bar popup)
 │   │   │   ├── CalendarModal.tsx    # project working-day calendar editor (week + holidays)
 │   │   │   ├── MarkdownEditor.tsx   # TipTap WYSIWYG + markdown sync + auto-save
 │   │   │   ├── MarkdownContent.tsx  # react-markdown chat rendering + note:/skill: link handling
@@ -350,8 +351,8 @@ ChatPanel (renderer) ──send──▶ Main process
 | `read_schedule`   | full task tree with rolled-up parent values; match schedule by id or name                                                                                 |
 | `create_schedule` | new empty schedule; returns id + name                                                                                                                     |
 | `update_schedule` | rename a schedule (match by id or name)                                                                                                                   |
-| `add_task`        | add a task (optional parent nesting); planStart+planEnd or planStart+duration — the missing value is computed                                             |
-| `update_task`     | update a task's fields (match by id, task number or title); plan date edits re-derive the other value (end-date-fixed); plan-field edits on parents are rejected (derived from children); optional `parent`/`addAfter` moves the task (and its subtree) to a new parent/position — cycle-safe |
+| `add_task`        | add a task (optional parent nesting); planStart+planEnd or planStart+duration — the missing value is computed; `addAfter` without `parent` infers the parent (sibling of the matched task)              |
+| `update_task`     | update a task's fields (match by id, task number or title); plan date edits re-derive the other value (end-date-fixed); plan-field edits on parents are rejected (derived from children); `parent`/`addAfter` moves the task (and its subtree) — `addAfter` without `parent` infers the parent (sibling of the matched task), explicit empty `parent` → top level, cycle-safe |
 | `set_calendar`    | set week + holidays; re-rolls all schedules so parent durations reflect the new calendar                                                                  |
 
 ### PDF attachments (drag & drop into chat)
@@ -501,6 +502,42 @@ JSON in `<project>/planner/<slug>.json`; the whole feature is pure data — no m
   text fields keep their own undo behavior.
 - 4th sidebar tab (`mdiChartTimeline`) → PlannerPanel (schedule list) → PlannerEditor (keyed by
   `activeScheduleId`); an empty-state "New Schedule" flow otherwise.
+- **No. and Title are always visible**: both columns are always rendered (row/header/`colTemplate`
+  guards removed) and are checked + disabled in the column modal (`disabledKeys`), so the grid
+  always has a stable identity + label to anchor the Gantt view.
+
+### Gantt view (GanttChart)
+
+- Bottom status bar with a segmented **Grid View** / **Gantt Chart View** toggle. The view is
+  component-local state (session-only — resets to Grid on schedule change); switching carries the
+  scroll position between the grid and the Gantt body and clears that schedule's undo/redo history
+  (`plannerClearHistory`). In Gantt mode the toolbar's add/delete/copy/indent/move, columns, and
+  calendar buttons are disabled, and a day-width zoom slider (16–32 px, step 4) appears in the
+  status bar.
+- `GanttChart` renders the task tree itself (recursive `renderTree`, deriving No. numbering and
+  honoring the shared `collapsed` set — consistent with the table view). The timeline
+  (`buildTimeline`) auto-fits min `planStart` → max `planEnd` (+7-day padding, fallback today) and
+  is rebuilt only when tasks change. Fixed left columns: collapse toggle (28px) + No. (46px) +
+  Title (220px), indented by depth. Header: month band + a floating "current month" label that
+  follows horizontal scroll, and a day axis (weekday + day number) where non-working days
+  (`isWorkingDay`) are shaded gray and today is highlighted.
+- **Bars**: leaves are draggable, parents are not (distinct color + `v───v` end arrows). Leaf bars
+  expose left/right edge handles; pointer drags snap to whole days (`clampDelta` keeps the bar in
+  the timeline and start ≤ end), preview locally in `drag` state (the store is untouched until
+  release), and commit once on release with a non-zero delta via
+  `onResize(id, start, end, mode)`:
+  - `start` — sets `planStart`, keeps `planEnd` fixed, recomputes `duration` (deliberately **not**
+    `applyDateRule`, which would preserve duration);
+  - `end` — sets `planEnd`, keeps `planStart` fixed, recomputes `duration`;
+  - `move` — shifts both dates by the same day delta (duration preserved).
+- **Bar popup**: right-click any bar (parent or leaf) for No., Title, Plan Start, Plan End, and
+  Duration (working days); closes on outside click / Escape / close button. Leaves with dates get
+  a **Clear Plan** action (`planStart`/`planEnd` → null).
+- **Day-cell click**: for date-less leaves, clicking a day cell sets `planStart` to that day and
+  `planEnd = computeEndDate(date, duration, calendar)` (duration defaults to 1); settable cells
+  show a hover hint, and date-less leaf titles are dimmed.
+- All Gantt edits route through the editor's `editTask`/`commit`, so rollup, undo/redo, and
+  debounce autosave behave exactly as in the table view.
 
 ## Notes & caveats
 
