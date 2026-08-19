@@ -13,6 +13,7 @@
   --accent-soft: #e8edff;
   --danger: #e5484d;
   --ok: #30a46c;
+  --warn: #d9a024;
   --shadow: 0 6px 24px rgba(15, 23, 42, 0.12);
 }
 
@@ -30,6 +31,7 @@
     --accent-soft: #232a45;
     --danger: #ff6369;
     --ok: #4cc38a;
+    --warn: #e6b33f;
     --shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
   }
 }
@@ -4186,6 +4188,22 @@ body {
   color: var(--text-dim);
 }
 
+.planner-input[type='date'].planner-date-empty {
+  color: var(--text-faint);
+}
+
+.planner-input[type='date'].planner-date-empty:hover {
+  color: var(--text-dim);
+}
+
+.planner-value-empty {
+  color: var(--text-faint);
+}
+
+.planner-value-empty:hover {
+  color: var(--text-dim);
+}
+
 .planner-input[type='date']::-webkit-calendar-picker-indicator {
   opacity: 0;
   pointer-events: none;
@@ -4203,25 +4221,51 @@ body {
   width: 48px;
 }
 
-.planner-status-select {
+.planner-status-label {
   width: 100%;
   box-sizing: border-box;
   border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
-  color: var(--text);
+  color: var(--text-dim);
   font-size: 12px;
-  padding: 3px 4px;
+  font-weight: 500;
+  padding: 3px 6px;
   cursor: pointer;
+  text-align: left;
 }
 
-.planner-status-select:hover {
+.planner-status-label:hover {
   background: var(--bg-hover);
+  color: var(--text);
 }
 
-.planner-status-select:focus {
-  outline: none;
-  border-color: var(--accent);
+.planner-status-label.planner-status-manual {
+  color: var(--accent);
+}
+
+.planner-status-label.planner-status-manual:hover {
+  color: var(--accent-hover);
+}
+
+.planner-status-label.planner-status-inprogress {
+  color: var(--warn);
+}
+
+.planner-status-label.planner-status-inprogress:hover {
+  color: var(--warn);
+}
+
+.planner-status-label.planner-status-completed {
+  color: var(--ok);
+}
+
+.planner-status-label.planner-status-completed:hover {
+  color: var(--ok);
+}
+
+.planner-status-menu {
+  min-width: 130px;
 }
 
 .column-list {

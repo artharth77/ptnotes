@@ -107,9 +107,18 @@ const api = {
       sessionId: string,
       text: string,
       history?: ChatMessage[],
-      activeNoteId?: string | null
+      activeNoteId?: string | null,
+      activeScheduleId?: string | null
     ): Promise<void> =>
-      ipcRenderer.invoke('ai:send', project, sessionId, text, history, activeNoteId),
+      ipcRenderer.invoke(
+        'ai:send',
+        project,
+        sessionId,
+        text,
+        history,
+        activeNoteId,
+        activeScheduleId
+      ),
     stop: (project: string): Promise<void> => ipcRenderer.invoke('ai:stop', project),
     confirmResponse: (resp: ConfirmResponse): Promise<void> =>
       ipcRenderer.invoke('ai:confirmResponse', resp),

@@ -32,12 +32,20 @@ import {
 } from '@shared/planner'
 import type { Schedule, ScheduleStatus, ScheduleTask } from '@shared/types'
 
-const STATUS_OPTIONS: { value: ScheduleStatus; label: string }[] = [
-  { value: 'not-started', label: 'Not Started' },
-  { value: 'in-progress', label: 'In Progress' },
-  { value: 'completed', label: 'Completed' },
-  { value: 'on-hold', label: 'On Hold' }
-]
+function statusLabel(status: ScheduleStatus): string {
+  switch (status) {
+    case 'pending':
+      return 'Pending'
+    case 'on-hold':
+      return 'On Hold'
+    case 'completed':
+      return 'Completed'
+    case 'in-progress':
+      return 'In Progress'
+    default:
+      return 'Not Started'
+  }
+}
 
 type PlannerColumnKey =
   | 'no'
@@ -65,6 +73,19 @@ const COLUMNS: { key: PlannerColumnKey; label: string }[] = [
   { key: 'percent', label: '%' },
   { key: 'note', label: 'Note' }
 ]
+
+function initVisibleCols(saved: Record<string, boolean> | undefined): Set<PlannerColumnKey> {
+  const defaults: Record<string, boolean> = {
+    owner: false,
+    actualStart: false,
+    actualEnd: false
+  }
+  return new Set(
+    COLUMNS.filter((c) => (saved ? saved[c.key] !== false : defaults[c.key] !== false)).map(
+      (c) => c.key
+    )
+  )
+}
 
 interface FlatRow {
   task: ScheduleTask
@@ -268,7 +289,7 @@ function DateField({
     <input
       ref={ref}
       type="date"
-      className="planner-input"
+      className={`planner-input ${!value ? 'planner-date-empty' : ''}`}
       value={value ?? ''}
       readOnly={readOnly}
       disabled={disabled}
@@ -291,13 +312,24 @@ export function PlannerEditor(): React.JSX.Element {
   const [columnsOpen, setColumnsOpen] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<{ tasks: ScheduleTask[] } | null>(null)
+  const [statusMenu, setStatusMenu] = useState<{
+    id: string
+    x: number
+    y: number
+    mode: ScheduleStatus
+  } | null>(null)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [numberDrafts, setNumberDrafts] = useState<Record<string, string>>({})
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [anchorId, setAnchorId] = useState<string | null>(null)
-  const [visibleCols, setVisibleCols] = useState<Set<PlannerColumnKey>>(
-    () => new Set(COLUMNS.map((c) => c.key))
+  const [visibleCols, setVisibleCols] = useState<Set<PlannerColumnKey>>(() =>
+    initVisibleCols(schedule?.columnVisibility)
   )
+  const [prevScheduleId, setPrevScheduleId] = useState(schedule?.id)
+  if (schedule?.id !== prevScheduleId) {
+    setPrevScheduleId(schedule?.id)
+    setVisibleCols(initVisibleCols(schedule?.columnVisibility))
+  }
   const [clipboard, setClipboard] = useState<ScheduleTask[]>([])
   const [clipboardMode, setClipboardMode] = useState<'copy' | 'cut' | null>(null)
   const pendingFocusId = useRef<string | null>(null)
@@ -318,8 +350,12 @@ export function PlannerEditor(): React.JSX.Element {
   const cal = calendar ?? defaultCalendar()
   const rows = flattenTasks(sc.tasks, null, 0, collapsed, [])
 
-  function commit(base: Schedule, tasks: ScheduleTask[]): void {
-    const nextSchedule = { ...base, tasks: rollupScheduleTasks(tasks, cal) }
+  function commit(base: Schedule, tasks: ScheduleTask[], override?: Partial<Schedule>): void {
+    const nextSchedule = {
+      ...base,
+      ...override,
+      tasks: rollupScheduleTasks(tasks, cal)
+    }
     updateScheduleContent(nextSchedule)
     if (saveTimer.current !== null) clearTimeout(saveTimer.current)
     saveTimer.current = window.setTimeout(() => {
@@ -345,6 +381,13 @@ export function PlannerEditor(): React.JSX.Element {
       }
       return next
     })
+  }
+
+  function setTaskStatusMode(id: string, mode: 'auto' | 'pending' | 'on-hold'): void {
+    editTask(sc, id, (prev) => ({
+      ...prev,
+      status: mode === 'auto' ? 'not-started' : mode
+    }))
   }
 
   function toggleCollapse(id: string): void {
@@ -714,7 +757,7 @@ export function PlannerEditor(): React.JSX.Element {
                   {visibleCols.has('title') && <th className="planner-col-title">Title</th>}
                   {visibleCols.has('status') && <th className="planner-col-status">Status</th>}
                   {visibleCols.has('owner') && <th className="planner-col-owner">Owner</th>}
-                  {visibleCols.has('duration') && <th className="planner-col-num">Duration</th>}
+                  {visibleCols.has('duration') && <th className="planner-col-num">Dur.</th>}
                   {visibleCols.has('planStart') && <th className="planner-col-date">Plan Start</th>}
                   {visibleCols.has('planEnd') && <th className="planner-col-date">Plan End</th>}
                   {visibleCols.has('actualStart') && (
@@ -761,7 +804,10 @@ export function PlannerEditor(): React.JSX.Element {
                                 el.focus()
                               }
                             }}
-                            style={{ paddingLeft: depth * 14 }}
+                            style={{
+                              paddingLeft: depth * 14,
+                              fontWeight: isParent ? 600 : undefined
+                            }}
                             value={task.title}
                             placeholder={isParent ? 'Group task' : 'Task title'}
                             onChange={(e) => editField(sc, task.id, 'title', e.target.value)}
@@ -770,25 +816,38 @@ export function PlannerEditor(): React.JSX.Element {
                       )}
                       {visibleCols.has('status') && (
                         <td className="planner-col-status planner-cell">
-                          <select
-                            className="planner-status-select"
-                            value={task.status}
-                            onChange={(e) =>
-                              editField(sc, task.id, 'status', e.target.value as ScheduleStatus)
-                            }
+                          <button
+                            type="button"
+                            className={`planner-status-label${
+                              task.status === 'on-hold' || task.status === 'pending'
+                                ? ` planner-status-manual`
+                                : ''
+                            }${task.status === 'in-progress' ? ' planner-status-inprogress' : ''}${
+                              task.status === 'completed' ? ' planner-status-completed' : ''
+                            }`}
+                            title="Status — click to change"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                              setStatusMenu({
+                                id: task.id,
+                                x: Math.min(rect.left, window.innerWidth - 160),
+                                y: rect.bottom + 2,
+                                mode:
+                                  task.status === 'on-hold' || task.status === 'pending'
+                                    ? task.status
+                                    : 'not-started'
+                              })
+                            }}
                           >
-                            {STATUS_OPTIONS.map((o) => (
-                              <option key={o.value} value={o.value}>
-                                {o.label}
-                              </option>
-                            ))}
-                          </select>
+                            {statusLabel(task.status)}
+                          </button>
                         </td>
                       )}
                       {visibleCols.has('owner') && (
                         <td className="planner-col-owner planner-cell">
                           <input
-                            className="planner-input"
+                            className={`planner-input${!task.owner ? ' planner-value-empty' : ''}`}
                             value={task.owner}
                             placeholder="Owner"
                             onChange={(e) => editField(sc, task.id, 'owner', e.target.value)}
@@ -894,7 +953,7 @@ export function PlannerEditor(): React.JSX.Element {
                       {visibleCols.has('note') && (
                         <td className="planner-col-note planner-cell">
                           <input
-                            className="planner-input"
+                            className={`planner-input${!task.note ? ' planner-value-empty' : ''}`}
                             value={task.note}
                             placeholder="Note"
                             onChange={(e) => editField(sc, task.id, 'note', e.target.value)}
@@ -909,6 +968,49 @@ export function PlannerEditor(): React.JSX.Element {
           </div>
         )}
       </div>
+
+      {statusMenu && (
+        <>
+          <div className="menu-overlay" onClick={() => setStatusMenu(null)} />
+          <div
+            className="note-menu planner-status-menu"
+            style={{ left: statusMenu.x, top: statusMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className={`note-menu-item${statusMenu.mode === 'not-started' ? ' active' : ''}`}
+              onClick={() => {
+                setTaskStatusMode(statusMenu.id, 'auto')
+                setStatusMenu(null)
+              }}
+            >
+              [Auto]
+            </button>
+            <div className="note-menu-sep" />
+            <button
+              type="button"
+              className={`note-menu-item${statusMenu.mode === 'pending' ? ' active' : ''}`}
+              onClick={() => {
+                setTaskStatusMode(statusMenu.id, 'pending')
+                setStatusMenu(null)
+              }}
+            >
+              Pending
+            </button>
+            <button
+              type="button"
+              className={`note-menu-item${statusMenu.mode === 'on-hold' ? ' active' : ''}`}
+              onClick={() => {
+                setTaskStatusMode(statusMenu.id, 'on-hold')
+                setStatusMenu(null)
+              }}
+            >
+              On Hold
+            </button>
+          </div>
+        </>
+      )}
 
       {confirmDelete && (
         <Modal title="Delete task" onClose={() => setConfirmDelete(null)}>
@@ -948,15 +1050,18 @@ export function PlannerEditor(): React.JSX.Element {
         <PlannerColumnModal
           columns={COLUMNS}
           visible={visibleCols}
-          onToggle={(key) =>
-            setVisibleCols((prev) => {
-              const next = new Set(prev)
-              if (next.has(key)) next.delete(key)
-              else next.add(key)
-              return next
-            })
-          }
-          onClose={() => setColumnsOpen(false)}
+          onToggle={(key) => {
+            const next = new Set(visibleCols)
+            if (next.has(key)) next.delete(key)
+            else next.add(key)
+            setVisibleCols(next)
+          }}
+          onClose={() => {
+            const visibility = { ...(sc.columnVisibility ?? {}) }
+            for (const c of COLUMNS) visibility[c.key] = visibleCols.has(c.key)
+            commit(sc, sc.tasks, { columnVisibility: visibility })
+            setColumnsOpen(false)
+          }}
         />
       )}
 

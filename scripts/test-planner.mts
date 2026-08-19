@@ -379,6 +379,82 @@ r = await call('update_task', { schedule: 'Sprint 12', task: 'Wireframes', planE
 sched2 = await service.readSchedule('Build', 'sprint-12')
 assert.equal(sched2!.tasks[0].children[0].duration, 4, 'end edited -> duration recomputed')
 
+// update_task re-parenting: move a child to top level (empty parent)
+r = await call('update_task', { schedule: 'Sprint 12', task: 'Wireframes', parent: '' })
+assert.equal(r.ok, true)
+assert.equal(r.parent, null, 'top-level move reports parent null')
+sched2 = await service.readSchedule('Build', 'sprint-12')
+assert.deepEqual(
+  sched2!.tasks.map((t) => t.title),
+  ['Design', 'Research', 'Misc', 'Wireframes'],
+  'task moved to top level (appended)'
+)
+assert.deepEqual(
+  sched2!.tasks[0].children.map((c) => c.title),
+  ['Spec', 'Estimate'],
+  'task removed from its old parent'
+)
+
+// update_task re-parenting: move to a new parent by title + addAfter positioning
+r = await call('update_task', {
+  schedule: 'Sprint 12',
+  task: 'Misc',
+  parent: 'Design',
+  addAfter: 'Spec'
+})
+assert.equal(r.ok, true)
+const designId = (await service.readSchedule('Build', 'sprint-12'))!.tasks[0].id
+assert.equal(r.parent, designId, 'move under Design reports Design id')
+sched2 = await service.readSchedule('Build', 'sprint-12')
+assert.deepEqual(
+  sched2!.tasks[0].children.map((c) => c.title),
+  ['Spec', 'Misc', 'Estimate'],
+  'addAfter positions the task within the new parent'
+)
+assert.deepEqual(
+  sched2!.tasks.map((t) => t.title),
+  ['Design', 'Research', 'Wireframes'],
+  'task removed from top level'
+)
+
+// update_task re-parenting: cycle guard rejects self/descendant parents
+r = await call('update_task', { schedule: 'Sprint 12', task: 'Design', parent: 'Misc' })
+assert.equal(r.ok, false, 'cannot move a parent under its own descendant')
+r = await call('update_task', { schedule: 'Sprint 12', task: 'Design', parent: 'Design' })
+assert.equal(r.ok, false, 'cannot move a task under itself')
+
+// update_task re-parenting: moving a parent carries its subtree
+r = await call('update_task', { schedule: 'Sprint 12', task: 'Design', parent: 'Wireframes' })
+assert.equal(r.ok, true)
+assert.equal(r.parent, (await service.readSchedule('Build', 'sprint-12'))!.tasks[1].id)
+sched2 = await service.readSchedule('Build', 'sprint-12')
+assert.deepEqual(
+  sched2!.tasks.map((t) => t.title),
+  ['Research', 'Wireframes'],
+  'top level after moving Design under Wireframes'
+)
+assert.deepEqual(
+  sched2!.tasks[1].children.map((c) => c.title),
+  ['Design'],
+  'Design nested under Wireframes'
+)
+assert.deepEqual(
+  sched2!.tasks[1].children[0].children.map((c) => c.title),
+  ['Spec', 'Misc', 'Estimate'],
+  'Design subtree travels with it'
+)
+
+// update_task re-parenting: unknown parent falls back to top-level append
+r = await call('update_task', { schedule: 'Sprint 12', task: 'Spec', parent: 'no-such-task' })
+assert.equal(r.ok, true)
+assert.equal(r.parent, null)
+sched2 = await service.readSchedule('Build', 'sprint-12')
+assert.equal(
+  sched2!.tasks[sched2!.tasks.length - 1].title,
+  'Spec',
+  'unknown parent moves task to top level'
+)
+
 // update_schedule rename
 r = await call('update_schedule', { schedule: 'Sprint 12', name: 'Sprint 13' })
 assert.equal(r.ok, true)

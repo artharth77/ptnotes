@@ -102,8 +102,23 @@ function findTaskById(tasks: ScheduleTask[], id: string): ScheduleTask | null {
   return null
 }
 
+function findTaskByTaskNo(tasks: ScheduleTask[], taskNo: string): ScheduleTask | null {
+  const walk = (list: ScheduleTask[], parentNo: string | null): ScheduleTask | null => {
+    for (let i = 0; i < list.length; i++) {
+      const no = deriveTaskNo(parentNo, i)
+      if (no === taskNo) return list[i]
+      const found = walk(list[i].children, no)
+      if (found) return found
+    }
+    return null
+  }
+  return walk(tasks, null)
+}
+
 function findTask(tasks: ScheduleTask[], target: string): ScheduleTask | null {
-  return findTaskById(tasks, target) ?? findTaskByTitle(tasks, target)
+  return (
+    findTaskById(tasks, target) ?? findTaskByTaskNo(tasks, target) ?? findTaskByTitle(tasks, target)
+  )
 }
 
 function updateTaskNode(
@@ -125,6 +140,17 @@ function insertAfterId(tasks: ScheduleTask[], afterId: string, task: ScheduleTas
   return [...tasks.slice(0, i + 1), task, ...tasks.slice(i + 1)]
 }
 
+function removeTaskNode(tasks: ScheduleTask[], id: string): ScheduleTask[] {
+  return tasks
+    .filter((t) => t.id !== id)
+    .map((t) => (t.children.length > 0 ? { ...t, children: removeTaskNode(t.children, id) } : t))
+}
+
+function containsTask(root: ScheduleTask, id: string): boolean {
+  if (root.id === id) return true
+  return root.children.some((c) => containsTask(c, id))
+}
+
 function str(v: unknown): string | null {
   return typeof v === 'string' ? v : null
 }
@@ -141,7 +167,7 @@ function dateOrNull(v: unknown): string | null {
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null
 }
 
-const STATUSES: ScheduleStatus[] = ['not-started', 'in-progress', 'completed', 'on-hold']
+const STATUSES: ScheduleStatus[] = ['not-started', 'in-progress', 'completed', 'pending', 'on-hold']
 
 function statusOf(v: unknown): ScheduleStatus | null {
   const s = str(v)
@@ -953,13 +979,17 @@ export const tools: PTTool[] = [
       function: {
         name: 'list_schedules',
         description:
-          'List all project schedules (schedules are project plans with tasks and dates).',
+          'List project schedules (schedules are project plans with tasks and dates). Provide a query to search for a specific schedule by id or name; omit to list all.',
         parameters: {
           type: 'object',
           properties: {
             project: {
               type: 'string',
               description: 'Project name. Defaults to the current project.'
+            },
+            query: {
+              type: 'string',
+              description: 'Optional search query for schedule id or name.'
             }
           }
         }
@@ -967,7 +997,12 @@ export const tools: PTTool[] = [
     },
     async execute(args, ctx) {
       const project = projectOf(args, ctx)
-      const schedules = await ctx.service.listSchedules(project)
+      let schedules = await ctx.service.listSchedules(project)
+      const query = String(args.query ?? '').trim()
+      if (query) {
+        const found = findSchedule(schedules, query)
+        schedules = found ? [found] : []
+      }
       return JSON.stringify({
         ok: true,
         project,
@@ -986,7 +1021,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'read_schedule',
         description:
-          'Read a full schedule (its task tree with status, owner, durations, plan/actual dates, %complete, notes). Each task carries a taskNo outline number (1, 1.1, 1.2, 2, ...) matching the editor, including children. Parent task values are rolled up from children. Match the schedule by id or name.',
+          'Read a full schedule (its task tree with status, owner, durations, plan/actual dates, %complete, notes). Each task carries a taskNo outline number (1, 1.1, 1.2, 2, ...) matching the editor, including children. Parent task values are rolled up from children. Match the schedule by id.',
         parameters: {
           type: 'object',
           properties: {
@@ -996,7 +1031,7 @@ export const tools: PTTool[] = [
             },
             schedule: {
               type: 'string',
-              description: 'Schedule id or name'
+              description: 'Schedule id'
             }
           },
           required: ['schedule']
@@ -1058,7 +1093,7 @@ export const tools: PTTool[] = [
       type: 'function',
       function: {
         name: 'update_schedule',
-        description: 'Rename a project schedule. Match the schedule by id or name.',
+        description: 'Rename a project schedule. Match the schedule by id.',
         parameters: {
           type: 'object',
           properties: {
@@ -1068,7 +1103,7 @@ export const tools: PTTool[] = [
             },
             schedule: {
               type: 'string',
-              description: 'Schedule id or name to rename'
+              description: 'Schedule id to rename'
             },
             name: { type: 'string', description: 'New schedule name' }
           },
@@ -1102,7 +1137,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'add_task',
         description:
-          'Add a task to a project schedule. Match the schedule by id or name. Optionally nest it under an existing parent task (match the parent by id or title) and/or position it directly after an existing sibling task (match addAfter by id or title). Plan dates follow the project working-day calendar: set both planStart and planEnd, or planStart + duration; the missing value is computed.',
+          'Add a task to a project schedule. Match the schedule by id. Optionally nest it under an existing parent task (match the parent by id, task number or title) and/or position it directly after an existing sibling task (match addAfter by id, task number or title). Plan dates follow the project working-day calendar: set both planStart and planEnd, or planStart + duration; the missing value is computed.',
         parameters: {
           type: 'object',
           properties: {
@@ -1110,15 +1145,16 @@ export const tools: PTTool[] = [
               type: 'string',
               description: 'Project name. Defaults to the current project.'
             },
-            schedule: { type: 'string', description: 'Schedule id or name' },
+            schedule: { type: 'string', description: 'Schedule id' },
             parent: {
               type: 'string',
-              description: 'Optional parent task id or title to nest this task under'
+              description:
+                'Optional parent task id, task number (e.g. 1.2) or title to nest this task under'
             },
             addAfter: {
               type: 'string',
               description:
-                'Optional task id or title to insert this new task directly after. Positions within the sibling list chosen by `parent` (defaults to top level). If the task is not found in that list, the new task is appended.'
+                'Optional task id, task number (e.g. 1.2) or title to insert this new task directly after. Positions within the sibling list chosen by `parent` (defaults to top level). If the task is not found in that list, the new task is appended.'
             },
             title: { type: 'string', description: 'Task title' },
             owner: { type: 'string', description: 'Owner (optional)' },
@@ -1140,7 +1176,7 @@ export const tools: PTTool[] = [
             status: {
               type: 'string',
               description:
-                'Status: not-started, in-progress, completed, on-hold (auto-derived from percent unless on-hold)'
+                'Status: not-started, in-progress, completed, pending, on-hold (auto-derived from percent unless pending/on-hold)'
             },
             note: { type: 'string', description: 'Note (optional)' }
           },
@@ -1222,7 +1258,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'update_task',
         description:
-          'Update an existing task in a project schedule. Match the schedule by id or name and the task by id or title. Only provided fields change. For plan dates/duration, the project working-day calendar applies: change one of planStart/planEnd/duration and the other is recomputed. Parent status and %complete are derived from children.',
+          'Update an existing task in a project schedule. Match the schedule by id and the task by id, task number (e.g. 1.2) or title. Only provided fields change. For plan dates/duration, the project working-day calendar applies: change one of planStart/planEnd/duration and the other is recomputed. For parent tasks, plan start/end, %complete and duration are derived from children — update the child tasks instead (plan-field edits on a parent are rejected). Parent status and %complete are derived from children. To move a task, set `parent` to the new parent task id, task number (e.g. 1.2) or title (omit or pass empty to move it to the top level); the task and its subtree move together and `addAfter` positions it within the new sibling list (defaults to append).',
         parameters: {
           type: 'object',
           properties: {
@@ -1230,8 +1266,21 @@ export const tools: PTTool[] = [
               type: 'string',
               description: 'Project name. Defaults to the current project.'
             },
-            schedule: { type: 'string', description: 'Schedule id or name' },
-            task: { type: 'string', description: 'Task id (uuid) or title to update' },
+            schedule: { type: 'string', description: 'Schedule id' },
+            task: {
+              type: 'string',
+              description: 'Task id (uuid), task number (e.g. 1.2) or title to update'
+            },
+            parent: {
+              type: 'string',
+              description:
+                'Optional new parent task id, task number (e.g. 1.2) or title to move this task under. Omit or pass empty to move it to the top level. The task and its subtree move together. The new parent must not be the task itself or one of its descendants.'
+            },
+            addAfter: {
+              type: 'string',
+              description:
+                'Optional task id, task number (e.g. 1.2) or title to position this task directly after within the sibling list chosen by `parent` (defaults to top level). If the task is not found in that list, the task is appended.'
+            },
             title: { type: 'string', description: 'New title' },
             owner: { type: 'string', description: 'New owner' },
             duration: {
@@ -1245,7 +1294,7 @@ export const tools: PTTool[] = [
             percentComplete: { type: 'number', description: 'New percent complete 0-100' },
             status: {
               type: 'string',
-              description: 'New status: not-started, in-progress, completed, on-hold'
+              description: 'New status: not-started, in-progress, completed, pending, on-hold'
             },
             note: { type: 'string', description: 'New note' }
           },
@@ -1261,6 +1310,17 @@ export const tools: PTTool[] = [
         const task = findTask(schedule.tasks, target)
         if (!task) {
           return JSON.stringify({ ok: false, error: `Task "${target}" not found` })
+        }
+        if (
+          task.children.length > 0 &&
+          (args.planStart !== undefined ||
+            args.planEnd !== undefined ||
+            args.duration !== undefined)
+        ) {
+          return JSON.stringify({
+            ok: false,
+            error: `Task "${task.title}" is a parent task: plan start/end and duration are derived from its children. Update the child tasks instead.`
+          })
         }
         const calendar = await ctx.service.readCalendar(project)
 
@@ -1287,7 +1347,32 @@ export const tools: PTTool[] = [
         if (actualEnd !== null) next.actualEnd = actualEnd
 
         const resolved = applyDateRule(task, next, calendar)
-        const tasks = updateTaskNode(schedule.tasks, task.id, () => resolved)
+
+        const parentArg = args.parent ? findTask(schedule.tasks, String(args.parent)) : null
+        if (parentArg && (parentArg.id === task.id || containsTask(task, parentArg.id))) {
+          return JSON.stringify({
+            ok: false,
+            error: `Cannot move task "${task.title}" under itself or one of its descendants.`
+          })
+        }
+        const afterId = args.addAfter
+          ? (findTask(schedule.tasks, String(args.addAfter))?.id ?? '')
+          : ''
+        const moveRequested = args.parent !== undefined || args.addAfter !== undefined
+
+        let tasks: ScheduleTask[]
+        if (moveRequested) {
+          tasks = removeTaskNode(schedule.tasks, task.id)
+          if (parentArg) {
+            const parentNode = findTask(tasks, parentArg.id)
+            const children = insertAfterId(parentNode!.children, afterId, resolved)
+            tasks = updateTaskNode(tasks, parentNode!.id, (t) => ({ ...t, children }))
+          } else {
+            tasks = insertAfterId(tasks, afterId, resolved)
+          }
+        } else {
+          tasks = updateTaskNode(schedule.tasks, task.id, () => resolved)
+        }
         const saved = {
           ...schedule,
           tasks: rollupScheduleTasks(tasks, calendar),
@@ -1296,7 +1381,8 @@ export const tools: PTTool[] = [
         await ctx.service.saveSchedule(project, saved)
         return JSON.stringify({
           ...scheduleSummary(saved, project),
-          updated: { id: task.id, title: resolved.title }
+          updated: { id: task.id, title: resolved.title },
+          parent: parentArg ? parentArg.id : null
         })
       } catch (err) {
         return JSON.stringify({ ok: false, error: (err as Error).message })
@@ -1346,9 +1432,9 @@ export const tools: PTTool[] = [
       const weekEnd = numOrNull(args.weekEnd)
       if (weekEnd !== null && weekEnd >= 0 && weekEnd <= 6) calendar.weekEnd = weekEnd
       if (Array.isArray(args.holidays)) {
-        calendar.holidays = args.holidays
-          .map((h) => dateOrNull(h))
-          .filter((h): h is string => h !== null)
+        calendar.holidays = [
+          ...new Set(args.holidays.map((h) => dateOrNull(h)).filter((h): h is string => h !== null))
+        ]
       }
       for (const h of Array.isArray(args.addHolidays) ? args.addHolidays : []) {
         const d = dateOrNull(h)

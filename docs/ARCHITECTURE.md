@@ -351,7 +351,7 @@ ChatPanel (renderer) ──send──▶ Main process
 | `create_schedule` | new empty schedule; returns id + name                                                                                                                     |
 | `update_schedule` | rename a schedule (match by id or name)                                                                                                                   |
 | `add_task`        | add a task (optional parent nesting); planStart+planEnd or planStart+duration — the missing value is computed                                             |
-| `update_task`     | update a task's fields (match by id or title); plan date edits re-derive the other value (end-date-fixed)                                                 |
+| `update_task`     | update a task's fields (match by id, task number or title); plan date edits re-derive the other value (end-date-fixed); plan-field edits on parents are rejected (derived from children); optional `parent`/`addAfter` moves the task (and its subtree) to a new parent/position — cycle-safe |
 | `set_calendar`    | set week + holidays; re-rolls all schedules so parent durations reflect the new calendar                                                                  |
 
 ### PDF attachments (drag & drop into chat)

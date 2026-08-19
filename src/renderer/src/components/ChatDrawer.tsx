@@ -119,6 +119,7 @@ function AskToolSummary({
 export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   const activeProject = useAppStore((s) => s.activeProject)
   const activeNoteId = useAppStore((s) => s.activeNoteId)
+  const activeScheduleId = useAppStore((s) => s.activeScheduleId)
   const notes = useAppStore((s) => s.notes)
   const todos = useAppStore((s) => s.todos)
   const projectFiles = useAppStore((s) => s.projectFiles)
@@ -151,6 +152,8 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   const deleteChat = useAppStore((s) => s.deleteChat)
   const openTraceViewer = useAppStore((s) => s.openTraceViewer)
   const selectNote = useAppStore((s) => s.selectNote)
+  const selectSchedule = useAppStore((s) => s.selectSchedule)
+  const schedules = useAppStore((s) => s.schedules)
   const moduleRuns = useAppStore((s) =>
     s.activeProject ? (s.moduleRuns[s.activeProject] ?? NO_MODULE_RUNS) : NO_MODULE_RUNS
   )
@@ -481,7 +484,14 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     setChatStreamProject(project)
     setChatWaitRuns([])
     try {
-      await window.ptnotes.ai.send(project, sessionId ?? '', text, history, activeNoteId)
+      await window.ptnotes.ai.send(
+        project,
+        sessionId ?? '',
+        text,
+        history,
+        activeNoteId,
+        activeScheduleId
+      )
     } finally {
       setChatBusy(false)
       setChatStreamProject(null)
@@ -596,6 +606,17 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     if (!note) return
     await selectNote(note.id)
     setTab('notes')
+  }
+
+  async function openSchedule(planName: string): Promise<void> {
+    if (!activeProject) return
+    const plan =
+      schedules.find((s) => s.id === planName) ??
+      schedules.find((s) => s.name === planName) ??
+      schedules.find((s) => s.name.includes(planName))
+    if (!plan) return
+    await selectSchedule(plan.id)
+    setTab('planner')
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>): void {
@@ -1010,6 +1031,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                         content={part.content}
                         onOpenNote={(n) => void openNote(n)}
                         onOpenSkill={(n) => openSkillEditor(n)}
+                        onOpenPlan={(n) => void openSchedule(n)}
                       />
                     </div>
                   )

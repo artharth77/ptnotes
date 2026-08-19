@@ -44,7 +44,8 @@ export function buildSystemPrompt(
   activeProject: string,
   currentDate: string,
   skillsIndex?: string,
-  activeNote?: string | null
+  activeNote?: string | null,
+  activeSchedule?: string | null
 ): string {
   const skillsSection = skillsIndex
     ? `\nSkills:
@@ -54,6 +55,10 @@ ${skillsIndex}
     : ''
   const activeNoteSection = activeNote
     ? `- The note the user is currently viewing is "${activeNote}". When the user says "this note", "the current note", "the active note" or "check this note", read it with the read_note tool (omit the title argument to read the active note).
+`
+    : ''
+  const activeScheduleSection = activeSchedule
+    ? `- The schedule (project planner) the user is currently viewing is "${activeSchedule}". When the user says "this schedule", "the current schedule", "the active schedule", "the plan" or "this plan", work with that schedule (omit the schedule argument to target it by default).
 `
     : ''
   return `You are PTNotes assistant, an automation and research assistant inside a markdown notes + todo desktop app.
@@ -67,15 +72,16 @@ Guidelines:
 - When the user asks for up-to-date or factual information, use web_search (and web_fetch for detail) instead of relying only on your own knowledge.
 - After researching, if the user wants it saved, write a well-structured markdown note via create_note/update_note.
 - If the user references a note as \`note:<notename>\` (for example \`note:meeting-notes\`), call the read_note tool to read that specific note before responding.
-${activeNoteSection}- If the user references a project file as \`file:<filename>\` (for example \`file:report.pdf\`, \`file:notes.md\`, \`file:data.json\` or \`file:readme.txt\`), call the read_file tool to read that file before responding.
+${activeNoteSection}${activeScheduleSection}- If the user references a project file as \`file:<filename>\` (for example \`file:report.pdf\`, \`file:notes.md\`, \`file:data.json\` or \`file:readme.txt\`), call the read_file tool to read that file before responding.
 - If the user asks you to use a skill by name (for example \`Use the skill "name": …\`, optionally with the scope in parentheses), call the read_skill tool to load that skill before applying it.
 - When the user asks you to find notes about a topic, call the search_notes tool.
 - When you need user input — a choice, a detail, or confirmation — before you can proceed, call ask_user with your questions. You may ask several questions in a single call; the user answers them all at once. Only ask when genuinely needed.
 - When a task can be split into parallel deliverables, delegate each part to a background module: call start_module for each (passing the \`expect\` argument to specify the result payload the module must submit back), then call wait_modules with all the returned runIds and continue with the results. Do NOT call wait_modules when you do not need the module output.
 - Quote the snippet returned by search_notes exactly as given; never paraphrase, reword, or summarize it.
 - Whenever you mention an existing note by name in your reply, always link to it: [note name](note:note name). The link opens the note, so never return a bare note name without a link.
-- Whenever you mention an existing todo by its text in your reply, always link to it: [todo text](todo:todo text).
+- Whenever you mention an existing todo from the project's todo list by its text in your reply, always link to it: [todo text](todo:todo text). Do NOT link tasks that belong to a schedule/plan — plan tasks have no link, so just mention their text plainly.
 - Whenever you mention an existing skill by name in your reply, always link to it: [skill name](skill:skill name). The link opens the skill's editor, so never return a bare skill name without a link.
+- Whenever you mention an existing schedule/plan by name in your reply, always link to it: [plan name](plan:plan name) or [plan name](schedule:plan name). The link opens the schedule, so never return a bare plan name without a link.
 - Keep replies short and actionable.
 ${skillsSection}Current date: ${currentDate}.`
 }
@@ -90,6 +96,7 @@ export class ChatSession {
   private abortController: AbortController | undefined
   private readonly toolsProvider?: ToolsProvider
   private activeNoteId: string | null = null
+  private activeScheduleId: string | null = null
   private trace: AiTraceRecorder | undefined
 
   constructor(
@@ -114,11 +121,13 @@ export class ChatSession {
     userText: string,
     history?: ChatMessage[],
     activeNoteId?: string | null,
+    activeScheduleId?: string | null,
     trace?: AiTraceRecorder
   ): Promise<void> {
     this.stopped = false
     this.abortController = undefined
     this.activeNoteId = activeNoteId ?? null
+    this.activeScheduleId = activeScheduleId ?? null
     this.config = await this.getConfig()
     if (!this.config.apiKey && !isLocalEndpoint(this.config.baseUrl)) {
       this.emit({
@@ -360,7 +369,18 @@ export class ChatSession {
       const notes = await this.ctx.service.listNotes(this.ctx.activeProject)
       activeNote = notes.find((n) => n.id === this.activeNoteId)?.name ?? null
     }
-    const content = buildSystemPrompt(this.ctx.activeProject, date, skillsIndex, activeNote)
+    let activeSchedule: string | null = null
+    if (this.activeScheduleId) {
+      const schedules = await this.ctx.service.listSchedules(this.ctx.activeProject)
+      activeSchedule = schedules.find((s) => s.id === this.activeScheduleId)?.name ?? null
+    }
+    const content = buildSystemPrompt(
+      this.ctx.activeProject,
+      date,
+      skillsIndex,
+      activeNote,
+      activeSchedule
+    )
     const idx = this.messages.findIndex((m) => m.role === 'system')
     if (idx === -1) {
       this.messages.unshift({ role: 'system', content })

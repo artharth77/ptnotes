@@ -3,7 +3,7 @@
  * Mirrors `find.ts` / `slash.ts`: no imports, fully unit-testable.
  */
 
-export type ScheduleStatus = 'not-started' | 'in-progress' | 'completed' | 'on-hold'
+export type ScheduleStatus = 'not-started' | 'in-progress' | 'completed' | 'pending' | 'on-hold'
 
 /** Project-level working-day configuration, stored at `<project>/planner/calendar.json`. */
 export interface ProjectCalendar {
@@ -40,6 +40,8 @@ export interface Schedule {
   createdAt: number
   updatedAt: number
   tasks: ScheduleTask[]
+  /** Per-schedule editor column visibility. Absent keys default to visible. */
+  columnVisibility?: Record<string, boolean>
 }
 
 /** List-item summary of a schedule, without the task tree. */
@@ -185,9 +187,9 @@ export function applyDateRule(
   return result
 }
 
-/** Derive status from percent. `On Hold` is manual only — never auto-changed. */
+/** Derive status from percent. `Pending` and `On Hold` are manual only — never auto-changed. */
 export function deriveStatus(percent: number, currentStatus: ScheduleStatus): ScheduleStatus {
-  if (currentStatus === 'on-hold') return 'on-hold'
+  if (currentStatus === 'on-hold' || currentStatus === 'pending') return currentStatus
   if (percent <= 0) return 'not-started'
   if (percent >= 100) return 'completed'
   return 'in-progress'
@@ -196,7 +198,7 @@ export function deriveStatus(percent: number, currentStatus: ScheduleStatus): Sc
 /**
  * Compute a parent's fields from its (already rolled-up) children:
  * `%Complete` = duration-weighted mean, `planStart` = min, `planEnd` = max,
- * `duration` = working days between min..max, `status` = derived (on-hold preserved).
+ * `duration` = working days between min..max, `status` = derived (pending/on-hold preserved).
  */
 export function rollupChildren(
   children: ScheduleTask[],
