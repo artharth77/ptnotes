@@ -490,14 +490,15 @@ JSON in `<project>/planner/<slug>.json`; the whole feature is pure data — no m
 - **Undo/redo**: toolbar Undo/Redo buttons plus `⌘Z` / `⇧⌘Z` (on Windows/Linux `Ctrl+Z` /
   `Ctrl+Shift+Z` or `Ctrl+Y`). History lives in the zustand store as per-schedule stacks
   (`plannerUndo` / `plannerRedo` keyed by schedule id, capped at 100 entries, pruned on delete).
-  Every mutation funnels through the editor's `commit()`, which pushes a deep-cloned snapshot of
-  the pre-edit schedule; consecutive edits within ~800ms coalesce into a single undo step (keystroke
-  bursts undo once). Undo/redo restore the snapshot into `scheduleContent`, cancel any pending
-  autosave, and debounce-save the restored state. Keyboard interception is done in the **main
-  process** via `before-input-event` (the app menu's `undo`/`redo` roles swallow `⌘Z` before the
-  renderer sees it), gated by a `planner:set-edit-active` flag the editor updates from
-  `focusin`/`focusout` — so the markdown editor, chat input, and native text fields keep their own
-  undo behavior.
+  Discrete actions (add/delete/move/status/date/columns) record a deep-cloned pre-edit snapshot
+  immediately in `commit()`. Text/number fields (title, owner, duration, %complete, note) capture
+  the pre-edit snapshot on **focus** and record it as a single undo step when the field **loses
+  focus**, so a typing session undoes once instead of per character. Undo/redo restore the snapshot
+  into `scheduleContent`, cancel any pending autosave, and debounce-save the restored state.
+  Keyboard interception is done in the **main process** via `before-input-event` (the app menu's
+  `undo`/`redo` roles swallow `⌘Z` before the renderer sees it), gated by a `planner:set-edit-active`
+  flag the editor updates from `focusin`/`focusout` — so the markdown editor, chat input, and native
+  text fields keep their own undo behavior.
 - 4th sidebar tab (`mdiChartTimeline`) → PlannerPanel (schedule list) → PlannerEditor (keyed by
   `activeScheduleId`); an empty-state "New Schedule" flow otherwise.
 

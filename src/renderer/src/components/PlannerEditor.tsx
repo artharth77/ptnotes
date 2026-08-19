@@ -62,8 +62,6 @@ type PlannerColumnKey =
   | 'percent'
   | 'note'
 
-const HISTORY_COALESCE_MS = 800
-
 const COLUMNS: { key: PlannerColumnKey; label: string }[] = [
   { key: 'no', label: 'No.' },
   { key: 'title', label: 'Title' },
@@ -370,7 +368,56 @@ export function PlannerEditor(): React.JSX.Element {
   const statusMenuRef = useRef<HTMLDivElement>(null)
   const pendingFocus = useRef<{ id: string; col: string } | null>(null)
   const saveTimer = useRef<number | null>(null)
-  const lastHistoryPush = useRef<number | null>(null)
+  const editSession = useRef<{ scheduleId: string; snapshot: Schedule } | null>(null)
+
+  function recordHistory(base: Schedule): void {
+    const snapshot = JSON.parse(JSON.stringify(base)) as Schedule
+    useAppStore.getState().plannerPushUndo(base.id, snapshot)
+    useAppStore.getState().plannerClearRedo(base.id)
+  }
+
+  function startEditSession(): void {
+    if (editSession.current) return
+    const current = useAppStore.getState().scheduleContent
+    if (!current) return
+    editSession.current = {
+      scheduleId: current.id,
+      snapshot: JSON.parse(JSON.stringify(current)) as Schedule
+    }
+  }
+
+  function endEditSession(): void {
+    const session = editSession.current
+    if (!session) return
+    editSession.current = null
+    const current = useAppStore.getState().scheduleContent
+    if (current && JSON.stringify(current) !== JSON.stringify(session.snapshot)) {
+      useAppStore.getState().plannerPushUndo(session.scheduleId, session.snapshot)
+      useAppStore.getState().plannerClearRedo(session.scheduleId)
+    }
+  }
+
+  function restoreSchedule(restored: Schedule | null): void {
+    if (!restored) return
+    if (saveTimer.current !== null) clearTimeout(saveTimer.current)
+    setNumberDrafts({})
+    setSelected(new Set())
+    setAnchorId(null)
+    saveTimer.current = window.setTimeout(() => {
+      saveTimer.current = null
+      void saveSchedule(restored)
+    }, 800)
+  }
+
+  function handleUndo(): void {
+    endEditSession()
+    restoreSchedule(useAppStore.getState().undoPlanner())
+  }
+
+  function handleRedo(): void {
+    endEditSession()
+    restoreSchedule(useAppStore.getState().redoPlanner())
+  }
 
   useEffect(() => {
     return () => {
@@ -467,6 +514,8 @@ export function PlannerEditor(): React.JSX.Element {
               }}
               value={task.title}
               placeholder={isParent ? 'Group task' : 'Task title'}
+              onFocus={startEditSession}
+              onBlur={endEditSession}
               onChange={(e) => editField(sc, task.id, 'title', e.target.value)}
             />
           </div>
@@ -511,6 +560,8 @@ export function PlannerEditor(): React.JSX.Element {
               data-col="owner"
               value={task.owner}
               placeholder="Owner"
+              onFocus={startEditSession}
+              onBlur={endEditSession}
               onChange={(e) => editField(sc, task.id, 'owner', e.target.value)}
             />
           </div>
@@ -526,6 +577,7 @@ export function PlannerEditor(): React.JSX.Element {
               value={numberDrafts[numberDraftKey(task.id, 'duration')] ?? task.duration ?? ''}
               readOnly={isParent}
               disabled={isParent}
+              onFocus={startEditSession}
               onChange={(e) => {
                 setNumberDrafts((d) => ({
                   ...d,
@@ -533,13 +585,14 @@ export function PlannerEditor(): React.JSX.Element {
                 }))
                 commitNumber(sc, task.id, 'duration', e.target.value)
               }}
-              onBlur={() =>
+              onBlur={() => {
                 normalizeNumber(
                   task.id,
                   'duration',
                   numberDrafts[numberDraftKey(task.id, 'duration')] ?? ''
                 )
-              }
+                endEditSession()
+              }}
             />
           </div>
         )}
@@ -601,6 +654,7 @@ export function PlannerEditor(): React.JSX.Element {
               }
               readOnly={isParent}
               disabled={isParent}
+              onFocus={startEditSession}
               onChange={(e) => {
                 setNumberDrafts((d) => ({
                   ...d,
@@ -608,13 +662,14 @@ export function PlannerEditor(): React.JSX.Element {
                 }))
                 commitNumber(sc, task.id, 'percentComplete', e.target.value)
               }}
-              onBlur={() =>
+              onBlur={() => {
                 normalizeNumber(
                   task.id,
                   'percentComplete',
                   numberDrafts[numberDraftKey(task.id, 'percentComplete')] ?? ''
                 )
-              }
+                endEditSession()
+              }}
             />
           </div>
         )}
@@ -626,6 +681,8 @@ export function PlannerEditor(): React.JSX.Element {
               data-col="note"
               value={task.note}
               placeholder="Note"
+              onFocus={startEditSession}
+              onBlur={endEditSession}
               onChange={(e) => editField(sc, task.id, 'note', e.target.value)}
             />
           </div>
@@ -657,20 +714,8 @@ export function PlannerEditor(): React.JSX.Element {
     })
   }
 
-  function recordHistory(base: Schedule): void {
-    const snapshot = JSON.parse(JSON.stringify(base)) as Schedule
-    const now = Date.now()
-    if (lastHistoryPush.current !== null && now - lastHistoryPush.current < HISTORY_COALESCE_MS) {
-      useAppStore.getState().plannerReplaceTopUndo(base.id, snapshot)
-    } else {
-      useAppStore.getState().plannerPushUndo(base.id, snapshot)
-      useAppStore.getState().plannerClearRedo(base.id)
-    }
-    lastHistoryPush.current = now
-  }
-
   function commit(base: Schedule, tasks: ScheduleTask[], override?: Partial<Schedule>): void {
-    recordHistory(base)
+    if (!editSession.current) recordHistory(base)
     const nextSchedule = {
       ...base,
       ...override,
@@ -682,27 +727,6 @@ export function PlannerEditor(): React.JSX.Element {
       saveTimer.current = null
       void saveSchedule(nextSchedule)
     }, 800)
-  }
-
-  function restoreSchedule(restored: Schedule | null): void {
-    if (!restored) return
-    if (saveTimer.current !== null) clearTimeout(saveTimer.current)
-    setNumberDrafts({})
-    setSelected(new Set())
-    setAnchorId(null)
-    lastHistoryPush.current = null
-    saveTimer.current = window.setTimeout(() => {
-      saveTimer.current = null
-      void saveSchedule(restored)
-    }, 800)
-  }
-
-  function handleUndo(): void {
-    restoreSchedule(useAppStore.getState().undoPlanner())
-  }
-
-  function handleRedo(): void {
-    restoreSchedule(useAppStore.getState().redoPlanner())
   }
 
   function editTask(
