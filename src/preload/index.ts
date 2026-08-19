@@ -99,7 +99,17 @@ const api = {
     getCalendar: (project: string): Promise<ProjectCalendar> =>
       ipcRenderer.invoke('planner:getCalendar', project),
     saveCalendar: (project: string, calendar: ProjectCalendar): Promise<void> =>
-      ipcRenderer.invoke('planner:saveCalendar', project, calendar)
+      ipcRenderer.invoke('planner:saveCalendar', project, calendar),
+    setEditActive: (active: boolean): void => {
+      ipcRenderer.send('planner:set-edit-active', active)
+    },
+    onUndoRedo: (callback: (data: { redo: boolean }) => void): (() => void) => {
+      const listener = (_e: unknown, data: { redo: boolean }): void => callback(data)
+      ipcRenderer.on('planner:undo-redo', listener)
+      return () => {
+        ipcRenderer.removeListener('planner:undo-redo', listener)
+      }
+    }
   },
   ai: {
     send: (

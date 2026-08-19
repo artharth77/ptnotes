@@ -125,7 +125,7 @@ src/
 │   │   ├── projects.ts
 │   │   ├── notes.ts
 │   │   ├── todos.ts
-│   │   ├── planner.ts  # planner:list/read/save/create/rename/delete/getCalendar/saveCalendar
+│   │   ├── planner.ts  # planner:list/read/save/create/rename/delete/getCalendar/saveCalendar/set-edit-active/undo-redo
 │   │   ├── chat.ts      # chat history persistence (list/read/write/delete/rename)
 │   │   ├── ai.ts        # chat session registry + ai:generateTitle (chat titles)
 │   │   ├── files.ts     # files:* attach/extract/list/reveal + pdf:upload (multi-file drop: .pdf/.md/.txt)
@@ -173,7 +173,7 @@ src/
 │   │   │   ├── NoteList.tsx         # Notes tab
 │   │   │   ├── TodoPanel.tsx        # Todo tab (checkboxes + progress)
 │   │   │   ├── PlannerPanel.tsx     # Planner tab (schedule list + create/rename/delete)
-│   │   │   ├── PlannerEditor.tsx    # schedule grid editor (hierarchical tasks, rollups, autosave)
+│   │   │   ├── PlannerEditor.tsx    # schedule grid editor (hierarchical tasks, rollups, autosave, undo/redo history)
 │   │   │   ├── CalendarModal.tsx    # project working-day calendar editor (week + holidays)
 │   │   │   ├── MarkdownEditor.tsx   # TipTap WYSIWYG + markdown sync + auto-save
 │   │   │   ├── MarkdownContent.tsx  # react-markdown chat rendering + note:/skill: link handling
@@ -231,7 +231,7 @@ src/
 - **Projects:** `list` (returns `pathExists` per project), `create`, `rename`, `delete`, `recreate` (rebuild folder for a project whose path is missing)
 - **Notes:** `list`, `read`, `save`, `create`, `rename`, `delete`
 - **Todos:** `read` (parse checklist), `save` (serialize `- [ ]`/`- [x]`), `toggle`, `deleteCompleted`, `reorder`
-- **Planner:** `list` (schedule metas), `read` (full schedule or `null`), `save` (atomic tmp+rename), `create` (slugified id), `rename`, `delete`; `getCalendar` (defaults to Mon–Fri), `saveCalendar` (normalized). All ids validated with `validateScheduleId` (same rule as the note-id guard).
+- **Planner:** `list` (schedule metas), `read` (full schedule or `null`), `save` (atomic tmp+rename), `create` (slugified id), `rename`, `delete`; `getCalendar` (defaults to Mon–Fri), `saveCalendar` (normalized). All ids validated with `validateScheduleId` (same rule as the note-id guard). Plus `setEditActive` (renderer→main `send`: gates the main-process `before-input-event` shortcut interception) and `onUndoRedo` (main→renderer: forwards `⌘Z`/`⇧⌘Z`/`Ctrl+Y` to the planner editor — see [Editor (PlannerEditor)](#editor-plannereditor)).
 - **Chat history:** `list`, `read`, `write`, `delete`, `rename`, `readTrace` (raw AI trace `AiTraceFile` for a session, or `null`)
 - **AI:** `send` (message → streamed reply; takes `sessionId` so the run is traced), `getConfig`, `setConfig`, `listModels(baseUrl, apiKey)`, `generateTitle` (takes `sessionId`; the title call is traced into the session's trace file), `stop`, `clear`, `confirmResponse`, `askResponse` (human-in-the-loop answers for `ask_user`), `onStreamEvent` (token chunks + tool-call logs + confirm events)
 - **Settings:** `get` (returns `{ rootDir }`), `getAbout` (app name/version + Electron/Chromium/Node versions for the About pane), `chooseRoot` (native folder picker), `changeRoot` (moves data + persists + returns new `{ rootDir }`)
@@ -487,6 +487,17 @@ JSON in `<project>/planner/<slug>.json`; the whole feature is pure data — no m
 - Single source of truth is the store's `scheduleContent`; every edit recomputes the tree and
   auto-saves ~800ms debounced (flushed on unmount). Calendar button opens `CalendarModal` (week
   selects + holiday date list with add/remove).
+- **Undo/redo**: toolbar Undo/Redo buttons plus `⌘Z` / `⇧⌘Z` (on Windows/Linux `Ctrl+Z` /
+  `Ctrl+Shift+Z` or `Ctrl+Y`). History lives in the zustand store as per-schedule stacks
+  (`plannerUndo` / `plannerRedo` keyed by schedule id, capped at 100 entries, pruned on delete).
+  Every mutation funnels through the editor's `commit()`, which pushes a deep-cloned snapshot of
+  the pre-edit schedule; consecutive edits within ~800ms coalesce into a single undo step (keystroke
+  bursts undo once). Undo/redo restore the snapshot into `scheduleContent`, cancel any pending
+  autosave, and debounce-save the restored state. Keyboard interception is done in the **main
+  process** via `before-input-event` (the app menu's `undo`/`redo` roles swallow `⌘Z` before the
+  renderer sees it), gated by a `planner:set-edit-active` flag the editor updates from
+  `focusin`/`focusout` — so the markdown editor, chat input, and native text fields keep their own
+  undo behavior.
 - 4th sidebar tab (`mdiChartTimeline`) → PlannerPanel (schedule list) → PlannerEditor (keyed by
   `activeScheduleId`); an empty-state "New Schedule" flow otherwise.
 

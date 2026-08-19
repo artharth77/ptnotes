@@ -2,6 +2,11 @@
 
 ### Added
 
+#### Planner — undo/redo
+
+- **Undo/redo for the planner editor**: toolbar **Undo**/**Redo** buttons plus `⌘Z` / `⇧⌘Z` (on Windows/Linux `Ctrl+Z` / `Ctrl+Shift+Z` or `Ctrl+Y`). History is kept in the app store as per-schedule stacks (capped at 100 entries), so switching schedules preserves each one's history; deleting a schedule prunes it. Every edit snapshots the pre-edit schedule, and consecutive edits within ~800ms coalesce into a single undo step (so a keystroke burst undoes once). Undo/redo restore the snapshot, cancel any pending autosave, and re-save the restored state.
+- **Focus-aware shortcuts**: keyboard undo/redo is intercepted in the **main process** (`before-input-event`, gated by a `planner:set-edit-active` flag driven by the editor's focus) because the app menu's `undo`/`redo` roles swallow `⌘Z` before the renderer can act. This keeps the markdown editor, chat input, and native text fields on their own undo behavior.
+
 #### Planner — project schedules with working-day math
 
 - **Planner tab**: a fourth sidebar tab (`mdiChartTimeline`) with a schedule list (filter, create, rename, delete) and a grid editor keyed to the active schedule. Schedules are JSON files under `<project>/planner/<slug>.json`; a shared `calendar.json` holds the project's working-day config.

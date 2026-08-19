@@ -52,6 +52,7 @@ Run `npm run typecheck` and `npm run lint` after any change.
 - Todo storage is a markdown checklist file (`TODO.md`, `- [ ]` / `- [x]`); the line content derives the id.
 - Planner schedules are JSON in `<project>/planner/<slug>.json` with a shared `calendar.json` working-day config. The pure date/rollup engine lives in `src/shared/planner.ts` and must stay shared (main + renderer + tests) — do not duplicate the math.
 - Planner UI: the store's `scheduleContent` is the single source of truth for the editor; parents' plan fields are rolled up from children (read-only in the UI), `On Hold` is manual-only, and actual dates are never computed.
+- Planner undo/redo history lives in the store as per-schedule stacks (`plannerUndo`/`plannerRedo`); snapshots are taken in the editor's `commit()` and coalesced over ~800ms. Keyboard interception (`before-input-event`) is gated by a main-process `planner:set-edit-active` flag so it never hijacks the markdown/chat/native undo.
 - Use existing utilities; do not add new dependencies without checking `package.json`.
 - Do not add comments unless necessary.
 

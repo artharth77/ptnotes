@@ -12,9 +12,11 @@ import {
   mdiPencil,
   mdiPlaylistPlus,
   mdiPlus,
+  mdiRedo,
   mdiTableRowPlusAfter,
   mdiTableRowPlusBefore,
   mdiTrashCan,
+  mdiUndo,
   mdiViewColumnOutline
 } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
@@ -59,6 +61,8 @@ type PlannerColumnKey =
   | 'actualEnd'
   | 'percent'
   | 'note'
+
+const HISTORY_COALESCE_MS = 800
 
 const COLUMNS: { key: PlannerColumnKey; label: string }[] = [
   { key: 'no', label: 'No.' },
@@ -335,6 +339,8 @@ export function PlannerEditor(): React.JSX.Element {
   const updateScheduleContent = useAppStore((s) => s.updateScheduleContent)
   const saveSchedule = useAppStore((s) => s.saveSchedule)
   const renameSchedule = useAppStore((s) => s.renameSchedule)
+  const plannerUndo = useAppStore((s) => s.plannerUndo)
+  const plannerRedo = useAppStore((s) => s.plannerRedo)
 
   const [calendarOpen, setCalendarOpen] = useState(false)
   const [columnsOpen, setColumnsOpen] = useState(false)
@@ -364,6 +370,7 @@ export function PlannerEditor(): React.JSX.Element {
   const statusMenuRef = useRef<HTMLDivElement>(null)
   const pendingFocus = useRef<{ id: string; col: string } | null>(null)
   const saveTimer = useRef<number | null>(null)
+  const lastHistoryPush = useRef<number | null>(null)
 
   useEffect(() => {
     return () => {
@@ -394,6 +401,28 @@ export function PlannerEditor(): React.JSX.Element {
     const activeIdx = statusMenu.mode === 'pending' ? 1 : statusMenu.mode === 'on-hold' ? 2 : 0
     items?.[activeIdx]?.focus()
   }, [statusMenu])
+
+  useEffect(() => {
+    const update = (): void => {
+      const el = document.activeElement as HTMLElement | null
+      window.ptnotes.planner.setEditActive(!!el?.closest('.planner-editor'))
+    }
+    window.addEventListener('focusin', update)
+    window.addEventListener('focusout', update)
+    update()
+    return () => {
+      window.removeEventListener('focusin', update)
+      window.removeEventListener('focusout', update)
+      window.ptnotes.planner.setEditActive(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    return window.ptnotes.planner.onUndoRedo(({ redo }) => {
+      if (redo) handleRedo()
+      else handleUndo()
+    })
+  })
 
   if (!schedule) return <></>
   const sc: Schedule = schedule
@@ -628,7 +657,20 @@ export function PlannerEditor(): React.JSX.Element {
     })
   }
 
+  function recordHistory(base: Schedule): void {
+    const snapshot = JSON.parse(JSON.stringify(base)) as Schedule
+    const now = Date.now()
+    if (lastHistoryPush.current !== null && now - lastHistoryPush.current < HISTORY_COALESCE_MS) {
+      useAppStore.getState().plannerReplaceTopUndo(base.id, snapshot)
+    } else {
+      useAppStore.getState().plannerPushUndo(base.id, snapshot)
+      useAppStore.getState().plannerClearRedo(base.id)
+    }
+    lastHistoryPush.current = now
+  }
+
   function commit(base: Schedule, tasks: ScheduleTask[], override?: Partial<Schedule>): void {
+    recordHistory(base)
     const nextSchedule = {
       ...base,
       ...override,
@@ -640,6 +682,27 @@ export function PlannerEditor(): React.JSX.Element {
       saveTimer.current = null
       void saveSchedule(nextSchedule)
     }, 800)
+  }
+
+  function restoreSchedule(restored: Schedule | null): void {
+    if (!restored) return
+    if (saveTimer.current !== null) clearTimeout(saveTimer.current)
+    setNumberDrafts({})
+    setSelected(new Set())
+    setAnchorId(null)
+    lastHistoryPush.current = null
+    saveTimer.current = window.setTimeout(() => {
+      saveTimer.current = null
+      void saveSchedule(restored)
+    }, 800)
+  }
+
+  function handleUndo(): void {
+    restoreSchedule(useAppStore.getState().undoPlanner())
+  }
+
+  function handleRedo(): void {
+    restoreSchedule(useAppStore.getState().redoPlanner())
   }
 
   function editTask(
@@ -1043,6 +1106,25 @@ export function PlannerEditor(): React.JSX.Element {
         </button>
       </div>
       <div className="planner-toolbar">
+        <div className="planner-toolbar-group">
+          <button
+            className="icon-btn"
+            title="Undo (⌘Z)"
+            disabled={(plannerUndo[schedule.id]?.length ?? 0) === 0}
+            onClick={handleUndo}
+          >
+            <MdiIcon path={mdiUndo} size={16} />
+          </button>
+          <button
+            className="icon-btn"
+            title="Redo (⇧⌘Z)"
+            disabled={(plannerRedo[schedule.id]?.length ?? 0) === 0}
+            onClick={handleRedo}
+          >
+            <MdiIcon path={mdiRedo} size={16} />
+          </button>
+        </div>
+        <span className="planner-toolbar-divider" />
         <div className="planner-toolbar-group">
           <button className="icon-btn" title="New task" onClick={handleNewTask}>
             <MdiIcon path={mdiPlus} size={16} />

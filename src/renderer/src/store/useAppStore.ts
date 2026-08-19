@@ -28,6 +28,8 @@ interface AppState {
   activeScheduleId: string | null
   scheduleContent: Schedule | null
   calendar: ProjectCalendar | null
+  plannerUndo: Record<string, Schedule[]>
+  plannerRedo: Record<string, Schedule[]>
   tab: Tab
   chatOpen: boolean
   chatMessages: Record<string, ChatMessage[]>
@@ -69,6 +71,11 @@ interface AppState {
   renameSchedule: (id: string, newName: string) => Promise<void>
   deleteSchedule: (id: string) => Promise<void>
   saveCalendar: (calendar: ProjectCalendar) => Promise<void>
+  plannerPushUndo: (scheduleId: string, snapshot: Schedule) => void
+  plannerReplaceTopUndo: (scheduleId: string, snapshot: Schedule) => void
+  plannerClearRedo: (scheduleId: string) => void
+  undoPlanner: () => Schedule | null
+  redoPlanner: () => Schedule | null
   loadModules: (project: string) => Promise<void>
   applyModuleEvent: (evt: ModuleEvent) => void
   setModuleHistoryRunId: (runId: string | null) => void
@@ -117,6 +124,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   activeScheduleId: null,
   scheduleContent: null,
   calendar: null,
+  plannerUndo: {},
+  plannerRedo: {},
   tab: 'notes',
   chatOpen: false,
   chatMessages: {},
@@ -331,6 +340,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (get().activeScheduleId === id) {
       set({ activeScheduleId: null, scheduleContent: null })
     }
+    const plannerUndo = { ...get().plannerUndo }
+    const plannerRedo = { ...get().plannerRedo }
+    delete plannerUndo[id]
+    delete plannerRedo[id]
+    set({ plannerUndo, plannerRedo })
     await get().refreshSchedules()
   },
 
@@ -350,6 +364,58 @@ export const useAppStore = create<AppState>((set, get) => ({
       await window.ptnotes.planner.save(project, recomputed)
       await get().refreshSchedules()
     }
+  },
+
+  plannerPushUndo(scheduleId, snapshot) {
+    const undo = get().plannerUndo[scheduleId] ?? []
+    set({
+      plannerUndo: { ...get().plannerUndo, [scheduleId]: [...undo, snapshot].slice(-100) }
+    })
+  },
+
+  plannerReplaceTopUndo(scheduleId, snapshot) {
+    const undo = get().plannerUndo[scheduleId] ?? []
+    const next = undo.length === 0 ? [snapshot] : [...undo.slice(0, -1), snapshot]
+    set({ plannerUndo: { ...get().plannerUndo, [scheduleId]: next } })
+  },
+
+  plannerClearRedo(scheduleId) {
+    if (!get().plannerRedo[scheduleId]?.length) return
+    const plannerRedo = { ...get().plannerRedo }
+    delete plannerRedo[scheduleId]
+    set({ plannerRedo })
+  },
+
+  undoPlanner() {
+    const state = get()
+    if (!state.activeScheduleId || !state.scheduleContent) return null
+    const id = state.activeScheduleId
+    const undo = state.plannerUndo[id] ?? []
+    if (undo.length === 0) return null
+    const prev = undo[undo.length - 1]
+    const redo = state.plannerRedo[id] ?? []
+    set({
+      plannerUndo: { ...state.plannerUndo, [id]: undo.slice(0, -1) },
+      plannerRedo: { ...state.plannerRedo, [id]: [...redo, state.scheduleContent].slice(-100) },
+      scheduleContent: prev
+    })
+    return prev
+  },
+
+  redoPlanner() {
+    const state = get()
+    if (!state.activeScheduleId || !state.scheduleContent) return null
+    const id = state.activeScheduleId
+    const redo = state.plannerRedo[id] ?? []
+    if (redo.length === 0) return null
+    const next = redo[redo.length - 1]
+    const undo = state.plannerUndo[id] ?? []
+    set({
+      plannerRedo: { ...state.plannerRedo, [id]: redo.slice(0, -1) },
+      plannerUndo: { ...state.plannerUndo, [id]: [...undo, state.scheduleContent].slice(-100) },
+      scheduleContent: next
+    })
+    return next
   },
 
   async loadModules(project) {
