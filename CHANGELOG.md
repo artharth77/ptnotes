@@ -17,6 +17,10 @@
 
 - `add_task` and `update_task` now infer the parent from a **nested** `addAfter` task number (e.g. `addAfter: "2.1.1"` without `parent` places the task as a sibling of the matched task, under the same parent). An explicit `parent` still wins over `addAfter` (in `update_task`, an empty `parent` forces top level), and moving a task next to its own descendant is rejected (cycle-safe).
 
+#### Planner — schedule list layout QoL
+
+- The schedule list item meta now stacks the **updated date** on top with the **task count** below it in a smaller font, and the **More actions** button stays vertically centered to the right of both lines.
+
 ## [0.9.0] — 2026-08-19
 
 ### Added
