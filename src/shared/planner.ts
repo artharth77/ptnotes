@@ -128,6 +128,11 @@ function nextWorkingDay(date: Date, calendar: ProjectCalendar): Date {
   return next
 }
 
+/** The first working day strictly after `date` (YYYY-MM-DD). */
+export function nextWorkingDayString(date: string, calendar: ProjectCalendar): string {
+  return formatDate(nextWorkingDay(parseDate(date), calendar))
+}
+
 /** End date = `start` counted as day 1, advanced `duration - 1` working days. */
 export function computeEndDate(start: string, duration: number, calendar: ProjectCalendar): string {
   if (!start || !duration || duration <= 0) return start

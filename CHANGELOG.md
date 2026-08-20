@@ -17,6 +17,16 @@
 
 - `add_task` and `update_task` now infer the parent from a **nested** `addAfter` task number (e.g. `addAfter: "2.1.1"` without `parent` places the task as a sibling of the matched task, under the same parent). An explicit `parent` still wins over `addAfter` (in `update_task`, an empty `parent` forces top level), and moving a task next to its own descendant is rejected (cycle-safe).
 
+#### Planner — grid view context menu
+
+- **Right-click context menu**: right-clicking a task row opens a cursor-positioned menu that acts on the current selection — right-clicking an unselected row selects it first and makes it the anchor. It offers **Insert Before / Insert After / Insert Sub Task**, **Copy / Cut / Paste Before / Paste After** (paste actions disabled while the clipboard is empty), and **Delete** (with the usual parent-confirmation). The menu mirrors the note-menu pattern and closes on outside click, `Escape`, or grid scroll.
+- **Auto Plan Date**: chains the selected leaf tasks onto the plan timeline — the first selected task starts on the next working day after the immediately preceding non-descendant row's `planEnd` (when it has one), and each subsequent selected task chains from the previous one's new `planEnd`, preserving each task's duration. Parent/group rows are skipped, and the action is disabled when no such anchor exists.
+- **Clear Plan Date**: clears `planStart`/`planEnd` on all selected tasks.
+- **% Complete slider**: a slider in the menu sets `%Complete` on the selected leaf tasks (parent/group rows are skipped, matching the table's read-only rollup). Dragging commits live without flooding undo history — a single undo step is recorded when the drag ends (pointer up / blur / key up).
+- **Multi-add**: the toolbar's **Add Task** and **Add Sub Task** actions now insert one new task per selected row (previously a single task), selecting and focusing the new rows; the two toolbar paste buttons were consolidated into a single **Paste** button (pastes before the selection).
+- **Keyboard navigation**: `PageUp`/`PageDown` move the selection 10 rows at a time and `Home`/`End` jump to the first/last row; arrow-key, page, and home/end moves all scroll the active row into view. Right-clicking or shift-clicking while editing a cell now exits the cell so keyboard navigation never fights the input.
+- **Shared helper**: the chain math uses a new exported `nextWorkingDayString` from the shared planner engine (`src/shared/planner.ts`), covered by new unit tests in `scripts/test-planner.mts`.
+
 ### Changed
 
 #### Chat — static system prompt for provider prompt caching
