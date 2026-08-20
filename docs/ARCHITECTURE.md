@@ -134,7 +134,7 @@ src/
 │   └── ai/
 │       ├── client.ts    # OpenAI-compatible client (streaming)
 │       ├── tools.ts     # tool JSON schemas + executors (bind to PTNotesService)
-│       ├── chatSession.ts   # conversation state + tool-call loop (system prompt refreshed per send, includes skills index)
+│       ├── chatSession.ts   # conversation state + tool-call loop (static system prompt + skills index; active note/schedule sent as user-message context suffix)
 │       ├── config.ts    # ai-provider.json load/save
 │       ├── reader.ts     # readFileAsText + detectFileKind: content-based (pdf-parse for PDFs, raw text for any text file) + MAX_PDF_CHARS truncation
 │       └── search/
@@ -173,7 +173,8 @@ src/
 │   │   │   ├── NoteList.tsx         # Notes tab
 │   │   │   ├── TodoPanel.tsx        # Todo tab (checkboxes + progress)
 │   │   │   ├── PlannerPanel.tsx     # Planner tab (schedule list + create/rename/delete)
-│   │   │   ├── PlannerEditor.tsx    # schedule grid editor (hierarchical tasks, rollups, autosave, undo/redo history)
+│   │   │   ├── PlannerEditor.tsx    # schedule grid editor (hierarchical tasks, rollups, autosave, undo/redo history) + view toggle
+│   │   │   ├── GanttChart.tsx       # planner Gantt view (day-grid timeline, draggable bars, bar popup)
 │   │   │   ├── CalendarModal.tsx    # project working-day calendar editor (week + holidays)
 │   │   │   ├── MarkdownEditor.tsx   # TipTap WYSIWYG + markdown sync + auto-save
 │   │   │   ├── MarkdownContent.tsx  # react-markdown chat rendering + note:/skill: link handling
@@ -256,9 +257,9 @@ ChatPanel (renderer) ──send──▶ Main process
 - Chat operates on the **currently active project** by default.
 - Tool errors are returned to the model so it can self-correct.
 - Session is kept in memory per project (`sessions` map) so closing the drawer and reopening continues the same conversation.
-- Each `ai:send` call receives the renderer's current thread as `history` and the session is re-seeded from it, so reopening a historical chat (or switching sessions) keeps the correct model context — the AI never relies solely on in-memory accumulation.
-- System prompt is sent when a session starts; it includes the active project and instructs the AI that a `note:<notename>` message means it must call `read_note` for that note.
-- Each `ai:send` also forwards the currently **active note** (`activeNoteId` from the renderer store). The system prompt tells the AI that "this note", "the current note" or "the active note" means it should call `read_note` **without a `title`**, which resolves to the note the user is viewing.
+- Each `ai:send` call receives the renderer's current thread as `history`; the session is re-seeded from it only when it has no in-memory messages yet (fresh session — e.g. after `ai:clear` on New Chat / opening a historical chat), so reopening a historical chat (or switching sessions) keeps the correct model context. Within a live conversation the in-memory messages are kept, so context annotations (below) persist across turns.
+- The system prompt is kept **static** per project/date/skills (rebuilt each send only to refresh the skills index) — the active note/schedule are intentionally *not* part of it, so providers can reuse their prompt-prefix cache across turns.
+- Each `ai:send` also forwards the currently **active note** and **active schedule** (`activeNoteId` / `activeScheduleId` from the renderer store). Instead of the system prompt, the changed active context is appended as a **context suffix** to the user message — e.g. `[Context] Active note: "…".` / `[Context] Active schedule: "…".` — and only when it **changed** since the last send (the first message of a conversation always includes it). This keeps "this note", "the current note" or "the active note" working: the model learns the active note from the suffix and calls `read_note` **without a `title`**, which resolves to the note the user is viewing. The suffix is hidden from the chat bubble (the renderer displays its own raw user text) and visible only in the raw AI trace.
 - The system prompt also lists available **enabled** skills (name + description per skill, global + project)
   and is **rebuilt on every `send()`** (`ensureSystemPrompt` → `renderSkillsIndex`), so skills
   created/edited/toggled in Settings apply mid-session. The model calls `read_skill` to load full content
@@ -297,7 +298,7 @@ ChatPanel (renderer) ──send──▶ Main process
   (`system` / `user` / `assistant` / `tool`), `ts`, `durationMs`, and `content`:
   - `system` — the system prompt sent, written only once per trace file (the first send;
     later sends skip it, detected via `chatTraceMeta`).
-  - `user` — a user prompt (PDF uploads also carry a `file: { filename, file_id }` reference).
+  - `user` — a user prompt, including any auto-appended active note/schedule context suffix (PDF uploads also carry a `file: { filename, file_id }` reference).
   - `assistant` — an AI reply: `content` / `reasoning`, the `toolCalls` it issued (payload
     `{ id, name, args }`), `finishReason`, `usage`, plus `model` / `baseUrl` / `endpoint`.
   - `tool` — a tool response: `name`, `toolCallId`, `content` (the result), and `durationMs`.
@@ -350,8 +351,8 @@ ChatPanel (renderer) ──send──▶ Main process
 | `read_schedule`   | full task tree with rolled-up parent values; match schedule by id or name                                                                                 |
 | `create_schedule` | new empty schedule; returns id + name                                                                                                                     |
 | `update_schedule` | rename a schedule (match by id or name)                                                                                                                   |
-| `add_task`        | add a task (optional parent nesting); planStart+planEnd or planStart+duration — the missing value is computed                                             |
-| `update_task`     | update a task's fields (match by id, task number or title); plan date edits re-derive the other value (end-date-fixed); plan-field edits on parents are rejected (derived from children); optional `parent`/`addAfter` moves the task (and its subtree) to a new parent/position — cycle-safe |
+| `add_task`        | add a task (optional parent nesting); planStart+planEnd or planStart+duration — the missing value is computed; `addAfter` without `parent` infers the parent (sibling of the matched task)              |
+| `update_task`     | update a task's fields (match by id, task number or title); plan date edits re-derive the other value (end-date-fixed); plan-field edits on parents are rejected (derived from children); `parent`/`addAfter` moves the task (and its subtree) — `addAfter` without `parent` infers the parent (sibling of the matched task), explicit empty `parent` → top level, cycle-safe |
 | `set_calendar`    | set week + holidays; re-rolls all schedules so parent durations reflect the new calendar                                                                  |
 
 ### PDF attachments (drag & drop into chat)
@@ -501,6 +502,42 @@ JSON in `<project>/planner/<slug>.json`; the whole feature is pure data — no m
   text fields keep their own undo behavior.
 - 4th sidebar tab (`mdiChartTimeline`) → PlannerPanel (schedule list) → PlannerEditor (keyed by
   `activeScheduleId`); an empty-state "New Schedule" flow otherwise.
+- **No. and Title are always visible**: both columns are always rendered (row/header/`colTemplate`
+  guards removed) and are checked + disabled in the column modal (`disabledKeys`), so the grid
+  always has a stable identity + label to anchor the Gantt view.
+
+### Gantt view (GanttChart)
+
+- Bottom status bar with a segmented **Grid View** / **Gantt Chart View** toggle. The view is
+  component-local state (session-only — resets to Grid on schedule change); switching carries the
+  scroll position between the grid and the Gantt body and clears that schedule's undo/redo history
+  (`plannerClearHistory`). In Gantt mode the toolbar's add/delete/copy/indent/move, columns, and
+  calendar buttons are disabled, and a day-width zoom slider (16–32 px, step 4) appears in the
+  status bar.
+- `GanttChart` renders the task tree itself (recursive `renderTree`, deriving No. numbering and
+  honoring the shared `collapsed` set — consistent with the table view). The timeline
+  (`buildTimeline`) auto-fits min `planStart` → max `planEnd` (+7-day padding, fallback today) and
+  is rebuilt only when tasks change. Fixed left columns: collapse toggle (28px) + No. (46px) +
+  Title (220px), indented by depth. Header: month band + a floating "current month" label that
+  follows horizontal scroll, and a day axis (weekday + day number) where non-working days
+  (`isWorkingDay`) are shaded gray and today is highlighted.
+- **Bars**: leaves are draggable, parents are not (distinct color + `v───v` end arrows). Leaf bars
+  expose left/right edge handles; pointer drags snap to whole days (`clampDelta` keeps the bar in
+  the timeline and start ≤ end), preview locally in `drag` state (the store is untouched until
+  release), and commit once on release with a non-zero delta via
+  `onResize(id, start, end, mode)`:
+  - `start` — sets `planStart`, keeps `planEnd` fixed, recomputes `duration` (deliberately **not**
+    `applyDateRule`, which would preserve duration);
+  - `end` — sets `planEnd`, keeps `planStart` fixed, recomputes `duration`;
+  - `move` — shifts both dates by the same day delta (duration preserved).
+- **Bar popup**: right-click any bar (parent or leaf) for No., Title, Plan Start, Plan End, and
+  Duration (working days); closes on outside click / Escape / close button. Leaves with dates get
+  a **Clear Plan** action (`planStart`/`planEnd` → null).
+- **Day-cell click**: for date-less leaves, clicking a day cell sets `planStart` to that day and
+  `planEnd = computeEndDate(date, duration, calendar)` (duration defaults to 1); settable cells
+  show a hover hint, and date-less leaf titles are dimmed.
+- All Gantt edits route through the editor's `editTask`/`commit`, so rollup, undo/redo, and
+  debounce autosave behave exactly as in the table view.
 
 ## Notes & caveats
 

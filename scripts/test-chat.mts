@@ -663,7 +663,7 @@ const traceSession = new ChatSession(
   { service, activeProject: 'Test' },
   (evt) => traceEvents.push(evt)
 )
-await traceSession.send('hello from trace', [], null, trace)
+await traceSession.send('hello from trace', [], null, null, trace)
 
 const traceFile = await service.readChatTrace('Test', traceKey)
 assert.ok(traceFile, 'trace file written for the chat session')
@@ -754,7 +754,7 @@ const trace2 = new AiTraceRecorder({
   hasSystem: traceMeta2.hasSystem,
   append: (header, lines) => service.appendChatTrace('Test', traceKey, header, lines)
 })
-await traceSession.send('second trace message', [], null, trace2)
+await traceSession.send('second trace message', [], null, null, trace2)
 traceServer.close()
 
 const traceFile2 = await service.readChatTrace('Test', traceKey)

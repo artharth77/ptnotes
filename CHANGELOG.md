@@ -1,3 +1,48 @@
+## [0.10.0] — 2026-08-20
+
+### Added
+
+#### Planner — Gantt chart view
+
+- **View toggle**: a new bottom status bar in the planner editor with segmented **Grid View** / **Gantt Chart View** buttons. The active view is session-only (resets to Grid when switching schedules) and switching carries the scroll position between the grid and the Gantt body.
+- **Gantt chart** (`GanttChart.tsx`): a day-grid timeline auto-fitted to the min plan start → max plan end across all tasks (+7-day padding, falling back to today), with a month band plus a floating "current month" label that follows horizontal scroll, and a day-axis header (weekday + day number). Non-working days (weekends + project holidays via `isWorkingDay`) are shaded gray and today is highlighted. Fixed left columns (collapse toggle + No. + Title) indent by task depth and share the table view's collapse state; No. numbering is derived the same way as in the grid.
+- **Task bars**: leaf bars are draggable, parent bars are not (distinct color + `v───v` end arrows). Leaf bars expose left/right edge handles: dragging the **start** edge keeps `planEnd` fixed and recomputes `duration`, dragging the **end** edge keeps `planStart` fixed and recomputes `duration`, and dragging the **body** shifts both dates by the same day delta (duration preserved). All drags snap to whole days (pointer events, delta clamped so the bar stays in the timeline and start never passes end), preview live while dragging, and commit only on release with a non-zero delta.
+- **Bar popup**: right-clicking any bar (parent or leaf) opens a popup with No., Title, Plan Start, Plan End, and Duration (working days); it closes on outside click / Escape / close button. Leaves with dates get a **Clear Plan** action (clears `planStart`/`planEnd`).
+- **Day-cell click**: for leaves without dates, clicking a day cell sets `planStart` to that day and `planEnd` via `computeEndDate` (duration defaults to 1); settable cells show a hover hint, and date-less leaf titles are dimmed.
+- All Gantt edits flow through the existing `editTask`/`commit` path, so parent rollup, undo/redo, and debounced autosave work unchanged.
+- **Table view constraints**: No. and Title columns are always rendered and can no longer be hidden (checked + disabled in the column modal).
+- **Gantt-only chrome**: a day-width zoom slider (16–32 px, step 4) in the status bar, and the toolbar's add/delete/copy/indent/move, columns, and calendar buttons are disabled in Gantt mode.
+
+#### Planner — AI task placement by nested task number
+
+- `add_task` and `update_task` now infer the parent from a **nested** `addAfter` task number (e.g. `addAfter: "2.1.1"` without `parent` places the task as a sibling of the matched task, under the same parent). An explicit `parent` still wins over `addAfter` (in `update_task`, an empty `parent` forces top level), and moving a task next to its own descendant is rejected (cycle-safe).
+
+#### Planner — grid view context menu
+
+- **Right-click context menu**: right-clicking a task row opens a cursor-positioned menu that acts on the current selection — right-clicking an unselected row selects it first and makes it the anchor. It offers **Insert Before / Insert After / Insert Sub Task**, **Copy / Cut / Paste Before / Paste After** (paste actions disabled while the clipboard is empty), and **Delete** (with the usual parent-confirmation). The menu mirrors the note-menu pattern and closes on outside click, `Escape`, or grid scroll.
+- **Auto Plan Date**: chains the selected leaf tasks onto the plan timeline — the first selected task starts on the next working day after the immediately preceding non-descendant row's `planEnd` (when it has one), and each subsequent selected task chains from the previous one's new `planEnd`, preserving each task's duration. Parent/group rows are skipped, and the action is disabled when no such anchor exists.
+- **Clear Plan Date**: clears `planStart`/`planEnd` on all selected tasks.
+- **% Complete slider**: a slider in the menu sets `%Complete` on the selected leaf tasks (parent/group rows are skipped, matching the table's read-only rollup). Dragging commits live without flooding undo history — a single undo step is recorded when the drag ends (pointer up / blur / key up).
+- **Multi-add**: the toolbar's **Add Task** and **Add Sub Task** actions now insert one new task per selected row (previously a single task), selecting and focusing the new rows; the two toolbar paste buttons were consolidated into a single **Paste** button (pastes before the selection).
+- **Keyboard navigation**: `PageUp`/`PageDown` move the selection 10 rows at a time and `Home`/`End` jump to the first/last row; arrow-key, page, and home/end moves all scroll the active row into view. Right-clicking or shift-clicking while editing a cell now exits the cell so keyboard navigation never fights the input.
+- **Shared helper**: the chain math uses a new exported `nextWorkingDayString` from the shared planner engine (`src/shared/planner.ts`), covered by new unit tests in `scripts/test-planner.mts`.
+
+#### Planner — schedule list layout QoL
+
+- The schedule list item meta now stacks the **updated date** on top with the **task count** below it in a smaller font, and the **More actions** button stays vertically centered to the right of both lines.
+
+#### Note & schedule lists — right-click context menu
+
+- Right-clicking a note or schedule item in its list opens the same context menu as the **More actions** ("⋯") button (Rename / Show in Folder / Delete).
+- The menu is clamped to the window bounds, so it no longer gets trimmed when the item sits near the window border.
+
+### Changed
+
+#### Chat — static system prompt for provider prompt caching
+
+- The active note and active schedule are no longer baked into the system prompt. The system prompt is now static per project/date/skills, so providers can reuse their prompt-prefix cache across turns.
+- Instead, the currently active note/schedule is appended as a **context suffix** to the user message — but only when it **changed** since the last send (the first message always includes it). The chat bubble still shows just the raw user text; the suffix is hidden from the UI and visible only in the raw AI trace.
+
 ## [0.9.0] — 2026-08-19
 
 ### Added

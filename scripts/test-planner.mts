@@ -28,6 +28,7 @@ const {
   deriveTaskNo,
   emptyTask,
   findTaskByTitle,
+  nextWorkingDayString,
   normalizeCalendar,
   rollupScheduleTasks,
   validateScheduleId
@@ -54,6 +55,12 @@ assert.equal(computeEndDate('2024-01-01', 1, cal), '2024-01-01', 'duration 1 end
 assert.equal(computeEndDate('2024-01-01', 5, cal), '2024-01-05', '5 working days Mon-Fri')
 assert.equal(computeEndDate('2024-01-05', 2, cal), '2024-01-08', 'skips weekend (Fri->Mon)')
 
+assert.equal(
+  nextWorkingDayString('2024-01-05', cal),
+  '2024-01-08',
+  'next working day skips weekend'
+)
+
 assert.equal(computeDuration('2024-01-01', '2024-01-05', cal), 5, 'Mon-Fri is 5 days')
 assert.equal(computeDuration('2024-01-01', '2024-01-01', cal), 1, 'same day is 1 day')
 assert.equal(computeDuration('2024-01-05', '2024-01-01', cal), 0, 'end before start is 0')
@@ -64,6 +71,11 @@ assert.equal(computeDuration('2024-01-05', '2024-01-08', cal), 2, 'Mon-Fri acros
 const hol = normalizeCalendar({ weekStart: 1, weekEnd: 5, holidays: ['2024-01-02'] })
 assert.equal(computeDuration('2024-01-01', '2024-01-03', hol), 2, 'holiday is not a working day')
 assert.equal(computeEndDate('2024-01-01', 3, hol), '2024-01-04', 'end skips the holiday')
+assert.equal(
+  nextWorkingDayString('2024-01-01', hol),
+  '2024-01-03',
+  'next working day skips the holiday'
+)
 assert.deepEqual(
   normalizeCalendar({ holidays: ['bad-date'] }),
   defaultCalendar(),
@@ -85,8 +97,8 @@ next = applyDateRule(prev, { ...prev, planEnd: '2024-01-10' }, cal)
 assert.equal(next.duration, 8, 'end edited -> duration recomputed')
 
 next = applyDateRule(
-  { ...emptyTask(), planStart: '2024-01-01', planEnd: '2024-01-05' },
-  { ...emptyTask(), planStart: '2024-01-02', planEnd: '2024-01-05' },
+  { ...emptyTask(), duration: null, planStart: '2024-01-01', planEnd: '2024-01-05' },
+  { ...emptyTask(), duration: null, planStart: '2024-01-02', planEnd: '2024-01-05' },
   cal
 )
 assert.equal(next.duration, 4, 'start edited with no duration -> duration recomputed, end fixed')
@@ -485,6 +497,55 @@ assert.equal(
   'unknown parent moves task to top level'
 )
 
+// state: top = Research(1), Wireframes(2), Spec(3); Wireframes > Design(2.1) > Misc(2.1.1), Estimate(2.1.2)
+
+// add_task addAfter with a nested task number infers the parent (sibling placement)
+r = await call('add_task', { schedule: 'Sprint 12', title: 'Checklist', addAfter: '2.1.1' })
+assert.equal(r.ok, true)
+sched2 = await service.readSchedule('Build', 'sprint-12')
+assert.deepEqual(
+  sched2!.tasks[1].children[0].children.map((c) => c.title),
+  ['Misc', 'Checklist', 'Estimate'],
+  'nested addAfter inserts as sibling under the same parent'
+)
+assert.equal(sched2!.tasks.length, 3, 'nested addAfter does not create a top-level task')
+assert.equal(r.parent, sched2!.tasks[1].children[0].id, 'inferred parent is reported')
+
+// update_task move with only a nested addAfter infers the parent (sibling placement)
+r = await call('update_task', { schedule: 'Sprint 12', task: 'Spec', addAfter: '2.1.3' })
+assert.equal(r.ok, true)
+sched2 = await service.readSchedule('Build', 'sprint-12')
+assert.deepEqual(
+  sched2!.tasks.map((t) => t.title),
+  ['Research', 'Wireframes'],
+  'task moved out of the top level'
+)
+assert.deepEqual(
+  sched2!.tasks[1].children[0].children.map((c) => c.title),
+  ['Misc', 'Checklist', 'Estimate', 'Spec'],
+  'task placed as sibling after the nested addAfter target'
+)
+
+// update_task move with a nested addAfter under the task itself is rejected (cycle)
+r = await call('update_task', { schedule: 'Sprint 12', task: 'Design', addAfter: '2.1.3' })
+assert.equal(r.ok, false, 'cannot move a task next to its own descendant')
+
+// update_task explicit empty parent still wins over a nested addAfter (top level)
+r = await call('update_task', {
+  schedule: 'Sprint 12',
+  task: 'Checklist',
+  parent: '',
+  addAfter: '2.1.3'
+})
+assert.equal(r.ok, true)
+assert.equal(r.parent, null)
+sched2 = await service.readSchedule('Build', 'sprint-12')
+assert.deepEqual(
+  sched2!.tasks.map((t) => t.title),
+  ['Research', 'Wireframes', 'Checklist'],
+  'explicit empty parent moves to top level despite nested addAfter'
+)
+
 // update_schedule rename
 r = await call('update_schedule', { schedule: 'Sprint 12', name: 'Sprint 13' })
 assert.equal(r.ok, true)
@@ -506,7 +567,7 @@ assert.deepEqual(r.holidays, ['2024-01-01'])
 assert.equal(r.reRolledSchedules, 2)
 
 // parent rollup recomputed after re-roll (Jan 1 holiday shrinks durations)
-sched2 = await service.readSchedule('Build', 'release-plan')
+sched2 = await service.readSchedule('Build', 'ship-it')
 assert.ok(sched2 && sched2.tasks.length === 1)
 assert.equal(sched2.tasks[0].percentComplete, 100)
 

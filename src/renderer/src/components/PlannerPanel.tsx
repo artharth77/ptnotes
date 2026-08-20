@@ -104,7 +104,11 @@ export function PlannerPanel(): React.JSX.Element {
       return
     }
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-    setMenuPos({ x: rect.right, y: rect.bottom })
+    const menuW = 180
+    const menuH = 130
+    const x = Math.min(rect.right, window.innerWidth - menuW - 8)
+    const y = Math.min(rect.bottom, window.innerHeight - menuH - 8)
+    setMenuPos({ x: Math.max(8, x), y: Math.max(8, y) })
     setMenuFor(id)
   }
 
@@ -159,12 +163,17 @@ export function PlannerPanel(): React.JSX.Element {
             key={schedule.id}
             className={`note-item ${schedule.id === activeScheduleId ? 'active' : ''}`}
             onClick={() => void selectSchedule(schedule.id)}
+            onContextMenu={(e) => openMenu(e, schedule.id)}
           >
             <span className="note-item-title">{schedule.name}</span>
             <span className="note-item-actions">
-              <span className="note-item-date">
-                {schedule.taskCount} task{schedule.taskCount === 1 ? '' : 's'} ·{' '}
-                {formatDate(schedule.updatedAt)}
+              <span className="note-item-meta">
+                <span className="note-item-date">
+                  {formatDate(schedule.updatedAt)}
+                </span>
+                <span className="note-item-count">
+                  {schedule.taskCount} task{schedule.taskCount === 1 ? '' : 's'}
+                </span>
               </span>
               <button
                 className="icon-btn small note-menu-btn"
