@@ -42,7 +42,6 @@ import {
   applyDateRule,
   computeDuration,
   computeEndDate,
-  countTasks,
   defaultCalendar,
   deriveTaskNo,
   emptyTask,
@@ -222,6 +221,16 @@ function removeTasks(tasks: ScheduleTask[], ids: Set<string>): ScheduleTask[] {
   return tasks
     .filter((t) => !ids.has(t.id))
     .map((t) => (t.children.length > 0 ? { ...t, children: removeTasks(t.children, ids) } : t))
+}
+
+function countDeletable(tasks: ScheduleTask[]): number {
+  const ids = new Set<string>()
+  const add = (t: ScheduleTask): void => {
+    ids.add(t.id)
+    t.children.forEach(add)
+  }
+  tasks.forEach(add)
+  return ids.size
 }
 
 function findTaskCtx(
@@ -1586,7 +1595,7 @@ export function PlannerEditor(): React.JSX.Element {
   }
 
   const ganttMode = view === 'gantt'
-  const deleteTotal = confirmDelete ? confirmDelete.tasks.reduce((n, t) => n + countTasks(t), 0) : 0
+  const deleteTotal = confirmDelete ? countDeletable(confirmDelete.tasks) : 0
 
   return (
     <div className="planner-editor">
@@ -1807,7 +1816,14 @@ export function PlannerEditor(): React.JSX.Element {
       <div className="planner-statusbar">
         {ganttMode && (
           <div className="planner-gantt-zoom" title="Gantt zoom">
-            <MdiIcon path={mdiMagnifyMinus} size={14} />
+            <button
+              type="button"
+              className="planner-zoom-btn"
+              aria-label="Zoom out"
+              onClick={() => setGanttDayWidth((w) => Math.max(GANTT_DAY_WIDTH_MIN, w - 4))}
+            >
+              <MdiIcon path={mdiMagnifyMinus} size={14} />
+            </button>
             <input
               type="range"
               min={GANTT_DAY_WIDTH_MIN}
@@ -1816,7 +1832,14 @@ export function PlannerEditor(): React.JSX.Element {
               value={ganttDayWidth}
               onChange={(e) => setGanttDayWidth(Number(e.target.value))}
             />
-            <MdiIcon path={mdiMagnifyPlus} size={14} />
+            <button
+              type="button"
+              className="planner-zoom-btn"
+              aria-label="Zoom in"
+              onClick={() => setGanttDayWidth((w) => Math.min(GANTT_DAY_WIDTH_MAX, w + 4))}
+            >
+              <MdiIcon path={mdiMagnifyPlus} size={14} />
+            </button>
           </div>
         )}
         <div className="planner-view-toggle">

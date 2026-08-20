@@ -27,6 +27,15 @@
 - **Keyboard navigation**: `PageUp`/`PageDown` move the selection 10 rows at a time and `Home`/`End` jump to the first/last row; arrow-key, page, and home/end moves all scroll the active row into view. Right-clicking or shift-clicking while editing a cell now exits the cell so keyboard navigation never fights the input.
 - **Shared helper**: the chain math uses a new exported `nextWorkingDayString` from the shared planner engine (`src/shared/planner.ts`), covered by new unit tests in `scripts/test-planner.mts`.
 
+#### Planner — schedule list layout QoL
+
+- The schedule list item meta now stacks the **updated date** on top with the **task count** below it in a smaller font, and the **More actions** button stays vertically centered to the right of both lines.
+
+#### Note & schedule lists — right-click context menu
+
+- Right-clicking a note or schedule item in its list opens the same context menu as the **More actions** ("⋯") button (Rename / Show in Folder / Delete).
+- The menu is clamped to the window bounds, so it no longer gets trimmed when the item sits near the window border.
+
 ### Changed
 
 #### Chat — static system prompt for provider prompt caching

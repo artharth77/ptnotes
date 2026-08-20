@@ -633,6 +633,13 @@ body {
   opacity: 0;
 }
 
+.note-item-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+
 .note-item:hover .note-item-actions {
   opacity: 1;
 }
@@ -641,6 +648,12 @@ body {
   font-size: 11px;
   color: var(--text-faint);
   margin-right: 2px;
+  white-space: nowrap;
+}
+
+.note-item-count {
+  font-size: 10px;
+  color: var(--text-faint);
   white-space: nowrap;
 }
 
@@ -4106,6 +4119,27 @@ body {
   align-items: center;
   gap: 8px;
   color: var(--text-dim);
+}
+
+.planner-gantt-zoom .planner-zoom-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.planner-gantt-zoom .planner-zoom-btn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.planner-gantt-zoom .planner-zoom-btn:active {
+  transform: scale(0.9);
 }
 
 .planner-gantt-zoom input[type='range'] {

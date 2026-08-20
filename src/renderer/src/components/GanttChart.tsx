@@ -5,7 +5,7 @@ import type { ProjectCalendar, ScheduleTask } from '@shared/types'
 import { MdiIcon } from './MdiIcon'
 
 const DAY_MS = 24 * 60 * 60 * 1000
-export const GANTT_DAY_WIDTH_MIN = 16
+export const GANTT_DAY_WIDTH_MIN = 8
 export const GANTT_DAY_WIDTH_MAX = 32
 export const GANTT_DAY_WIDTH_DEFAULT = 24
 const PADDING_DAYS = 7
@@ -494,11 +494,15 @@ export function GanttChart({
                   key={formatDate(day)}
                   className={`gantt-day-head${isWorkingDay(day, calendar) ? '' : ' gantt-nonwork'}${
                     formatDate(day) === todayKey ? ' gantt-today' : ''
-                  }`}
+                  }${dayWidth <= 12 ? ' gantt-day-head-compact' : ''}`}
                   style={{ width: dayWidth }}
                 >
-                  <div className="gantt-day-weekday">{WEEKDAYS[day.getDay()]}</div>
-                  <div className="gantt-day-date">{day.getDate()}</div>
+                  <div className="gantt-day-weekday">
+                    {dayWidth <= 12 ? WEEKDAYS[day.getDay()][0] : WEEKDAYS[day.getDay()]}
+                  </div>
+                  {dayWidth > 12 || day.getDay() === 1 ? (
+                    <div className="gantt-day-date">{day.getDate()}</div>
+                  ) : null}
                 </div>
               ))}
             </div>
