@@ -104,7 +104,11 @@ export function PlannerPanel(): React.JSX.Element {
       return
     }
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-    setMenuPos({ x: rect.right, y: rect.bottom })
+    const menuW = 180
+    const menuH = 130
+    const x = Math.min(rect.right, window.innerWidth - menuW - 8)
+    const y = Math.min(rect.bottom, window.innerHeight - menuH - 8)
+    setMenuPos({ x: Math.max(8, x), y: Math.max(8, y) })
     setMenuFor(id)
   }
 
@@ -159,6 +163,7 @@ export function PlannerPanel(): React.JSX.Element {
             key={schedule.id}
             className={`note-item ${schedule.id === activeScheduleId ? 'active' : ''}`}
             onClick={() => void selectSchedule(schedule.id)}
+            onContextMenu={(e) => openMenu(e, schedule.id)}
           >
             <span className="note-item-title">{schedule.name}</span>
             <span className="note-item-actions">

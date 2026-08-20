@@ -21,6 +21,11 @@
 
 - The schedule list item meta now stacks the **updated date** on top with the **task count** below it in a smaller font, and the **More actions** button stays vertically centered to the right of both lines.
 
+#### Note & schedule lists — right-click context menu
+
+- Right-clicking a note or schedule item in its list opens the same context menu as the **More actions** ("⋯") button (Rename / Show in Folder / Delete).
+- The menu is clamped to the window bounds, so it no longer gets trimmed when the item sits near the window border.
+
 ## [0.9.0] — 2026-08-19
 
 ### Added
