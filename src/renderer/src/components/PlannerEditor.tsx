@@ -1437,6 +1437,7 @@ export function PlannerEditor(): React.JSX.Element {
     if (e.key === 'Escape') {
       e.preventDefault()
       cancelEdit()
+      gridRef.current?.focus()
       return
     }
 
