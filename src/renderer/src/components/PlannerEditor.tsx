@@ -1538,7 +1538,14 @@ export function PlannerEditor(): React.JSX.Element {
       <div className="planner-statusbar">
         {ganttMode && (
           <div className="planner-gantt-zoom" title="Gantt zoom">
-            <MdiIcon path={mdiMagnifyMinus} size={14} />
+            <button
+              type="button"
+              className="planner-zoom-btn"
+              aria-label="Zoom out"
+              onClick={() => setGanttDayWidth((w) => Math.max(GANTT_DAY_WIDTH_MIN, w - 4))}
+            >
+              <MdiIcon path={mdiMagnifyMinus} size={14} />
+            </button>
             <input
               type="range"
               min={GANTT_DAY_WIDTH_MIN}
@@ -1547,7 +1554,14 @@ export function PlannerEditor(): React.JSX.Element {
               value={ganttDayWidth}
               onChange={(e) => setGanttDayWidth(Number(e.target.value))}
             />
-            <MdiIcon path={mdiMagnifyPlus} size={14} />
+            <button
+              type="button"
+              className="planner-zoom-btn"
+              aria-label="Zoom in"
+              onClick={() => setGanttDayWidth((w) => Math.min(GANTT_DAY_WIDTH_MAX, w + 4))}
+            >
+              <MdiIcon path={mdiMagnifyPlus} size={14} />
+            </button>
           </div>
         )}
         <div className="planner-view-toggle">
