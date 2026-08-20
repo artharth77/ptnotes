@@ -1,3 +1,12 @@
+## [0.10.1] — 2026-08-20
+
+### Added
+
+#### Chat — on-demand reading of skill-linked files
+
+- New **`read_skill_file`** tool: lets the assistant read a sibling file stored inside a skill's folder, referenced from its `SKILL.md` via a relative link (e.g. `[FORMAT.md](./FORMAT.md)` or `[DOC.md](./doc/DOC.md)`). After loading a skill with `read_skill`, the model calls `read_skill_file` (passing `scope`, `skill` and the relative `file` path) only when it actually needs that file — nothing is auto-loaded into context.
+- Accepts PDF and text files (markdown, JSON, YAML, etc.) via the existing local reader; the path is **relative to the skill folder only** — absolute paths and `..` traversal are refused. Read/validation happens in the main process, so the renderer's no-filesystem invariant is preserved and `create_skill`/`saveSkill`/the Settings ▸ Skills editor are unchanged.
+
 ## [0.10.0] — 2026-08-20
 
 ### Added

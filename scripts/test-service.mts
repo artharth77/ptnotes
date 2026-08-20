@@ -303,6 +303,35 @@ assert.equal(skillContent.description, 'House style rules')
 assert.equal(skillContent.content, '# Style\n\nUse sentence case.')
 assert.equal(skillContent.enabled, true, 'readSkill reports enabled')
 
+// readSkillFile: sibling file inside the skill folder (relative only, no traversal)
+const skillDir = join(ROOT, 'Skills', '.data', 'skills', 'style-guide')
+await fs.mkdir(join(skillDir, 'doc'), { recursive: true })
+await fs.writeFile(join(skillDir, 'FORMAT.md'), '# Format\n\nUse tabs.', 'utf8')
+await fs.writeFile(join(skillDir, 'doc', 'DOC.md'), '# Doc\n\nDetails.', 'utf8')
+assert.equal(
+  (await service.readSkillFile('Skills', 'project', 'style-guide', 'FORMAT.md'))?.content,
+  '# Format\n\nUse tabs.'
+)
+assert.equal(
+  (await service.readSkillFile('Skills', 'project', 'style-guide', 'doc/DOC.md'))?.content,
+  '# Doc\n\nDetails.'
+)
+assert.equal(
+  await service.readSkillFile('Skills', 'project', 'style-guide', 'missing.md'),
+  null,
+  'missing file is null'
+)
+assert.equal(
+  await service.readSkillFile('Skills', 'project', 'style-guide', '../FORMAT.md'),
+  null,
+  'traversal refused'
+)
+assert.equal(
+  await service.readSkillFile('Skills', 'project', 'style-guide', '/etc/passwd'),
+  null,
+  'absolute path refused'
+)
+
 // OpenAI skill-guide layout: a per-skill folder containing SKILL.md with name + description lines
 const skillFolder = join(ROOT, 'Skills', '.data', 'skills', 'style-guide')
 const manifestStat = await fs.stat(skillFolder)

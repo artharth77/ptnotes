@@ -1,6 +1,6 @@
 import { promises as fs } from 'fs'
 import { createHash } from 'crypto'
-import { basename, extname, join, relative, sep } from 'path'
+import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'path'
 import { app, shell } from 'electron'
 import type {
   AiTraceEntry,
@@ -495,6 +495,41 @@ export class PTNotesService {
             : parseSkillEnabled(raw),
         content: stripSkillFrontMatter(raw).trim()
       }
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Read a sibling file inside a skill's folder, referenced from its SKILL.md via a
+   * relative link (e.g. `[FORMAT.md](./FORMAT.md)`, `[DOC.md](./doc/DOC.md)`). Only
+   * relative paths that resolve within the skill folder are allowed; anything escaping
+   * (traversal) or absolute is refused.
+   */
+  async readSkillFile(
+    project: string,
+    scope: SkillScope,
+    skill: string,
+    relPath: string
+  ): Promise<{ path: string; content: string; absolutePath: string } | null> {
+    if (scope !== 'global' && scope !== 'project' && scope !== 'builtin') return null
+    const rel = relPath.replaceAll('\\', '/')
+    if (!rel || rel.startsWith('/')) return null
+    const base = this.skillDir(scope, project, skill)
+    const full = resolve(base, rel)
+    const relToBase = relative(base, full)
+    if (
+      !relToBase ||
+      relToBase === '..' ||
+      relToBase.startsWith(`..${sep}`) ||
+      isAbsolute(relToBase)
+    ) {
+      return null
+    }
+    try {
+      const stat = await fs.stat(full)
+      if (!stat.isFile()) return null
+      return { path: rel, content: await fs.readFile(full, 'utf8'), absolutePath: full }
     } catch {
       return null
     }
