@@ -39,7 +39,6 @@ import {
   applyDateRule,
   computeDuration,
   computeEndDate,
-  countTasks,
   defaultCalendar,
   deriveTaskNo,
   emptyTask,
@@ -199,6 +198,16 @@ function removeTasks(tasks: ScheduleTask[], ids: Set<string>): ScheduleTask[] {
   return tasks
     .filter((t) => !ids.has(t.id))
     .map((t) => (t.children.length > 0 ? { ...t, children: removeTasks(t.children, ids) } : t))
+}
+
+function countDeletable(tasks: ScheduleTask[]): number {
+  const ids = new Set<string>()
+  const add = (t: ScheduleTask): void => {
+    ids.add(t.id)
+    t.children.forEach(add)
+  }
+  tasks.forEach(add)
+  return ids.size
 }
 
 function findTaskCtx(
@@ -1311,7 +1320,7 @@ export function PlannerEditor(): React.JSX.Element {
   }
 
   const ganttMode = view === 'gantt'
-  const deleteTotal = confirmDelete ? confirmDelete.tasks.reduce((n, t) => n + countTasks(t), 0) : 0
+  const deleteTotal = confirmDelete ? countDeletable(confirmDelete.tasks) : 0
 
   return (
     <div className="planner-editor">
