@@ -202,7 +202,8 @@ export function registerAiIpc(
           baseUrl: config.baseUrl,
           endpoint: 'title',
           content: title,
-          finishReason: res.choices?.[0]?.finish_reason
+          finishReason: res.choices?.[0]?.finish_reason,
+          ...(res.usage ? { usage: res.usage } : {})
         })
         await trace.flush()
         return title

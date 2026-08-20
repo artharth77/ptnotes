@@ -92,6 +92,12 @@ export interface SkillContent extends SkillMeta {
   content: string
 }
 
+export interface TokenUsage {
+  input: number
+  output: number
+  cached?: number
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
@@ -99,6 +105,7 @@ export interface ChatMessage {
   toolCalls?: ToolCallInfo[]
   error?: boolean
   attachments?: ChatAttachment[]
+  usage?: TokenUsage
 }
 
 export type PdfAttachmentKind = 'extract' | 'upload'
@@ -157,6 +164,8 @@ export interface ChatStreamEvent {
   error?: string
   /** Module run ids the main chat is currently waiting on (`wait_modules`). */
   runIds?: string[]
+  /** Raw provider usage on `message-end` (chat.completions or Responses shape). */
+  usage?: unknown
 }
 
 // ---- Human-in-the-loop (`ask_user` tool) ----
