@@ -27,6 +27,13 @@
 - **Keyboard navigation**: `PageUp`/`PageDown` move the selection 10 rows at a time and `Home`/`End` jump to the first/last row; arrow-key, page, and home/end moves all scroll the active row into view. Right-clicking or shift-clicking while editing a cell now exits the cell so keyboard navigation never fights the input.
 - **Shared helper**: the chain math uses a new exported `nextWorkingDayString` from the shared planner engine (`src/shared/planner.ts`), covered by new unit tests in `scripts/test-planner.mts`.
 
+### Changed
+
+#### Chat — static system prompt for provider prompt caching
+
+- The active note and active schedule are no longer baked into the system prompt. The system prompt is now static per project/date/skills, so providers can reuse their prompt-prefix cache across turns.
+- Instead, the currently active note/schedule is appended as a **context suffix** to the user message — but only when it **changed** since the last send (the first message always includes it). The chat bubble still shows just the raw user text; the suffix is hidden from the UI and visible only in the raw AI trace.
+
 ## [0.9.0] — 2026-08-19
 
 ### Added

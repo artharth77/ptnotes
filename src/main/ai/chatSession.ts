@@ -43,22 +43,12 @@ function toToolArgs(args: string | undefined): Record<string, unknown> {
 export function buildSystemPrompt(
   activeProject: string,
   currentDate: string,
-  skillsIndex?: string,
-  activeNote?: string | null,
-  activeSchedule?: string | null
+  skillsIndex?: string
 ): string {
   const skillsSection = skillsIndex
     ? `\nSkills:
 You can load skills (named instruction documents) on demand when a task is relevant. Call the read_skill tool to load a skill's full content before applying it.
 ${skillsIndex}
-`
-    : ''
-  const activeNoteSection = activeNote
-    ? `- The note the user is currently viewing is "${activeNote}". When the user says "this note", "the current note", "the active note" or "check this note", read it with the read_note tool (omit the title argument to read the active note).
-`
-    : ''
-  const activeScheduleSection = activeSchedule
-    ? `- The schedule (project planner) the user is currently viewing is "${activeSchedule}". When the user says "this schedule", "the current schedule", "the active schedule", "the plan" or "this plan", work with that schedule (omit the schedule argument to target it by default).
 `
     : ''
   return `You are PTNotes assistant, an automation and research assistant inside a markdown notes + todo desktop app.
@@ -72,7 +62,7 @@ Guidelines:
 - When the user asks for up-to-date or factual information, use web_search (and web_fetch for detail) instead of relying only on your own knowledge.
 - After researching, if the user wants it saved, write a well-structured markdown note via create_note/update_note.
 - If the user references a note as \`note:<notename>\` (for example \`note:meeting-notes\`), call the read_note tool to read that specific note before responding.
-${activeNoteSection}${activeScheduleSection}- If the user references a project file as \`file:<filename>\` (for example \`file:report.pdf\`, \`file:notes.md\`, \`file:data.json\` or \`file:readme.txt\`), call the read_file tool to read that file before responding.
+- If the user references a project file as \`file:<filename>\` (for example \`file:report.pdf\`, \`file:notes.md\`, \`file:data.json\` or \`file:readme.txt\`), call the read_file tool to read that file before responding.
 - If the user asks you to use a skill by name (for example \`Use the skill "name": …\`, optionally with the scope in parentheses), call the read_skill tool to load that skill before applying it.
 - When the user asks you to find notes about a topic, call the search_notes tool.
 - When you need user input — a choice, a detail, or confirmation — before you can proceed, call ask_user with your questions. You may ask several questions in a single call; the user answers them all at once. Only ask when genuinely needed.
@@ -97,6 +87,8 @@ export class ChatSession {
   private readonly toolsProvider?: ToolsProvider
   private activeNoteId: string | null = null
   private activeScheduleId: string | null = null
+  private lastActiveNoteName: string | null = null
+  private lastActiveScheduleName: string | null = null
   private trace: AiTraceRecorder | undefined
 
   constructor(
@@ -141,14 +133,17 @@ export class ChatSession {
       return
     }
 
-    if (history && history.length > 0) this.loadContext(history)
+    if (history && history.length > 0 && this.messages.length === 0) {
+      this.loadContext(history)
+    }
 
     const date = new Date().toISOString().slice(0, 10)
     this.trace = trace
     const systemContent = await this.ensureSystemPrompt(date)
     this.traceSystem(systemContent)
-    this.messages.push({ role: 'user', content: userText })
-    this.traceUser(userText)
+    const contextSuffix = await this.buildActiveContextSuffix()
+    this.messages.push({ role: 'user', content: `${userText}${contextSuffix}` })
+    this.traceUser(`${userText}${contextSuffix}`)
 
     const client = createClient(this.config)
     const messageId = randomUUID()
@@ -364,23 +359,7 @@ export class ChatSession {
   /** (Re)build the system message on every send so mid-session changes (e.g. skills) apply. */
   private async ensureSystemPrompt(date: string): Promise<string> {
     const skillsIndex = await this.ctx.service.renderSkillsIndex(this.ctx.activeProject)
-    let activeNote: string | null = null
-    if (this.activeNoteId) {
-      const notes = await this.ctx.service.listNotes(this.ctx.activeProject)
-      activeNote = notes.find((n) => n.id === this.activeNoteId)?.name ?? null
-    }
-    let activeSchedule: string | null = null
-    if (this.activeScheduleId) {
-      const schedules = await this.ctx.service.listSchedules(this.ctx.activeProject)
-      activeSchedule = schedules.find((s) => s.id === this.activeScheduleId)?.name ?? null
-    }
-    const content = buildSystemPrompt(
-      this.ctx.activeProject,
-      date,
-      skillsIndex,
-      activeNote,
-      activeSchedule
-    )
+    const content = buildSystemPrompt(this.ctx.activeProject, date, skillsIndex)
     const idx = this.messages.findIndex((m) => m.role === 'system')
     if (idx === -1) {
       this.messages.unshift({ role: 'system', content })
@@ -388,6 +367,31 @@ export class ChatSession {
       this.messages[idx] = { role: 'system', content }
     }
     return content
+  }
+
+  /** Build a context suffix for the user message with the active note/schedule only when it changed since the last send. */
+  private async buildActiveContextSuffix(): Promise<string> {
+    const notes = this.activeNoteId ? await this.ctx.service.listNotes(this.ctx.activeProject) : []
+    const activeNoteName =
+      (this.activeNoteId && notes.find((n) => n.id === this.activeNoteId)?.name) ?? null
+    const schedules = this.activeScheduleId
+      ? await this.ctx.service.listSchedules(this.ctx.activeProject)
+      : []
+    const activeScheduleName =
+      (this.activeScheduleId && schedules.find((s) => s.id === this.activeScheduleId)?.name) ?? null
+
+    const parts: string[] = []
+    if (activeNoteName && activeNoteName !== this.lastActiveNoteName) {
+      parts.push(`[Context] Active note: "${activeNoteName}".`)
+    }
+    if (activeScheduleName && activeScheduleName !== this.lastActiveScheduleName) {
+      parts.push(`[Context] Active schedule: "${activeScheduleName}".`)
+    }
+
+    this.lastActiveNoteName = activeNoteName
+    this.lastActiveScheduleName = activeScheduleName
+
+    return parts.length > 0 ? ` ${parts.join(' ')}` : ''
   }
 
   /** Run one streaming turn. Returns 'done' when the model produced a final answer. */
