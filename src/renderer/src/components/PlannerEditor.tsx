@@ -1,15 +1,18 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   mdiArrowDownCircleOutline,
   mdiArrowLeftCircleOutline,
   mdiArrowRightCircleOutline,
   mdiArrowUpCircleOutline,
+  mdiCalendarClock,
   mdiCalendarMonth,
+  mdiCalendarRemove,
   mdiChartTimeline,
   mdiChevronDown,
   mdiChevronRight,
   mdiContentCopy,
   mdiContentCut,
+  mdiContentPaste,
   mdiGrid,
   mdiMagnifyMinus,
   mdiMagnifyPlus,
@@ -42,6 +45,7 @@ import {
   defaultCalendar,
   deriveTaskNo,
   emptyTask,
+  nextWorkingDayString,
   rollupScheduleTasks
 } from '@shared/planner'
 import type { Schedule, ScheduleStatus, ScheduleTask } from '@shared/types'
@@ -189,6 +193,25 @@ function insertTasksAfter(
     if (t.id === id) out.push(...newTasks)
     else if (t.children.length > 0) {
       out[out.length - 1] = { ...t, children: insertTasksAfter(t.children, id, newTasks) }
+    }
+  }
+  return out
+}
+
+function insertTasksBefore(
+  tasks: ScheduleTask[],
+  id: string,
+  newTasks: ScheduleTask[]
+): ScheduleTask[] {
+  const out: ScheduleTask[] = []
+  for (const t of tasks) {
+    if (t.id === id) {
+      out.push(...newTasks, t)
+    } else {
+      out.push(t)
+      if (t.children.length > 0) {
+        out[out.length - 1] = { ...t, children: insertTasksBefore(t.children, id, newTasks) }
+      }
     }
   }
   return out
@@ -375,6 +398,8 @@ export function PlannerEditor(): React.JSX.Element {
     y: number
     mode: ScheduleStatus
   } | null>(null)
+  const [gridMenu, setGridMenu] = useState<{ x: number; y: number; id: string } | null>(null)
+  const [gridPercent, setGridPercent] = useState(0)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [numberDrafts, setNumberDrafts] = useState<Record<string, string>>({})
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -395,6 +420,8 @@ export function PlannerEditor(): React.JSX.Element {
   const ganttBodyRef = useRef<HTMLDivElement>(null)
   const pendingScrollTop = useRef<number | null>(null)
   const statusMenuRef = useRef<HTMLDivElement>(null)
+  const gridMenuRef = useRef<HTMLDivElement>(null)
+  const gridPercentBase = useRef<Schedule | null>(null)
   const pendingFocus = useRef<{ id: string; col: string } | null>(null)
   const saveTimer = useRef<number | null>(null)
   const editSession = useRef<{ scheduleId: string; snapshot: Schedule } | null>(null)
@@ -600,6 +627,43 @@ export function PlannerEditor(): React.JSX.Element {
   }, [statusMenu])
 
   useEffect(() => {
+    if (!gridMenu) return
+    const onDocMouseDown = (e: MouseEvent): void => {
+      const el = e.target as HTMLElement
+      if (el.closest('.planner-grid-menu')) return
+      setGridMenu(null)
+    }
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setGridMenu(null)
+    }
+    const onScroll = (): void => setGridMenu(null)
+    document.addEventListener('mousedown', onDocMouseDown)
+    document.addEventListener('keydown', onKey)
+    const scrollEl = gridScrollRef.current
+    scrollEl?.addEventListener('scroll', onScroll, true)
+    return () => {
+      document.removeEventListener('mousedown', onDocMouseDown)
+      document.removeEventListener('keydown', onKey)
+      scrollEl?.removeEventListener('scroll', onScroll, true)
+    }
+  }, [gridMenu])
+
+  useLayoutEffect(() => {
+    if (!gridMenu) return
+    const el = gridMenuRef.current
+    if (!el) return
+    const margin = 8
+    const width = el.offsetWidth
+    const height = el.offsetHeight
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const left = Math.max(margin, Math.min(gridMenu.x, vw - width - margin))
+    const top = Math.max(margin, Math.min(gridMenu.y, vh - height - margin))
+    el.style.left = `${left}px`
+    el.style.top = `${top}px`
+  }, [gridMenu])
+
+  useEffect(() => {
     const update = (): void => {
       const el = document.activeElement as HTMLElement | null
       const inPlanner = !!el?.closest('.planner-editor')
@@ -636,8 +700,10 @@ export function PlannerEditor(): React.JSX.Element {
     return (
       <div
         className={`planner-grid-row${selected.has(task.id) ? ' planner-row-selected' : ''}`}
+        data-row={task.id}
         style={{ gridTemplateColumns: template }}
         onClick={(e) => handleRowClick(e, task.id)}
+        onContextMenu={(e) => handleRowContext(e, task.id)}
       >
         <div className="planner-col-toggle planner-cell">
           {isParent ? (
@@ -1006,49 +1072,210 @@ export function PlannerEditor(): React.JSX.Element {
     setAnchorId(id)
   }
 
-  function insertNewTasksForSelection(): ScheduleTask[] {
-    const selRows = rows.filter((r) => selected.has(r.task.id))
-    if (selRows.length > 1) {
-      const firstIdx = rows.findIndex((r) => selected.has(r.task.id))
-      const newTasks = Array.from({ length: selRows.length }, () => emptyTask())
-      const next =
-        firstIdx > 0
-          ? insertTasksAfter(sc.tasks, rows[firstIdx - 1].task.id, newTasks)
-          : [...newTasks, ...sc.tasks]
-      commit(sc, next)
-      setSelected(new Set(newTasks.map((t) => t.id)))
-      setAnchorId(newTasks[0].id)
-      pendingFocus.current = { id: newTasks[0].id, col: 'title' }
-      return newTasks
+  function handleGridMouseDown(e: React.MouseEvent): void {
+    const el = e.target as HTMLElement
+    const grid = gridRef.current
+    if (el.tagName !== 'INPUT') {
+      if (grid) grid.focus()
+      return
     }
-    return []
+    if (e.shiftKey || e.button === 2) {
+      e.preventDefault()
+      el.blur()
+      if (grid) grid.focus()
+      return
+    }
+    if (el.dataset.col === 'title' && el.dataset.cell && !selected.has(el.dataset.cell)) {
+      e.preventDefault()
+      const active = document.activeElement
+      if (active instanceof HTMLElement && active.tagName === 'INPUT') active.blur()
+      if (grid) grid.focus()
+    }
   }
 
-  function handleNewTask(): void {
-    if (insertNewTasksForSelection().length > 0) return
-    const task = emptyTask()
-    const targetId = lastSelectedId()
-    if (targetId) commit(sc, addSibling(sc.tasks, targetId, task))
-    else commit(sc, [...sc.tasks, task])
-    setSelected(new Set([task.id]))
-    setAnchorId(task.id)
-    pendingFocus.current = { id: task.id, col: 'title' }
+  function handleRowContext(e: React.MouseEvent, id: string): void {
+    e.preventDefault()
+    e.stopPropagation()
+    const isSelected = selected.has(id)
+    const sel = isSelected ? selected : new Set([id])
+    if (!isSelected) {
+      setSelected(sel)
+      setAnchorId(id)
+    }
+    const leafRows = rows.filter((r) => sel.has(r.task.id) && r.task.children.length === 0)
+    setGridPercent(leafRows[0]?.task.percentComplete ?? 0)
+    setGridMenu({ x: e.clientX, y: e.clientY, id })
   }
 
-  function handleNewSubtask(): void {
-    if (insertNewTasksForSelection().length > 0) return
-    const targetId = lastSelectedId()
-    if (!targetId) return
-    const task = emptyTask()
-    commit(sc, addChild(sc.tasks, targetId, task))
+  function handleGridInsertBefore(): void {
+    if (!gridMenu) return
+    const selRows = rows.filter((r) => selected.has(r.task.id))
+    const newTasks = Array.from({ length: Math.max(1, selRows.length) }, () => emptyTask())
+    const targetId = selRows[0]?.task.id ?? gridMenu.id
+    const next = insertTasksBefore(sc.tasks, targetId, newTasks)
+    commit(sc, next)
+    setSelected(new Set(newTasks.map((t) => t.id)))
+    setAnchorId(newTasks[0].id)
+    pendingFocus.current = { id: newTasks[0].id, col: 'title' }
+    setGridMenu(null)
+  }
+
+  function handleGridInsertAfter(): void {
+    if (!gridMenu) return
+    const selRows = rows.filter((r) => selected.has(r.task.id))
+    const newTasks = Array.from({ length: Math.max(1, selRows.length) }, () => emptyTask())
+    const targetId = selRows[selRows.length - 1]?.task.id ?? gridMenu.id
+    const next = insertTasksAfter(sc.tasks, targetId, newTasks)
+    commit(sc, next)
+    setSelected(new Set(newTasks.map((t) => t.id)))
+    setAnchorId(newTasks[0].id)
+    pendingFocus.current = { id: newTasks[0].id, col: 'title' }
+    setGridMenu(null)
+  }
+
+  function handleGridInsertSubtask(): void {
+    if (!gridMenu) return
+    const selRows = rows.filter((r) => selected.has(r.task.id))
+    const newTasks = Array.from({ length: Math.max(1, selRows.length) }, () => emptyTask())
+    const targetId = selRows[selRows.length - 1]?.task.id ?? gridMenu.id
+    let next = sc.tasks
+    for (const task of newTasks) next = addChild(next, targetId, task)
+    commit(sc, next)
     setCollapsed((prev) => {
       const next = new Set(prev)
       next.delete(targetId)
       return next
     })
-    setSelected(new Set([task.id]))
-    setAnchorId(task.id)
-    pendingFocus.current = { id: task.id, col: 'title' }
+    setSelected(new Set(newTasks.map((t) => t.id)))
+    setAnchorId(newTasks[0].id)
+    pendingFocus.current = { id: newTasks[0].id, col: 'title' }
+    setGridMenu(null)
+  }
+
+  function handleGridCopy(): void {
+    handleCopy()
+    setGridMenu(null)
+  }
+
+  function handleGridCut(): void {
+    handleCut()
+    setGridMenu(null)
+  }
+
+  function handleGridPasteBefore(): void {
+    handlePasteBefore()
+    setGridMenu(null)
+  }
+
+  function handleGridPasteAfter(): void {
+    handlePasteAfter()
+    setGridMenu(null)
+  }
+
+  function autoPlanAnchorIdx(rows: FlatRow[], firstIdx: number): number {
+    let prevIdx = firstIdx - 1
+    const firstNo = rows[firstIdx].no
+    while (prevIdx >= 0 && firstNo.startsWith(rows[prevIdx].no + '.')) prevIdx -= 1
+    return prevIdx
+  }
+
+  function handleGridAutoPlan(): void {
+    const firstIdx = rows.findIndex((r) => selected.has(r.task.id))
+    if (firstIdx < 0) return
+    const prevIdx = autoPlanAnchorIdx(rows, firstIdx)
+    if (prevIdx < 0) return
+    const initial = rows[prevIdx].task.planEnd
+    if (!initial) return
+    let tasks = sc.tasks
+    let cursorEnd: string = initial
+    for (const row of rows) {
+      if (!selected.has(row.task.id)) continue
+      if (row.task.children.length > 0) continue
+      const planStart = nextWorkingDayString(cursorEnd, cal)
+      const duration = row.task.duration ?? 1
+      const planEnd = computeEndDate(planStart, duration, cal)
+      tasks = updateTask(tasks, row.task.id, (prev) => ({ ...prev, planStart, planEnd, duration }))
+      cursorEnd = planEnd
+    }
+    commit(sc, tasks)
+    setGridMenu(null)
+  }
+
+  function handleGridClearPlan(): void {
+    let tasks = sc.tasks
+    for (const row of rows) {
+      if (selected.has(row.task.id)) {
+        tasks = updateTask(tasks, row.task.id, (prev) => ({
+          ...prev,
+          planStart: null,
+          planEnd: null
+        }))
+      }
+    }
+    commit(sc, tasks)
+    setGridMenu(null)
+  }
+
+  function handleGridDelete(): void {
+    setGridMenu(null)
+    handleDeleteSelected()
+  }
+
+  function handleGridPercentStart(): void {
+    if (gridPercentBase.current) return
+    const current = useAppStore.getState().scheduleContent
+    if (current) gridPercentBase.current = JSON.parse(JSON.stringify(current)) as Schedule
+  }
+
+  function handleGridPercentChange(v: number): void {
+    setGridPercent(v)
+    if (!gridPercentBase.current) handleGridPercentStart()
+    let tasks = sc.tasks
+    for (const row of rows) {
+      if (!selected.has(row.task.id)) continue
+      if (row.task.children.length > 0) continue
+      tasks = updateTask(tasks, row.task.id, (prev) => ({ ...prev, percentComplete: v }))
+    }
+    commit(sc, tasks, undefined, false)
+  }
+
+  function handleGridPercentEnd(): void {
+    const base = gridPercentBase.current
+    if (!base) return
+    gridPercentBase.current = null
+    const current = useAppStore.getState().scheduleContent
+    if (current && scheduleKey(current) !== scheduleKey(base)) {
+      recordHistory(base)
+    }
+  }
+
+  function handleNewTask(): void {
+    const selRows = rows.filter((r) => selected.has(r.task.id))
+    const newTasks = Array.from({ length: Math.max(1, selRows.length) }, () => emptyTask())
+    const targetId = selRows[selRows.length - 1]?.task.id ?? lastSelectedId()
+    if (targetId) commit(sc, insertTasksAfter(sc.tasks, targetId, newTasks))
+    else commit(sc, [...sc.tasks, ...newTasks])
+    setSelected(new Set(newTasks.map((t) => t.id)))
+    setAnchorId(newTasks[0].id)
+    pendingFocus.current = { id: newTasks[0].id, col: 'title' }
+  }
+
+  function handleNewSubtask(): void {
+    const selRows = rows.filter((r) => selected.has(r.task.id))
+    const newTasks = Array.from({ length: Math.max(1, selRows.length) }, () => emptyTask())
+    const targetId = selRows[selRows.length - 1]?.task.id ?? lastSelectedId()
+    if (!targetId) return
+    let next = sc.tasks
+    for (const task of newTasks) next = addChild(next, targetId, task)
+    commit(sc, next)
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      next.delete(targetId)
+      return next
+    })
+    setSelected(new Set(newTasks.map((t) => t.id)))
+    setAnchorId(newTasks[0].id)
+    pendingFocus.current = { id: newTasks[0].id, col: 'title' }
   }
 
   function handleDeleteSelected(): void {
@@ -1107,17 +1334,9 @@ export function PlannerEditor(): React.JSX.Element {
     if (clipboard.length === 0) return
     const clones = clipboard.map(cloneWithNewIds)
     const targetId = firstSelectedId()
-    let inserted: ScheduleTask[]
-    if (!targetId) {
-      inserted = [...sc.tasks, ...clones]
-    } else {
-      const idx = rows.findIndex((r) => r.task.id === targetId)
-      if (idx <= 0) {
-        inserted = [...clones, ...sc.tasks]
-      } else {
-        inserted = insertTasksAfter(sc.tasks, rows[idx - 1].task.id, clones)
-      }
-    }
+    const inserted = targetId
+      ? insertTasksBefore(sc.tasks, targetId, clones)
+      : [...sc.tasks, ...clones]
     applyClipboard(inserted, clones)
   }
 
@@ -1181,6 +1400,42 @@ export function PlannerEditor(): React.JSX.Element {
     }
   }
 
+  function moveSelectionBy(step: number): void {
+    if (rows.length === 0) return
+    const from = lastSelectedId()
+    const curIdx = from ? rows.findIndex((r) => r.task.id === from) : -1
+    const targetIdx = Math.max(0, Math.min(rows.length - 1, (curIdx === -1 ? 0 : curIdx) + step))
+    if (rows[targetIdx]) {
+      setSelected(new Set([rows[targetIdx].task.id]))
+      setAnchorId(rows[targetIdx].task.id)
+      scrollRowIntoView(rows[targetIdx].task.id)
+    }
+  }
+
+  function scrollRowIntoView(id: string): void {
+    const scroll = gridScrollRef.current
+    const row = gridRef.current?.querySelector<HTMLElement>(`[data-row="${id}"]`)
+    if (!scroll || !row) return
+    const headerH = gridRef.current?.querySelector<HTMLElement>('.planner-grid-head')?.offsetHeight ?? 0
+    const rect = row.getBoundingClientRect()
+    const srect = scroll.getBoundingClientRect()
+    const top = rect.top - srect.top
+    const bottom = rect.bottom - srect.top
+    const viewH = scroll.clientHeight
+    if (top < headerH) {
+      scroll.scrollTop += top - headerH
+    } else if (bottom > viewH) {
+      scroll.scrollTop += bottom - viewH
+    }
+  }
+
+  function selectRow(idx: number): void {
+    if (idx < 0 || idx >= rows.length) return
+    setSelected(new Set([rows[idx].task.id]))
+    setAnchorId(rows[idx].task.id)
+    scrollRowIntoView(rows[idx].task.id)
+  }
+
   function handleGridKeyDown(e: React.KeyboardEvent): void {
     const active = document.activeElement
     const cellEl = active instanceof HTMLElement ? active.closest<HTMLElement>('[data-cell]') : null
@@ -1191,6 +1446,7 @@ export function PlannerEditor(): React.JSX.Element {
     if (e.key === 'Escape') {
       e.preventDefault()
       cancelEdit()
+      gridRef.current?.focus()
       return
     }
 
@@ -1224,13 +1480,22 @@ export function PlannerEditor(): React.JSX.Element {
         return
       }
       e.preventDefault()
-      const from = lastSelectedId()
-      const curIdx = from ? rows.findIndex((r) => r.task.id === from) : -1
-      const targetIdx = Math.max(0, Math.min(rows.length - 1, (curIdx === -1 ? 0 : curIdx) + dir))
-      if (rows[targetIdx]) {
-        setSelected(new Set([rows[targetIdx].task.id]))
-        setAnchorId(rows[targetIdx].task.id)
-      }
+      moveSelectionBy(dir)
+      return
+    }
+
+    if (e.key === 'PageDown' || e.key === 'PageUp') {
+      if (cellId && col && rowIdx !== -1) return
+      e.preventDefault()
+      moveSelectionBy(e.key === 'PageDown' ? 10 : -10)
+      return
+    }
+
+    if (e.key === 'Home' || e.key === 'End') {
+      if (cellId && col && rowIdx !== -1) return
+      e.preventDefault()
+      selectRow(e.key === 'Home' ? 0 : rows.length - 1)
+      return
     }
   }
 
@@ -1274,6 +1539,16 @@ export function PlannerEditor(): React.JSX.Element {
     const ctx = findTaskCtx(sc.tasks, r.task.id)
     return !!ctx && ctx.index < ctx.parent.length - 1 && !selected.has(ctx.parent[ctx.index + 1].id)
   })
+  const canAutoPlan = (() => {
+    const firstIdx = rows.findIndex((r) => selected.has(r.task.id))
+    if (firstIdx < 0) return false
+    const prevIdx = autoPlanAnchorIdx(rows, firstIdx)
+    return prevIdx >= 0 && !!rows[prevIdx].task.planEnd
+  })()
+  const allParents = (() => {
+    const selRows = rows.filter((r) => selected.has(r.task.id))
+    return selRows.length > 0 && selRows.every((r) => r.task.children.length > 0)
+  })()
 
   function commitNumber(
     base: Schedule,
@@ -1405,19 +1680,11 @@ export function PlannerEditor(): React.JSX.Element {
           </button>
           <button
             className="icon-btn"
-            title="Paste after"
-            disabled={ganttMode || clipboard.length === 0}
-            onClick={handlePasteAfter}
-          >
-            <MdiIcon path={mdiTableRowPlusAfter} size={16} />
-          </button>
-          <button
-            className="icon-btn"
-            title="Paste before"
+            title="Paste"
             disabled={ganttMode || clipboard.length === 0}
             onClick={handlePasteBefore}
           >
-            <MdiIcon path={mdiTableRowPlusBefore} size={16} />
+            <MdiIcon path={mdiContentPaste} size={16} />
           </button>
         </div>
         <span className="planner-toolbar-divider" />
@@ -1489,8 +1756,10 @@ export function PlannerEditor(): React.JSX.Element {
               <div
                 className="planner-grid"
                 ref={gridRef}
+                tabIndex={-1}
                 onKeyDown={handleGridKeyDown}
                 onFocusCapture={handleGridFocusCapture}
+                onMouseDownCapture={handleGridMouseDown}
               >
                 <div className="planner-grid-head" style={{ gridTemplateColumns: template }}>
                   <div className="planner-col-toggle planner-cell"></div>
@@ -1619,6 +1888,121 @@ export function PlannerEditor(): React.JSX.Element {
               onClick={() => applyStatusMode('on-hold')}
             >
               On Hold
+            </button>
+          </div>
+        </>
+      )}
+
+      {gridMenu && (
+        <>
+          <div className="menu-overlay" onClick={() => setGridMenu(null)} />
+          <div
+            ref={gridMenuRef}
+            className="note-menu planner-grid-menu"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button type="button" className="note-menu-item" onClick={handleGridInsertBefore}>
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiTableRowPlusBefore} size={15} />
+              </span>
+              Insert Before
+            </button>
+            <button type="button" className="note-menu-item" onClick={handleGridInsertAfter}>
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiTableRowPlusAfter} size={15} />
+              </span>
+              Insert After
+            </button>
+            <button type="button" className="note-menu-item" onClick={handleGridInsertSubtask}>
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiPlaylistPlus} size={15} />
+              </span>
+              Insert Sub Task
+            </button>
+            <div className="note-menu-sep" />
+            <button type="button" className="note-menu-item" onClick={handleGridCopy}>
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiContentCopy} size={15} />
+              </span>
+              Copy
+            </button>
+            <button type="button" className="note-menu-item" onClick={handleGridCut}>
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiContentCut} size={15} />
+              </span>
+              Cut
+            </button>
+            <button
+              type="button"
+              className="note-menu-item"
+              disabled={clipboard.length === 0}
+              onClick={handleGridPasteBefore}
+            >
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiContentPaste} size={15} />
+              </span>
+              Paste Before
+            </button>
+            <button
+              type="button"
+              className="note-menu-item"
+              disabled={clipboard.length === 0}
+              onClick={handleGridPasteAfter}
+            >
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiContentPaste} size={15} />
+              </span>
+              Paste After
+            </button>
+            {!allParents && <div className="note-menu-sep" />}
+            {!allParents && (
+              <>
+                <button
+                  type="button"
+                  className="note-menu-item"
+                  disabled={!canAutoPlan}
+                  onClick={handleGridAutoPlan}
+                >
+                  <span className="note-menu-icon">
+                    <MdiIcon path={mdiCalendarClock} size={15} />
+                  </span>
+                  Auto Plan Date
+                </button>
+                <button type="button" className="note-menu-item" onClick={handleGridClearPlan}>
+                  <span className="note-menu-icon">
+                    <MdiIcon path={mdiCalendarRemove} size={15} />
+                  </span>
+                  Clear Plan Date
+                </button>
+              </>
+            )}
+            {!allParents && (
+              <>
+                <div className="note-menu-sep" />
+                <div className="note-menu-item note-menu-slider">
+                  <span>%</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={10}
+                    value={gridPercent}
+                    onPointerDown={handleGridPercentStart}
+                    onChange={(e) => handleGridPercentChange(Number(e.target.value))}
+                    onPointerUp={handleGridPercentEnd}
+                    onKeyUp={handleGridPercentEnd}
+                    onBlur={handleGridPercentEnd}
+                  />
+                  <span className="note-menu-slider-value">{gridPercent}%</span>
+                </div>
+              </>
+            )}
+            <div className="note-menu-sep" />
+            <button type="button" className="note-menu-item danger" onClick={handleGridDelete}>
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiTrashCan} size={15} />
+              </span>
+              Delete
             </button>
           </div>
         </>
