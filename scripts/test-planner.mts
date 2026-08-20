@@ -28,6 +28,7 @@ const {
   deriveTaskNo,
   emptyTask,
   findTaskByTitle,
+  nextWorkingDayString,
   normalizeCalendar,
   rollupScheduleTasks,
   validateScheduleId
@@ -54,6 +55,12 @@ assert.equal(computeEndDate('2024-01-01', 1, cal), '2024-01-01', 'duration 1 end
 assert.equal(computeEndDate('2024-01-01', 5, cal), '2024-01-05', '5 working days Mon-Fri')
 assert.equal(computeEndDate('2024-01-05', 2, cal), '2024-01-08', 'skips weekend (Fri->Mon)')
 
+assert.equal(
+  nextWorkingDayString('2024-01-05', cal),
+  '2024-01-08',
+  'next working day skips weekend'
+)
+
 assert.equal(computeDuration('2024-01-01', '2024-01-05', cal), 5, 'Mon-Fri is 5 days')
 assert.equal(computeDuration('2024-01-01', '2024-01-01', cal), 1, 'same day is 1 day')
 assert.equal(computeDuration('2024-01-05', '2024-01-01', cal), 0, 'end before start is 0')
@@ -64,6 +71,11 @@ assert.equal(computeDuration('2024-01-05', '2024-01-08', cal), 2, 'Mon-Fri acros
 const hol = normalizeCalendar({ weekStart: 1, weekEnd: 5, holidays: ['2024-01-02'] })
 assert.equal(computeDuration('2024-01-01', '2024-01-03', hol), 2, 'holiday is not a working day')
 assert.equal(computeEndDate('2024-01-01', 3, hol), '2024-01-04', 'end skips the holiday')
+assert.equal(
+  nextWorkingDayString('2024-01-01', hol),
+  '2024-01-03',
+  'next working day skips the holiday'
+)
 assert.deepEqual(
   normalizeCalendar({ holidays: ['bad-date'] }),
   defaultCalendar(),
