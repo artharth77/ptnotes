@@ -74,6 +74,7 @@ interface AppState {
   plannerPushUndo: (scheduleId: string, snapshot: Schedule) => void
   plannerClearRedo: (scheduleId: string) => void
   plannerTruncateUndo: (scheduleId: string, length: number) => void
+  plannerClearHistory: (scheduleId: string) => void
   undoPlanner: () => Schedule | null
   redoPlanner: () => Schedule | null
   loadModules: (project: string) => Promise<void>
@@ -391,6 +392,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       plannerUndo: { ...get().plannerUndo, [scheduleId]: undo.slice(0, length) }
     })
+  },
+
+  plannerClearHistory(scheduleId) {
+    const undo = get().plannerUndo
+    const redo = get().plannerRedo
+    if (!undo[scheduleId] && !redo[scheduleId]) return
+    const plannerUndo = { ...undo }
+    const plannerRedo = { ...redo }
+    delete plannerUndo[scheduleId]
+    delete plannerRedo[scheduleId]
+    set({ plannerUndo, plannerRedo })
   },
 
   undoPlanner() {

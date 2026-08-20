@@ -1,3 +1,22 @@
+## [0.10.0] — 2026-08-20
+
+### Added
+
+#### Planner — Gantt chart view
+
+- **View toggle**: a new bottom status bar in the planner editor with segmented **Grid View** / **Gantt Chart View** buttons. The active view is session-only (resets to Grid when switching schedules) and switching carries the scroll position between the grid and the Gantt body.
+- **Gantt chart** (`GanttChart.tsx`): a day-grid timeline auto-fitted to the min plan start → max plan end across all tasks (+7-day padding, falling back to today), with a month band plus a floating "current month" label that follows horizontal scroll, and a day-axis header (weekday + day number). Non-working days (weekends + project holidays via `isWorkingDay`) are shaded gray and today is highlighted. Fixed left columns (collapse toggle + No. + Title) indent by task depth and share the table view's collapse state; No. numbering is derived the same way as in the grid.
+- **Task bars**: leaf bars are draggable, parent bars are not (distinct color + `v───v` end arrows). Leaf bars expose left/right edge handles: dragging the **start** edge keeps `planEnd` fixed and recomputes `duration`, dragging the **end** edge keeps `planStart` fixed and recomputes `duration`, and dragging the **body** shifts both dates by the same day delta (duration preserved). All drags snap to whole days (pointer events, delta clamped so the bar stays in the timeline and start never passes end), preview live while dragging, and commit only on release with a non-zero delta.
+- **Bar popup**: right-clicking any bar (parent or leaf) opens a popup with No., Title, Plan Start, Plan End, and Duration (working days); it closes on outside click / Escape / close button. Leaves with dates get a **Clear Plan** action (clears `planStart`/`planEnd`).
+- **Day-cell click**: for leaves without dates, clicking a day cell sets `planStart` to that day and `planEnd` via `computeEndDate` (duration defaults to 1); settable cells show a hover hint, and date-less leaf titles are dimmed.
+- All Gantt edits flow through the existing `editTask`/`commit` path, so parent rollup, undo/redo, and debounced autosave work unchanged.
+- **Table view constraints**: No. and Title columns are always rendered and can no longer be hidden (checked + disabled in the column modal).
+- **Gantt-only chrome**: a day-width zoom slider (16–32 px, step 4) in the status bar, and the toolbar's add/delete/copy/indent/move, columns, and calendar buttons are disabled in Gantt mode.
+
+#### Planner — AI task placement by nested task number
+
+- `add_task` and `update_task` now infer the parent from a **nested** `addAfter` task number (e.g. `addAfter: "2.1.1"` without `parent` places the task as a sibling of the matched task, under the same parent). An explicit `parent` still wins over `addAfter` (in `update_task`, an empty `parent` forces top level), and moving a task next to its own descendant is rejected (cycle-safe).
+
 ## [0.9.0] — 2026-08-19
 
 ### Added

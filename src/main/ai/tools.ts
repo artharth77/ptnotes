@@ -121,6 +121,15 @@ function findTask(tasks: ScheduleTask[], target: string): ScheduleTask | null {
   )
 }
 
+function findTaskParent(tasks: ScheduleTask[], id: string): ScheduleTask | null {
+  for (const task of tasks) {
+    if (task.children.some((c) => c.id === id)) return task
+    const found = findTaskParent(task.children, id)
+    if (found) return found
+  }
+  return null
+}
+
 function updateTaskNode(
   tasks: ScheduleTask[],
   id: string,
@@ -1141,7 +1150,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'add_task',
         description:
-          'Add a task to a project schedule. Match the schedule by id. Optionally nest it under an existing parent task (match the parent by id, task number or title) and/or position it directly after an existing sibling task (match addAfter by id, task number or title). Plan dates follow the project working-day calendar: set both planStart and planEnd, or planStart + duration; the missing value is computed.',
+          'Add a task to a project schedule. Match the schedule by id. Optionally nest it under an existing parent task (match the parent by id, task number or title) and/or position it directly after an existing task (match addAfter by id, task number or title; without `parent` the new task is placed as a sibling of the matched task). Plan dates follow the project working-day calendar: set both planStart and planEnd, or planStart + duration; the missing value is computed.',
         parameters: {
           type: 'object',
           properties: {
@@ -1158,7 +1167,7 @@ export const tools: PTTool[] = [
             addAfter: {
               type: 'string',
               description:
-                'Optional task id, task number (e.g. 1.2) or title to insert this new task directly after. Positions within the sibling list chosen by `parent` (defaults to top level). If the task is not found in that list, the new task is appended.'
+                'Optional task id, task number (e.g. 1.2) or title to insert this new task directly after. Positions within the sibling list chosen by `parent`; if `parent` is omitted, the new task becomes a sibling of the matched task (nested under the same parent). If the task is not found, the new task is appended at the top level.'
             },
             title: { type: 'string', description: 'Task title' },
             owner: { type: 'string', description: 'Owner (optional)' },
@@ -1230,10 +1239,10 @@ export const tools: PTTool[] = [
         }
 
         let tasks: ScheduleTask[]
-        const parent = args.parent ? findTask(schedule.tasks, String(args.parent)) : null
-        const afterId = args.addAfter
-          ? (findTask(schedule.tasks, String(args.addAfter))?.id ?? '')
-          : ''
+        const parentArg = args.parent ? findTask(schedule.tasks, String(args.parent)) : null
+        const afterArg = args.addAfter ? findTask(schedule.tasks, String(args.addAfter)) : null
+        const afterId = afterArg?.id ?? ''
+        const parent = parentArg ?? (afterArg ? findTaskParent(schedule.tasks, afterArg.id) : null)
         if (parent) {
           const children = insertAfterId(parent.children, afterId, resolved)
           tasks = updateTaskNode(schedule.tasks, parent.id, (t) => ({ ...t, children }))
@@ -1262,7 +1271,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'update_task',
         description:
-          'Update an existing task in a project schedule. Match the schedule by id and the task by id, task number (e.g. 1.2) or title. Only provided fields change. For plan dates/duration, the project working-day calendar applies: change one of planStart/planEnd/duration and the other is recomputed. For parent tasks, plan start/end, %complete and duration are derived from children — update the child tasks instead (plan-field edits on a parent are rejected). Parent status and %complete are derived from children. To move a task, set `parent` to the new parent task id, task number (e.g. 1.2) or title (omit or pass empty to move it to the top level); the task and its subtree move together and `addAfter` positions it within the new sibling list (defaults to append).',
+          'Update an existing task in a project schedule. Match the schedule by id and the task by id, task number (e.g. 1.2) or title. Only provided fields change. For plan dates/duration, the project working-day calendar applies: change one of planStart/planEnd/duration and the other is recomputed. For parent tasks, plan start/end, %complete and duration are derived from children — update the child tasks instead (plan-field edits on a parent are rejected). Parent status and %complete are derived from children. To move a task, set `parent` to the new parent task id, task number (e.g. 1.2) or title (pass empty to move it to the top level) and/or `addAfter` to the task it should follow; the task and its subtree move together. `addAfter` positions the task within the sibling list chosen by `parent` (defaults to append); if `parent` is omitted, the task becomes a sibling of the matched `addAfter` task.',
         parameters: {
           type: 'object',
           properties: {
@@ -1278,12 +1287,12 @@ export const tools: PTTool[] = [
             parent: {
               type: 'string',
               description:
-                'Optional new parent task id, task number (e.g. 1.2) or title to move this task under. Omit or pass empty to move it to the top level. The task and its subtree move together. The new parent must not be the task itself or one of its descendants.'
+                'Optional new parent task id, task number (e.g. 1.2) or title to move this task under. Pass empty to move it to the top level (omit it when using only `addAfter` to place the task next to a nested task). The task and its subtree move together. The new parent must not be the task itself or one of its descendants.'
             },
             addAfter: {
               type: 'string',
               description:
-                'Optional task id, task number (e.g. 1.2) or title to position this task directly after within the sibling list chosen by `parent` (defaults to top level). If the task is not found in that list, the task is appended.'
+                'Optional task id, task number (e.g. 1.2) or title to position this task directly after within the sibling list chosen by `parent`. If `parent` is omitted, the task becomes a sibling of the matched task (nested under the same parent). If the task is not found, the task is appended at the top level.'
             },
             title: { type: 'string', description: 'New title' },
             owner: { type: 'string', description: 'New owner' },
@@ -1353,22 +1362,26 @@ export const tools: PTTool[] = [
         const resolved = applyDateRule(task, next, calendar)
 
         const parentArg = args.parent ? findTask(schedule.tasks, String(args.parent)) : null
-        if (parentArg && (parentArg.id === task.id || containsTask(task, parentArg.id))) {
+        const afterArg = args.addAfter ? findTask(schedule.tasks, String(args.addAfter)) : null
+        const afterId = afterArg?.id ?? ''
+        const parent =
+          parentArg ??
+          (args.parent === undefined && afterArg
+            ? findTaskParent(schedule.tasks, afterArg.id)
+            : null)
+        if (parent && (parent.id === task.id || containsTask(task, parent.id))) {
           return JSON.stringify({
             ok: false,
             error: `Cannot move task "${task.title}" under itself or one of its descendants.`
           })
         }
-        const afterId = args.addAfter
-          ? (findTask(schedule.tasks, String(args.addAfter))?.id ?? '')
-          : ''
         const moveRequested = args.parent !== undefined || args.addAfter !== undefined
 
         let tasks: ScheduleTask[]
         if (moveRequested) {
           tasks = removeTaskNode(schedule.tasks, task.id)
-          if (parentArg) {
-            const parentNode = findTask(tasks, parentArg.id)
+          if (parent) {
+            const parentNode = findTask(tasks, parent.id)
             const children = insertAfterId(parentNode!.children, afterId, resolved)
             tasks = updateTaskNode(tasks, parentNode!.id, (t) => ({ ...t, children }))
           } else {
@@ -1386,7 +1399,7 @@ export const tools: PTTool[] = [
         return JSON.stringify({
           ...scheduleSummary(saved, project),
           updated: { id: task.id, title: resolved.title },
-          parent: parentArg ? parentArg.id : null
+          parent: parent ? parent.id : null
         })
       } catch (err) {
         return JSON.stringify({ ok: false, error: (err as Error).message })
