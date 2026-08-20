@@ -17,6 +17,13 @@
 
 - `add_task` and `update_task` now infer the parent from a **nested** `addAfter` task number (e.g. `addAfter: "2.1.1"` without `parent` places the task as a sibling of the matched task, under the same parent). An explicit `parent` still wins over `addAfter` (in `update_task`, an empty `parent` forces top level), and moving a task next to its own descendant is rejected (cycle-safe).
 
+### Changed
+
+#### Chat — static system prompt for provider prompt caching
+
+- The active note and active schedule are no longer baked into the system prompt. The system prompt is now static per project/date/skills, so providers can reuse their prompt-prefix cache across turns.
+- Instead, the currently active note/schedule is appended as a **context suffix** to the user message — but only when it **changed** since the last send (the first message always includes it). The chat bubble still shows just the raw user text; the suffix is hidden from the UI and visible only in the raw AI trace.
+
 ## [0.9.0] — 2026-08-19
 
 ### Added
