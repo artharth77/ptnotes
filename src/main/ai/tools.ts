@@ -837,6 +837,91 @@ export const tools: PTTool[] = [
     definition: {
       type: 'function',
       function: {
+        name: 'read_skill_file',
+        description:
+          "Read the content of a file stored inside a skill's folder, referenced from its SKILL.md via a relative link such as `[FORMAT.md](./FORMAT.md)` or `[DOC.md](./doc/DOC.md)`. Call this after read_skill when the skill's instructions reference a sibling file you need. Accepts PDF and text files (markdown, JSON, YAML, etc.); the path is relative to the skill folder only.",
+        parameters: {
+          type: 'object',
+          properties: {
+            scope: {
+              type: 'string',
+              enum: ['global', 'project', 'builtin'],
+              description:
+                'Where the skill lives: "global" (all projects), "project" (current project) or "builtin" (app-shipped, read-only). Defaults to "project".'
+            },
+            skill: { type: 'string', description: 'Name of the skill the file belongs to' },
+            file: {
+              type: 'string',
+              description:
+                'Relative path of the file inside the skill folder, e.g. FORMAT.md or doc/DOC.md'
+            },
+            project: {
+              type: 'string',
+              description: 'Project name. Defaults to the current project.'
+            }
+          },
+          required: ['skill', 'file']
+        }
+      }
+    },
+    async execute(args, ctx) {
+      const project = projectOf(args, ctx)
+      const scope = scopeOf(args)
+      if (!scope) {
+        return JSON.stringify({
+          ok: false,
+          error: 'scope must be "global", "project" or "builtin"'
+        })
+      }
+      const skill = String(args.skill ?? '').trim()
+      if (!skill) return JSON.stringify({ ok: false, error: 'No skill name provided' })
+      const file = String(args.file ?? '').trim()
+      if (!file) return JSON.stringify({ ok: false, error: 'No file path provided' })
+      const loaded = await ctx.service.readSkill(project, scope, skill)
+      if (!loaded) {
+        return JSON.stringify({
+          ok: false,
+          error: `Skill "${skill}" (${scope}) not found. Available skills: ${
+            (await skillNames(ctx)).join(', ') || '(none)'
+          }`
+        })
+      }
+      if (!loaded.enabled) {
+        return JSON.stringify({ ok: false, error: `Skill "${skill}" (${scope}) is disabled.` })
+      }
+      const found = await ctx.service.readSkillFile(project, scope, skill, file)
+      if (!found) {
+        return JSON.stringify({
+          ok: false,
+          error: `File "${file}" not found inside skill "${skill}" (${scope}). Relative paths only.`
+        })
+      }
+      try {
+        const { text, pageCount, charCount, truncated } = await readFileAsText(found.absolutePath)
+        return JSON.stringify({
+          ok: true,
+          scope,
+          skill,
+          file: found.path,
+          pageCount,
+          charCount,
+          truncated,
+          text
+        })
+      } catch (err) {
+        return JSON.stringify({
+          ok: false,
+          error: `Could not read "${file}" in skill "${skill}": ${
+            err instanceof Error ? err.message : String(err)
+          }`
+        })
+      }
+    }
+  },
+  {
+    definition: {
+      type: 'function',
+      function: {
         name: 'delete_skill',
         description:
           'Delete a skill (a named instruction document) for the current project (scope "project") or for all projects (scope "global"). Requires user confirmation before deleting.',
