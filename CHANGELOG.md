@@ -1,3 +1,15 @@
+## [0.11.0] — 2026-08-21
+
+### Added
+
+#### AI provider profiles
+
+- **Profile set**: the AI configuration is now a set of **named profiles**, each its own `baseUrl` / `apiKey` / `model` combination, plus a persisted **active profile** that the chat actually uses. The Base URL field in the profile editor is an editable input with a **predefined endpoint dropdown** (OpenAI, OpenRouter, Ollama, Ollama Cloud, OpenCode Go, 9arm AI Passport — shared from `src/shared/aiEndpoints.ts`).
+- **Profile management in Settings ▸ AI Settings**: an **Active profile** selector (switching it takes effect immediately) alongside **New profile** / **Edit profile** / **Delete profile** actions. Editing a profile happens in a modal and never changes which profile is active; deleting the active profile falls back to the first remaining one (delete is disabled when only one profile exists). The **PDF upload toggle is now global** — it applies across all profiles, not per-profile.
+- **Legacy migration**: the old flat `ai-provider.json` config is automatically migrated on first load into a single **"Profile 1"**, which becomes the active profile; the legacy `uploadPdfEnabled` is hoisted into the global toggle and the file is rewritten once. Keys stay **plain text** with `chmod 600` (no encryption), exactly as before.
+- **New store API + IPC**: `AIConfigStore` now exposes `getAll()` / `saveAll()` (full profile set + global toggle) alongside the unchanged `load()` (which still returns the active profile as a `AIProviderConfig`, so chat/module/title-generation consumers are untouched). Added `ai:getProfiles` / `ai:saveProfiles` IPC channels (preload `getProfiles` / `saveProfiles`); the renderer never touches the filesystem.
+- **Tests**: new `scripts/test-config.mts` (wired into `npm test`) covers the no-file default, legacy flat-config migration, `getAll`/`saveAll` round-trip with multiple profiles, active-profile switching, invalid active-id fallback, and the 0600 file mode.
+
 ## [0.10.1] — 2026-08-21
 
 ### Added

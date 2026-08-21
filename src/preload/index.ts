@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type {
   AboutInfo,
+  AIConfig,
   AIProviderConfig,
   AiTraceFile,
   AskResponse,
@@ -139,10 +140,11 @@ const api = {
     generateTitle: (project: string, sessionId: string, firstMessage: string): Promise<string> =>
       ipcRenderer.invoke('ai:generateTitle', project, sessionId, firstMessage),
     getConfig: (): Promise<AIProviderConfig> => ipcRenderer.invoke('ai:getConfig'),
+    getProfiles: (): Promise<AIConfig> => ipcRenderer.invoke('ai:getProfiles'),
+    saveProfiles: (config: AIConfig): Promise<AIConfig> =>
+      ipcRenderer.invoke('ai:saveProfiles', config),
     listModels: (baseUrl: string, apiKey: string): Promise<string[] | { error: string }> =>
       ipcRenderer.invoke('ai:listModels', baseUrl, apiKey),
-    setConfig: (config: AIProviderConfig): Promise<AIProviderConfig> =>
-      ipcRenderer.invoke('ai:setConfig', config),
     onStreamEvent: (callback: (event: ChatStreamEvent) => void): (() => void) => {
       const listener = (_e: unknown, event: ChatStreamEvent): void => callback(event)
       ipcRenderer.on('ai:stream', listener)

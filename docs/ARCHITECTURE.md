@@ -68,7 +68,7 @@ Run `npm run typecheck` and `npm run lint` after any change.
 | Project registry        | Persistent known-project list so folders deleted externally still show (missing paths marked red)                                                                                                                                                                                                                   |
 | Chat placement          | Collapsible right-side drawer                                                                                                                                                                                                                                                                                       |
 | AI streaming            | Yes (real-time)                                                                                                                                                                                                                                                                                                     |
-| Settings dialog         | Two-panel dialog: **Storage** (project root path) + **AI Settings** (base URL, API key, model)                                                                                                                                                                                                                      |
+| Settings dialog         | Two-panel dialog: **Storage** (project root path) + **AI Settings** (profile set: active selector, per-profile base URL/API key/model with endpoint presets, global PDF toggle) + Modules + Skills + About                                                                                                                                                                                                                      |
 | Project root            | Configurable via settings; default `~/Documents/PTNotes`; changing it moves all data + registry to the new location after confirmation                                                                                                                                                                              |
 | Chat history            | Persisted per session as JSON files under `<project>/.data/chat/`; auto-saved per message; New Chat archives current thread; history picker can view/reopen old sessions                                                                                                                                            |
 | Chat titles             | Hybrid: local heuristic from first message immediately, refined by a background AI completion; manual rename supported; history popup shows title + message count                                                                                                                                                   |
@@ -107,7 +107,7 @@ Run `npm run typecheck` and `npm run lint` after any change.
   (whole-folder `rename` when the target is free, recursive merge — keeping both files
   on collision with a `-2` suffix — otherwise). The migration is idempotent.
 
-- App AI config stored in Electron `userData/ai-provider.json`, `chmod 600`, never in the renderer bundle.
+- App AI config stored in Electron `userData/ai-provider.json`, `chmod 600`, never in the renderer bundle. Shape: `{ version, profiles: [{id,name,baseUrl,apiKey,model}], activeProfileId, uploadPdfEnabled }` — a set of named profiles plus the active one and a global PDF toggle. Legacy flat configs migrate into a single "Profile 1".
 - App settings (project root path + `disabledModules` module toggles) stored in Electron `userData/ptnotes-settings.json`, `chmod 600`.
 - Creating a project initializes folder + `TODO.md` + `welcome.md`.
 - `.ptnotes-projects.json` in the root dir is the persistent project registry so externally-deleted folders still show (missing paths flagged `pathExists: false`).
@@ -135,7 +135,7 @@ src/
 │       ├── client.ts    # OpenAI-compatible client (streaming)
 │       ├── tools.ts     # tool JSON schemas + executors (bind to PTNotesService)
 │       ├── chatSession.ts   # conversation state + tool-call loop (static system prompt + skills index; active note/schedule sent as user-message context suffix)
-│       ├── config.ts    # ai-provider.json load/save
+│       ├── config.ts    # ai-provider.json load/save (profile set + legacy migration)
 │       ├── reader.ts     # readFileAsText + detectFileKind: content-based (pdf-parse for PDFs, raw text for any text file) + MAX_PDF_CHARS truncation
 │       └── search/
 │           ├── duckduckgo.ts  # web_search (no key)
@@ -190,7 +190,7 @@ src/
 ### Security invariants (do not break)
 
 - The renderer must **never** access the network or filesystem; all I/O goes through IPC to the main process.
-- The AI API key lives only in `userData/ai-provider.json` (chmod 600), read by the main process — never bundle it in the renderer.
+- The AI API key lives only in `userData/ai-provider.json` (chmod 600), read by the main process — never bundle it in the renderer. Keys are plain text across all profiles (no encryption).
 - Chat HTML is rendered via `react-markdown` with raw HTML escaped (XSS-safe); `<think>` blocks and user/error messages stay plain text.
 - Chart rasterization (Chart.js onto `@napi-rs/canvas`/skia) must stay isolated in the Electron **utility process** (`chart-render-worker.js`, spawned by `chartRenderer.ts`): a native segfault there must only fail the in-flight render tool, never crash the app. Module chart tools must call `renderChartIsolated`, never `renderChartPng` on the main process. The worker is a second `main` entry in `electron.vite.config.ts`; `PTNOTES_CHART_WORKER` env overrides its path for tests.
 - Diagram rendering (mermaid DSL → SVG via the jsdom/svgdom shim, rasterized by `@resvg/resvg-js`) must stay isolated in the Electron **utility process** (`diagram-render-worker.js`, spawned by `diagramRenderer.ts`): heavy DOM parsing and any native crash there must only fail the in-flight render tool, never crash the app. Module diagram tools must call `renderDiagramIsolated`, never render mermaid on the main process. The worker is a `main` entry in `electron.vite.config.ts`; `PTNOTES_DIAGRAM_WORKER` env overrides its path for tests. Mermaid is ESM-only, so it is always loaded via dynamic `import()`.
@@ -422,13 +422,18 @@ Two-panel dialog (`.settings-layout` with `.settings-nav` + `.settings-pane`):
   folder picker. Selecting a new root prompts for explicit confirmation ("Move all project data…")
   before `PTNotesService.changeRootDir` moves every project dir + `.ptnotes-projects.json`, and the
   settings store persists the new root.
-- **AI Settings:** Base URL (default `https://api.openai.com/v1`), API key, model (default empty —
-  placeholder only, must be chosen), PDF upload toggle. No search provider field (DuckDuckGo-only,
-  keyless). The **Model** field is an editable custom combobox: free-text `<input>` with a
-  `Load models` button that calls `ai:listModels(baseUrl, apiKey)` (uses the in-dialog unsaved
-  values) against `GET {baseUrl}/models`, then shows a scrollable dropdown (~10 rows) of fetched
-  model ids that is filtered by typing; the typed value is never cleared on failure. The AI Selected
-  category is driven by store state (`settingsCategory`, opened via `openSettings('ai')`).
+- **AI Settings:** a set of **profiles** (each a named base URL / API key / model combination). The
+  UI lets you pick the **active** profile (used by chat), create new profiles (auto id `profile-N`,
+  editable name, not active), edit any profile, and delete non-active ones. The **Base URL** field
+  is an editable input plus a preset dropdown of predefined endpoints (`AI_ENDPOINTS`). The **Model**
+  field is an editable custom combobox: free-text `<input>` with a `Load models` button that calls
+  `ai:listModels(baseUrl, apiKey)` (uses the edited profile's unsaved values) against
+  `GET {baseUrl}/models`, then shows a scrollable dropdown (~10 rows) of fetched model ids filtered
+  by typing; the typed value is never cleared on failure. The **PDF upload** toggle is global
+  (applies to `AIConfig.uploadPdfEnabled`), rendered once outside the per-profile fields. Saving
+  persists the whole `AIConfig` via `ai:saveProfiles`; the active profile is read back via
+  `ai:getProfiles`. Editing a profile never changes which one is active. The AI Settings category is
+  driven by store state (`settingsCategory`, opened via `openSettings('ai')`).
 - **Modules:** a toggle per registered module. Disabled modules are excluded from the `start_module`
   tool description and refused by `ModuleRunManager.start`; the list comes from
   `modules:listAvailable` / `modules:setEnabled`, persisted as `disabledModules` in

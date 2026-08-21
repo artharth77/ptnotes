@@ -41,7 +41,7 @@ Run `npm run typecheck` and `npm run lint` after any change.
 ## Security invariants (do not break)
 
 - The renderer must **never** access the network or filesystem; all I/O goes through IPC to the main process.
-- The AI API key lives only in `userData/ai-provider.json` (chmod 600), read by the main process — never bundle it in the renderer.
+- The AI API key lives only in `userData/ai-provider.json` (chmod 600), read by the main process — never bundle it in the renderer. Keys are plain text across the AI provider profile set (no encryption).
 - Chat HTML is rendered via `react-markdown` with raw HTML escaped (XSS-safe).
 - Chart/diagram/infographic rasterization must stay isolated in Electron **utility processes** — module tools must call `renderChartIsolated` / `renderDiagramIsolated` / `renderInfographicIsolated`, never render on the main process. Full rules: `docs/ARCHITECTURE.md` → Security invariants.
 

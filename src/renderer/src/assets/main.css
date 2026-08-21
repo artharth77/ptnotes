@@ -1347,6 +1347,102 @@ body {
   color: var(--text);
 }
 
+/* ---------- AI profile / endpoint ---------- */
+
+.profile-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.profile-block .profile-active {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.profile-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.endpoint-combo {
+  display: flex;
+  gap: 6px;
+}
+
+.endpoint-dropdown {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.endpoint-preset-btn {
+  height: 32px;
+  width: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.endpoint-preset-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.endpoint-popup {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 95;
+  min-width: 260px;
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 4px;
+}
+
+.endpoint-option {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.endpoint-option:hover {
+  background: var(--bg-hover);
+}
+
+.endpoint-option.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.endpoint-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.endpoint-url {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
 /* ---------- Editor ---------- */
 
 .editor-wrap {
@@ -4116,7 +4212,7 @@ body {
 .planner-view-toggle .view-btn.active {
   background: var(--bg-elev);
   color: var(--text);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .planner-view-toggle .view-btn:hover:not(.active) {

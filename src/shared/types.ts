@@ -28,6 +28,22 @@ export interface AIProviderConfig {
   uploadPdfEnabled?: boolean
 }
 
+/** A named AI provider profile: one endpoint/apiKey/model combination. */
+export interface AIProfile {
+  id: string
+  name: string
+  baseUrl: string
+  apiKey: string
+  model: string
+}
+
+/** The full AI config: a set of profiles plus the active one and the global PDF toggle. */
+export interface AIConfig {
+  profiles: AIProfile[]
+  activeProfileId: string
+  uploadPdfEnabled: boolean
+}
+
 export interface StorageSettings {
   rootDir: string
   disabledModules?: string[]
