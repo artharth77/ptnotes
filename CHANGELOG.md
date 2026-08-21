@@ -1,3 +1,16 @@
+## [0.12.0] — 2026-08-22
+
+### Added
+
+#### Excel support for chat file attachments & read_file
+
+- **Excel attachments**: `.xlsx` / `.xlsm` workbooks are now accepted when dragging files into the chat (detected by content: ZIP magic + Excel extension), stored in `<project>/files/` like PDFs and text files, and reusable via `#` mentions.
+- **Excel reading via exceljs**: the `read_file` tool parses Excel workbooks locally with the new `exceljs` dependency and converts them to structured data — JSON by default (`{ "<sheet name>": [row objects] }`, header row → keys) or CSV (`## Sheet: <name>` sections) via an optional `format` argument.
+- **Multi-sheet workbooks** are fully read; cell values are normalized for the AI (formula results resolved, rich text flattened to plain text, dates as ISO strings). Output is truncated at the same `MAX_PDF_CHARS` limit as other readers.
+- **Worksheet filter via `query` parameter**: `read_file` accepts an optional `query` string in URL-style var format (`var=value&var=value`, URL-encoded values are decoded). Supported variables: **`workspace`** — a worksheet name or 1-based worksheet number (e.g. `workspace=Sales` or `workspace=2`); unknown worksheets return an error listing the available sheets — and **`list=workspace`**, which returns a minified JSON list of all worksheets with their 1-based index (`[{"index":1,"name":"Sheet1"},…]`) instead of file content. Only supported for `.xlsx`/`.xlsm` files; unknown query variables, invalid `list` values, and combining `list` with `workspace` are rejected with clear messages.
+- Legacy binary `.xls` files remain unsupported (exceljs reads only `.xlsx`/`.xlsm`); non-ZIP binaries keep the clear "binary file" error message.
+- The system prompt and chat drop hints now mention Excel files; `files:extract` IPC inherits Excel support automatically.
+
 ## [0.11.0] — 2026-08-21
 
 ### Added
