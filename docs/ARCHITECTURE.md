@@ -66,9 +66,9 @@ Run `npm run typecheck` and `npm run lint` after any change.
 | Stack                   | Electron + electron-vite + React 19 + TypeScript                                                                                                                                                                                                                                                                    |
 | Project selector        | Top bar: current project name dropdown + New Project button                                                                                                                                                                                                                                                         |
 | Project registry        | Persistent known-project list so folders deleted externally still show (missing paths marked red)                                                                                                                                                                                                                   |
-| Chat placement          | Collapsible right-side drawer                                                                                                                                                                                                                                                                                       |
+| Chat placement          | Collapsible right-side drawer, shared with the **Module** panel (top-bar toggles, one view at a time)                                                                                                                                                                                                                |
 | AI streaming            | Yes (real-time)                                                                                                                                                                                                                                                                                                     |
-| Settings dialog         | Two-panel dialog: **Storage** (project root path) + **AI Settings** (base URL, API key, model)                                                                                                                                                                                                                      |
+| Settings dialog         | Two-panel dialog: **Storage** (project root path) + **AI Settings** (profile set: active selector, per-profile base URL/API key/model with endpoint presets, global PDF toggle) + Modules + Skills + About                                                                                                                                                                                                                      |
 | Project root            | Configurable via settings; default `~/Documents/PTNotes`; changing it moves all data + registry to the new location after confirmation                                                                                                                                                                              |
 | Chat history            | Persisted per session as JSON files under `<project>/.data/chat/`; auto-saved per message; New Chat archives current thread; history picker can view/reopen old sessions                                                                                                                                            |
 | Chat titles             | Hybrid: local heuristic from first message immediately, refined by a background AI completion; manual rename supported; history popup shows title + message count                                                                                                                                                   |
@@ -107,7 +107,7 @@ Run `npm run typecheck` and `npm run lint` after any change.
   (whole-folder `rename` when the target is free, recursive merge — keeping both files
   on collision with a `-2` suffix — otherwise). The migration is idempotent.
 
-- App AI config stored in Electron `userData/ai-provider.json`, `chmod 600`, never in the renderer bundle.
+- App AI config stored in Electron `userData/ai-provider.json`, `chmod 600`, never in the renderer bundle. Shape: `{ version, profiles: [{id,name,baseUrl,apiKey,model}], activeProfileId, uploadPdfEnabled }` — a set of named profiles plus the active one and a global PDF toggle. Legacy flat configs migrate into a single "Profile 1".
 - App settings (project root path + `disabledModules` module toggles) stored in Electron `userData/ptnotes-settings.json`, `chmod 600`.
 - Creating a project initializes folder + `TODO.md` + `welcome.md`.
 - `.ptnotes-projects.json` in the root dir is the persistent project registry so externally-deleted folders still show (missing paths flagged `pathExists: false`).
@@ -135,7 +135,7 @@ src/
 │       ├── client.ts    # OpenAI-compatible client (streaming)
 │       ├── tools.ts     # tool JSON schemas + executors (bind to PTNotesService)
 │       ├── chatSession.ts   # conversation state + tool-call loop (static system prompt + skills index; active note/schedule sent as user-message context suffix)
-│       ├── config.ts    # ai-provider.json load/save
+│       ├── config.ts    # ai-provider.json load/save (profile set + legacy migration)
 │       ├── reader.ts     # readFileAsText + detectFileKind: content-based (pdf-parse for PDFs, raw text for any text file) + MAX_PDF_CHARS truncation
 │       └── search/
 │           ├── duckduckgo.ts  # web_search (no key)
@@ -143,7 +143,7 @@ src/
 │   └── modules/
 │       ├── registry.ts   # module registry (extensible)
 │       ├── runs.ts       # ModuleRunManager: start/list/stop + event broadcast + readChat/readTrace (live in-memory or persisted .chat.json/.trace.jsonl) + waitForRuns (multi-module waiting for the main chat)
-│       ├── runner.ts     # subagent loop; persists a read-only transcript + raw AI trace to <project>/.data/modules/<runId>.chat.json and .trace.jsonl each turn (removed on run delete/retry); submit_result tool for expectResult runs
+│       ├── runner.ts     # subagent loop; persists a read-only transcript + raw AI trace to <project>/.data/modules/<runId>.chat.json and .trace.jsonl each turn (removed on run delete/retry); submit_result tool for expectResult runs; injects the enabled-skills index into the module system prompt and offers read_skill/read_skill_file (create_skill/delete_skill excluded)
 │       ├── tool.ts       # start_module tool (with expect result spec) + wait_modules tool (main chat → module run)
 │       ├── subagent/     # general-purpose long-run agent (base tools only, no output file; maxIterations 60)
 │       ├── pptx/         # PowerPoint module (design schema → buildPptx)
@@ -190,7 +190,7 @@ src/
 ### Security invariants (do not break)
 
 - The renderer must **never** access the network or filesystem; all I/O goes through IPC to the main process.
-- The AI API key lives only in `userData/ai-provider.json` (chmod 600), read by the main process — never bundle it in the renderer.
+- The AI API key lives only in `userData/ai-provider.json` (chmod 600), read by the main process — never bundle it in the renderer. Keys are plain text across all profiles (no encryption).
 - Chat HTML is rendered via `react-markdown` with raw HTML escaped (XSS-safe); `<think>` blocks and user/error messages stay plain text.
 - Chart rasterization (Chart.js onto `@napi-rs/canvas`/skia) must stay isolated in the Electron **utility process** (`chart-render-worker.js`, spawned by `chartRenderer.ts`): a native segfault there must only fail the in-flight render tool, never crash the app. Module chart tools must call `renderChartIsolated`, never `renderChartPng` on the main process. The worker is a second `main` entry in `electron.vite.config.ts`; `PTNOTES_CHART_WORKER` env overrides its path for tests.
 - Diagram rendering (mermaid DSL → SVG via the jsdom/svgdom shim, rasterized by `@resvg/resvg-js`) must stay isolated in the Electron **utility process** (`diagram-render-worker.js`, spawned by `diagramRenderer.ts`): heavy DOM parsing and any native crash there must only fail the in-flight render tool, never crash the app. Module diagram tools must call `renderDiagramIsolated`, never render mermaid on the main process. The worker is a `main` entry in `electron.vite.config.ts`; `PTNOTES_DIAGRAM_WORKER` env overrides its path for tests. Mermaid is ESM-only, so it is always loaded via dynamic `import()`.
@@ -208,18 +208,18 @@ src/
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ ⚙ Project A ▾ [New Project]      [Settings] [💬 Chat]     │
+│ ⚙ Project A ▾ [New Project]   [Settings] [🧩 Module] [💬 Chat]│
 ├─────────────────┬────────────────────────────────────────────┤
-│ Notes│Todo│      │  Editor area        │  Chat drawer         │
-│ Modules│Planner  │  ┌ toolbar ───────┐ │  (collapsible,      │
-│ ▸ note 1        │  │ TipTap editor  │ │  streaming +        │
-│ ▸ note 2        │  └────────────────┘ │  tool-call log)     │
+│ Notes│Todo│      │  Editor area        │  Module / Chat drawer│
+│ Planner          │  ┌ toolbar ───────┐ │  (collapsible,       │
+│ ▸ note 1        │  │ TipTap editor  │ │  one view at a time) │
+│ ▸ note 2        │  └────────────────┘ │                      │
 │ [+ New note]    │                     │                      │
 └─────────────────┴────────────────────┴──────────────────────┘
 ```
 
-- **Top bar:** current project name with dropdown (switch / new / rename / delete), Settings, chat toggle.
-- **Middle column:** tabs for Notes (list + create/rename/delete), Todo (interactive checklist + progress), Modules, and Planner (project schedules — see [Planner](#planner)).
+- **Top bar:** current project name with dropdown (switch / new / rename / delete), Settings, and a **Chat / Module** segmented view toggle (`mdiChatProcessingOutline` / `mdiPuzzleOutline`). Both views share the collapsible right-side drawer, showing **Chat or Module one at a time**; the Module button is disabled when no project is open. Shortcuts: `⌘⇧C`/`Ctrl+Shift+C` toggles chat, `⌘⇧M`/`Ctrl+Shift+M` toggles modules.
+- **Middle column:** tabs for Notes (list + create/rename/delete), Todo (interactive checklist + progress), and Planner (project schedules — see [Planner](#planner)).
   - **Main area:** TipTap WYSIWYG editor for notes; auto-save to `.md` ~800ms after edits (debounced). The toolbar includes an **underline** button (StarterKit v3 registers `Underline`; markdown round-trips as GitLab-style `++text++`). Links in the editor use a custom `<span>` implementation to disable default browser navigation; they require Cmd/Ctrl+click to navigate: external links open in the OS browser, while `note:`, `skill:`, and `file:` links open the note, skill editor, or reveal the file in Finder, respectively.
 
 - **Format helper (bubble popup):** selecting text shows an icon-only bubble (`BubbleMenu` from `@tiptap/react/menus` — no new dependency) with **Bold / Italic / Underline / Strikethrough / Inline code** buttons (active states + tooltips); a circular `mdiCloseCircle` X button in its top-right corner closes it and turns the feature off. Enabled by default, persisted in `localStorage` (`ptnotes:formatHelper`), and toggled from a status-bar button on the right (icon + label).
@@ -264,6 +264,10 @@ ChatPanel (renderer) ──send──▶ Main process
   and is **rebuilt on every `send()`** (`ensureSystemPrompt` → `renderSkillsIndex`), so skills
   created/edited/toggled in Settings apply mid-session. The model calls `read_skill` to load full content
   when a skill is relevant; disabled skills are excluded from the index and refused by `read_skill`.
+- **Module subagents** get the same skills index injected into their (static) system prompt — but only
+  when at least one skill is enabled. Modules are offered `read_skill` / `read_skill_file` from the base
+  tool set, while `create_skill` / `delete_skill` are **excluded** so background modules can read skills
+  but never mutate them.
 - A `!` todo mention inserts `todo:<todotext>` which is sent to the model as-is.
 - A `#` file mention inserts `file:<filename>`; the system prompt instructs the AI that a
   `file:<filename>` message means it must call `read_file` (content-based local extraction;
@@ -395,9 +399,11 @@ ChatPanel (renderer) ──send──▶ Main process
   sole purpose is removing the default Edit→Find role so the renderer owns `Cmd/Ctrl+F` for the
   markdown editor's find/replace bar); opening via the
   shortcut blurs the input, closing refocuses it. Globally, `Cmd/Ctrl+Shift+C` toggles the chat
-  panel (mirrors the top-bar Chat button, handled by a window listener in ChatDrawer, which is
-  always mounted); it is suppressed while any dialog/modal is open (a `.modal-overlay` or
-  `.module-history-backdrop` present in the DOM). The history popup is
+  panel and `Cmd/Ctrl+Shift+M` toggles the module panel (mirroring the top-bar Chat / Module
+  buttons; handled by a window listener in `App.tsx`, which is always mounted so both work
+  regardless of which drawer view is open); they are suppressed while any dialog/modal is open (a
+  `.modal-overlay` or `.module-history-backdrop` present in the DOM), and `Cmd/Ctrl+Shift+M` is a
+  no-op when no project is open. The history popup is
   keyboard-navigable: `↑`/`↓` move the active selector (highlighted via `.chat-history-item.active`,
   auto-scrolled into view), mouse move re-syncs the selector to the pointer,
   `Enter` opens the selected session, `Escape` closes and refocuses the input (nav keys skipped
@@ -422,13 +428,18 @@ Two-panel dialog (`.settings-layout` with `.settings-nav` + `.settings-pane`):
   folder picker. Selecting a new root prompts for explicit confirmation ("Move all project data…")
   before `PTNotesService.changeRootDir` moves every project dir + `.ptnotes-projects.json`, and the
   settings store persists the new root.
-- **AI Settings:** Base URL (default `https://api.openai.com/v1`), API key, model (default empty —
-  placeholder only, must be chosen), PDF upload toggle. No search provider field (DuckDuckGo-only,
-  keyless). The **Model** field is an editable custom combobox: free-text `<input>` with a
-  `Load models` button that calls `ai:listModels(baseUrl, apiKey)` (uses the in-dialog unsaved
-  values) against `GET {baseUrl}/models`, then shows a scrollable dropdown (~10 rows) of fetched
-  model ids that is filtered by typing; the typed value is never cleared on failure. The AI Selected
-  category is driven by store state (`settingsCategory`, opened via `openSettings('ai')`).
+- **AI Settings:** a set of **profiles** (each a named base URL / API key / model combination). The
+  UI lets you pick the **active** profile (used by chat), create new profiles (auto id `profile-N`,
+  editable name, not active), edit any profile, and delete non-active ones. The **Base URL** field
+  is an editable input plus a preset dropdown of predefined endpoints (`AI_ENDPOINTS`). The **Model**
+  field is an editable custom combobox: free-text `<input>` with a `Load models` button that calls
+  `ai:listModels(baseUrl, apiKey)` (uses the edited profile's unsaved values) against
+  `GET {baseUrl}/models`, then shows a scrollable dropdown (~10 rows) of fetched model ids filtered
+  by typing; the typed value is never cleared on failure. The **PDF upload** toggle is global
+  (applies to `AIConfig.uploadPdfEnabled`), rendered once outside the per-profile fields. Saving
+  persists the whole `AIConfig` via `ai:saveProfiles`; the active profile is read back via
+  `ai:getProfiles`. Editing a profile never changes which one is active. The AI Settings category is
+  driven by store state (`settingsCategory`, opened via `openSettings('ai')`).
 - **Modules:** a toggle per registered module. Disabled modules are excluded from the `start_module`
   tool description and refused by `ModuleRunManager.start`; the list comes from
   `modules:listAvailable` / `modules:setEnabled`, persisted as `disabledModules` in
@@ -500,7 +511,7 @@ JSON in `<project>/planner/<slug>.json`; the whole feature is pure data — no m
   `undo`/`redo` roles swallow `⌘Z` before the renderer sees it), gated by a `planner:set-edit-active`
   flag the editor updates from `focusin`/`focusout` — so the markdown editor, chat input, and native
   text fields keep their own undo behavior.
-- 4th sidebar tab (`mdiChartTimeline`) → PlannerPanel (schedule list) → PlannerEditor (keyed by
+- Sidebar tab (`mdiChartTimeline`) → PlannerPanel (schedule list) → PlannerEditor (keyed by
   `activeScheduleId`); an empty-state "New Schedule" flow otherwise.
 - **No. and Title are always visible**: both columns are always rendered (row/header/`colTemplate`
   guards removed) and are checked + disabled in the column modal (`disabledKeys`), so the grid

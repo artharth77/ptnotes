@@ -1,3 +1,26 @@
+## [0.11.0] — 2026-08-21
+
+### Added
+
+#### AI provider profiles
+
+- **Profile set**: the AI configuration is now a set of **named profiles**, each its own `baseUrl` / `apiKey` / `model` combination, plus a persisted **active profile** that the chat actually uses. The Base URL field in the profile editor is an editable input with a **predefined endpoint dropdown** (OpenAI, OpenRouter, Ollama, Ollama Cloud, OpenCode Go, 9arm AI Passport — shared from `src/shared/aiEndpoints.ts`).
+- **Profile management in Settings ▸ AI Settings**: an **Active profile** selector (switching it takes effect immediately) alongside **New profile** / **Edit profile** / **Delete profile** actions. Editing a profile happens in a modal and never changes which profile is active; deleting the active profile falls back to the first remaining one (delete is disabled when only one profile exists). The **PDF upload toggle is now global** — it applies across all profiles, not per-profile.
+- **Legacy migration**: the old flat `ai-provider.json` config is automatically migrated on first load into a single **"Profile 1"**, which becomes the active profile; the legacy `uploadPdfEnabled` is hoisted into the global toggle and the file is rewritten once. Keys stay **plain text** with `chmod 600` (no encryption), exactly as before.
+- **New store API + IPC**: `AIConfigStore` now exposes `getAll()` / `saveAll()` (full profile set + global toggle) alongside the unchanged `load()` (which still returns the active profile as a `AIProviderConfig`, so chat/module/title-generation consumers are untouched). Added `ai:getProfiles` / `ai:saveProfiles` IPC channels (preload `getProfiles` / `saveProfiles`); the renderer never touches the filesystem.
+- **Chat drawer profile switcher**: the chat drawer's statusbar shows the active profile's **model name** on the left; hovering reveals an arrow button and clicking either the name or the arrow opens a **profile popup** (anchored above the statusbar) listing every profile with its name and model. Selecting a profile switches the active profile immediately via `saveProfiles`. The statusbar's In / Out / Cache token labels are now compact icons (`mdiTrayArrowDown` / `mdiTrayArrowUp` / `mdiTrayFull`).
+
+#### Module panel — moved to the right-side drawer
+
+- The **Modules** tab is removed from the left sidebar. The module panel now lives in the **right-side drawer**, toggled from a new **Module** button (🧩 `mdiPuzzleOutline`) in the top bar.
+- The top-bar **Chat** and **Module** buttons now render as a **segmented view toggle** (like the Planner's Grid/Gantt toggle), showing one active view at a time. The right drawer shows **either Chat or Module at a time**: clicking a button opens its view (or closes the drawer if already open); clicking the other button switches views without closing. The Module button is disabled when no project is open.
+- New keyboard shortcut **`⌘⇧M` / `Ctrl+Shift+M`** toggles the module panel (alongside the existing `⌘⇧C` / `Ctrl+Shift+C` chat shortcut).
+
+#### Modules — can read skills (read-only)
+
+- **Skills in modules**: module subagents can now load and apply skills. The runner injects the **enabled-skills index** into the module's system prompt (only when at least one skill is enabled, matching the chat's behaviour), so a module can discover which skills exist and call `read_skill` to load a skill's full content, plus `read_skill_file` to read sibling files inside a skill's folder.
+- **Read-only**: modules get `read_skill` / `read_skill_file` from the base tool set, but the mutating skill tools **`create_skill` and `delete_skill` are excluded** — autonomous background modules can read skills but never create, edit, or delete them.
+
 ## [0.10.1] — 2026-08-21
 
 ### Added

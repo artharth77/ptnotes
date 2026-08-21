@@ -1499,4 +1499,134 @@ assert.equal(
   'deleting a run removes its .trace.jsonl file'
 )
 
+// ---- modules can read skills (index injected) but never mutate them ----
+await service.saveSkill(PROJECT, 'project', 'pt-style', {
+  description: 'PTNotes house style guide',
+  content: '# Style\n\nUse active voice.',
+  enabled: true
+})
+
+// capture the `tools` array each scripted completion receives
+const offeredToolNames: string[] = []
+function makeCapturingClient(
+  scriptArr: { content?: string; tool_calls?: FakeToolCall[] }[]
+): (cfg: AIProviderConfig) => OpenAI {
+  let i = 0
+  return () =>
+    ({
+      chat: {
+        completions: {
+          create: async (params: { tools?: { function: { name: string } }[] }) => {
+            for (const t of params.tools ?? []) offeredToolNames.push(t.function.name)
+            const entry = scriptArr[i++] ?? scriptArr[scriptArr.length - 1]!
+            const message: Record<string, unknown> = {
+              role: 'assistant',
+              content: entry.content ?? ''
+            }
+            if (entry.tool_calls) message.tool_calls = entry.tool_calls
+            return { choices: [{ message }] }
+          }
+        }
+      }
+    }) as unknown as OpenAI
+}
+
+const skillSubScript: { content?: string; tool_calls?: FakeToolCall[] }[] = [
+  {
+    tool_calls: [
+      step('sk1', 'set_plan', {
+        steps: ['Load the style skill', 'Write the note', 'Submit result']
+      })
+    ]
+  },
+  {
+    tool_calls: [
+      step('sk2', 'read_skill', { scope: 'project', name: 'pt-style' }),
+      step('sk3', 'update_step', { index: 1, status: 'done' })
+    ]
+  },
+  { tool_calls: [step('sk4', 'submit_result', { result: 'ok' })] },
+  { content: 'Done.' }
+]
+const skillManager = new ModuleRunManager(
+  service,
+  configStore,
+  subRegistry,
+  () => {},
+  makeCapturingClient(skillSubScript)
+)
+const skillStart = await skillManager.start(
+  PROJECT,
+  'subagent',
+  'Use the style skill',
+  'Write the note using the pt-style skill.',
+  'Return the string "ok"'
+)
+assert.equal(skillStart.ok, true, 'skill-enabled subagent run accepted')
+const skillRunId = skillStart.ok ? skillStart.runId : ''
+await waitFor(async () => {
+  const runs = await skillManager.list(PROJECT)
+  return runs.some((r) => r.runId === skillRunId && (r.status === 'done' || r.status === 'failed'))
+})
+
+const skillToolNames = new Set(offeredToolNames)
+assert.ok(skillToolNames.has('read_skill'), 'modules are offered read_skill')
+assert.ok(skillToolNames.has('read_skill_file'), 'modules are offered read_skill_file')
+assert.ok(!skillToolNames.has('create_skill'), 'modules are NOT offered create_skill (read-only)')
+assert.ok(!skillToolNames.has('delete_skill'), 'modules are NOT offered delete_skill (read-only)')
+assert.ok(!skillToolNames.has('ask_user'), 'modules are not offered ask_user')
+
+const skillModTrace = await service.readModuleTrace(PROJECT, skillRunId)
+assert.ok(skillModTrace, 'skill-enabled module trace written')
+const skillSystemPrompt = skillModTrace!.entries.find((e) => e.role === 'system')?.content ?? ''
+assert.match(
+  skillSystemPrompt,
+  /pt-style — PTNotes house style guide/,
+  'module system prompt lists enabled skills in the index'
+)
+assert.match(
+  skillSystemPrompt,
+  /Call the read_skill tool/,
+  'module system prompt explains read_skill'
+)
+
+// with no enabled skills, the index is omitted from the module system prompt
+const skillModTraceRun = await skillManager.deleteRun(PROJECT, skillRunId, false)
+assert.equal(skillModTraceRun, true, 'skill-enabled run deleted')
+const skillBefore = await service.renderSkillsIndex(PROJECT)
+assert.match(skillBefore, /pt-style/, 'sanity: skill index populated before disabling')
+
+await service.setSkillEnabled(PROJECT, 'project', 'pt-style', false)
+const noSkillIndex = await service.renderSkillsIndex(PROJECT)
+assert.equal(noSkillIndex.trim(), '', 'disabled skills are excluded from the index')
+const noSkillManager = new ModuleRunManager(
+  service,
+  configStore,
+  subRegistry,
+  () => {},
+  makeScriptedClient(skillSubScript)
+)
+const noSkillStart = await noSkillManager.start(
+  PROJECT,
+  'subagent',
+  'Plain task',
+  'Do a simple task.',
+  'Return the string "ok"'
+)
+assert.equal(noSkillStart.ok, true, 'no-skill subagent run accepted')
+const noSkillRunId = noSkillStart.ok ? noSkillStart.runId : ''
+await waitFor(async () => {
+  const runs = await noSkillManager.list(PROJECT)
+  return runs.some(
+    (r) => r.runId === noSkillRunId && (r.status === 'done' || r.status === 'failed')
+  )
+})
+const noSkillTrace = await service.readModuleTrace(PROJECT, noSkillRunId)
+assert.ok(noSkillTrace, 'no-skill module trace written')
+const noSkillSystemPrompt = noSkillTrace!.entries.find((e) => e.role === 'system')?.content ?? ''
+assert.ok(
+  !noSkillSystemPrompt.includes('read_skill'),
+  'module system prompt omits the skills section when no skills are enabled'
+)
+
 console.log('MODULES TESTS PASSED')

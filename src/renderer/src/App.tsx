@@ -22,32 +22,20 @@ const SIDEBAR_MIN = 200
 const SIDEBAR_MAX = 560
 const CHAT_MIN = 280
 const CHAT_MAX = 720
-const NO_RUNS: never[] = []
 
 function SideTabs(): React.JSX.Element {
   const tab = useAppStore((s) => s.tab)
   const setTab = useAppStore((s) => s.setTab)
-  const moduleRuns = useAppStore((s) =>
-    s.activeProject ? (s.moduleRuns[s.activeProject] ?? NO_RUNS) : NO_RUNS
-  )
-  const modulesBusy = moduleRuns.some((r) => !['done', 'failed', 'cancelled'].includes(r.status))
 
   return (
     <div className="side-tabs">
-      {(['notes', 'todo', 'planner', 'modules'] as Tab[]).map((t) => (
+      {(['notes', 'todo', 'planner'] as Tab[]).map((t) => (
         <button
           key={t}
           className={`side-tab ${tab === t ? 'active' : ''}`}
           onClick={() => setTab(t)}
         >
-          {t === 'notes'
-            ? 'Notes'
-            : t === 'todo'
-              ? 'Todo'
-              : t === 'planner'
-                ? 'Planner'
-                : 'Modules'}
-          {t === 'modules' && modulesBusy && <span className="side-tab-spinner" />}
+          {t === 'notes' ? 'Notes' : t === 'todo' ? 'Todo' : t === 'planner' ? 'Planner' : ''}
         </button>
       ))}
     </div>
@@ -156,6 +144,39 @@ function EmptyPlanner(): React.JSX.Element {
   )
 }
 
+function ModuleSkeleton(): React.JSX.Element {
+  return (
+    <div className="module-skeleton">
+      <div className="module-skeleton-card">
+        <div className="module-skeleton-row">
+          <span className="skeleton-bar w30" />
+          <span className="skeleton-bar w10" />
+        </div>
+        <span className="skeleton-bar w55" />
+        <span className="skeleton-bar w85" />
+        <span className="skeleton-bar w70" />
+      </div>
+      <div className="module-skeleton-card">
+        <div className="module-skeleton-row">
+          <span className="skeleton-bar w35" />
+          <span className="skeleton-bar w15" />
+        </div>
+        <span className="skeleton-bar w65" />
+        <span className="skeleton-bar w80" />
+      </div>
+      <div className="module-skeleton-card">
+        <div className="module-skeleton-row">
+          <span className="skeleton-bar w25" />
+          <span className="skeleton-bar w10" />
+        </div>
+        <span className="skeleton-bar w75" />
+        <span className="skeleton-bar w60" />
+        <span className="skeleton-bar w90" />
+      </div>
+    </div>
+  )
+}
+
 function ChatSkeleton(): React.JSX.Element {
   return (
     <div className="chat-skeleton">
@@ -237,14 +258,21 @@ function App(): React.JSX.Element {
   const noteContent = useAppStore((s) => s.noteContent)
   const tab = useAppStore((s) => s.tab)
   const chatOpen = useAppStore((s) => s.chatOpen)
+  const moduleOpen = useAppStore((s) => s.moduleOpen)
+  const rightView = useAppStore((s) => s.rightView)
+  const rightOpen = chatOpen || moduleOpen
+  const setRightView = useAppStore((s) => s.setRightView)
   const settingsOpen = useAppStore((s) => s.settingsOpen)
   const sidebarVisible = useAppStore((s) => s.sidebarVisible)
   const askRequest = useAppStore((s) => s.askRequest)
   const [sidebarWidth, setSidebarWidth] = useState(280)
   const [chatWidth, setChatWidth] = useState(360)
   const [chatResizing, setChatResizing] = useState(false)
+  const [moduleResizing, setModuleResizing] = useState(false)
   const sidebarRef = useRef<HTMLElement>(null)
   const chatColRef = useRef<HTMLDivElement>(null)
+  const chatNewTurnRef = useRef(false)
+  const chatLastMsgIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     void init()
@@ -269,9 +297,22 @@ function App(): React.JSX.Element {
       switch (evt.type) {
         case 'message-start':
           state.setChatBusy(true)
+          if (evt.messageId && evt.messageId !== chatLastMsgIdRef.current) {
+            chatLastMsgIdRef.current = evt.messageId
+            chatNewTurnRef.current = false
+          }
           break
         case 'content':
           if (project) {
+            if (chatNewTurnRef.current) {
+              chatNewTurnRef.current = false
+              state.appendChatMessage(project, {
+                id: crypto.randomUUID(),
+                role: 'assistant',
+                content: '',
+                toolCalls: []
+              })
+            }
             state.updateLastAssistantMessage(project, (m) => ({
               ...m,
               content: m.content + (evt.content ?? '')
@@ -284,6 +325,7 @@ function App(): React.JSX.Element {
               ...m,
               toolCalls: [...(m.toolCalls ?? []), evt.toolCall!]
             }))
+            chatNewTurnRef.current = true
           }
           if (evt.toolCall) {
             if (NOTE_TOOLS.has(evt.toolCall.name)) {
@@ -367,6 +409,40 @@ function App(): React.JSX.Element {
     })
   }, [])
 
+  // Global panel shortcuts: Cmd/Ctrl+Shift+C toggles chat, Cmd/Ctrl+Shift+M toggles modules
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent): void {
+      const mod =
+        (window.electron.process.platform === 'darwin' ? e.metaKey : e.ctrlKey) && e.shiftKey
+      if (!mod || e.altKey) return
+      const key = e.key.toLowerCase()
+      if (key !== 'c' && key !== 'm') return
+      const modalOpen = document.querySelector('.modal-overlay, .module-history-backdrop') !== null
+      if (modalOpen) return
+      e.preventDefault()
+      const view = key === 'c' ? 'chat' : 'modules'
+      if (view === 'modules' && !activeProject) return
+      setRightView(view)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [activeProject, setRightView])
+
+  // Show a skeleton briefly while the module panel animates open/close or switches to it
+  const moduleWasOpen = useRef(rightOpen && rightView === 'modules')
+  useEffect(() => {
+    const isOpen = rightOpen && rightView === 'modules'
+    const opened = isOpen && !moduleWasOpen.current
+    const closed = !isOpen && moduleWasOpen.current
+    moduleWasOpen.current = isOpen
+    if (opened || closed) {
+      setModuleResizing(true)
+      const t = setTimeout(() => setModuleResizing(false), 300)
+      return () => clearTimeout(t)
+    }
+    return undefined
+  }, [rightOpen, rightView])
+
   return (
     <div className="app">
       <TopBar />
@@ -379,15 +455,7 @@ function App(): React.JSX.Element {
             style={{ width: sidebarVisible ? sidebarWidth : 0 }}
           >
             <SideTabs />
-            {tab === 'todo' ? (
-              <TodoPanel />
-            ) : tab === 'modules' ? (
-              <ModulePanel />
-            ) : tab === 'planner' ? (
-              <PlannerPanel />
-            ) : (
-              <NoteList />
-            )}
+            {tab === 'todo' ? <TodoPanel /> : tab === 'planner' ? <PlannerPanel /> : <NoteList />}
           </aside>
           {sidebarVisible && (
             <Resizer
@@ -411,23 +479,41 @@ function App(): React.JSX.Element {
               <EmptyNote />
             )}
           </main>
-          {chatOpen && (
+          {rightOpen && (
             <Resizer
               position="start"
               targetRef={chatColRef}
               min={CHAT_MIN}
               max={CHAT_MAX}
               onCommit={setChatWidth}
-              onStart={() => setChatResizing(true)}
-              onEnd={() => setChatResizing(false)}
+              onStart={() => {
+                setChatResizing(true)
+                setModuleResizing(true)
+              }}
+              onEnd={() => {
+                setChatResizing(false)
+                setModuleResizing(false)
+              }}
             />
           )}
           <div
             ref={chatColRef}
-            className={`chat-col${chatOpen ? '' : ' collapsed'}`}
-            style={{ width: chatOpen ? chatWidth : 0 }}
+            className={`chat-col${rightOpen ? '' : ' collapsed'}`}
+            style={{ width: rightOpen ? chatWidth : 0 }}
           >
-            {chatResizing ? <ChatSkeleton /> : <ChatDrawer width={chatWidth} />}
+            {rightView === 'modules' ? (
+              moduleResizing ? (
+                <ModuleSkeleton />
+              ) : (
+                <div className="module-drawer">
+                  <ModulePanel />
+                </div>
+              )
+            ) : chatResizing ? (
+              <ChatSkeleton />
+            ) : (
+              <ChatDrawer width={chatWidth} />
+            )}
           </div>
         </div>
       ) : (

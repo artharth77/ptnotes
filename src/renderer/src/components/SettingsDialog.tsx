@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   mdiDotsVertical,
   mdiPencil,
@@ -13,7 +14,8 @@ import { Modal, TextField } from './Modal'
 import { MdiIcon } from './MdiIcon'
 import type {
   AboutInfo,
-  AIProviderConfig,
+  AIConfig,
+  AIProfile,
   ModuleSettings,
   SkillContent,
   SkillList,
@@ -21,20 +23,30 @@ import type {
   SkillScope,
   StorageSettings
 } from '@shared/types'
+import { AI_ENDPOINTS } from '@shared/aiEndpoints'
 import appIcon from '../../../../resources/icon.png'
 
-function AiSettingsPane({
-  config,
-  setConfig
+function ProfileEditorModal({
+  initial,
+  onClose,
+  onSave
 }: {
-  config: AIProviderConfig
-  setConfig: (c: AIProviderConfig) => void
+  initial: AIProfile
+  onClose: () => void
+  onSave: (profile: AIProfile) => void
 }): React.JSX.Element {
+  const [profile, setProfile] = useState<AIProfile>(initial)
   const [models, setModels] = useState<string[]>([])
   const [loadingModels, setLoadingModels] = useState(false)
   const [modelsError, setModelsError] = useState('')
   const [modelOpen, setModelOpen] = useState(false)
+  const [endpointOpen, setEndpointOpen] = useState(false)
   const modelDropdownRef = useRef<HTMLDivElement | null>(null)
+  const endpointDropdownRef = useRef<HTMLDivElement | null>(null)
+
+  function update(patch: Partial<AIProfile>): void {
+    setProfile((p) => ({ ...p, ...patch }))
+  }
 
   useEffect(() => {
     if (!modelOpen) return
@@ -47,19 +59,30 @@ function AiSettingsPane({
     return () => document.removeEventListener('pointerdown', handler)
   }, [modelOpen])
 
-  const visibleModels = config.model.trim()
-    ? models.filter((m) => m.toLowerCase().includes(config.model.trim().toLowerCase()))
+  useEffect(() => {
+    if (!endpointOpen) return
+    const handler = (e: PointerEvent): void => {
+      if (endpointDropdownRef.current && !endpointDropdownRef.current.contains(e.target as Node)) {
+        setEndpointOpen(false)
+      }
+    }
+    document.addEventListener('pointerdown', handler)
+    return () => document.removeEventListener('pointerdown', handler)
+  }, [endpointOpen])
+
+  const visibleModels = profile.model.trim()
+    ? models.filter((m) => m.toLowerCase().includes(profile.model.trim().toLowerCase()))
     : models
 
   async function loadModels(silent = false): Promise<void> {
-    if (!config.baseUrl.trim()) {
+    if (!profile.baseUrl.trim()) {
       if (!silent) setModelsError('Enter a Base URL first.')
       return
     }
     if (!silent) setLoadingModels(true)
     if (!silent) setModelsError('')
     try {
-      const res = await window.ptnotes.ai.listModels(config.baseUrl.trim(), config.apiKey)
+      const res = await window.ptnotes.ai.listModels(profile.baseUrl.trim(), profile.apiKey ?? '')
       if (Array.isArray(res)) {
         setModels(res)
         if (!silent) setModelsError('')
@@ -75,7 +98,7 @@ function AiSettingsPane({
   }
 
   useEffect(() => {
-    if (config.baseUrl.trim()) {
+    if (profile.baseUrl.trim()) {
       const id = setTimeout(() => void loadModels(true), 0)
       return () => clearTimeout(id)
     }
@@ -83,26 +106,62 @@ function AiSettingsPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  const canSave = profile.name.trim().length > 0
+
   return (
-    <>
-      <p className="hint">
-        Connect to any OpenAI-compatible API (OpenAI, OpenRouter, Groq, LM Studio, Ollama, …). The
-        API key is stored locally on this machine.
-      </p>
+    <Modal title={initial.id ? 'Edit profile' : 'New profile'} onClose={onClose}>
+      <label className="form-label">
+        Profile name
+        <TextField
+          value={profile.name}
+          onChange={(v) => update({ name: v })}
+          placeholder="e.g. Work, Ollama local"
+          autoFocus
+        />
+      </label>
       <label className="form-label">
         Base URL
-        <TextField
-          value={config.baseUrl}
-          onChange={(v) => setConfig({ ...config, baseUrl: v })}
-          placeholder="https://api.openai.com/v1"
-        />
+        <div className="endpoint-combo">
+          <div className="endpoint-dropdown" ref={endpointDropdownRef}>
+            <button
+              className="endpoint-preset-btn"
+              onClick={() => setEndpointOpen((o) => !o)}
+              title="Pick a predefined endpoint"
+            >
+              ▾
+            </button>
+            {endpointOpen && (
+              <div className="endpoint-popup">
+                {AI_ENDPOINTS.map((e) => (
+                  <button
+                    key={e.url}
+                    className={`endpoint-option ${profile.baseUrl === e.url ? 'active' : ''}`}
+                    onMouseDown={(ev) => {
+                      ev.preventDefault()
+                      update({ baseUrl: e.url })
+                      setEndpointOpen(false)
+                    }}
+                  >
+                    <span className="endpoint-name">{e.name}</span>
+                    <span className="endpoint-url">{e.url}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <TextField
+            value={profile.baseUrl}
+            onChange={(v) => update({ baseUrl: v })}
+            placeholder="https://api.openai.com/v1"
+          />
+        </div>
       </label>
       <label className="form-label">
         API key
         <TextField
           type="password"
-          value={config.apiKey}
-          onChange={(v) => setConfig({ ...config, apiKey: v })}
+          value={profile.apiKey ?? ''}
+          onChange={(v) => update({ apiKey: v })}
           placeholder="sk-…"
         />
       </label>
@@ -113,21 +172,21 @@ function AiSettingsPane({
             <div className="model-input-wrap">
               <input
                 className="text-field"
-                value={config.model}
+                value={profile.model ?? ''}
                 placeholder="gpt-4o-mini"
-                onChange={(e) => setConfig({ ...config, model: e.target.value })}
+                onChange={(e) => update({ model: e.target.value })}
                 onFocus={() => setModelOpen(true)}
                 onKeyDown={(e) => {
                   if (e.key === 'Escape') setModelOpen(false)
                 }}
               />
-              {config.model && (
+              {profile.model && (
                 <button
                   className="model-clear"
                   aria-label="Clear model"
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
-                    setConfig({ ...config, model: '' })
+                    update({ model: '' })
                     setModelOpen(true)
                   }}
                 >
@@ -147,10 +206,10 @@ function AiSettingsPane({
                   visibleModels.map((m) => (
                     <button
                       key={m}
-                      className={`model-option ${config.model === m ? 'active' : ''}`}
+                      className={`model-option ${profile.model === m ? 'active' : ''}`}
                       onMouseDown={(e) => {
                         e.preventDefault()
-                        setConfig({ ...config, model: m })
+                        update({ model: m })
                         setModelOpen(false)
                       }}
                     >
@@ -164,7 +223,7 @@ function AiSettingsPane({
           <button
             className="btn"
             onClick={() => void loadModels()}
-            disabled={!config.baseUrl.trim() || loadingModels}
+            disabled={!profile.baseUrl.trim() || loadingModels}
           >
             {loadingModels ? 'Loading…' : 'Load models'}
           </button>
@@ -177,19 +236,148 @@ function AiSettingsPane({
           </p>
         )}
       </label>
+      <div className="modal-actions">
+        <button className="btn" onClick={onClose}>
+          Cancel
+        </button>
+        <button className="btn primary" onClick={() => onSave(profile)} disabled={!canSave}>
+          Save
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
+function AiSettingsPane({
+  config,
+  onChange,
+  onCommit
+}: {
+  config: AIConfig
+  onChange: (c: AIConfig) => void
+  onCommit: (c: AIConfig) => Promise<void>
+}): React.JSX.Element {
+  const [editing, setEditing] = useState<AIProfile | null>(null)
+
+  const profile = config.profiles.find((p) => p.id === config.activeProfileId) ?? config.profiles[0]
+  const profileId = profile?.id ?? ''
+
+  function addProfile(): void {
+    let n = config.profiles.length + 1
+    let id = `profile-${n}`
+    while (config.profiles.some((p) => p.id === id)) {
+      n += 1
+      id = `profile-${n}`
+    }
+    setEditing({ id: '', name: `Profile ${n}`, baseUrl: '', apiKey: '', model: '' })
+  }
+
+  function editProfile(): void {
+    if (profile) setEditing({ ...profile })
+  }
+
+  async function deleteProfile(): Promise<void> {
+    if (config.profiles.length <= 1) return
+    const rest = config.profiles.filter((p) => p.id !== profileId)
+    const next: AIConfig = {
+      ...config,
+      profiles: rest,
+      activeProfileId: config.activeProfileId === profileId ? rest[0].id : config.activeProfileId
+    }
+    await onCommit(next)
+  }
+
+  async function saveProfile(saved: AIProfile): Promise<void> {
+    const exists = config.profiles.some((p) => p.id === saved.id)
+    const resolved = exists
+      ? saved
+      : (() => {
+          let n = config.profiles.length + 1
+          let id = `profile-${n}`
+          while (config.profiles.some((p) => p.id === id)) {
+            n += 1
+            id = `profile-${n}`
+          }
+          return { ...saved, id }
+        })()
+    const next: AIConfig = exists
+      ? {
+          ...config,
+          profiles: config.profiles.map((p) => (p.id === resolved.id ? resolved : p))
+        }
+      : { ...config, profiles: [...config.profiles, resolved] }
+    setEditing(null)
+    await onCommit(next)
+  }
+
+  return (
+    <>
+      <p className="hint">
+        Connect to any OpenAI-compatible API (OpenAI, OpenRouter, Groq, LM Studio, Ollama, …). API
+        keys are stored locally on this machine. Profiles let you switch between different
+        providers; the active profile is used by the chat.
+      </p>
+      <div className="profile-block">
+        <label className="form-label profile-active">
+          Active profile
+          <select
+            className="text-field"
+            value={config.activeProfileId}
+            onChange={(e) => {
+              const next = { ...config, activeProfileId: e.target.value }
+              onChange(next)
+              void onCommit(next)
+            }}
+          >
+            {config.profiles.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name || p.id}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="profile-actions">
+          <button className="btn" onClick={addProfile}>
+            <MdiIcon path={mdiPlus} size={16} /> New profile
+          </button>
+          <button className="btn" onClick={editProfile} disabled={!profile}>
+            Edit profile
+          </button>
+          <button
+            className="btn"
+            onClick={() => void deleteProfile()}
+            disabled={!profile || config.profiles.length <= 1}
+          >
+            Delete profile
+          </button>
+        </div>
+      </div>
       <label className="checkbox-label">
         <input
           type="checkbox"
-          checked={config.uploadPdfEnabled ?? true}
-          onChange={(e) => setConfig({ ...config, uploadPdfEnabled: e.target.checked })}
+          checked={config.uploadPdfEnabled}
+          onChange={(e) => {
+            const next = { ...config, uploadPdfEnabled: e.target.checked }
+            onChange(next)
+            void onCommit(next)
+          }}
         />
         <span>Enable PDF upload (Upload mode)</span>
       </label>
       <p className="hint">
         sends the PDF as a raw file attachment to the AI provider. Only enable if your provider
         accepts file attachments (e.g. OpenAI&apos;s Responses API). If uploads fail, use Extract
-        text mode instead.
+        text mode instead. This setting applies to all profiles.
       </p>
+      {editing &&
+        createPortal(
+          <ProfileEditorModal
+            initial={editing}
+            onClose={() => setEditing(null)}
+            onSave={(saved) => void saveProfile(saved)}
+          />,
+          document.body
+        )}
     </>
   )
 }
@@ -721,16 +909,15 @@ export function SettingsDialog(): React.JSX.Element {
   const category = useAppStore((s) => s.settingsCategory)
   const setSettingsCategory = useAppStore((s) => s.setSettingsCategory)
   const [storage, setStorage] = useState<StorageSettings | null>(null)
-  const [aiConfig, setAiConfig] = useState<AIProviderConfig | null>(null)
+  const [aiConfig, setAiConfig] = useState<AIConfig | null>(null)
   const [modules, setModules] = useState<ModuleSettings[] | null>(null)
-  const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [pendingRoot, setPendingRoot] = useState<string | null>(null)
   const [moving, setMoving] = useState(false)
 
   useEffect(() => {
     void window.ptnotes.settings.get().then(setStorage)
-    void window.ptnotes.ai.getConfig().then(setAiConfig)
+    void window.ptnotes.ai.getProfiles().then(setAiConfig)
     void window.ptnotes.modules.listAvailable().then(setModules)
   }, [])
 
@@ -757,17 +944,13 @@ export function SettingsDialog(): React.JSX.Element {
     }
   }
 
-  async function saveAi(): Promise<void> {
-    if (!aiConfig) return
-    setSaving(true)
+  async function commitAi(next: AIConfig): Promise<void> {
     setError('')
     try {
-      await window.ptnotes.ai.setConfig(aiConfig)
-      setSettingsOpen(false)
+      const saved = await window.ptnotes.ai.saveProfiles(next)
+      setAiConfig(saved)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setSaving(false)
     }
   }
 
@@ -846,15 +1029,7 @@ export function SettingsDialog(): React.JSX.Element {
             </>
           ) : (
             <>
-              <AiSettingsPane config={aiConfig} setConfig={setAiConfig} />
-              <div className="modal-actions">
-                <button className="btn" onClick={() => setSettingsOpen(false)}>
-                  Cancel
-                </button>
-                <button className="btn primary" onClick={() => void saveAi()} disabled={saving}>
-                  {saving ? 'Saving…' : 'Save'}
-                </button>
-              </div>
+              <AiSettingsPane config={aiConfig} onChange={setAiConfig} onCommit={commitAi} />
             </>
           )}
         </div>

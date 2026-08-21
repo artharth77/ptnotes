@@ -30,4 +30,11 @@ export function splitContent(content: string): ContentPart[] {
   return parts
 }
 
+export function isReasoningOpen(content: string): boolean {
+  const open = content.indexOf('<think')
+  if (open === -1) return false
+  const close = content.indexOf(' response', open)
+  return close === -1
+}
+
 export const USER_MSG_COLLAPSE_LIMIT = 400

@@ -8,6 +8,7 @@ import type { ToolsProvider } from '../ai/chatSession'
 import { createClient } from '../ai/client'
 import { AiTraceRecorder } from '../ai/trace'
 import type {
+  AIConfig,
   AIProviderConfig,
   AskAnswer,
   AskRequest,
@@ -136,6 +137,12 @@ export function registerAiIpc(
 ): void {
   ipcMain.handle('ai:getConfig', async (): Promise<AIProviderConfig> => configStore.load())
 
+  ipcMain.handle('ai:getProfiles', async (): Promise<AIConfig> => configStore.getAll())
+
+  ipcMain.handle('ai:saveProfiles', async (_e, config: AIConfig): Promise<AIConfig> =>
+    configStore.saveAll(config)
+  )
+
   ipcMain.handle(
     'ai:listModels',
     async (_e, baseUrl: string, apiKey: string): Promise<ListModelsResult> => {
@@ -152,10 +159,6 @@ export function registerAiIpc(
         return { error: err instanceof Error ? err.message : String(err) }
       }
     }
-  )
-
-  ipcMain.handle('ai:setConfig', async (_e, config: AIProviderConfig): Promise<AIProviderConfig> =>
-    configStore.save(config)
   )
 
   ipcMain.handle('ai:clear', async (_e, project: string): Promise<void> => {
