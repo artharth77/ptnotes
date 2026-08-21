@@ -108,8 +108,15 @@ export interface ModuleRunnerOptions {
 function buildSystemPrompt(
   module: RegisteredModule,
   activeProject: string,
+  skillsIndex?: string,
   expectResult?: string
 ): string {
+  const skillsSection = skillsIndex
+    ? `\nSkills:
+You can load skills (named instruction documents) on demand when a task is relevant. Call the read_skill tool to load a skill's full content before applying it.
+${skillsIndex}
+`
+    : ''
   const resultSection = expectResult
     ? `
 RESULT REQUIREMENT:
@@ -129,7 +136,7 @@ MANDATORY WORKFLOW:
 2. Then work through each step, calling update_step with the 1-based step index to mark it "running" when you begin and "done" when you finish. If a step fails, mark it "failed" (with a short detail) and either recover or stop with a clear explanation.
 3. Use whatever tools you need — reading project notes/files, web research, and the module's own creation tools — to complete each step.
 4. When every step is done, produce a short final summary. Mention the output file path. No extra commentary.
-${resultSection}
+${resultSection}${skillsSection}
 ${module.systemPrompt ? `MODULE GUIDANCE:\n${module.systemPrompt}` : ''}`
 }
 
@@ -230,7 +237,13 @@ export class ModuleRunner {
 
     this.messages = []
     this.messageTs = []
-    const systemContent = buildSystemPrompt(this.module, this.activeProject, this.run.expectResult)
+    const skillsIndex = await this.service.renderSkillsIndex(this.activeProject)
+    const systemContent = buildSystemPrompt(
+      this.module,
+      this.activeProject,
+      skillsIndex,
+      this.run.expectResult
+    )
     this.push({ role: 'system', content: systemContent })
     this.push({ role: 'user', content: this.run.prompt })
     this.trace.append({ role: 'system', ts: Date.now(), content: systemContent })
@@ -264,7 +277,9 @@ export class ModuleRunner {
 
   private toolList(): PTTool[] {
     // ask_user is chat-only (modules are background subagents — they must never pop dialogs).
-    const base = baseTools.filter((t) => t.definition.function.name !== 'ask_user')
+    // create_skill/delete_skill are chat-only too (modules may read skills, never mutate them).
+    const EXCLUDED = new Set(['ask_user', 'create_skill', 'delete_skill'])
+    const base = baseTools.filter((t) => !EXCLUDED.has(t.definition.function.name))
     const framework = [setPlanTool(this), updateStepTool(this)]
     if (this.run.expectResult) framework.push(submitResultTool(this))
     return [...base, ...this.module.tools, ...framework]

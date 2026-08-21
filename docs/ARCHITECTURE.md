@@ -143,7 +143,7 @@ src/
 │   └── modules/
 │       ├── registry.ts   # module registry (extensible)
 │       ├── runs.ts       # ModuleRunManager: start/list/stop + event broadcast + readChat/readTrace (live in-memory or persisted .chat.json/.trace.jsonl) + waitForRuns (multi-module waiting for the main chat)
-│       ├── runner.ts     # subagent loop; persists a read-only transcript + raw AI trace to <project>/.data/modules/<runId>.chat.json and .trace.jsonl each turn (removed on run delete/retry); submit_result tool for expectResult runs
+│       ├── runner.ts     # subagent loop; persists a read-only transcript + raw AI trace to <project>/.data/modules/<runId>.chat.json and .trace.jsonl each turn (removed on run delete/retry); submit_result tool for expectResult runs; injects the enabled-skills index into the module system prompt and offers read_skill/read_skill_file (create_skill/delete_skill excluded)
 │       ├── tool.ts       # start_module tool (with expect result spec) + wait_modules tool (main chat → module run)
 │       ├── subagent/     # general-purpose long-run agent (base tools only, no output file; maxIterations 60)
 │       ├── pptx/         # PowerPoint module (design schema → buildPptx)
@@ -264,6 +264,10 @@ ChatPanel (renderer) ──send──▶ Main process
   and is **rebuilt on every `send()`** (`ensureSystemPrompt` → `renderSkillsIndex`), so skills
   created/edited/toggled in Settings apply mid-session. The model calls `read_skill` to load full content
   when a skill is relevant; disabled skills are excluded from the index and refused by `read_skill`.
+- **Module subagents** get the same skills index injected into their (static) system prompt — but only
+  when at least one skill is enabled. Modules are offered `read_skill` / `read_skill_file` from the base
+  tool set, while `create_skill` / `delete_skill` are **excluded** so background modules can read skills
+  but never mutate them.
 - A `!` todo mention inserts `todo:<todotext>` which is sent to the model as-is.
 - A `#` file mention inserts `file:<filename>`; the system prompt instructs the AI that a
   `file:<filename>` message means it must call `read_file` (content-based local extraction;

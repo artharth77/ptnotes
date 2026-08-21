@@ -16,6 +16,11 @@
 - The top-bar **Chat** and **Module** buttons now render as a **segmented view toggle** (like the Planner's Grid/Gantt toggle), showing one active view at a time. The right drawer shows **either Chat or Module at a time**: clicking a button opens its view (or closes the drawer if already open); clicking the other button switches views without closing. The Module button is disabled when no project is open.
 - New keyboard shortcut **`⌘⇧M` / `Ctrl+Shift+M`** toggles the module panel (alongside the existing `⌘⇧C` / `Ctrl+Shift+C` chat shortcut).
 
+#### Modules — can read skills (read-only)
+
+- **Skills in modules**: module subagents can now load and apply skills. The runner injects the **enabled-skills index** into the module's system prompt (only when at least one skill is enabled, matching the chat's behaviour), so a module can discover which skills exist and call `read_skill` to load a skill's full content, plus `read_skill_file` to read sibling files inside a skill's folder.
+- **Read-only**: modules get `read_skill` / `read_skill_file` from the base tool set, but the mutating skill tools **`create_skill` and `delete_skill` are excluded** — autonomous background modules can read skills but never create, edit, or delete them.
+
 ## [0.10.1] — 2026-08-21
 
 ### Added

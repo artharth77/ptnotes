@@ -1,6 +1,6 @@
 {
   "name": "ptnotes",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "description": "Markdown notes + todo lists + AI assistant, organized by project",
   "main": "./out/main/index.js",
   "author": "",
