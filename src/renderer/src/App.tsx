@@ -16,6 +16,7 @@ import { TraceViewerModal } from './components/TraceViewerModal'
 import { PromptModal, Modal } from './components/Modal'
 import { Resizer } from './components/Resizer'
 import type { Tab, ToolCallInfo } from '@shared/types'
+import { addUsage, normalizeUsage } from '@shared/usage'
 
 const SIDEBAR_MIN = 200
 const SIDEBAR_MAX = 560
@@ -338,9 +339,19 @@ function App(): React.JSX.Element {
             state.setChatWaitRuns(evt.runIds)
           }
           break
-        case 'message-end':
+        case 'message-end': {
           state.setChatWaitRuns([])
+          if (project && evt.usage !== undefined) {
+            const u = normalizeUsage(evt.usage)
+            if (u) {
+              state.updateLastAssistantMessage(project, (m) => ({
+                ...m,
+                usage: addUsage(m.usage, u)
+              }))
+            }
+          }
           break
+        }
       }
     })
   }, [])

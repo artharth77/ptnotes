@@ -2559,6 +2559,18 @@ body {
   padding: 2px 0;
 }
 
+.chat-statusbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 4px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elev);
+  font-size: 12px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
 .chat-spinner {
   width: 14px;
   height: 14px;

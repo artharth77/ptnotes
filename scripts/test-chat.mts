@@ -90,6 +90,16 @@ const server = http.createServer(async (req, res) => {
           choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }]
         })
       )
+      res.write(
+        sse({
+          id: '1',
+          object: 'chat.completion.chunk',
+          created: 1,
+          model: 't',
+          choices: [],
+          usage: { prompt_tokens: 10, completion_tokens: 5 }
+        })
+      )
       turn = 1
     } else {
       // Turn 2: stream reasoning_content (think) then final text
@@ -125,6 +135,20 @@ const server = http.createServer(async (req, res) => {
           created: 2,
           model: 't',
           choices: [{ index: 0, delta: {}, finish_reason: 'stop' }]
+        })
+      )
+      res.write(
+        sse({
+          id: '2',
+          object: 'chat.completion.chunk',
+          created: 2,
+          model: 't',
+          choices: [],
+          usage: {
+            prompt_tokens: 20,
+            completion_tokens: 15,
+            prompt_tokens_details: { cached_tokens: 8 }
+          }
         })
       )
     }
@@ -175,6 +199,8 @@ const endEvents = events.filter(
   (e: { type?: string }) => (e as { type: string }).type === 'message-end'
 )
 assert.equal(endEvents.length, 2, 'two turns completed')
+const endWithUsage = endEvents.filter((e) => (e as { usage?: unknown }).usage)
+assert.equal(endWithUsage.length, 2, 'message-end carries usage on both turns')
 
 const thinkEvents = events.filter(
   (e: { type?: string; content?: string }) =>

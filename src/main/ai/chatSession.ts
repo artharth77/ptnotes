@@ -244,6 +244,7 @@ export class ChatSession {
       let content = ''
       let started = false
       let failedMessage: string | null = null
+      let usage: unknown
       for await (const evt of stream) {
         if (this.stopped) break
         if (evt.type === 'response.output_text.delta') {
@@ -264,6 +265,7 @@ export class ChatSession {
           break
         }
         if (evt.type === 'response.completed') {
+          usage = evt.response?.usage
           break
         }
       }
@@ -277,11 +279,12 @@ export class ChatSession {
         file: { filename, file_id: filePart.file_id },
         ...(content ? { content } : {}),
         ...(failedMessage ? { error: failedMessage } : {}),
-        ...(this.stopped && !failedMessage ? { error: 'stopped' } : {})
+        ...(this.stopped && !failedMessage ? { error: 'stopped' } : {}),
+        ...(usage !== undefined ? { usage } : {})
       })
       if (this.stopped || failedMessage) return
       this.messages.push({ role: 'assistant', content: content || '…' })
-      this.emit({ type: 'message-end', messageId })
+      this.emit({ type: 'message-end', messageId, ...(usage !== undefined ? { usage } : {}) })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       this.trace?.append({
@@ -417,7 +420,8 @@ export class ChatSession {
           model: this.config.model,
           messages: apiMessages,
           tools: toolList.map((t) => t.definition),
-          stream: true
+          stream: true,
+          stream_options: { include_usage: true }
         },
         { signal }
       )
@@ -529,7 +533,7 @@ export class ChatSession {
       )
 
       this.messages.push({ role: 'assistant', content: content || '', tool_calls: completed })
-      this.emit({ type: 'message-end', messageId })
+      this.emit({ type: 'message-end', messageId, ...(usage !== undefined ? { usage } : {}) })
 
       for (const call of completed) {
         if (this.stopped) break
@@ -547,7 +551,7 @@ export class ChatSession {
     }
 
     this.messages.push({ role: 'assistant', content: content || '…' })
-    this.emit({ type: 'message-end', messageId })
+    this.emit({ type: 'message-end', messageId, ...(usage !== undefined ? { usage } : {}) })
     return 'done'
   }
 

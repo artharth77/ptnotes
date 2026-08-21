@@ -32,6 +32,7 @@ import type {
   SkillList,
   Todo
 } from '@shared/types'
+import { formatTokens, sumUsage } from '@shared/usage'
 
 const NO_SESSIONS: ChatSessionMeta[] = []
 const NO_MODULE_RUNS: ModuleRun[] = []
@@ -217,6 +218,8 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   }, [settingsOpen])
 
   const list = useMemo(() => messages ?? [], [messages])
+
+  const usageTotal = useMemo(() => sumUsage(list), [list])
 
   const userHistory = useMemo(
     () =>
@@ -1064,6 +1067,20 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
           </div>
         )}
       </div>
+
+      {usageTotal && (
+        <div className="chat-statusbar">
+          <span title="Total input tokens for this chat">In {formatTokens(usageTotal.input)}</span>
+          <span title="Total output tokens for this chat">
+            Out {formatTokens(usageTotal.output)}
+          </span>
+          {usageTotal.cached !== undefined && (
+            <span title="Total cached input tokens for this chat">
+              Cache {formatTokens(usageTotal.cached)}
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="chat-input">
         {showJumpDown && (

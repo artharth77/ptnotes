@@ -1,4 +1,4 @@
-## [0.10.1] — 2026-08-20
+## [0.10.1] — 2026-08-21
 
 ### Added
 
@@ -6,6 +6,12 @@
 
 - New **`read_skill_file`** tool: lets the assistant read a sibling file stored inside a skill's folder, referenced from its `SKILL.md` via a relative link (e.g. `[FORMAT.md](./FORMAT.md)` or `[DOC.md](./doc/DOC.md)`). After loading a skill with `read_skill`, the model calls `read_skill_file` (passing `scope`, `skill` and the relative `file` path) only when it actually needs that file — nothing is auto-loaded into context.
 - Accepts PDF and text files (markdown, JSON, YAML, etc.) via the existing local reader; the path is **relative to the skill folder only** — absolute paths and `..` traversal are refused. Read/validation happens in the main process, so the renderer's no-filesystem invariant is preserved and `create_skill`/`saveSkill`/the Settings ▸ Skills editor are unchanged.
+
+#### Chat — token usage tracking
+
+- **Per-message usage in the AI trace**: provider token usage (input / output / cached) is now extracted from AI responses and recorded on each chat exchange. Handles both the chat.completions shape (`prompt_tokens` / `completion_tokens` / `prompt_tokens_details.cached_tokens`) and the Responses API shape (`input_tokens` / `output_tokens` / `input_tokens_details.cached_tokens`), via a new shared helper module `src/shared/usage.ts` (`normalizeUsage` / `addUsage` / `sumUsage` / `formatTokens`). Streaming requests now send `stream_options: { include_usage: true }`, and usage rides along on the `message-end` event (tool-call turns, final turns, and PDF-upload turns), plus on title-generation and PDF-upload trace entries.
+- **Assistant detail**: the trace viewer's assistant panel now shows parsed **Input tokens** / **Output tokens** / **Cache read** rows instead of a raw JSON blob (raw JSON is kept as a fallback when the shape is unrecognized).
+- **Session totals status bar**: a new status bar at the bottom of the chat drawer shows the running totals for the current chat — **In** / **Out** / **Cache** (compact `12.3k` formatting) — summed across the session's assistant messages. It only appears when at least one message carries usage, so it stays hidden for providers that don't report streaming usage (e.g. Ollama).
 
 ## [0.10.0] — 2026-08-20
 
