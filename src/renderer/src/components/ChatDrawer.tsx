@@ -4,16 +4,20 @@ import {
   mdiChevronDown,
   mdiFileOutline,
   mdiHistory,
+  mdiMenuUp,
   mdiPencil,
   mdiTimelineClockOutline,
-  mdiTrashCanOutline
+  mdiTrashCanOutline,
+  mdiTrayArrowDown,
+  mdiTrayArrowUp,
+  mdiTrayFull
 } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
 import { MarkdownContent } from './MarkdownContent'
 import { ModuleCard } from './ModuleCard'
 import { MdiIcon } from './MdiIcon'
 import { NOTE_LINK_ICON, TODO_LINK_ICON } from './contentIcons'
-import { splitContent } from './chatContent'
+import { isReasoningOpen, splitContent } from './chatContent'
 import { ThinkBox, UserBubble } from './chatBubbles'
 import { builtinSlashCommands, builtinSlashNames } from '../commands'
 import {
@@ -25,6 +29,7 @@ import {
 } from '@shared/slash'
 import type { SlashCommand, SlashCommandContext } from '@shared/slash'
 import type {
+  AIConfig,
   ChatMessage,
   ChatSessionMeta,
   ModuleRun,
@@ -203,6 +208,13 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   const prevBusy = useRef(false)
 
   const [aiReady, setAiReady] = useState(false)
+  const [activeModel, setActiveModel] = useState('')
+  const [activeProfileName, setActiveProfileName] = useState('')
+  const [activeProfileId, setActiveProfileId] = useState('')
+  const [aiConfig, setAiConfig] = useState<AIConfig | null>(null)
+  const [profileMenuPos, setProfileMenuPos] = useState<{ top: number; right: number } | null>(null)
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false)
+  const profileNameBtnRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -212,10 +224,59 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
       const key = (cfg.apiKey || '').trim()
       setAiReady(!!cfg.model.trim() && (!!key || !!local || !cfg.baseUrl.trim()))
     })
+    window.ptnotes.ai.getProfiles().then((cfg) => {
+      if (cancelled) return
+      setAiConfig(cfg)
+      setActiveProfileId(cfg.activeProfileId)
+      const active = cfg.profiles.find((p) => p.id === cfg.activeProfileId)
+      setActiveProfileName(active?.name ?? '')
+      setActiveModel(active?.model ?? '')
+    })
     return () => {
       cancelled = true
     }
   }, [settingsOpen])
+
+  const profiles = aiConfig?.profiles ?? []
+
+  function openProfileMenu(): void {
+    const el = profileNameBtnRef.current
+    if (el) {
+      const rect = el.getBoundingClientRect()
+      const menuHeight = Math.min(
+        aiConfig?.profiles.length ? aiConfig?.profiles.length * 55 : 40,
+        280
+      )
+      setProfileMenuPos({
+        top: Math.max(4, rect.top - menuHeight - 4),
+        right: Math.max(0, window.innerWidth - rect.right)
+      })
+    }
+    setProfileMenuOpen(true)
+  }
+
+  function closeProfileMenu(): void {
+    setProfileMenuOpen(false)
+  }
+
+  async function switchProfile(id: string): Promise<void> {
+    if (!aiConfig) return
+    if (id === activeProfileId) {
+      closeProfileMenu()
+      return
+    }
+    closeProfileMenu()
+    try {
+      const saved = await window.ptnotes.ai.saveProfiles({ ...aiConfig, activeProfileId: id })
+      setAiConfig(saved)
+      setActiveProfileId(saved.activeProfileId)
+      const active = saved.profiles.find((p) => p.id === saved.activeProfileId)
+      setActiveProfileName(active?.name ?? '')
+      setActiveModel(active?.model ?? '')
+    } catch {
+      // ignore switch failures
+    }
+  }
 
   const list = useMemo(() => messages ?? [], [messages])
 
@@ -968,6 +1029,39 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                 ))}
               </div>
             )}
+            {m.content &&
+              splitContent(m.content)
+                .filter((part) => part.type === 'think')
+                .map((part, i) => {
+                  const streaming =
+                    chatBusy && m.id === list[list.length - 1]?.id && isReasoningOpen(m.content)
+                  return <ThinkBox key={i} content={part.content} streaming={streaming} />
+                })}
+            {m.content &&
+              splitContent(m.content)
+                .filter((part) => part.type === 'text')
+                .map((part, i) => {
+                  if (m.role === 'assistant' && !m.error) {
+                    return (
+                      <div key={i} className="chat-msg-content">
+                        <MarkdownContent
+                          content={part.content}
+                          onOpenNote={(n) => void openNote(n)}
+                          onOpenSkill={(n) => openSkillEditor(n)}
+                          onOpenPlan={(n) => void openSchedule(n)}
+                        />
+                      </div>
+                    )
+                  }
+                  if (m.role === 'user') {
+                    return <UserBubble key={i} content={part.content} />
+                  }
+                  return (
+                    <div key={i} className={`chat-msg-content ${m.error ? 'error' : ''}`}>
+                      {part.content}
+                    </div>
+                  )
+                })}
             {m.role === 'assistant' && (m.toolCalls?.length ?? 0) > 0 && (
               <div className="chat-tools">
                 {(m.toolCalls ?? []).map((tc) => (
@@ -1022,32 +1116,6 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                 ))}
               </div>
             )}
-            {m.content &&
-              splitContent(m.content).map((part, i) => {
-                if (part.type === 'think') {
-                  return <ThinkBox key={i} content={part.content} />
-                }
-                if (m.role === 'assistant' && !m.error) {
-                  return (
-                    <div key={i} className="chat-msg-content">
-                      <MarkdownContent
-                        content={part.content}
-                        onOpenNote={(n) => void openNote(n)}
-                        onOpenSkill={(n) => openSkillEditor(n)}
-                        onOpenPlan={(n) => void openSchedule(n)}
-                      />
-                    </div>
-                  )
-                }
-                if (m.role === 'user') {
-                  return <UserBubble key={i} content={part.content} />
-                }
-                return (
-                  <div key={i} className={`chat-msg-content ${m.error ? 'error' : ''}`}>
-                    {part.content}
-                  </div>
-                )
-              })}
             {chatBusy &&
               m.id === list[list.length - 1]?.id &&
               m.role === 'assistant' &&
@@ -1068,19 +1136,80 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
         )}
       </div>
 
-      {usageTotal && (
+      {(usageTotal || activeModel || activeProfileName) && (
         <div className="chat-statusbar">
-          <span title="Total input tokens for this chat">In {formatTokens(usageTotal.input)}</span>
-          <span title="Total output tokens for this chat">
-            Out {formatTokens(usageTotal.output)}
-          </span>
-          {usageTotal.cached !== undefined && (
-            <span title="Total cached input tokens for this chat">
-              Cache {formatTokens(usageTotal.cached)}
+          {(activeModel || activeProfileName) && (
+            <span className="chat-statusbar-model">
+              <button
+                type="button"
+                className="chat-statusbar-name"
+                ref={profileNameBtnRef}
+                title="Switch profile"
+                aria-label="Switch profile"
+                onClick={openProfileMenu}
+              >
+                <span className="chat-statusbar-name-text">
+                  {activeModel ? activeModel : '---'}
+                </span>
+              </button>
+              <button
+                type="button"
+                className="chat-statusbar-switch"
+                title="Switch profile"
+                aria-label="Switch profile"
+                onClick={openProfileMenu}
+              >
+                <MdiIcon path={mdiMenuUp} size={14} />
+              </button>
             </span>
+          )}
+          {usageTotal && (
+            <>
+              <span className="chat-statusbar-usage" title="Total input tokens for this chat">
+                <MdiIcon path={mdiTrayArrowDown} size={14} />
+                {formatTokens(usageTotal.input)}
+              </span>
+              <span className="chat-statusbar-usage" title="Total output tokens for this chat">
+                <MdiIcon path={mdiTrayArrowUp} size={14} />
+                {formatTokens(usageTotal.output)}
+              </span>
+              {usageTotal.cached !== undefined && (
+                <span
+                  className="chat-statusbar-usage"
+                  title="Total cached input tokens for this chat"
+                >
+                  <MdiIcon path={mdiTrayFull} size={14} />
+                  {formatTokens(usageTotal.cached)}
+                </span>
+              )}
+            </>
           )}
         </div>
       )}
+
+      {profileMenuOpen &&
+        createPortal(
+          <>
+            <div className="chat-history-overlay" onClick={closeProfileMenu} />
+            <div className="chat-profile-menu" style={profileMenuPos ?? { top: 0, right: 0 }}>
+              {profiles.length === 0 && <div className="chat-profile-empty">No profiles</div>}
+              {profiles.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={
+                    p.id === activeProfileId ? 'chat-profile-item active' : 'chat-profile-item'
+                  }
+                  onClick={() => void switchProfile(p.id)}
+                >
+                  <span className="chat-profile-item-name">{p.name}</span>
+                  <span className="chat-profile-item-model">{p.model}</span>
+                </button>
+              ))}
+            </div>
+          </>,
+          document.body
+        )}
 
       <div className="chat-input">
         {showJumpDown && (

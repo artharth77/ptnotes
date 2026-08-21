@@ -245,6 +245,8 @@ function App(): React.JSX.Element {
   const [chatResizing, setChatResizing] = useState(false)
   const sidebarRef = useRef<HTMLElement>(null)
   const chatColRef = useRef<HTMLDivElement>(null)
+  const chatNewTurnRef = useRef(false)
+  const chatLastMsgIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     void init()
@@ -269,9 +271,22 @@ function App(): React.JSX.Element {
       switch (evt.type) {
         case 'message-start':
           state.setChatBusy(true)
+          if (evt.messageId && evt.messageId !== chatLastMsgIdRef.current) {
+            chatLastMsgIdRef.current = evt.messageId
+            chatNewTurnRef.current = false
+          }
           break
         case 'content':
           if (project) {
+            if (chatNewTurnRef.current) {
+              chatNewTurnRef.current = false
+              state.appendChatMessage(project, {
+                id: crypto.randomUUID(),
+                role: 'assistant',
+                content: '',
+                toolCalls: []
+              })
+            }
             state.updateLastAssistantMessage(project, (m) => ({
               ...m,
               content: m.content + (evt.content ?? '')
@@ -284,6 +299,7 @@ function App(): React.JSX.Element {
               ...m,
               toolCalls: [...(m.toolCalls ?? []), evt.toolCall!]
             }))
+            chatNewTurnRef.current = true
           }
           if (evt.toolCall) {
             if (NOTE_TOOLS.has(evt.toolCall.name)) {

@@ -1,15 +1,33 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { USER_MSG_COLLAPSE_LIMIT } from './chatContent'
 
-export function ThinkBox({ content }: { content: string }): React.JSX.Element {
+export function ThinkBox({
+  content,
+  streaming = false
+}: {
+  content: string
+  streaming?: boolean
+}): React.JSX.Element {
   const [open, setOpen] = useState(false)
+  const effectiveOpen = open || streaming
+  const bodyRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (streaming && bodyRef.current) {
+      bodyRef.current.scrollTop = bodyRef.current.scrollHeight
+    }
+  }, [streaming, content, effectiveOpen])
   return (
-    <div className={`think-box ${open ? 'open' : ''}`}>
+    <div className={`think-box ${effectiveOpen ? 'open' : ''}${streaming ? ' streaming' : ''}`}>
       <button className="think-header" onClick={() => setOpen(!open)}>
-        <span>💭 Thinking</span>
-        <span className="think-toggle">{open ? '▲' : '▼'}</span>
+        <span>💭 {streaming ? 'Thinking' : 'Thought'}</span>
+        <span className="think-toggle">{effectiveOpen ? '▲' : '▼'}</span>
       </button>
-      {open && <div className="think-body">{content}</div>}
+      {effectiveOpen && (
+        <div ref={bodyRef} className="think-body">
+          {content}
+          {streaming && <span className="think-cursor" />}
+        </div>
+      )}
     </div>
   )
 }
