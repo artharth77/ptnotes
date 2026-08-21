@@ -23,7 +23,7 @@ ModuleRunner (background subagent, independent LLM loop)
         │  · uses base chat tools + your module's tools
         │  · finishes with a text summary
         ▼
-persisted <project>/.data/modules/<runId>.json  → viewable in Modules tab + chat card
+persisted <project>/.data/modules/<runId>.json  → viewable in the Module panel + chat card
 ```
 
 Key rules enforced by the runner (`src/main/modules/runner.ts`):
@@ -243,7 +243,7 @@ Add a scripted test wired into `npm run test`. See `scripts/test-modules.mts` fo
 
 ## UI notes (no changes required)
 
-The Modules tab and the chat card are **generic** — they render whatever the framework emits:
+The Module panel and the chat card are **generic** — they render whatever the framework emits:
 
 - Steps appear as a list with `✔` (done), `…` (running), `✕` (failed), `·` (pending).
 - Progress bar reflects `done + failed` / total steps.

@@ -10,6 +10,12 @@
 - **New store API + IPC**: `AIConfigStore` now exposes `getAll()` / `saveAll()` (full profile set + global toggle) alongside the unchanged `load()` (which still returns the active profile as a `AIProviderConfig`, so chat/module/title-generation consumers are untouched). Added `ai:getProfiles` / `ai:saveProfiles` IPC channels (preload `getProfiles` / `saveProfiles`); the renderer never touches the filesystem.
 - **Chat drawer profile switcher**: the chat drawer's statusbar shows the active profile's **model name** on the left; hovering reveals an arrow button and clicking either the name or the arrow opens a **profile popup** (anchored above the statusbar) listing every profile with its name and model. Selecting a profile switches the active profile immediately via `saveProfiles`. The statusbar's In / Out / Cache token labels are now compact icons (`mdiTrayArrowDown` / `mdiTrayArrowUp` / `mdiTrayFull`).
 
+#### Module panel — moved to the right-side drawer
+
+- The **Modules** tab is removed from the left sidebar. The module panel now lives in the **right-side drawer**, toggled from a new **Module** button (🧩 `mdiPuzzleOutline`) in the top bar.
+- The top-bar **Chat** and **Module** buttons now render as a **segmented view toggle** (like the Planner's Grid/Gantt toggle), showing one active view at a time. The right drawer shows **either Chat or Module at a time**: clicking a button opens its view (or closes the drawer if already open); clicking the other button switches views without closing. The Module button is disabled when no project is open.
+- New keyboard shortcut **`⌘⇧M` / `Ctrl+Shift+M`** toggles the module panel (alongside the existing `⌘⇧C` / `Ctrl+Shift+C` chat shortcut).
+
 ## [0.10.1] — 2026-08-21
 
 ### Added

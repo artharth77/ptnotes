@@ -371,25 +371,11 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   }, [])
 
   const chatOpen = useAppStore((s) => s.chatOpen)
-  const setChatOpen = useAppStore((s) => s.setChatOpen)
   const prevChatOpen = useRef(false)
   useEffect(() => {
     if (chatOpen && !prevChatOpen.current) focusInput()
     prevChatOpen.current = chatOpen
   }, [chatOpen])
-
-  useEffect(() => {
-    function onKeyDown(e: KeyboardEvent): void {
-      const mod = (IS_MAC ? e.metaKey : e.ctrlKey) && e.shiftKey
-      if (!mod || e.altKey || e.key.toLowerCase() !== 'c') return
-      const modalOpen = document.querySelector('.modal-overlay, .module-history-backdrop') !== null
-      if (modalOpen) return
-      e.preventDefault()
-      setChatOpen(!chatOpen)
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [chatOpen, setChatOpen])
 
   useEffect(() => {
     if (prevBusy.current && !chatBusy) {

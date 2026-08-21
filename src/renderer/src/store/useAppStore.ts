@@ -32,6 +32,8 @@ interface AppState {
   plannerRedo: Record<string, Schedule[]>
   tab: Tab
   chatOpen: boolean
+  moduleOpen: boolean
+  rightView: 'chat' | 'modules'
   chatMessages: Record<string, ChatMessage[]>
   chatSessionIds: Record<string, string>
   chatSessions: Record<string, ChatSessionMeta[]>
@@ -89,6 +91,7 @@ interface AppState {
   deleteNote: (id: string) => Promise<void>
   setTab: (tab: Tab) => void
   setChatOpen: (open: boolean) => void
+  setRightView: (view: 'chat' | 'modules') => void
   appendChatMessage: (project: string, msg: ChatMessage) => void
   updateLastAssistantMessage: (project: string, updater: (msg: ChatMessage) => ChatMessage) => void
   clearChatMessages: (project: string) => void
@@ -129,6 +132,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   plannerRedo: {},
   tab: 'notes',
   chatOpen: false,
+  moduleOpen: false,
+  rightView: 'chat',
   chatMessages: {},
   chatSessionIds: {},
   chatSessions: {},
@@ -515,6 +520,21 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setChatOpen(chatOpen) {
     set({ chatOpen })
+  },
+
+  setRightView(view) {
+    set((s) => {
+      const openFor = view === 'chat' ? s.chatOpen : s.moduleOpen
+      const sameView = s.rightView === view
+      if (sameView && openFor) {
+        return { chatOpen: false, moduleOpen: false }
+      }
+      return {
+        rightView: view,
+        chatOpen: view === 'chat',
+        moduleOpen: view === 'modules'
+      }
+    })
   },
 
   appendChatMessage(project, msg) {

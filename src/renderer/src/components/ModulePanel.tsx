@@ -19,7 +19,7 @@ export function ModulePanel(): React.JSX.Element {
   const [clearing, setClearing] = useState(false)
   const [deleteOutputFiles, setDeleteOutputFiles] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
-  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null)
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -48,7 +48,7 @@ export function ModulePanel(): React.JSX.Element {
       return
     }
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-    setMenuPos({ x: rect.right, y: rect.bottom })
+    setMenuPos({ top: rect.bottom + 4, right: Math.max(0, window.innerWidth - rect.right) })
     setMenuOpen(true)
   }
 
@@ -87,7 +87,7 @@ export function ModulePanel(): React.JSX.Element {
           <div
             ref={menuRef}
             className="note-menu"
-            style={{ left: menuPos.x, top: menuPos.y }}
+            style={{ top: menuPos.top, right: menuPos.right }}
             onClick={(e) => e.stopPropagation()}
           >
             <button

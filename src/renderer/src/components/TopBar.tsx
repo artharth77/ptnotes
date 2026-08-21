@@ -1,15 +1,23 @@
-import { mdiChatProcessingOutline, mdiCogOutline } from '@mdi/js'
+import { mdiChatProcessingOutline, mdiCogOutline, mdiPuzzleOutline } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
 import { ProjectDropdown } from './ProjectDropdown'
 import { MdiIcon } from './MdiIcon'
 
+const NO_RUNS: never[] = []
+
 export function TopBar(): React.JSX.Element {
   const chatOpen = useAppStore((s) => s.chatOpen)
+  const moduleOpen = useAppStore((s) => s.moduleOpen)
   const chatBusy = useAppStore((s) => s.chatBusy)
-  const setChatOpen = useAppStore((s) => s.setChatOpen)
+  const moduleRuns = useAppStore((s) =>
+    s.activeProject ? (s.moduleRuns[s.activeProject] ?? NO_RUNS) : NO_RUNS
+  )
+  const modulesBusy = moduleRuns.some((r) => !['done', 'failed', 'cancelled'].includes(r.status))
+  const setRightView = useAppStore((s) => s.setRightView)
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen)
   const sidebarVisible = useAppStore((s) => s.sidebarVisible)
   const setSidebarVisible = useAppStore((s) => s.setSidebarVisible)
+  const activeProject = useAppStore((s) => s.activeProject)
 
   return (
     <header className="topbar">
@@ -61,20 +69,43 @@ export function TopBar(): React.JSX.Element {
           </span>{' '}
           Settings
         </button>
-        <button
-          className={`btn ghost ${chatOpen ? 'active' : ''}`}
-          onClick={() => setChatOpen(!chatOpen)}
-          title="Toggle AI assistant"
-        >
-          {chatBusy ? (
-            <span className="topbar-chat-spinner" />
-          ) : (
-            <span className="btn-icon">
-              <MdiIcon path={mdiChatProcessingOutline} size={18} />
-            </span>
-          )}{' '}
-          Chat
-        </button>
+        <div className="panel-view-toggle">
+          <button
+            className={`view-btn ${chatOpen ? 'active' : ''}`}
+            onClick={() => setRightView('chat')}
+            title="Toggle AI assistant (⌘⇧C)"
+          >
+            {chatBusy ? (
+              <span className="topbar-chat-spinner" />
+            ) : (
+              <span className="btn-icon">
+                <MdiIcon path={mdiChatProcessingOutline} size={16} />
+              </span>
+            )}{' '}
+            Chat
+          </button>
+          <button
+            className={`view-btn ${moduleOpen ? 'active' : ''}`}
+            onClick={() => setRightView('modules')}
+            disabled={!activeProject}
+            title={
+              activeProject
+                ? modulesBusy
+                  ? 'Modules are running…'
+                  : 'Toggle module panel (⌘⇧M)'
+                : 'Open a project to use modules'
+            }
+          >
+            {modulesBusy ? (
+              <span className="topbar-chat-spinner" />
+            ) : (
+              <span className="btn-icon">
+                <MdiIcon path={mdiPuzzleOutline} size={16} />
+              </span>
+            )}{' '}
+            Module
+          </button>
+        </div>
       </div>
     </header>
   )

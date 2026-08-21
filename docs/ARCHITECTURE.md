@@ -66,7 +66,7 @@ Run `npm run typecheck` and `npm run lint` after any change.
 | Stack                   | Electron + electron-vite + React 19 + TypeScript                                                                                                                                                                                                                                                                    |
 | Project selector        | Top bar: current project name dropdown + New Project button                                                                                                                                                                                                                                                         |
 | Project registry        | Persistent known-project list so folders deleted externally still show (missing paths marked red)                                                                                                                                                                                                                   |
-| Chat placement          | Collapsible right-side drawer                                                                                                                                                                                                                                                                                       |
+| Chat placement          | Collapsible right-side drawer, shared with the **Module** panel (top-bar toggles, one view at a time)                                                                                                                                                                                                                |
 | AI streaming            | Yes (real-time)                                                                                                                                                                                                                                                                                                     |
 | Settings dialog         | Two-panel dialog: **Storage** (project root path) + **AI Settings** (profile set: active selector, per-profile base URL/API key/model with endpoint presets, global PDF toggle) + Modules + Skills + About                                                                                                                                                                                                                      |
 | Project root            | Configurable via settings; default `~/Documents/PTNotes`; changing it moves all data + registry to the new location after confirmation                                                                                                                                                                              |
@@ -208,18 +208,18 @@ src/
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ ⚙ Project A ▾ [New Project]      [Settings] [💬 Chat]     │
+│ ⚙ Project A ▾ [New Project]   [Settings] [🧩 Module] [💬 Chat]│
 ├─────────────────┬────────────────────────────────────────────┤
-│ Notes│Todo│      │  Editor area        │  Chat drawer         │
-│ Modules│Planner  │  ┌ toolbar ───────┐ │  (collapsible,      │
-│ ▸ note 1        │  │ TipTap editor  │ │  streaming +        │
-│ ▸ note 2        │  └────────────────┘ │  tool-call log)     │
+│ Notes│Todo│      │  Editor area        │  Module / Chat drawer│
+│ Planner          │  ┌ toolbar ───────┐ │  (collapsible,       │
+│ ▸ note 1        │  │ TipTap editor  │ │  one view at a time) │
+│ ▸ note 2        │  └────────────────┘ │                      │
 │ [+ New note]    │                     │                      │
 └─────────────────┴────────────────────┴──────────────────────┘
 ```
 
-- **Top bar:** current project name with dropdown (switch / new / rename / delete), Settings, chat toggle.
-- **Middle column:** tabs for Notes (list + create/rename/delete), Todo (interactive checklist + progress), Modules, and Planner (project schedules — see [Planner](#planner)).
+- **Top bar:** current project name with dropdown (switch / new / rename / delete), Settings, and a **Chat / Module** segmented view toggle (`mdiChatProcessingOutline` / `mdiPuzzleOutline`). Both views share the collapsible right-side drawer, showing **Chat or Module one at a time**; the Module button is disabled when no project is open. Shortcuts: `⌘⇧C`/`Ctrl+Shift+C` toggles chat, `⌘⇧M`/`Ctrl+Shift+M` toggles modules.
+- **Middle column:** tabs for Notes (list + create/rename/delete), Todo (interactive checklist + progress), and Planner (project schedules — see [Planner](#planner)).
   - **Main area:** TipTap WYSIWYG editor for notes; auto-save to `.md` ~800ms after edits (debounced). The toolbar includes an **underline** button (StarterKit v3 registers `Underline`; markdown round-trips as GitLab-style `++text++`). Links in the editor use a custom `<span>` implementation to disable default browser navigation; they require Cmd/Ctrl+click to navigate: external links open in the OS browser, while `note:`, `skill:`, and `file:` links open the note, skill editor, or reveal the file in Finder, respectively.
 
 - **Format helper (bubble popup):** selecting text shows an icon-only bubble (`BubbleMenu` from `@tiptap/react/menus` — no new dependency) with **Bold / Italic / Underline / Strikethrough / Inline code** buttons (active states + tooltips); a circular `mdiCloseCircle` X button in its top-right corner closes it and turns the feature off. Enabled by default, persisted in `localStorage` (`ptnotes:formatHelper`), and toggled from a status-bar button on the right (icon + label).
@@ -395,9 +395,11 @@ ChatPanel (renderer) ──send──▶ Main process
   sole purpose is removing the default Edit→Find role so the renderer owns `Cmd/Ctrl+F` for the
   markdown editor's find/replace bar); opening via the
   shortcut blurs the input, closing refocuses it. Globally, `Cmd/Ctrl+Shift+C` toggles the chat
-  panel (mirrors the top-bar Chat button, handled by a window listener in ChatDrawer, which is
-  always mounted); it is suppressed while any dialog/modal is open (a `.modal-overlay` or
-  `.module-history-backdrop` present in the DOM). The history popup is
+  panel and `Cmd/Ctrl+Shift+M` toggles the module panel (mirroring the top-bar Chat / Module
+  buttons; handled by a window listener in `App.tsx`, which is always mounted so both work
+  regardless of which drawer view is open); they are suppressed while any dialog/modal is open (a
+  `.modal-overlay` or `.module-history-backdrop` present in the DOM), and `Cmd/Ctrl+Shift+M` is a
+  no-op when no project is open. The history popup is
   keyboard-navigable: `↑`/`↓` move the active selector (highlighted via `.chat-history-item.active`,
   auto-scrolled into view), mouse move re-syncs the selector to the pointer,
   `Enter` opens the selected session, `Escape` closes and refocuses the input (nav keys skipped
@@ -505,7 +507,7 @@ JSON in `<project>/planner/<slug>.json`; the whole feature is pure data — no m
   `undo`/`redo` roles swallow `⌘Z` before the renderer sees it), gated by a `planner:set-edit-active`
   flag the editor updates from `focusin`/`focusout` — so the markdown editor, chat input, and native
   text fields keep their own undo behavior.
-- 4th sidebar tab (`mdiChartTimeline`) → PlannerPanel (schedule list) → PlannerEditor (keyed by
+- Sidebar tab (`mdiChartTimeline`) → PlannerPanel (schedule list) → PlannerEditor (keyed by
   `activeScheduleId`); an empty-state "New Schedule" flow otherwise.
 - **No. and Title are always visible**: both columns are always rendered (row/header/`colTemplate`
   guards removed) and are checked + disabled in the column modal (`disabledKeys`), so the grid

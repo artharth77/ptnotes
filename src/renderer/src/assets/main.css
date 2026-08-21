@@ -162,6 +162,44 @@ body {
   gap: 10px;
 }
 
+.panel-view-toggle {
+  display: inline-flex;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+}
+
+.panel-view-toggle .view-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  padding: 4px 12px;
+  font-size: 13px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-dim);
+  transition: all 0.2s ease;
+}
+
+.panel-view-toggle .view-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.panel-view-toggle .view-btn.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.panel-view-toggle .view-btn:hover:not(.active):not(:disabled) {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
 .app-logo {
   font-weight: 700;
   font-size: 15px;
@@ -1842,6 +1880,35 @@ body {
 
 /* ---------- Chat drawer ---------- */
 
+.module-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  padding: 14px;
+  overflow: hidden;
+  background: var(--bg-elev);
+  border-left: 1px solid var(--border);
+}
+
+.module-skeleton-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.module-skeleton-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
 .chat-skeleton {
   display: flex;
   flex-direction: column;
@@ -3060,6 +3127,14 @@ body {
 }
 
 /* ---------- Modules ---------- */
+
+.module-drawer {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elev);
+  border-left: 1px solid var(--border);
+}
 
 .module-panel {
   flex: 1;
