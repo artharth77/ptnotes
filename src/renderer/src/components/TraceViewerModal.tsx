@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useAppStore } from '../store/useAppStore'
 import { Modal } from './Modal'
 import type { AiTraceEntry, AiTraceFile, AiTraceRole } from '@shared/types'
+import { normalizeUsage } from '@shared/usage'
 
 interface TraceViewerTarget {
   kind: 'chat' | 'module'
@@ -277,6 +278,7 @@ function TraceDetail({ entry }: { entry: AiTraceEntry | null }): React.JSX.Eleme
       <div className="trace-detail trace-detail-empty">Select an exchange to see its details.</div>
     )
   }
+  const usage = normalizeUsage(entry.usage)
   return (
     <div className="trace-detail">
       <div className="trace-detail-header">
@@ -331,11 +333,18 @@ function TraceDetail({ entry }: { entry: AiTraceEntry | null }): React.JSX.Eleme
       )}
 
       {entry.error && <div className="trace-detail-error">{entry.error}</div>}
-      {entry.usage !== undefined && (
-        <Block label="Usage" mono>
-          {JSON.stringify(entry.usage, null, 2)}
-        </Block>
-      )}
+      {entry.usage !== undefined &&
+        (usage ? (
+          <>
+            <Row k="Input tokens" v={usage.input.toLocaleString()} />
+            <Row k="Output tokens" v={usage.output.toLocaleString()} />
+            {usage.cached !== undefined && <Row k="Cache read" v={usage.cached.toLocaleString()} />}
+          </>
+        ) : (
+          <Block label="Usage" mono>
+            {JSON.stringify(entry.usage, null, 2)}
+          </Block>
+        ))}
     </div>
   )
 }

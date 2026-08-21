@@ -38,7 +38,10 @@ let FAIL_FILES_CREATE = false
 
 async function* fakeResponsesStream(): AsyncIterable<Record<string, unknown>> {
   yield { type: 'response.output_text.delta', delta: 'Summary from PDF.' }
-  yield { type: 'response.completed' }
+  yield {
+    type: 'response.completed',
+    response: { usage: { input_tokens: 10, output_tokens: 5 } }
+  }
 }
 
 const origLoad = (Module as { _load: (r: string, p: unknown, m: boolean) => unknown })._load
@@ -237,6 +240,9 @@ assert.match(contentEvents.map((e) => e.content).join(''), /Summary from PDF\./)
 let types = events.map((e) => (e as { type: string }).type)
 assert.ok(types.includes('message-start'), 'message-start emitted')
 assert.ok(types.includes('message-end'), 'message-end emitted')
+const endEvt = events.find((e) => (e as { type?: string }).type === 'message-end') as
+  { usage?: unknown } | undefined
+assert.ok(endEvt?.usage, 'message-end carries usage')
 
 // ---- uploadPdf: falls back to inline base64 when Files API is unavailable ----
 FAIL_FILES_CREATE = true
