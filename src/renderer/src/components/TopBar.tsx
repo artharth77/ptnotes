@@ -73,6 +73,7 @@ export function TopBar(): React.JSX.Element {
           <button
             className={`view-btn ${chatOpen ? 'active' : ''}`}
             onClick={() => setRightView('chat')}
+            disabled={!activeProject}
             title="Toggle AI assistant (⌘⇧C)"
           >
             {chatBusy ? (
