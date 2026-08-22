@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { USER_MSG_COLLAPSE_LIMIT } from './chatContent'
+import { MarkdownContent } from './MarkdownContent'
 
 export function ThinkBox({
   content,
@@ -44,6 +45,37 @@ export function UserBubble({ content }: { content: string }): React.JSX.Element 
           {expanded ? 'Show less' : '… Show more'}
         </button>
       )}
+    </div>
+  )
+}
+
+export function AssistantBubble({
+  content,
+  streaming = false,
+  onOpenNote,
+  onOpenSkill
+}: {
+  content: string
+  streaming?: boolean
+  onOpenNote?: (noteName: string) => void
+  onOpenSkill?: (skillName: string) => void
+}): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false)
+  const long = content.length > USER_MSG_COLLAPSE_LIMIT
+  const shown = long && !expanded ? content.slice(0, USER_MSG_COLLAPSE_LIMIT) : content
+  return (
+    <div className="chat-msg-content">
+      <MarkdownContent content={shown} onOpenNote={onOpenNote} onOpenSkill={onOpenSkill} />
+      {long &&
+        (streaming ? (
+          <button className="chat-msg-more streaming" disabled title="Still receiving response…">
+            … more +{content.length - USER_MSG_COLLAPSE_LIMIT} chars
+          </button>
+        ) : (
+          <button className="chat-msg-more" onClick={() => setExpanded(!expanded)}>
+            {expanded ? 'Show less' : '… Show more'}
+          </button>
+        ))}
     </div>
   )
 }

@@ -2,12 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useAppStore } from '../store/useAppStore'
 import { mdiTimelineClockOutline } from '@mdi/js'
-import { MarkdownContent } from './MarkdownContent'
 import { MdiIcon } from './MdiIcon'
 import { NOTE_LINK_ICON } from './contentIcons'
 import { STATUS_LABELS } from './moduleStatus'
 import { splitContent } from './chatContent'
-import { ThinkBox, UserBubble } from './chatBubbles'
+import { AssistantBubble, ThinkBox, UserBubble } from './chatBubbles'
 import type { ModuleChatMessage, ModuleRun } from '@shared/types'
 
 function noteIdFromToolCall(name: string, result?: string): string | null {
@@ -150,6 +149,10 @@ function ModuleHistoryPanel({
   }, [messages, runId])
 
   const runChatMessages = messages.filter((m) => m.role !== 'system')
+  const lastAssistantId = runChatMessages.reduceRight<string | undefined>(
+    (acc, m) => acc ?? (m.role === 'assistant' ? m.id : undefined),
+    undefined
+  )
   const systemText = messages
     .filter((m) => m.role === 'system')
     .map((m) => m.content)
@@ -243,13 +246,13 @@ function ModuleHistoryPanel({
                       return <ThinkBox key={i} content={part.content} />
                     }
                     return (
-                      <div key={i} className="chat-msg-content">
-                        <MarkdownContent
-                          content={part.content}
-                          onOpenNote={(n) => void openNote(n)}
-                          onOpenSkill={(n) => openSkillEditor(n)}
-                        />
-                      </div>
+                      <AssistantBubble
+                        key={i}
+                        content={part.content}
+                        streaming={active && m.id === lastAssistantId}
+                        onOpenNote={(n) => void openNote(n)}
+                        onOpenSkill={openSkillEditor}
+                      />
                     )
                   })}
                 {m.toolCalls && m.toolCalls.length > 0 && (
