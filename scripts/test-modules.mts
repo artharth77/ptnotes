@@ -889,17 +889,54 @@ function makeScriptedClient(
 ): (cfg: AIProviderConfig) => OpenAI {
   let i = 0
   return () => {
+    const chunks = (entry: { content?: string; tool_calls?: FakeToolCall[] }): unknown[] => {
+      const out: unknown[] = []
+      if (entry.tool_calls) {
+        for (const tc of entry.tool_calls) {
+          out.push({
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  role: 'assistant',
+                  tool_calls: [
+                    {
+                      index: out.length,
+                      id: tc.id,
+                      type: 'function',
+                      function: { name: tc.function.name, arguments: tc.function.arguments }
+                    }
+                  ]
+                },
+                finish_reason: null
+              }
+            ]
+          })
+        }
+        out.push({ choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] })
+      } else {
+        out.push({
+          choices: [
+            {
+              index: 0,
+              delta: { role: 'assistant', content: entry.content ?? '' },
+              finish_reason: null
+            }
+          ]
+        })
+        out.push({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })
+      }
+      return out
+    }
     return {
       chat: {
         completions: {
           create: async () => {
             const entry = scriptArr[i++] ?? scriptArr[scriptArr.length - 1]!
-            const message: Record<string, unknown> = {
-              role: 'assistant',
-              content: entry.content ?? ''
-            }
-            if (entry.tool_calls) message.tool_calls = entry.tool_calls
-            return { choices: [{ message }] }
+            const list = chunks(entry)
+            return (async function* () {
+              for (const c of list) yield c
+            })()
           }
         }
       }
@@ -1276,18 +1313,55 @@ function makeDelayedScriptedClient(
 ): (cfg: AIProviderConfig) => OpenAI {
   let i = 0
   return () => {
+    const chunks = (entry: { content?: string; tool_calls?: FakeToolCall[] }): unknown[] => {
+      const out: unknown[] = []
+      if (entry.tool_calls) {
+        for (const tc of entry.tool_calls) {
+          out.push({
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  role: 'assistant',
+                  tool_calls: [
+                    {
+                      index: out.length,
+                      id: tc.id,
+                      type: 'function',
+                      function: { name: tc.function.name, arguments: tc.function.arguments }
+                    }
+                  ]
+                },
+                finish_reason: null
+              }
+            ]
+          })
+        }
+        out.push({ choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] })
+      } else {
+        out.push({
+          choices: [
+            {
+              index: 0,
+              delta: { role: 'assistant', content: entry.content ?? '' },
+              finish_reason: null
+            }
+          ]
+        })
+        out.push({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })
+      }
+      return out
+    }
     return {
       chat: {
         completions: {
           create: async () => {
             await new Promise((r) => setTimeout(r, delayMs))
             const entry = scriptArr[i++] ?? scriptArr[scriptArr.length - 1]!
-            const message: Record<string, unknown> = {
-              role: 'assistant',
-              content: entry.content ?? ''
-            }
-            if (entry.tool_calls) message.tool_calls = entry.tool_calls
-            return { choices: [{ message }] }
+            const list = chunks(entry)
+            return (async function* () {
+              for (const c of list) yield c
+            })()
           }
         }
       }
@@ -1348,6 +1422,65 @@ const s2RunId = s2Start.ok ? s2Start.runId : ''
 const wStopped = await slowManager.waitForRuns(PROJECT, [s2RunId], 5000, () => true)
 assert.equal(wStopped[0]!.status, 'stopped', 'isStopped cancels the wait early')
 slowManager.stop(s2RunId)
+
+// ---- cancelActive marks in-flight runs cancelled (app-shutdown path) ----
+const cancelManager = new ModuleRunManager(
+  service,
+  configStore,
+  registry,
+  () => {},
+  makeDelayedScriptedClient(inflightScript, 300)
+)
+const cancelStart = await cancelManager.start(PROJECT, 'pptx', 'Cancel me', 'Build a deck.')
+assert.equal(cancelStart.ok, true, 'cancel run accepted')
+const cancelRunId = cancelStart.ok ? cancelStart.runId : ''
+await new Promise((r) => setTimeout(r, 30))
+await cancelManager.cancelActive()
+const cancelledRun = (await cancelManager.list(PROJECT)).find((r) => r.runId === cancelRunId)
+assert.equal(cancelledRun?.status, 'cancelled', 'cancelActive marks the live run cancelled')
+const persistedCancel = (await service.listStoredModuleRuns(PROJECT)).find(
+  (r) => r.runId === cancelRunId
+)
+if (persistedCancel) {
+  assert.equal(persistedCancel.status, 'cancelled', 'cancelled status persisted to disk')
+}
+// A scoped cancelActive only cancels runs for the given project.
+const cancelStart2 = await cancelManager.start(PROJECT, 'pptx', 'Cancel me 2', 'Build a deck.')
+assert.equal(cancelStart2.ok, true, 'cancel run 2 accepted')
+const cancelRunId2 = cancelStart2.ok ? cancelStart2.runId : ''
+await new Promise((r) => setTimeout(r, 30))
+await cancelManager.cancelActive('SomeOtherProject')
+const otherProjectRun = (await cancelManager.list(PROJECT)).find((r) => r.runId === cancelRunId2)
+assert.equal(
+  otherProjectRun?.status,
+  'planning',
+  'cancelActive for another project leaves the run untouched'
+)
+await cancelManager.stop(cancelRunId2)
+
+// ---- lazy-cancel: a persisted non-terminal run with no live runner is cancelled on list ----
+const staleId = 'stale-run-001'
+const staleRun: ModuleRun = {
+  runId: staleId,
+  module: { id: 'pptx', name: 'PowerPoint', description: 'x' },
+  project: PROJECT,
+  title: 'Stale deck',
+  prompt: 'Build a deck.',
+  status: 'running',
+  steps: [],
+  createdAt: Date.now(),
+  updatedAt: Date.now(),
+  startedAt: Date.now()
+}
+await service.writeModuleRun(PROJECT, staleId, staleRun)
+const lazyManager = new ModuleRunManager(service, configStore, registry, () => {}, undefined)
+const lazyList = await lazyManager.list(PROJECT)
+const staleEntry = lazyList.find((r) => r.runId === staleId)
+assert.equal(staleEntry?.status, 'cancelled', 'stale running run is lazily cancelled on list')
+assert.ok(
+  typeof staleEntry?.finishedAt === 'number',
+  'lazily cancelled run records a finishedAt timestamp'
+)
 
 // ---- general-purpose subagent module (long-run agent, no required output file) ----
 const { createSubagentModule } = await import('../src/main/modules/subagent')
@@ -1512,6 +1645,45 @@ function makeCapturingClient(
   scriptArr: { content?: string; tool_calls?: FakeToolCall[] }[]
 ): (cfg: AIProviderConfig) => OpenAI {
   let i = 0
+  const chunks = (entry: { content?: string; tool_calls?: FakeToolCall[] }): unknown[] => {
+    const out: unknown[] = []
+    if (entry.tool_calls) {
+      for (const tc of entry.tool_calls) {
+        out.push({
+          choices: [
+            {
+              index: 0,
+              delta: {
+                role: 'assistant',
+                tool_calls: [
+                  {
+                    index: out.length,
+                    id: tc.id,
+                    type: 'function',
+                    function: { name: tc.function.name, arguments: tc.function.arguments }
+                  }
+                ]
+              },
+              finish_reason: null
+            }
+          ]
+        })
+      }
+      out.push({ choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] })
+    } else {
+      out.push({
+        choices: [
+          {
+            index: 0,
+            delta: { role: 'assistant', content: entry.content ?? '' },
+            finish_reason: null
+          }
+        ]
+      })
+      out.push({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })
+    }
+    return out
+  }
   return () =>
     ({
       chat: {
@@ -1519,12 +1691,10 @@ function makeCapturingClient(
           create: async (params: { tools?: { function: { name: string } }[] }) => {
             for (const t of params.tools ?? []) offeredToolNames.push(t.function.name)
             const entry = scriptArr[i++] ?? scriptArr[scriptArr.length - 1]!
-            const message: Record<string, unknown> = {
-              role: 'assistant',
-              content: entry.content ?? ''
-            }
-            if (entry.tool_calls) message.tool_calls = entry.tool_calls
-            return { choices: [{ message }] }
+            const list = chunks(entry)
+            return (async function* () {
+              for (const c of list) yield c
+            })()
           }
         }
       }

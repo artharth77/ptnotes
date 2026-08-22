@@ -129,16 +129,11 @@ function ModuleHistoryPanel({
 
   useEffect(() => {
     if (!active) return
-    const timer = setInterval(() => {
-      window.ptnotes.modules
-        .readChat(project, runId)
-        .then((chat) => {
-          setMessages(chat)
-          setError(null)
-        })
-        .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load module chat'))
-    }, 1500)
-    return () => clearInterval(timer)
+    return window.ptnotes.modules.onEvent((evt) => {
+      if (evt.project !== project || evt.runId !== runId || evt.type !== 'chat' || !evt.chat) return
+      setMessages(evt.chat)
+      setError(null)
+    })
   }, [active, project, runId])
 
   useEffect(() => {
@@ -242,6 +237,21 @@ function ModuleHistoryPanel({
             ) : (
               <div key={m.id} className="chat-msg assistant">
                 <div className="chat-msg-label">Assistant</div>
+                {m.content &&
+                  splitContent(m.content).map((part, i) => {
+                    if (part.type === 'think') {
+                      return <ThinkBox key={i} content={part.content} />
+                    }
+                    return (
+                      <div key={i} className="chat-msg-content">
+                        <MarkdownContent
+                          content={part.content}
+                          onOpenNote={(n) => void openNote(n)}
+                          onOpenSkill={(n) => openSkillEditor(n)}
+                        />
+                      </div>
+                    )
+                  })}
                 {m.toolCalls && m.toolCalls.length > 0 && (
                   <div className="chat-tools">
                     {m.toolCalls.map((tc) => (
@@ -283,21 +293,6 @@ function ModuleHistoryPanel({
                     ))}
                   </div>
                 )}
-                {m.content &&
-                  splitContent(m.content).map((part, i) => {
-                    if (part.type === 'think') {
-                      return <ThinkBox key={i} content={part.content} />
-                    }
-                    return (
-                      <div key={i} className="chat-msg-content">
-                        <MarkdownContent
-                          content={part.content}
-                          onOpenNote={(n) => void openNote(n)}
-                          onOpenSkill={(n) => openSkillEditor(n)}
-                        />
-                      </div>
-                    )
-                  })}
               </div>
             )
           )}

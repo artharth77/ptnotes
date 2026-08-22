@@ -283,7 +283,7 @@ export interface ModuleChatMessage {
   toolCalls?: ToolCallInfo[]
 }
 
-export type ModuleEventType = 'status' | 'step' | 'output' | 'error' | 'done' | 'result'
+export type ModuleEventType = 'status' | 'step' | 'output' | 'error' | 'done' | 'result' | 'chat'
 
 export type ModuleStartResult =
   { ok: true; runId: string; module: ModuleInfo; title: string } | { ok: false; error: string }
@@ -300,6 +300,8 @@ export interface ModuleEvent {
   error?: string
   summary?: string
   result?: string
+  /** Full updated transcript, attached when `type === 'chat'`. */
+  chat?: ModuleChatMessage[]
 }
 
 // ---- Raw AI trace (readable app ↔ provider conversation log, JSONL) ----

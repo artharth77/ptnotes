@@ -203,12 +203,21 @@ function scheduleSummary(
   }
 }
 
-type TaskView = ScheduleTask & { taskNo: string }
+type TaskView = Omit<ScheduleTask, 'percentComplete' | 'children'> & {
+  taskNo: string
+  percentComplete: string
+  children: TaskView[]
+}
 
 function withTaskNo(tasks: ScheduleTask[], parentNo: string | null): TaskView[] {
   return tasks.map((t, i) => {
     const no = deriveTaskNo(parentNo, i)
-    return { ...t, taskNo: no, children: withTaskNo(t.children, no) }
+    return {
+      ...t,
+      percentComplete: `${t.percentComplete}%`,
+      taskNo: no,
+      children: withTaskNo(t.children, no)
+    }
   })
 }
 

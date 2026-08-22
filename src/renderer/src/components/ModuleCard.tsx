@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { mdiChatProcessingOutline } from '@mdi/js'
+import { mdiChatProcessingOutline, mdiRefresh } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
 import type { ModuleRun, ModuleStepState } from '@shared/types'
 import { Modal } from './Modal'
@@ -103,7 +103,7 @@ export function ModuleCard({
           >
             <MdiIcon path={mdiChatProcessingOutline} size={16} />
           </button>
-          {!active && run.status === 'failed' && (
+          {!active && ['failed', 'cancelled'].includes(run.status) && (
             <button
               className="module-card-retry-btn"
               title="Retry this module run"
@@ -112,7 +112,7 @@ export function ModuleCard({
                 if (activeProject) void window.ptnotes.modules.retry(activeProject, run.runId)
               }}
             >
-              ↻
+              <MdiIcon path={mdiRefresh} size={16} />
             </button>
           )}
           {!active && (
