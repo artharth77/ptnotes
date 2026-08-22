@@ -1659,6 +1659,11 @@ assert.match(
   /2-3 data rows below it/,
   'xlsx system prompt samples data-row styling below the header'
 )
+assert.match(
+  createXlsxModule().systemPrompt,
+  /MORE rows than the template body sample/,
+  'xlsx system prompt instructs cloning body-row styles onto extra data rows'
+)
 
 assert.deepEqual(
   parseRange('A1..G20'),
@@ -1750,6 +1755,72 @@ assert.equal(stylesRead.sheets.Sales?.columns?.[0]?.width, 22, 'column widths re
 assert.equal(stylesRead.sheets.Sales?.rows?.[0]?.height, 24, 'row heights reported')
 const b2Style = stylesRead.sheets.Sales?.cells.B2
 assert.equal(b2Style?.format, '#,##0.00', 'style round-trip: number format')
+
+// bulk rows clone a named body style onto every cell (template body-row cloning)
+const xlsxRowsStylePath = join(ROOT, 'probe-xlsx-rows-style.xlsx')
+const builtRowsStyle = await buildXlsx(
+  {
+    sheets: [
+      {
+        name: 'Clone',
+        styles: {
+          header: {
+            font: { bold: true, color: '#FFFFFF' },
+            fill: { pattern: 'solid', fgColor: '#4472C4' }
+          },
+          rowA: {
+            fill: { pattern: 'solid', fgColor: '#D9E1F2' },
+            border: { bottom: { style: 'thin', color: '#8EAADB' } },
+            format: '#,##0.00'
+          },
+          rowB: { fill: { pattern: 'solid', fgColor: '#FFFFFF' } }
+        },
+        cells: [
+          { cell: 'A1', value: 'Item', styleRef: 'header' },
+          { cell: 'B1', value: 'Amount', styleRef: 'header' }
+        ],
+        rows: [
+          { startCell: 'A2', values: ['r1', 10], styleRef: 'rowA' },
+          { startCell: 'A3', values: ['r2', 20], styleRef: 'rowB' },
+          { startCell: 'A4', values: ['r3', 30], styleRef: 'rowA' },
+          { startCell: 'A5', values: ['r4', 40], style: { alignment: { horizontal: 'right' } } }
+        ]
+      }
+    ]
+  },
+  xlsxRowsStylePath
+)
+if (!builtRowsStyle.ok) throw new Error(`rows styleRef build failed: ${builtRowsStyle.error}`)
+const rowsStyles = await readStyles(xlsxRowsStylePath, 'Clone', 'A2..B5')
+if (!rowsStyles.ok) throw new Error(rowsStyles.error)
+const rowA2 = rowsStyles.sheets.Clone?.cells.A2
+assert.equal(rowA2?.fill?.fgColor, 'FFD9E1F2', 'rows styleRef clones body fill onto cells')
+assert.equal(rowA2?.border?.bottom?.style, 'thin', 'rows styleRef applies borders')
+assert.equal(rowA2?.format, '#,##0.00', 'rows styleRef applies number format')
+assert.equal(
+  rowsStyles.sheets.Clone?.cells.B3?.fill?.fgColor,
+  'FFFFFFFF',
+  'banded variant reaches later columns'
+)
+assert.equal(
+  rowsStyles.sheets.Clone?.cells.A4?.fill?.fgColor,
+  'FFD9E1F2',
+  'cycled variant continues banding past the template body'
+)
+assert.equal(
+  rowsStyles.sheets.Clone?.cells.A5?.alignment?.horizontal,
+  'right',
+  'inline rows style applies'
+)
+
+const badRowRef = await buildXlsx(
+  { sheets: [{ name: 'S', rows: [{ startCell: 'A1', values: [1], styleRef: 'nope' }] }] },
+  join(ROOT, 'bad-row-ref.xlsx')
+)
+assert.ok(
+  !badRowRef.ok && /unknown styleRef "nope"/.test(badRowRef.error),
+  'rows entry with unknown styleRef rejected'
+)
 
 // theme / indexed colors round-trip (write + read)
 const xlsxThemePath = join(ROOT, 'probe-xlsx-theme.xlsx')

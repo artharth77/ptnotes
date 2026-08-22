@@ -625,6 +625,8 @@ export interface XlsxCellSpec {
 export interface XlsxRowsSpec {
   startCell: string
   values: unknown[]
+  styleRef?: string
+  style?: XlsxCellStyle
 }
 
 export interface XlsxImageSpec {
@@ -829,8 +831,26 @@ export async function buildXlsx(
             error: `Sheet "${name}": row starting at ${rs.startCell} overflows past column XFD.`
           }
         }
+        let rowStyle: XlsxCellStyle | undefined
+        if (rs.styleRef) {
+          const named = spec.styles?.[rs.styleRef]
+          if (!named) {
+            const known = Object.keys(spec.styles ?? {})
+            return {
+              ok: false,
+              error: `Sheet "${name}": unknown styleRef "${rs.styleRef}". Defined styles: ${
+                known.join(', ') || '(none)'
+              }.`
+            }
+          }
+          rowStyle = rs.style ? mergeStyles(named, rs.style) : named
+        } else {
+          rowStyle = rs.style
+        }
         rs.values.forEach((v, i) => {
-          ws!.getCell(start.row, start.col + i).value = coerceValue(v)
+          const target = ws!.getCell(start.row, start.col + i)
+          target.value = coerceValue(v)
+          if (rowStyle) applyCellStyle(target, rowStyle, theme)
           cellCount++
         })
       }
