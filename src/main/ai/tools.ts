@@ -209,6 +209,16 @@ type TaskView = Omit<ScheduleTask, 'percentComplete' | 'children'> & {
   children: TaskView[]
 }
 
+function slimTasks(tasks: TaskView[]): Record<string, unknown>[] {
+  return tasks.map(({ owner, note, children, ...rest }) => {
+    const slim: Record<string, unknown> = rest
+    if (owner) slim.owner = owner
+    if (note) slim.note = note
+    if (children?.length) slim.children = slimTasks(children)
+    return slim
+  })
+}
+
 function withTaskNo(tasks: ScheduleTask[], parentNo: string | null): TaskView[] {
   return tasks.map((t, i) => {
     const no = deriveTaskNo(parentNo, i)
@@ -1142,7 +1152,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'read_schedule',
         description:
-          'Read a full schedule (its task tree with status, owner, durations, plan/actual dates, %complete, notes). Each task carries a taskNo outline number (1, 1.1, 1.2, 2, ...) matching the editor, including children. Parent task values are rolled up from children. Match the schedule by id.',
+          'Read a full schedule (its task tree with status, owner, durations, plan/actual dates, %complete, notes). Each task carries a taskNo outline number (1, 1.1, 1.2, 2, ...) matching the editor, including children. Parent task values are rolled up from children. Match the schedule by id. Empty owner/note fields and childless children arrays are omitted from the output.',
         parameters: {
           type: 'object',
           properties: {
@@ -1164,7 +1174,7 @@ export const tools: PTTool[] = [
       try {
         const { meta, schedule } = await requireSchedule(ctx, project, String(args.schedule ?? ''))
         const calendar = await ctx.service.readCalendar(project)
-        const tasks = withTaskNo(rollupScheduleTasks(schedule.tasks, calendar), null)
+        const tasks = slimTasks(withTaskNo(rollupScheduleTasks(schedule.tasks, calendar), null))
         return JSON.stringify({
           ok: true,
           project,
