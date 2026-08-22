@@ -20,6 +20,7 @@ import type { PTTool } from './ai/tools'
 import { createPptxModule } from './modules/pptx'
 import { createInfographicModule } from './modules/infographic'
 import { createDocxModule } from './modules/docx'
+import { createXlsxModule } from './modules/xlsx'
 import { createSubagentModule } from './modules/subagent'
 import { SettingsStore } from './settings'
 import { AIConfigStore } from './ai/config'
@@ -207,6 +208,7 @@ app.whenReady().then(async () => {
   moduleRegistry.register(createPptxModule())
   moduleRegistry.register(createInfographicModule())
   moduleRegistry.register(createDocxModule())
+  moduleRegistry.register(createXlsxModule())
   const moduleManager = new ModuleRunManager(
     service,
     configStore,

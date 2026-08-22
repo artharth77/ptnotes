@@ -6,7 +6,7 @@ import type { RegisteredModule } from '../modules/types'
 import type { SettingsStore } from '../settings'
 import type { AiTraceFile, ModuleChatMessage, ModuleSettings } from '@shared/types'
 
-const MODULE_DISPLAY_ORDER = ['subagent', 'docx', 'pptx', 'infographic']
+const MODULE_DISPLAY_ORDER = ['subagent', 'docx', 'xlsx', 'pptx', 'infographic']
 
 /** Sort modules for the Settings ▸ Modules list (known ids first, unknowns after in registry order). */
 function orderedModules(registry: ModuleRegistry): RegisteredModule[] {

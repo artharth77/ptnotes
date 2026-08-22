@@ -277,7 +277,10 @@ ChatPanel (renderer) ──send──▶ Main process
 - The system prompt includes an orchestration guideline: delegate parallel deliverables to
   background modules via `start_module` (passing `expect` to specify the result payload), then
   call `wait_modules` with all runIds and continue with the returned results; never wait when the
-  module output is not needed.
+  module output is not needed. When delegating, the main agent passes source material as inline
+  references in the prompt — `note:<notename>`, `file:<filename>`, `plan:<schedule id or name>`
+  — instead of reading them itself first; every module subagent's system prompt explains how to
+  resolve these references (`read_note` / `read_file` / `list_schedules` + `read_schedule`).
 
 ### Module result + multi-module waiting
 

@@ -20,7 +20,7 @@ export function buildStartModuleTool(
       type: 'function',
       function: {
         name: 'start_module',
-        description: `Start a background module that autonomously produces a deliverable file for the user. Available modules:\n${modulesDesc}\n\nWrite a THOROUGH prompt (goal, audience, outline/spec, and references like note:<name> or file:<name>). The module runs in the background with progress tracking; do NOT wait for it to finish. If you need a result payload back, set \`expect\` to describe exactly what the module must submit via submit_result (JSON, markdown or plain text). Confirm it has started and summarize what it will do. To continue only once all the modules you started finish, call wait_modules with their runIds.`,
+        description: `Start a background module that autonomously produces a deliverable file for the user. Available modules:\n${modulesDesc}\n\nWrite a THOROUGH prompt (goal, audience, outline/spec) and pass source material as inline references — note:<notename>, file:<filename> or plan:<schedule id or name> — instead of reading notes/files/schedules yourself and pasting their content into the prompt; every module can resolve these references itself with its own tools. The module runs in the background with progress tracking; do NOT wait for it to finish. If you need a result payload back, set \`expect\` to describe exactly what the module must submit via submit_result (JSON, markdown or plain text). Confirm it has started and summarize what it will do. To continue only once all the modules you started finish, call wait_modules with their runIds.`,
         parameters: {
           type: 'object',
           properties: {
