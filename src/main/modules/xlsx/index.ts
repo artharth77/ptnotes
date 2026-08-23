@@ -8,6 +8,7 @@ import { createInfographicTools } from '../shared/createInfographicTools'
 import {
   buildXlsx,
   collectImagePaths,
+  editXlsx,
   listSheets,
   readStyles,
   readValues,
@@ -310,6 +311,78 @@ ${DESIGN_SCHEMA}`,
   }
 }
 
+const MAX_EDIT_OPS = 100
+
+const EDIT_SCHEMA = `Operations array (executed in order):
+[
+  { "type": "set_cells", "startCell": "B2", "values": [100, "text", "=A2*2"], "styles": [{ "font": { "bold": true } }, null, null] },
+  { "type": "insert_rows", "at": 5, "count": 2 },
+  { "type": "delete_rows", "at": 10, "count": 1 },
+  { "type": "insert_columns", "at": 3, "count": 1 },
+  { "type": "delete_columns", "at": 1, "count": 1 }
+]
+set_cells: writes values row-wise starting at startCell. Strings starting with "=" become formulas. Optional "styles" array applies a ${STYLE_SCHEMA} per cell (null to skip).
+insert_rows / delete_rows: "at" is the 1-based row index; "count" defaults to 1.
+insert_columns / delete_columns: "at" is the 1-based column index; "count" defaults to 1.`
+
+const editXlsxFileTool: PTTool = {
+  definition: {
+    type: 'function',
+    function: {
+      name: 'edit_xlsx_file',
+      description: `Edit an existing Excel (.xlsx/.xlsm) workbook IN-PLACE (overwrites the file). Apply multiple operations in one call: write cell values/styles, insert or delete rows and columns. Maximum ${MAX_EDIT_OPS} operations per call — split larger edits into multiple calls. Returns the number of operations applied. Supported operations:
+${EDIT_SCHEMA}`,
+      parameters: {
+        type: 'object',
+        properties: {
+          project: {
+            type: 'string',
+            description: 'Project name. Defaults to the current project.'
+          },
+          file: {
+            type: 'string',
+            description: 'File name of the workbook to edit, e.g. budget.xlsx.'
+          },
+          sheet: {
+            type: 'string',
+            description:
+              'Worksheet by name or 1-based number, e.g. "Sales" or "2". Defaults to the first worksheet.'
+          },
+          operations: {
+            type: 'array',
+            items: { type: 'object' },
+            description:
+              'Array of edit operations to perform in order (see schema in tool description).'
+          }
+        },
+        required: ['file', 'operations']
+      }
+    }
+  },
+  async execute(args, ctx): Promise<string> {
+    const project =
+      typeof args.project === 'string' && args.project.trim()
+        ? args.project.trim()
+        : ctx.activeProject
+    const file = String(args.file ?? '').trim()
+    if (!file) return JSON.stringify({ ok: false, error: 'No file name provided.' })
+    const resolved = await resolveProjectFile(ctx, project, file)
+    if ('error' in resolved) return JSON.stringify({ ok: false, error: resolved.error })
+    const ops = Array.isArray(args.operations) ? args.operations : []
+    if (ops.length === 0) {
+      return JSON.stringify({ ok: false, error: 'No operations provided.' })
+    }
+    if (ops.length > MAX_EDIT_OPS) {
+      return JSON.stringify({
+        ok: false,
+        error: `Maximum ${MAX_EDIT_OPS} operations per call. You provided ${ops.length}. Split into multiple calls with up to ${MAX_EDIT_OPS} operations each.`
+      })
+    }
+    const res = await editXlsx(resolved.path, args.sheet as string | undefined, ops)
+    return JSON.stringify({ project, file, ...res })
+  }
+}
+
 /** Register the XLSX module. Call via ModuleRegistry.register(createXlsxModule()). */
 export function createXlsxModule(): RegisteredModule {
   return {
@@ -318,9 +391,9 @@ export function createXlsxModule(): RegisteredModule {
     summary:
       'Creates or edits styled Excel (.xlsx) workbooks, optionally reusing an existing file as a style template.',
     description:
-      'Creates real Excel (.xlsx) workbooks with values, formulas and full styling (fonts, fills, borders, alignment, number formats, column widths, frozen headers, embedded chart images). When the user asks for a spreadsheet, Excel file, budget, tracker, timesheet, invoice-like table or any tabular deliverable as .xlsx — including making a new file that follows the look of an existing one — prepare a DETAILED prompt: the goal, the exact data (or which note:/file: sources to pull it from), the desired layout (columns, header styling, formats) and, when applicable, the name of an existing .xlsx file in the project files folder to use as the template. The module subagent can inspect existing workbooks (sheets, values and styles by range) and will produce a real .xlsx saved to the project files folder.',
+      'Creates real Excel (.xlsx) workbooks with values, formulas and full styling (fonts, fills, borders, alignment, number formats, column widths, frozen headers, embedded chart images). Also edits existing workbooks in-place: write cell values/styles, insert or delete rows and columns. When the user asks for a spreadsheet, Excel file, budget, tracker, timesheet, invoice-like table or any tabular deliverable as .xlsx — including making a new file that follows the look of an existing one or editing an existing Excel file — prepare a DETAILED prompt: the goal, the exact data (or which note:/file: sources to pull it from), the desired layout (columns, header styling, formats) and, when applicable, the name of an existing .xlsx file in the project files folder to use as the template or to edit. The module subagent can inspect existing workbooks (sheets, values and styles by range) and will produce a real .xlsx saved to the project files folder or edit an existing one in-place.',
     systemPrompt:
-      'Build workbooks cell-by-cell with explicit addresses so layouts are deterministic. Workflow: (1) If an existing file should be reused or matched, first call excel_list_sheets, then excel_read_styles (and excel_read_values) on the relevant range — ranges look like "A1..G20" or "A1-G20"; sheet accepts a name or 1-based number. (2) TEMPLATE MATCHING: when the user points at an existing workbook to use as a template, read BOTH values and styles over the header row plus at least the 2-3 data rows below it (e.g. range "A1..H5") before designing. Identify each column by its header TEXT and map incoming data onto matching headers BY NAME — fill values under the headers they belong to, never assume column order, and leave non-matching columns empty rather than guessing. Copy the observed DATA-ROW styling from those sample rows into your design: per-column font, fill fgColor/bgColor, borders, alignment and number format, including variations between consecutive rows (banded/alternating striping) — reproduce the pattern across all rows you write. When the incoming data has MORE rows than the template body sample, define one named style per observed body-row variant (e.g. "rowA"/"rowB") and repeat them down every data row via rows "styleRef", cycling the variants so banding continues to the last row — never leave extra data rows unstyled. Decide the mode explicitly: clone-layout keeps the template layout and overwrites/adds content; style-source borrows only its look for new content (match template sheets by name or set "templateSheet"). (3) Author ONE design JSON: reusable named "styles" per sheet plus cells referencing them via "styleRef"; bulk rows go in "rows" ({ startCell, values, styleRef }) — styleRef clones a named style onto every cell of the row, carrying template body styling/banding down any number of rows. Strings starting with "=" become formulas. Give every column a sensible width, style header rows bold with a solid fill, white font and thin borders, freeze the header row with "freeze": "A2", and add number "format"s (#,##0.00 for money, 0% for percentages, yyyy-mm-dd for dates). (4) For a data chart, author Chart.js chart JSON, call chart_preview to sanity-check, then render_chart, and put the returned PNG path into sheet.images with an anchor cell (and "to" to size it). (5) Call create_xlsx_file once; fix any returned error and retry. All rendering is pure local — NO network, CLI tools or headless browser. Do NOT invent data — use only the numbers, names and facts from the user prompt or referenced note:/file: inputs.',
+      'Build workbooks cell-by-cell with explicit addresses so layouts are deterministic. Workflow: (1) If an existing file should be reused or matched, first call excel_list_sheets, then excel_read_styles (and excel_read_values) on the relevant range — ranges look like "A1..G20" or "A1-G20"; sheet accepts a name or 1-based number. (2) TEMPLATE MATCHING: when the user points at an existing workbook to use as a template, read BOTH values and styles over the header row plus at least the 2-3 data rows below it (e.g. range "A1..H5") before designing. Identify each column by its header TEXT and map incoming data onto matching headers BY NAME — fill values under the headers they belong to, never assume column order, and leave non-matching columns empty rather than guessing. Copy the observed DATA-ROW styling from those sample rows into your design: per-column font, fill fgColor/bgColor, borders, alignment and number format, including variations between consecutive rows (banded/alternating striping) — reproduce the pattern across all rows you write. When the incoming data has MORE rows than the template body sample, define one named style per observed body-row variant (e.g. "rowA"/"rowB") and repeat them down every data row via rows "styleRef", cycling the variants so banding continues to the last row — never leave extra data rows unstyled. Decide the mode explicitly: clone-layout keeps the template layout and overwrites/adds content; style-source borrows only its look for new content (match template sheets by name or set "templateSheet"). (3) Author ONE design JSON: reusable named "styles" per sheet plus cells referencing them via "styleRef"; bulk rows go in "rows" ({ startCell, values, styleRef }) — styleRef clones a named style onto every cell of the row, carrying template body styling/banding down any number of rows. Strings starting with "=" become formulas. Give every column a sensible width, style header rows bold with a solid fill, white font and thin borders, freeze the header row with "freeze": "A2", and add number "format"s (#,##0.00 for money, 0% for percentages, yyyy-mm-dd for dates). (4) For a data chart, author Chart.js chart JSON, call chart_preview to sanity-check, then render_chart, and put the returned PNG path into sheet.images with an anchor cell (and "to" to size it). (5) Call create_xlsx_file once; fix any returned error and retry. EDITING EXISTING FILES: when the user asks to modify an existing .xlsx (add rows, change cells, insert/delete columns, etc.), first read its structure with excel_list_sheets and excel_read_values, then call edit_xlsx_file with the appropriate operations array — all edits happen in-place. You can combine multiple operations (set_cells + insert_rows + delete_columns) in a single call; they execute in order. All rendering is pure local — NO network, CLI tools or headless browser. Do NOT invent data — use only the numbers, names and facts from the user prompt or referenced note:/file: inputs.',
     outputTool: 'create_xlsx_file',
     tools: [
       ...createDiagramTools(),
@@ -329,7 +402,8 @@ export function createXlsxModule(): RegisteredModule {
       excelListSheetsTool,
       excelReadValuesTool,
       excelReadStylesTool,
-      createXlsxFileTool
+      createXlsxFileTool,
+      editXlsxFileTool
     ]
   }
 }

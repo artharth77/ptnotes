@@ -1,4 +1,4 @@
-## [0.12.0] — 2026-08-22
+## [0.12.0] — 2026-08-24
 
 ### Added
 
@@ -16,13 +16,21 @@
 - **New background module** `xlsx` ("Excel (XLSX)") that produces real styled Excel workbooks in `<project>/files/`. Registered after the Word module; the Settings ▸ Modules list shows it as **Excel (XLSX)**.
 - **Workbook inspection tools**: `excel_list_sheets` (sheet index/name/dimensions), `excel_read_values` and `excel_read_styles` accept a file, an optional worksheet (name or 1-based number) and an optional range in A1 notation (`A1..G20` or `A1-G20`). Styles are returned per cell — font (name/size/bold/italic/underline/strike/color), fill (pattern + fg/bg color), borders (style + approximate width + color per side), alignment (vertical/horizontal/wrap), number format — plus column widths and row heights. Colors round-trip as hex (`#RRGGBB`/`AARRGGBB`), theme (`theme-0..11`) or indexed (`indexed-0..65`, including the `indexed-64` system-background marker Excel writes as bgColor), each optionally with an `@tint` suffix.
 - **`create_xlsx_file`** builds a workbook from a design JSON: reusable named styles per sheet (`styleRef`), explicit cells (values; strings starting with `=` become formulas), bulk rows (`{ startCell, values }`), column widths, row heights, freeze panes, merged ranges and embedded chart/diagram PNG images (rendered via the shared chart/diagram/infographic tools). Output is deduplicated via `uniqueOutputPath`; failed builds clean up after themselves.
-- **Template support**: pass an existing project `.xlsx` plus a mode — `clone-layout` keeps the template's layout/cells and applies the design on top; `style-source` starts fresh and copies the template's per-cell styles, column widths and row heights onto matching addresses (sheets match by name or via `templateSheet`). The module's system prompt instructs the subagent to inspect values *and* styles over the header row plus 2-3 data rows below it, match columns to headers **by name** (never by position), and reproduce observed data-row styling including banded/alternating striping.
+- **Template support**: pass an existing project `.xlsx` plus a mode — `clone-layout` keeps the template's layout/cells and applies the design on top; `style-source` starts fresh and copies the template's per-cell styles, column widths and row heights onto matching addresses (sheets match by name or via `templateSheet`). The module's system prompt instructs the subagent to inspect values _and_ styles over the header row plus 2-3 data rows below it, match columns to headers **by name** (never by position), and reproduce observed data-row styling including banded/alternating striping.
+- **`edit_xlsx_file`** edits an existing workbook in-place (overwrites the file). Supports multiple operations per call: `set_cells` writes values row-wise starting at a cell address with optional per-cell styles (font, fill, border, alignment, number format); `insert_rows` / `delete_rows` and `insert_columns` / `delete_columns` shift cells at a 1-based index. Up to 100 operations per call.
 - Module subagent tool tests cover builder round-trips (values/styles/theme+indexed colors/tint), both template modes, validation errors, direct tool execution against the service and a full scripted module run.
 
 #### Modules — pass source references instead of pre-reading
 
 - The main chat agent is now instructed to delegate sources as inline references in the module prompt — `note:<notename>`, `file:<filename>`, `plan:<schedule id or name>` (alias `schedule:`) — instead of reading notes/files/schedules itself first and pasting their content into the prompt.
 - Every module subagent's system prompt gained a **SOURCE REFERENCES** section mapping each prefix to its own read tools (`read_note`, `read_file`, `list_schedules` + `read_schedule`), with guardrails: never ask for referenced content; if a source does not exist, say so instead of inventing it.
+
+#### Built-in skills
+
+- Three built-in skills ship with the app and are enabled by default:
+  - **summarize** — condenses long documents, notes, or web pages into concise structured summaries.
+  - **schedule-to-excel-export** — exports a project schedule into a professional styled Excel workbook (`create_xlsx_file`), with design specs for headers, status-colored cells, and % complete bars.
+  - **schedule-to-excel-update** — updates an existing Excel workbook in-place from a project schedule (`edit_xlsx_file`), keeping the workbook's column structure while applying status background colors and % complete values.
 
 ## [0.11.0] — 2026-08-21
 

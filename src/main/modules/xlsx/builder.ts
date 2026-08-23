@@ -370,6 +370,7 @@ export function applyCellStyle(
   style: XlsxCellStyle,
   theme?: { fontName?: string; fontSize?: number }
 ): void {
+  cell.style = { ...cell.style }
   if (style.font || theme?.fontName || theme?.fontSize) {
     const prev = cell.font ?? {}
     const sf = style.font ?? {}
@@ -956,6 +957,108 @@ export async function buildXlsx(
     const buffer = await workbook.xlsx.writeBuffer()
     await fs.writeFile(outPath, new Uint8Array(buffer))
     return { ok: true, path: outPath, sheetCount: specs.length, cellCount }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+// ---- editing ----
+
+interface EditOperation {
+  type: string
+  [key: string]: unknown
+}
+
+export async function editXlsx(
+  path: string,
+  sheet: string | undefined,
+  operations: unknown[]
+): Promise<{ ok: true; path: string; applied: number } | { ok: false; error: string }> {
+  try {
+    if (!Array.isArray(operations) || operations.length === 0) {
+      return { ok: false, error: 'operations must be a non-empty array.' }
+    }
+    const workbook = await loadWorkbook(path)
+    const targets = pickWorksheets(workbook, sheet)
+    const ws = targets[0]
+    if (!ws) return { ok: false, error: `Worksheet not found.` }
+
+    let applied = 0
+    for (const raw of operations) {
+      const op = raw as EditOperation
+      if (!op || typeof op !== 'object') {
+        return { ok: false, error: `Each operation must be an object.` }
+      }
+      const type = String(op.type ?? '').trim()
+      switch (type) {
+        case 'set_cells': {
+          if (typeof op.startCell !== 'string' || !op.startCell.trim()) {
+            return { ok: false, error: 'set_cells requires a "startCell" address.' }
+          }
+          if (!Array.isArray(op.values)) {
+            return { ok: false, error: 'set_cells requires a "values" array.' }
+          }
+          const start = parseCellKey(op.startCell)
+          const values = op.values as unknown[]
+          const styles = Array.isArray(op.styles) ? (op.styles as unknown[]) : []
+          values.forEach((v, i) => {
+            const cell = ws.getCell(start.row, start.col + i)
+            cell.value = coerceValue(v)
+            if (i < styles.length && styles[i] && typeof styles[i] === 'object') {
+              applyCellStyle(cell, styles[i] as XlsxCellStyle)
+            }
+            applied++
+          })
+          break
+        }
+        case 'insert_rows': {
+          const at = Number(op.at)
+          if (!Number.isFinite(at) || at < 1) {
+            return { ok: false, error: 'insert_rows "at" must be a positive integer.' }
+          }
+          const count = Math.max(1, Math.round(Number(op.count) || 1))
+          ws.spliceRows(at, count)
+          applied += count
+          break
+        }
+        case 'delete_rows': {
+          const at = Number(op.at)
+          if (!Number.isFinite(at) || at < 1) {
+            return { ok: false, error: 'delete_rows "at" must be a positive integer.' }
+          }
+          const count = Math.max(1, Math.round(Number(op.count) || 1))
+          ws.spliceRows(at, count)
+          applied += count
+          break
+        }
+        case 'insert_columns': {
+          const at = Number(op.at)
+          if (!Number.isFinite(at) || at < 1) {
+            return { ok: false, error: 'insert_columns "at" must be a positive integer.' }
+          }
+          const count = Math.max(1, Math.round(Number(op.count) || 1))
+          ws.spliceColumns(at, count)
+          applied += count
+          break
+        }
+        case 'delete_columns': {
+          const at = Number(op.at)
+          if (!Number.isFinite(at) || at < 1) {
+            return { ok: false, error: 'delete_columns "at" must be a positive integer.' }
+          }
+          const count = Math.max(1, Math.round(Number(op.count) || 1))
+          ws.spliceColumns(at, count)
+          applied += count
+          break
+        }
+        default:
+          return { ok: false, error: `Unknown operation type "${type}".` }
+      }
+    }
+
+    const buffer = await workbook.xlsx.writeBuffer()
+    await fs.writeFile(path, new Uint8Array(buffer))
+    return { ok: true, path, applied }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }

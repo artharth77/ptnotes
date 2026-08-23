@@ -150,6 +150,7 @@ src/
 │       ├── pptx/         # PowerPoint module (design schema → buildPptx)
 │       ├── infographic/  # standalone infographic module (design schema → create_infographic_file; reuses the shared tool-pack)
 │       ├── docx/         # Word document module (design schema → buildDocx; reuses the shared tool-pack)
+│       ├── xlsx/         # Excel module (create_xlsx_file, edit_xlsx_file, read_values, read_styles, list_sheets)
 │       └── shared/
 │           ├── chart.ts          # Chart.js design validation + in-process renderChartPng (@napi-rs/canvas)
 │           ├── chart-render-worker.ts  # utility-process entry (forks under Electron)

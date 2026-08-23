@@ -1816,7 +1816,7 @@ assert.ok(
 
 // ---- xlsx module: range helpers + builder unit tests ----
 const { createXlsxModule } = await import('../src/main/modules/xlsx')
-const { buildXlsx, readValues, readStyles, listSheets, parseRange, cellKey } =
+const { buildXlsx, readValues, readStyles, listSheets, parseRange, cellKey, editXlsx } =
   await import('../src/main/modules/xlsx/builder')
 
 assert.match(
@@ -2132,6 +2132,76 @@ const badFill = await buildXlsx(
 assert.ok(!badFill.ok && /fill pattern/i.test(badFill.error), 'invalid fill pattern rejected')
 await fs.rm(join(ROOT, 'bad-1.xlsx'), { force: true })
 await fs.rm(join(ROOT, 'bad-3.xlsx'), { force: true })
+
+// ---- xlsx editXlsx: shared styleRef fill should not bleed ----
+const editSharedPath = join(ROOT, 'probe-xlsx-edit-shared.xlsx')
+const builtEditShared = await buildXlsx(
+  {
+    theme: { fontName: 'Calibri', fontSize: 11 },
+    sheets: [
+      {
+        name: 'Plan',
+        styles: {
+          inProgress: {
+            fill: { pattern: 'solid', fgColor: '#FFF2CC' },
+            alignment: { horizontal: 'center', vertical: 'middle' }
+          },
+          completed: {
+            fill: { pattern: 'solid', fgColor: '#C6EFCE' },
+            alignment: { horizontal: 'center', vertical: 'middle' }
+          }
+        },
+        cells: [
+          { cell: 'D18', value: 'In Progress', styleRef: 'inProgress' },
+          { cell: 'D19', value: 'Completed', styleRef: 'completed' },
+          { cell: 'D20', value: 'In Progress', styleRef: 'inProgress' }
+        ]
+      }
+    ]
+  },
+  editSharedPath
+)
+assert.ok(
+  builtEditShared.ok,
+  `edit-shared build: ${builtEditShared.ok ? '' : builtEditShared.error}`
+)
+
+const preEditStyles = await readStyles(editSharedPath, 'Plan', 'D18..D20')
+assert.ok(preEditStyles.ok, 'pre-edit readStyles ok')
+assert.equal(preEditStyles.sheets.Plan?.cells.D18?.fill?.fgColor, 'FFFFF2CC', 'D18 starts yellow')
+assert.equal(preEditStyles.sheets.Plan?.cells.D19?.fill?.fgColor, 'FFC6EFCE', 'D19 starts green')
+assert.equal(preEditStyles.sheets.Plan?.cells.D20?.fill?.fgColor, 'FFFFF2CC', 'D20 starts yellow')
+
+// edit only D18 fill — D20 must keep its fill
+const editRes = await editXlsx(editSharedPath, undefined, [
+  {
+    type: 'set_cells',
+    startCell: 'D18',
+    values: ['In Progress'],
+    styles: [
+      {
+        fill: { pattern: 'solid', fgColor: '#FF0000' },
+        alignment: { horizontal: 'center', vertical: 'middle' }
+      }
+    ]
+  }
+])
+assert.ok(editRes.ok, `editXlsx ok: ${editRes.ok ? '' : editRes.error}`)
+
+const postEditStyles = await readStyles(editSharedPath, 'Plan', 'D18..D20')
+assert.ok(postEditStyles.ok, 'post-edit readStyles ok')
+assert.equal(
+  postEditStyles.sheets.Plan?.cells.D18?.fill?.fgColor,
+  'FFFF0000',
+  'D18 fill changed to red'
+)
+assert.equal(
+  postEditStyles.sheets.Plan?.cells.D20?.fill?.fgColor,
+  'FFFFF2CC',
+  'D20 fill preserved (no bleed from D18 edit)'
+)
+assert.equal(postEditStyles.sheets.Plan?.cells.D19?.fill?.fgColor, 'FFC6EFCE', 'D19 fill unchanged')
+await fs.rm(editSharedPath, { force: true })
 
 // ---- xlsx tools: direct PTTool execution against the service ----
 const xlsxTools = createXlsxModule().tools
