@@ -19,9 +19,7 @@ export function CalendarModal({ onClose }: { onClose: () => void }): React.JSX.E
     if (!newHoliday) return
     setDraft((d) => ({
       ...d,
-      holidays: d.holidays.includes(newHoliday)
-        ? d.holidays
-        : [...d.holidays, newHoliday].sort()
+      holidays: d.holidays.includes(newHoliday) ? d.holidays : [...d.holidays, newHoliday].sort()
     }))
     setNewHoliday('')
   }

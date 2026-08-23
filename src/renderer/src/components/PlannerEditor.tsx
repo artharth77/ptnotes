@@ -1416,7 +1416,8 @@ export function PlannerEditor(): React.JSX.Element {
     const scroll = gridScrollRef.current
     const row = gridRef.current?.querySelector<HTMLElement>(`[data-row="${id}"]`)
     if (!scroll || !row) return
-    const headerH = gridRef.current?.querySelector<HTMLElement>('.planner-grid-head')?.offsetHeight ?? 0
+    const headerH =
+      gridRef.current?.querySelector<HTMLElement>('.planner-grid-head')?.offsetHeight ?? 0
     const rect = row.getBoundingClientRect()
     const srect = scroll.getBoundingClientRect()
     const top = rect.top - srect.top
