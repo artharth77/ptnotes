@@ -168,9 +168,7 @@ export function PlannerPanel(): React.JSX.Element {
             <span className="note-item-title">{schedule.name}</span>
             <span className="note-item-actions">
               <span className="note-item-meta">
-                <span className="note-item-date">
-                  {formatDate(schedule.updatedAt)}
-                </span>
+                <span className="note-item-date">{formatDate(schedule.updatedAt)}</span>
                 <span className="note-item-count">
                   {schedule.taskCount} task{schedule.taskCount === 1 ? '' : 's'}
                 </span>

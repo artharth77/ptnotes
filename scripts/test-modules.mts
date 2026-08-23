@@ -889,17 +889,54 @@ function makeScriptedClient(
 ): (cfg: AIProviderConfig) => OpenAI {
   let i = 0
   return () => {
+    const chunks = (entry: { content?: string; tool_calls?: FakeToolCall[] }): unknown[] => {
+      const out: unknown[] = []
+      if (entry.tool_calls) {
+        for (const tc of entry.tool_calls) {
+          out.push({
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  role: 'assistant',
+                  tool_calls: [
+                    {
+                      index: out.length,
+                      id: tc.id,
+                      type: 'function',
+                      function: { name: tc.function.name, arguments: tc.function.arguments }
+                    }
+                  ]
+                },
+                finish_reason: null
+              }
+            ]
+          })
+        }
+        out.push({ choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] })
+      } else {
+        out.push({
+          choices: [
+            {
+              index: 0,
+              delta: { role: 'assistant', content: entry.content ?? '' },
+              finish_reason: null
+            }
+          ]
+        })
+        out.push({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })
+      }
+      return out
+    }
     return {
       chat: {
         completions: {
           create: async () => {
             const entry = scriptArr[i++] ?? scriptArr[scriptArr.length - 1]!
-            const message: Record<string, unknown> = {
-              role: 'assistant',
-              content: entry.content ?? ''
-            }
-            if (entry.tool_calls) message.tool_calls = entry.tool_calls
-            return { choices: [{ message }] }
+            const list = chunks(entry)
+            return (async function* () {
+              for (const c of list) yield c
+            })()
           }
         }
       }
@@ -1276,18 +1313,55 @@ function makeDelayedScriptedClient(
 ): (cfg: AIProviderConfig) => OpenAI {
   let i = 0
   return () => {
+    const chunks = (entry: { content?: string; tool_calls?: FakeToolCall[] }): unknown[] => {
+      const out: unknown[] = []
+      if (entry.tool_calls) {
+        for (const tc of entry.tool_calls) {
+          out.push({
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  role: 'assistant',
+                  tool_calls: [
+                    {
+                      index: out.length,
+                      id: tc.id,
+                      type: 'function',
+                      function: { name: tc.function.name, arguments: tc.function.arguments }
+                    }
+                  ]
+                },
+                finish_reason: null
+              }
+            ]
+          })
+        }
+        out.push({ choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] })
+      } else {
+        out.push({
+          choices: [
+            {
+              index: 0,
+              delta: { role: 'assistant', content: entry.content ?? '' },
+              finish_reason: null
+            }
+          ]
+        })
+        out.push({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })
+      }
+      return out
+    }
     return {
       chat: {
         completions: {
           create: async () => {
             await new Promise((r) => setTimeout(r, delayMs))
             const entry = scriptArr[i++] ?? scriptArr[scriptArr.length - 1]!
-            const message: Record<string, unknown> = {
-              role: 'assistant',
-              content: entry.content ?? ''
-            }
-            if (entry.tool_calls) message.tool_calls = entry.tool_calls
-            return { choices: [{ message }] }
+            const list = chunks(entry)
+            return (async function* () {
+              for (const c of list) yield c
+            })()
           }
         }
       }
@@ -1348,6 +1422,65 @@ const s2RunId = s2Start.ok ? s2Start.runId : ''
 const wStopped = await slowManager.waitForRuns(PROJECT, [s2RunId], 5000, () => true)
 assert.equal(wStopped[0]!.status, 'stopped', 'isStopped cancels the wait early')
 slowManager.stop(s2RunId)
+
+// ---- cancelActive marks in-flight runs cancelled (app-shutdown path) ----
+const cancelManager = new ModuleRunManager(
+  service,
+  configStore,
+  registry,
+  () => {},
+  makeDelayedScriptedClient(inflightScript, 300)
+)
+const cancelStart = await cancelManager.start(PROJECT, 'pptx', 'Cancel me', 'Build a deck.')
+assert.equal(cancelStart.ok, true, 'cancel run accepted')
+const cancelRunId = cancelStart.ok ? cancelStart.runId : ''
+await new Promise((r) => setTimeout(r, 30))
+await cancelManager.cancelActive()
+const cancelledRun = (await cancelManager.list(PROJECT)).find((r) => r.runId === cancelRunId)
+assert.equal(cancelledRun?.status, 'cancelled', 'cancelActive marks the live run cancelled')
+const persistedCancel = (await service.listStoredModuleRuns(PROJECT)).find(
+  (r) => r.runId === cancelRunId
+)
+if (persistedCancel) {
+  assert.equal(persistedCancel.status, 'cancelled', 'cancelled status persisted to disk')
+}
+// A scoped cancelActive only cancels runs for the given project.
+const cancelStart2 = await cancelManager.start(PROJECT, 'pptx', 'Cancel me 2', 'Build a deck.')
+assert.equal(cancelStart2.ok, true, 'cancel run 2 accepted')
+const cancelRunId2 = cancelStart2.ok ? cancelStart2.runId : ''
+await new Promise((r) => setTimeout(r, 30))
+await cancelManager.cancelActive('SomeOtherProject')
+const otherProjectRun = (await cancelManager.list(PROJECT)).find((r) => r.runId === cancelRunId2)
+assert.equal(
+  otherProjectRun?.status,
+  'planning',
+  'cancelActive for another project leaves the run untouched'
+)
+await cancelManager.stop(cancelRunId2)
+
+// ---- lazy-cancel: a persisted non-terminal run with no live runner is cancelled on list ----
+const staleId = 'stale-run-001'
+const staleRun: ModuleRun = {
+  runId: staleId,
+  module: { id: 'pptx', name: 'PowerPoint', description: 'x' },
+  project: PROJECT,
+  title: 'Stale deck',
+  prompt: 'Build a deck.',
+  status: 'running',
+  steps: [],
+  createdAt: Date.now(),
+  updatedAt: Date.now(),
+  startedAt: Date.now()
+}
+await service.writeModuleRun(PROJECT, staleId, staleRun)
+const lazyManager = new ModuleRunManager(service, configStore, registry, () => {}, undefined)
+const lazyList = await lazyManager.list(PROJECT)
+const staleEntry = lazyList.find((r) => r.runId === staleId)
+assert.equal(staleEntry?.status, 'cancelled', 'stale running run is lazily cancelled on list')
+assert.ok(
+  typeof staleEntry?.finishedAt === 'number',
+  'lazily cancelled run records a finishedAt timestamp'
+)
 
 // ---- general-purpose subagent module (long-run agent, no required output file) ----
 const { createSubagentModule } = await import('../src/main/modules/subagent')
@@ -1512,6 +1645,45 @@ function makeCapturingClient(
   scriptArr: { content?: string; tool_calls?: FakeToolCall[] }[]
 ): (cfg: AIProviderConfig) => OpenAI {
   let i = 0
+  const chunks = (entry: { content?: string; tool_calls?: FakeToolCall[] }): unknown[] => {
+    const out: unknown[] = []
+    if (entry.tool_calls) {
+      for (const tc of entry.tool_calls) {
+        out.push({
+          choices: [
+            {
+              index: 0,
+              delta: {
+                role: 'assistant',
+                tool_calls: [
+                  {
+                    index: out.length,
+                    id: tc.id,
+                    type: 'function',
+                    function: { name: tc.function.name, arguments: tc.function.arguments }
+                  }
+                ]
+              },
+              finish_reason: null
+            }
+          ]
+        })
+      }
+      out.push({ choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] })
+    } else {
+      out.push({
+        choices: [
+          {
+            index: 0,
+            delta: { role: 'assistant', content: entry.content ?? '' },
+            finish_reason: null
+          }
+        ]
+      })
+      out.push({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })
+    }
+    return out
+  }
   return () =>
     ({
       chat: {
@@ -1519,12 +1691,10 @@ function makeCapturingClient(
           create: async (params: { tools?: { function: { name: string } }[] }) => {
             for (const t of params.tools ?? []) offeredToolNames.push(t.function.name)
             const entry = scriptArr[i++] ?? scriptArr[scriptArr.length - 1]!
-            const message: Record<string, unknown> = {
-              role: 'assistant',
-              content: entry.content ?? ''
-            }
-            if (entry.tool_calls) message.tool_calls = entry.tool_calls
-            return { choices: [{ message }] }
+            const list = chunks(entry)
+            return (async function* () {
+              for (const c of list) yield c
+            })()
           }
         }
       }
@@ -1589,6 +1759,21 @@ assert.match(
   /Call the read_skill tool/,
   'module system prompt explains read_skill'
 )
+assert.match(
+  skillSystemPrompt,
+  /SOURCE REFERENCES/,
+  'module system prompt explains inline source references'
+)
+assert.match(
+  skillSystemPrompt,
+  /plan:<schedule id or name>/,
+  'module system prompt documents plan: references'
+)
+assert.match(
+  skillSystemPrompt,
+  /note:<notename>[\s\S]*read_note/,
+  'module system prompt maps note: to read_note'
+)
 
 // with no enabled skills, the index is omitted from the module system prompt
 const skillModTraceRun = await skillManager.deleteRun(PROJECT, skillRunId, false)
@@ -1627,6 +1812,598 @@ const noSkillSystemPrompt = noSkillTrace!.entries.find((e) => e.role === 'system
 assert.ok(
   !noSkillSystemPrompt.includes('read_skill'),
   'module system prompt omits the skills section when no skills are enabled'
+)
+
+// ---- xlsx module: range helpers + builder unit tests ----
+const { createXlsxModule } = await import('../src/main/modules/xlsx')
+const { buildXlsx, readValues, readStyles, listSheets, parseRange, cellKey, editXlsx } =
+  await import('../src/main/modules/xlsx/builder')
+
+assert.match(
+  createXlsxModule().systemPrompt,
+  /BY NAME/,
+  'xlsx system prompt instructs header-name column matching for templates'
+)
+assert.match(
+  createXlsxModule().systemPrompt,
+  /2-3 data rows below it/,
+  'xlsx system prompt samples data-row styling below the header'
+)
+assert.match(
+  createXlsxModule().systemPrompt,
+  /MORE rows than the template body sample/,
+  'xlsx system prompt instructs cloning body-row styles onto extra data rows'
+)
+
+assert.deepEqual(
+  parseRange('A1..G20'),
+  { tl: { row: 1, col: 1 }, br: { row: 20, col: 7 } },
+  'range with ".." parses'
+)
+assert.deepEqual(
+  parseRange('G20-A1'),
+  { tl: { row: 1, col: 1 }, br: { row: 20, col: 7 } },
+  'reversed "-" range normalizes to top-left/bottom-right'
+)
+assert.equal(cellKey(3, 28), 'AB3', 'cellKey maps row/col to A1 notation')
+assert.throws(() => parseRange('banana'), 'invalid range is rejected')
+assert.throws(() => parseRange('A1..'), 'incomplete range is rejected')
+
+const xlsxProbePath = join(ROOT, 'probe-xlsx.xlsx')
+const scratchDesign = {
+  theme: { fontName: 'Calibri', fontSize: 11 },
+  sheets: [
+    {
+      name: 'Sales',
+      styles: {
+        header: {
+          font: { bold: true, size: 12, color: '#FFFFFF' },
+          fill: { pattern: 'solid', fgColor: '#4472C4' },
+          border: { bottom: { style: 'medium', color: '#2F5597' } },
+          alignment: { horizontal: 'center', vertical: 'middle' }
+        },
+        money: { format: '#,##0.00' }
+      },
+      cells: [
+        { cell: 'A1', value: 'Region', styleRef: 'header' },
+        { cell: 'B1', value: 'Revenue', styleRef: 'header' },
+        { cell: 'A2', value: 'EMEA' },
+        { cell: 'B2', value: 1234.5, styleRef: 'money' }
+      ],
+      rows: [{ startCell: 'A3', values: ['APAC', 999] }],
+      columns: [22, 14],
+      rowHeights: [{ row: 1, height: 24 }],
+      freeze: 'A2',
+      merges: [['A5', 'D5']]
+    }
+  ]
+}
+const builtScratch = await buildXlsx(scratchDesign, xlsxProbePath)
+if (!builtScratch.ok) throw new Error(`buildXlsx from scratch failed: ${builtScratch.error}`)
+assert.equal(builtScratch.cellCount, 6, 'scratch build reports cell count')
+const scratchStat = await fs.stat(xlsxProbePath)
+assert.ok(scratchStat.size > 1000, 'scratch xlsx exists on disk with content')
+
+const sheetList = await listSheets(xlsxProbePath)
+assert.ok(
+  sheetList.ok && sheetList.sheets.length === 1 && sheetList.sheets[0].name === 'Sales',
+  'listSheets returns the sheet'
+)
+const salesInfo = sheetList.ok ? sheetList.sheets[0] : undefined
+assert.ok(
+  salesInfo && salesInfo.rowCount === 5 && salesInfo.columnCount === 4,
+  'sheet dimensions reported (merges expand bounds)'
+)
+
+const vals = await readValues(xlsxProbePath, 'Sales')
+if (!vals.ok) throw new Error(vals.error)
+assert.equal(vals.sheets.Sales?.cells.A1, 'Region', 'readValues returns string value')
+assert.equal(vals.sheets.Sales?.cells.B2, 1234.5, 'readValues returns number value')
+assert.equal(vals.sheets.Sales?.cells.A3, 'APAC', 'readValues includes bulk rows values')
+assert.equal(vals.sheets.Sales?.cells.B3, 999, 'readValues includes bulk rows numbers')
+assert.equal(vals.sheets.Sales?.cells.B4, undefined, 'readValues omits empty cells')
+
+const valsRanged = await readValues(xlsxProbePath, 'Sales', 'A1..B1')
+assert.ok(valsRanged.ok, 'ranged readValues ok')
+assert.deepEqual(
+  Object.keys(valsRanged.sheets.Sales?.cells ?? {}),
+  ['A1', 'B1'],
+  'ranged readValues limits cells'
+)
+assert.equal(valsRanged.sheets.Sales?.rowCount, 1, 'ranged read reports row count')
+
+const stylesRead = await readStyles(xlsxProbePath, 'Sales', 'A1..B2')
+if (!stylesRead.ok) throw new Error(stylesRead.error)
+const a1Style = stylesRead.sheets.Sales?.cells.A1
+assert.ok(a1Style?.font?.bold === true, 'style round-trip: font.bold')
+assert.equal(a1Style?.font?.size, 12, 'style round-trip: font.size')
+assert.equal(a1Style?.fill?.fgColor, 'FF4472C4', 'style round-trip: fill.fgColor ARGB normalized')
+assert.equal(a1Style?.border?.bottom?.style, 'medium', 'style round-trip: border style')
+assert.equal(a1Style?.border?.bottom?.width, 2, 'style round-trip: border width approximated')
+assert.equal(a1Style?.alignment?.horizontal, 'center', 'style round-trip: alignment.horizontal')
+assert.equal(stylesRead.sheets.Sales?.columns?.[0]?.width, 22, 'column widths reported')
+assert.equal(stylesRead.sheets.Sales?.rows?.[0]?.height, 24, 'row heights reported')
+const b2Style = stylesRead.sheets.Sales?.cells.B2
+assert.equal(b2Style?.format, '#,##0.00', 'style round-trip: number format')
+
+// bulk rows clone a named body style onto every cell (template body-row cloning)
+const xlsxRowsStylePath = join(ROOT, 'probe-xlsx-rows-style.xlsx')
+const builtRowsStyle = await buildXlsx(
+  {
+    sheets: [
+      {
+        name: 'Clone',
+        styles: {
+          header: {
+            font: { bold: true, color: '#FFFFFF' },
+            fill: { pattern: 'solid', fgColor: '#4472C4' }
+          },
+          rowA: {
+            fill: { pattern: 'solid', fgColor: '#D9E1F2' },
+            border: { bottom: { style: 'thin', color: '#8EAADB' } },
+            format: '#,##0.00'
+          },
+          rowB: { fill: { pattern: 'solid', fgColor: '#FFFFFF' } }
+        },
+        cells: [
+          { cell: 'A1', value: 'Item', styleRef: 'header' },
+          { cell: 'B1', value: 'Amount', styleRef: 'header' }
+        ],
+        rows: [
+          { startCell: 'A2', values: ['r1', 10], styleRef: 'rowA' },
+          { startCell: 'A3', values: ['r2', 20], styleRef: 'rowB' },
+          { startCell: 'A4', values: ['r3', 30], styleRef: 'rowA' },
+          { startCell: 'A5', values: ['r4', 40], style: { alignment: { horizontal: 'right' } } }
+        ]
+      }
+    ]
+  },
+  xlsxRowsStylePath
+)
+if (!builtRowsStyle.ok) throw new Error(`rows styleRef build failed: ${builtRowsStyle.error}`)
+const rowsStyles = await readStyles(xlsxRowsStylePath, 'Clone', 'A2..B5')
+if (!rowsStyles.ok) throw new Error(rowsStyles.error)
+const rowA2 = rowsStyles.sheets.Clone?.cells.A2
+assert.equal(rowA2?.fill?.fgColor, 'FFD9E1F2', 'rows styleRef clones body fill onto cells')
+assert.equal(rowA2?.border?.bottom?.style, 'thin', 'rows styleRef applies borders')
+assert.equal(rowA2?.format, '#,##0.00', 'rows styleRef applies number format')
+assert.equal(
+  rowsStyles.sheets.Clone?.cells.B3?.fill?.fgColor,
+  'FFFFFFFF',
+  'banded variant reaches later columns'
+)
+assert.equal(
+  rowsStyles.sheets.Clone?.cells.A4?.fill?.fgColor,
+  'FFD9E1F2',
+  'cycled variant continues banding past the template body'
+)
+assert.equal(
+  rowsStyles.sheets.Clone?.cells.A5?.alignment?.horizontal,
+  'right',
+  'inline rows style applies'
+)
+
+const badRowRef = await buildXlsx(
+  { sheets: [{ name: 'S', rows: [{ startCell: 'A1', values: [1], styleRef: 'nope' }] }] },
+  join(ROOT, 'bad-row-ref.xlsx')
+)
+assert.ok(
+  !badRowRef.ok && /unknown styleRef "nope"/.test(badRowRef.error),
+  'rows entry with unknown styleRef rejected'
+)
+
+// theme / indexed colors round-trip (write + read)
+const xlsxThemePath = join(ROOT, 'probe-xlsx-theme.xlsx')
+const builtTheme = await buildXlsx(
+  {
+    sheets: [
+      {
+        name: 'Theme',
+        cells: [
+          {
+            cell: 'A1',
+            value: 'T',
+            style: {
+              fill: { pattern: 'solid', fgColor: 'theme-4', bgColor: 'indexed-64' },
+              font: { color: 'indexed-10', bold: true }
+            }
+          },
+          {
+            cell: 'A2',
+            value: 'S',
+            style: { border: { bottom: { style: 'thin', color: 'theme-2@-0.15' } } }
+          },
+          { cell: 'B1', value: 'O', style: { fill: { pattern: 'solid', fgColor: '#4472C4' } } }
+        ]
+      }
+    ]
+  },
+  xlsxThemePath
+)
+if (!builtTheme.ok) throw new Error(`theme build failed: ${builtTheme.error}`)
+const themeStyles = await readStyles(xlsxThemePath, 'Theme', 'A1..B2')
+if (!themeStyles.ok) throw new Error(themeStyles.error)
+assert.equal(
+  themeStyles.sheets.Theme?.cells.A1?.fill?.fgColor,
+  'theme-4',
+  'theme color round-trips through write+read'
+)
+assert.equal(
+  themeStyles.sheets.Theme?.cells.A1?.font?.color,
+  'indexed-10',
+  'indexed color round-trips'
+)
+assert.equal(
+  themeStyles.sheets.Theme?.cells.A1?.fill?.bgColor,
+  'indexed-64',
+  'indexed-64 (system bg marker Excel writes as bgColor) round-trips'
+)
+assert.equal(
+  themeStyles.sheets.Theme?.cells.A2?.border?.bottom?.color,
+  'theme-2@-0.15',
+  'theme color with tint round-trips'
+)
+assert.equal(
+  themeStyles.sheets.Theme?.cells.B1?.fill?.fgColor,
+  'FF4472C4',
+  'hex color still normalizes to ARGB'
+)
+const badThemeIdx = await buildXlsx(
+  { sheets: [{ name: 'S', cells: [{ cell: 'A1', style: { fill: { fgColor: 'theme-99' } } }] }] },
+  join(ROOT, 'bad-theme.xlsx')
+)
+assert.ok(
+  !badThemeIdx.ok && /theme index must be 0-11/.test(badThemeIdx.error),
+  'out-of-range theme index rejected'
+)
+const badIndexedIdx = await buildXlsx(
+  { sheets: [{ name: 'S', cells: [{ cell: 'A1', style: { font: { color: 'indexed-99' } } }] }] },
+  join(ROOT, 'bad-indexed.xlsx')
+)
+assert.ok(
+  !badIndexedIdx.ok && /indexed index must be an integer 0-65/.test(badIndexedIdx.error),
+  'out-of-range indexed index rejected'
+)
+
+// clone-layout: keep template layout/styles, override one value
+const xlsxClonePath = join(ROOT, 'probe-xlsx-clone.xlsx')
+const builtClone = await buildXlsx(
+  { sheets: [{ name: 'Sales', cells: [{ cell: 'B2', value: 777 }] }] },
+  xlsxClonePath,
+  { path: xlsxProbePath, mode: 'clone-layout' }
+)
+assert.ok(builtClone.ok, `clone-layout build succeeds: ${builtClone.ok ? '' : builtClone.error}`)
+const cloneVals = await readValues(xlsxClonePath, 'Sales')
+assert.ok(
+  cloneVals.ok && cloneVals.sheets.Sales?.cells.B2 === 777,
+  'clone-layout overrides the value'
+)
+assert.ok(
+  cloneVals.ok && cloneVals.sheets.Sales?.cells.A2 === 'EMEA',
+  'clone-layout keeps untouched cells'
+)
+const cloneStyles = await readStyles(xlsxClonePath, 'Sales', 'A1..A1')
+assert.ok(
+  cloneStyles.ok && cloneStyles.sheets.Sales?.cells.A1?.font?.bold === true,
+  'clone-layout preserves template styling'
+)
+
+// style-source: fresh workbook borrows the template look onto matching addresses
+const xlsxStyledNewPath = join(ROOT, 'probe-xlsx-styled-new.xlsx')
+const builtStyledNew = await buildXlsx(
+  {
+    templateMode: 'style-source',
+    sheets: [{ name: 'Report', templateSheet: 'Sales', cells: [{ cell: 'A1', value: 'Hello' }] }]
+  },
+  xlsxStyledNewPath,
+  { path: xlsxProbePath }
+)
+assert.ok(
+  builtStyledNew.ok,
+  `style-source build succeeds: ${builtStyledNew.ok ? '' : builtStyledNew.error}`
+)
+const styledNewStyles = await readStyles(xlsxStyledNewPath, 'Report', 'A1..A1')
+assert.ok(
+  styledNewStyles.ok &&
+    styledNewStyles.sheets.Report?.cells.A1?.font?.bold === true &&
+    styledNewStyles.sheets.Report?.cells.A1?.fill?.fgColor === 'FF4472C4',
+  'style-source copies template cell styles to the new workbook'
+)
+const styledNewVals = await readValues(xlsxStyledNewPath, 'Report')
+assert.ok(
+  styledNewVals.ok && styledNewVals.sheets.Report?.cells.A1 === 'Hello',
+  'style-source keeps the new design values'
+)
+
+const badNoSheets = await buildXlsx({}, join(ROOT, 'bad-1.xlsx'))
+assert.ok(!badNoSheets.ok, 'design without sheets rejected')
+const badRef = await buildXlsx(
+  { sheets: [{ name: 'S', cells: [{ cell: 'A1', styleRef: 'nope' }] }] },
+  join(ROOT, 'bad-2.xlsx')
+)
+assert.ok(
+  !badRef.ok && /unknown styleRef/.test(badRef.error),
+  'unknown styleRef rejected with message'
+)
+const badFill = await buildXlsx(
+  { sheets: [{ name: 'S', cells: [{ cell: 'A1', style: { fill: { pattern: 'sparkly' } } }] }] },
+  join(ROOT, 'bad-3.xlsx')
+)
+assert.ok(!badFill.ok && /fill pattern/i.test(badFill.error), 'invalid fill pattern rejected')
+await fs.rm(join(ROOT, 'bad-1.xlsx'), { force: true })
+await fs.rm(join(ROOT, 'bad-3.xlsx'), { force: true })
+
+// ---- xlsx editXlsx: shared styleRef fill should not bleed ----
+const editSharedPath = join(ROOT, 'probe-xlsx-edit-shared.xlsx')
+const builtEditShared = await buildXlsx(
+  {
+    theme: { fontName: 'Calibri', fontSize: 11 },
+    sheets: [
+      {
+        name: 'Plan',
+        styles: {
+          inProgress: {
+            fill: { pattern: 'solid', fgColor: '#FFF2CC' },
+            alignment: { horizontal: 'center', vertical: 'middle' }
+          },
+          completed: {
+            fill: { pattern: 'solid', fgColor: '#C6EFCE' },
+            alignment: { horizontal: 'center', vertical: 'middle' }
+          }
+        },
+        cells: [
+          { cell: 'D18', value: 'In Progress', styleRef: 'inProgress' },
+          { cell: 'D19', value: 'Completed', styleRef: 'completed' },
+          { cell: 'D20', value: 'In Progress', styleRef: 'inProgress' }
+        ]
+      }
+    ]
+  },
+  editSharedPath
+)
+assert.ok(
+  builtEditShared.ok,
+  `edit-shared build: ${builtEditShared.ok ? '' : builtEditShared.error}`
+)
+
+const preEditStyles = await readStyles(editSharedPath, 'Plan', 'D18..D20')
+assert.ok(preEditStyles.ok, 'pre-edit readStyles ok')
+assert.equal(preEditStyles.sheets.Plan?.cells.D18?.fill?.fgColor, 'FFFFF2CC', 'D18 starts yellow')
+assert.equal(preEditStyles.sheets.Plan?.cells.D19?.fill?.fgColor, 'FFC6EFCE', 'D19 starts green')
+assert.equal(preEditStyles.sheets.Plan?.cells.D20?.fill?.fgColor, 'FFFFF2CC', 'D20 starts yellow')
+
+// edit only D18 fill — D20 must keep its fill
+const editRes = await editXlsx(editSharedPath, undefined, [
+  {
+    type: 'set_cells',
+    startCell: 'D18',
+    values: ['In Progress'],
+    styles: [
+      {
+        fill: { pattern: 'solid', fgColor: '#FF0000' },
+        alignment: { horizontal: 'center', vertical: 'middle' }
+      }
+    ]
+  }
+])
+assert.ok(editRes.ok, `editXlsx ok: ${editRes.ok ? '' : editRes.error}`)
+
+const postEditStyles = await readStyles(editSharedPath, 'Plan', 'D18..D20')
+assert.ok(postEditStyles.ok, 'post-edit readStyles ok')
+assert.equal(
+  postEditStyles.sheets.Plan?.cells.D18?.fill?.fgColor,
+  'FFFF0000',
+  'D18 fill changed to red'
+)
+assert.equal(
+  postEditStyles.sheets.Plan?.cells.D20?.fill?.fgColor,
+  'FFFFF2CC',
+  'D20 fill preserved (no bleed from D18 edit)'
+)
+assert.equal(postEditStyles.sheets.Plan?.cells.D19?.fill?.fgColor, 'FFC6EFCE', 'D19 fill unchanged')
+await fs.rm(editSharedPath, { force: true })
+
+// ---- xlsx tools: direct PTTool execution against the service ----
+const xlsxTools = createXlsxModule().tools
+function xlsxTool(name: string): (args: Record<string, unknown>, ctx: unknown) => Promise<string> {
+  const t = xlsxTools.find((x) => x.definition.function.name === name)
+  if (!t) throw new Error(`tool ${name} missing`)
+  return t.execute as (args: Record<string, unknown>, ctx: unknown) => Promise<string>
+}
+const xlsxToolCtx = {
+  service,
+  activeProject: PROJECT,
+  activeNoteId: null,
+  confirm: async () => false
+}
+
+await service.copyFileToProject(PROJECT, xlsxProbePath, 'budget.xlsx')
+
+const listedJson = JSON.parse(
+  await xlsxTool('excel_list_sheets')({ file: 'budget.xlsx' }, xlsxToolCtx)
+)
+assert.ok(
+  listedJson.ok === true && listedJson.file === 'budget.xlsx',
+  'excel_list_sheets resolves project file'
+)
+assert.ok(listedJson.sheets[0].name === 'Sales', 'excel_list_sheets returns worksheet entries')
+
+const missingJson = JSON.parse(
+  await xlsxTool('excel_read_values')({ file: 'nope.xlsx' }, xlsxToolCtx)
+)
+assert.ok(
+  missingJson.ok === false && /Available files/.test(missingJson.error),
+  'missing file error lists available files'
+)
+
+const toolVals = JSON.parse(
+  await xlsxTool('excel_read_values')(
+    { file: 'budget.xlsx', sheet: 'Sales', range: 'A1-B2' },
+    xlsxToolCtx
+  )
+)
+assert.ok(
+  toolVals.ok === true && toolVals.sheets.Sales.cells.B2 === 1234.5,
+  'excel_read_values reads by name + range'
+)
+
+const toolStyles = JSON.parse(
+  await xlsxTool('excel_read_styles')(
+    { file: 'budget.xlsx', sheet: '1', range: 'A1..A1' },
+    xlsxToolCtx
+  )
+)
+assert.ok(
+  toolStyles.ok === true && toolStyles.sheets.Sales.cells.A1.font.bold === true,
+  'excel_read_styles accepts 1-based sheet numbers'
+)
+
+const createdJson = JSON.parse(
+  await xlsxTool('create_xlsx_file')(
+    {
+      filename: 'q3-report',
+      design: JSON.stringify({
+        theme: { fontSize: 11 },
+        sheets: [
+          {
+            name: 'Q3',
+            styles: { h: { font: { bold: true }, fill: { fgColor: '#548235' } } },
+            cells: [
+              { cell: 'A1', value: 'Month', styleRef: 'h' },
+              { cell: 'B1', value: 'Amount', styleRef: 'h' },
+              { cell: 'A2', value: 'July' },
+              { cell: 'B2', value: 42 }
+            ],
+            columns: [18, 12]
+          }
+        ]
+      })
+    },
+    xlsxToolCtx
+  )
+)
+assert.ok(createdJson.ok === true, `create_xlsx_file tool works: ${JSON.stringify(createdJson)}`)
+assert.ok(createdJson.file === 'q3-report.xlsx', 'create_xlsx_file dedupes/slugs the file name')
+assert.ok(String(createdJson.path).includes('files'), 'output lands in the project files folder')
+const createdOnDisk = await fs.stat(createdJson.path)
+assert.ok(createdOnDisk.size > 1000, 'created xlsx exists on disk')
+const reread = await readValues(createdJson.path, 'Q3')
+assert.ok(reread.ok && reread.sheets.Q3?.cells.B2 === 42, 'created workbook re-reads correctly')
+
+const badDesignJson = JSON.parse(
+  await xlsxTool('create_xlsx_file')({ design: '{not json' }, xlsxToolCtx)
+)
+assert.ok(badDesignJson.ok === false, 'create_xlsx_file rejects malformed JSON design')
+
+// ---- full xlsx module run (scripted model → create_xlsx_file) ----
+const xlsxScript: { content?: string; tool_calls?: FakeToolCall[] }[] = [
+  {
+    tool_calls: [
+      step('x1', 'set_plan', {
+        steps: ['Inspect data source', 'Author the workbook', 'Generate the xlsx']
+      })
+    ]
+  },
+  { tool_calls: [step('x2', 'update_step', { index: 1, status: 'running' })] },
+  {
+    tool_calls: [
+      step('x3', 'update_step', { index: 1, status: 'done' }),
+      step('x4', 'update_step', { index: 2, status: 'running' })
+    ]
+  },
+  {
+    tool_calls: [
+      step('x5', 'update_step', { index: 2, status: 'done' }),
+      step('x6', 'update_step', { index: 3, status: 'running' })
+    ]
+  },
+  {
+    tool_calls: [
+      step('x7', 'update_step', { index: 3, status: 'done' }),
+      step('x8', 'create_xlsx_file', {
+        filename: 'team-budget',
+        design: JSON.stringify({
+          sheets: [
+            {
+              name: 'Budget',
+              styles: { head: { font: { bold: true }, fill: { fgColor: '#2F5597' } } },
+              cells: [
+                { cell: 'A1', value: 'Item', styleRef: 'head' },
+                { cell: 'B1', value: 'Cost', styleRef: 'head' },
+                { cell: 'A2', value: 'Licenses' },
+                { cell: 'B2', value: 1500, style: { format: '#,##0' } }
+              ],
+              columns: [24, 12],
+              freeze: 'A2'
+            }
+          ]
+        })
+      })
+    ]
+  },
+  { content: 'Done. Generated team-budget.xlsx.' }
+]
+const xlsxEventTypes: string[] = []
+const xlsxRegistry = new ModuleRegistry()
+xlsxRegistry.register(createXlsxModule())
+const xlsxManager = new ModuleRunManager(
+  service,
+  configStore,
+  xlsxRegistry,
+  (evt) => {
+    xlsxEventTypes.push(evt.type)
+  },
+  makeScriptedClient(xlsxScript)
+)
+const xlsxStarted = await xlsxManager.start(
+  PROJECT,
+  'xlsx',
+  'Team budget',
+  'Build the team budget workbook.'
+)
+assert.equal(xlsxStarted.ok, true, 'xlsx module run starts')
+const xlsxRunId = xlsxStarted.ok ? xlsxStarted.runId : ''
+await waitFor(async () => {
+  const runs = await xlsxManager.list(PROJECT)
+  return runs.some((r) => r.runId === xlsxRunId && (r.status === 'done' || r.status === 'failed'))
+})
+const xlsxRun = (await xlsxManager.list(PROJECT)).find((r) => r.runId === xlsxRunId)
+assert.ok(xlsxRun, 'xlsx run listed')
+assert.equal(xlsxRun!.status, 'done', 'xlsx run finished done')
+assert.ok(
+  xlsxRun!.steps.every((s) => s.status === 'done'),
+  'all xlsx steps done'
+)
+assert.ok(xlsxRun!.outputFile && xlsxRun!.outputFile.endsWith('.xlsx'), 'xlsx output file captured')
+assert.ok((await fs.stat(xlsxRun!.outputFile!)).size > 1000, 'xlsx output exists on disk')
+assert.ok(
+  xlsxEventTypes.includes('step') &&
+    xlsxEventTypes.includes('output') &&
+    xlsxEventTypes.includes('done'),
+  'xlsx events broadcast'
+)
+assert.ok(
+  (await service.listStoredModuleRuns(PROJECT)).some((s) => s.runId === xlsxRunId),
+  'xlsx run persisted'
+)
+assert.ok((await xlsxManager.clearHistory(PROJECT)) >= 1, 'xlsx run history cleared')
+assert.ok(
+  !(await xlsxManager.list(PROJECT)).some((r) => r.runId === xlsxRunId),
+  'finished xlsx run no longer listed'
+)
+
+// start_module guidance: the main agent passes references instead of pre-reading sources
+const { buildStartModuleTool } = await import('../src/main/modules/tool')
+const startModuleTool = buildStartModuleTool(xlsxManager, xlsxRegistry, [])
+assert.match(
+  startModuleTool.definition.function.description,
+  /instead of reading notes\/files\/schedules yourself/,
+  'start_module tells the main agent to pass references rather than pre-reading sources'
+)
+assert.match(
+  startModuleTool.definition.function.description,
+  /plan:<schedule id or name>/,
+  'start_module documents plan: references'
 )
 
 console.log('MODULES TESTS PASSED')

@@ -1,6 +1,6 @@
 {
   "name": "ptnotes",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Markdown notes + todo lists + AI assistant, organized by project",
   "main": "./out/main/index.js",
   "author": "",
@@ -30,6 +30,7 @@
     "chart.js": "^4.5.1",
     "cheerio": "^1.2.0",
     "docx": "^9.7.1",
+    "exceljs": "^4.4.0",
     "isomorphic-mermaid": "^0.1.1",
     "lucide-static": "^1.30.0",
     "openai": "^7.4.0",

@@ -20,6 +20,7 @@ import type { PTTool } from './ai/tools'
 import { createPptxModule } from './modules/pptx'
 import { createInfographicModule } from './modules/infographic'
 import { createDocxModule } from './modules/docx'
+import { createXlsxModule } from './modules/xlsx'
 import { createSubagentModule } from './modules/subagent'
 import { SettingsStore } from './settings'
 import { AIConfigStore } from './ai/config'
@@ -31,6 +32,7 @@ app.setName('PTNotes')
 let mainWindow: BrowserWindow | null = null
 let plannerEditActive = false
 let windowStateStore: WindowStateStore
+let moduleManager: ModuleRunManager | undefined
 
 function buildAppMenu(): Menu {
   const isMac = process.platform === 'darwin'
@@ -207,7 +209,8 @@ app.whenReady().then(async () => {
   moduleRegistry.register(createPptxModule())
   moduleRegistry.register(createInfographicModule())
   moduleRegistry.register(createDocxModule())
-  const moduleManager = new ModuleRunManager(
+  moduleRegistry.register(createXlsxModule())
+  moduleManager = new ModuleRunManager(
     service,
     configStore,
     moduleRegistry,
@@ -222,8 +225,8 @@ app.whenReady().then(async () => {
   const toolsProvider = async (): Promise<PTTool[]> => {
     const current = await settingsStore.load()
     return [
-      buildStartModuleTool(moduleManager, moduleRegistry, current.disabledModules ?? []),
-      buildWaitModulesTool(moduleManager)
+      buildStartModuleTool(moduleManager!, moduleRegistry, current.disabledModules ?? []),
+      buildWaitModulesTool(moduleManager!)
     ]
   }
 
@@ -237,7 +240,7 @@ app.whenReady().then(async () => {
   registerFilesIpc(service, registry, configStore)
   registerSettingsIpc(service, settingsStore)
   registerSkillsIpc(service)
-  registerModulesIpc(moduleManager, settingsStore, moduleRegistry)
+  registerModulesIpc(moduleManager!, settingsStore, moduleRegistry)
 
   windowStateStore = new WindowStateStore()
   const windowState = await windowStateStore.load()
@@ -255,6 +258,8 @@ app.on('window-all-closed', () => {
 })
 
 app.on('will-quit', () => {
+  // Mark any in-flight module runs as cancelled before the process exits.
+  void moduleManager?.cancelActive()
   shutdownChartRenderer()
   shutdownDiagramRenderer()
   shutdownInfographicRenderer()

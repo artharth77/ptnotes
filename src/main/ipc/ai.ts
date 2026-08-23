@@ -19,7 +19,7 @@ import type {
   ConfirmResponse
 } from '@shared/types'
 
-const CONFIRM_TIMEOUT_MS = 60_000
+const CONFIRM_TIMEOUT_MS = 180_000
 
 export interface AskResult {
   answers: AskAnswer[]

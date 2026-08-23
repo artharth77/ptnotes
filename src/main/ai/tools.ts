@@ -2,7 +2,7 @@ import type { PTNotesService } from '../service/PTNotesService'
 import { duckDuckGoSearch } from './search/duckduckgo'
 import { fetchWebPage } from './search/webFetch'
 import { slugify } from '@shared/slug'
-import { readFileAsText } from './reader'
+import { readFileAsText, parseWorkbookQuery } from './reader'
 import {
   applyDateRule,
   computeDuration,
@@ -203,12 +203,31 @@ function scheduleSummary(
   }
 }
 
-type TaskView = ScheduleTask & { taskNo: string }
+type TaskView = Omit<ScheduleTask, 'percentComplete' | 'children'> & {
+  taskNo: string
+  percentComplete: string
+  children: TaskView[]
+}
+
+function slimTasks(tasks: TaskView[]): Record<string, unknown>[] {
+  return tasks.map(({ owner, note, children, ...rest }) => {
+    const slim: Record<string, unknown> = rest
+    if (owner) slim.owner = owner
+    if (note) slim.note = note
+    if (children?.length) slim.children = slimTasks(children)
+    return slim
+  })
+}
 
 function withTaskNo(tasks: ScheduleTask[], parentNo: string | null): TaskView[] {
   return tasks.map((t, i) => {
     const no = deriveTaskNo(parentNo, i)
-    return { ...t, taskNo: no, children: withTaskNo(t.children, no) }
+    return {
+      ...t,
+      percentComplete: `${t.percentComplete}%`,
+      taskNo: no,
+      children: withTaskNo(t.children, no)
+    }
   })
 }
 
@@ -381,7 +400,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'read_file',
         description:
-          'Read the text content of a project file (PDF or any text file such as markdown, plain text, JSON, logs or YAML; files live in the project files folder, referenced as `file:<name>`). Extracts the text locally and returns it, so the user does not need to drag and drop the file again.',
+          'Read the text content of a project file (PDF, Excel workbooks converted to JSON/CSV, or any text file such as markdown, plain text, JSON, logs or YAML; files live in the project files folder, referenced as `file:<name>`). Excel workbooks can be filtered to a single worksheet with the `query` parameter. Extracts the text locally and returns it, so the user does not need to drag and drop the file again.',
         parameters: {
           type: 'object',
           properties: {
@@ -391,7 +410,18 @@ export const tools: PTTool[] = [
             },
             name: {
               type: 'string',
-              description: 'Name of the file, e.g. report.pdf, notes.md, data.json or app.log'
+              description:
+                'Name of the file, e.g. report.pdf, data.xlsx, notes.md, data.json or app.log'
+            },
+            format: {
+              type: 'string',
+              enum: ['json', 'csv'],
+              description: 'Format for Excel workbooks. Defaults to "json".'
+            },
+            query: {
+              type: 'string',
+              description:
+                'Excel workbooks only, formatted as URL-style vars "var=value&var=value" (values may be URL-encoded). Supported vars: workspace = worksheet name or 1-based worksheet number, e.g. "workspace=Sales" or "workspace=2"; list=workspace returns a JSON list of all worksheets with their 1-based index instead of content. Only supported when reading .xlsx/.xlsm files.'
             }
           },
           required: ['name']
@@ -413,7 +443,14 @@ export const tools: PTTool[] = [
         })
       }
       try {
-        const { text, pageCount, charCount, truncated } = await readFileAsText(path)
+        const format = (args.format as 'json' | 'csv') ?? 'json'
+        const rawQuery = String(args.query ?? '').trim()
+        const excelQuery = rawQuery ? parseWorkbookQuery(rawQuery) : undefined
+        const { text, pageCount, charCount, truncated } = await readFileAsText(
+          path,
+          format,
+          excelQuery
+        )
         return JSON.stringify({
           ok: true,
           project,
@@ -1115,7 +1152,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'read_schedule',
         description:
-          'Read a full schedule (its task tree with status, owner, durations, plan/actual dates, %complete, notes). Each task carries a taskNo outline number (1, 1.1, 1.2, 2, ...) matching the editor, including children. Parent task values are rolled up from children. Match the schedule by id.',
+          'Read a full schedule (its task tree with status, owner, durations, plan/actual dates, %complete, notes). Each task carries a taskNo outline number (1, 1.1, 1.2, 2, ...) matching the editor, including children. Parent task values are rolled up from children. Match the schedule by id. Empty owner/note fields and childless children arrays are omitted from the output.',
         parameters: {
           type: 'object',
           properties: {
@@ -1137,7 +1174,7 @@ export const tools: PTTool[] = [
       try {
         const { meta, schedule } = await requireSchedule(ctx, project, String(args.schedule ?? ''))
         const calendar = await ctx.service.readCalendar(project)
-        const tasks = withTaskNo(rollupScheduleTasks(schedule.tasks, calendar), null)
+        const tasks = slimTasks(withTaskNo(rollupScheduleTasks(schedule.tasks, calendar), null))
         return JSON.stringify({
           ok: true,
           project,

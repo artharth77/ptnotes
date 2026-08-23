@@ -314,17 +314,54 @@ function makeIsolatedScriptedClient(
 ): (cfg: AIProviderConfig) => OpenAI {
   return () => {
     let i = 0
+    const chunks = (entry: { content?: string; tool_calls?: FakeToolCall[] }): unknown[] => {
+      const out: unknown[] = []
+      if (entry.tool_calls) {
+        for (const tc of entry.tool_calls) {
+          out.push({
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  role: 'assistant',
+                  tool_calls: [
+                    {
+                      index: out.length,
+                      id: tc.id,
+                      type: 'function',
+                      function: { name: tc.function.name, arguments: tc.function.arguments }
+                    }
+                  ]
+                },
+                finish_reason: null
+              }
+            ]
+          })
+        }
+        out.push({ choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] })
+      } else {
+        out.push({
+          choices: [
+            {
+              index: 0,
+              delta: { role: 'assistant', content: entry.content ?? '' },
+              finish_reason: null
+            }
+          ]
+        })
+        out.push({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })
+      }
+      return out
+    }
     return {
       chat: {
         completions: {
           create: async () => {
             const entry = scriptArr[i++] ?? scriptArr[scriptArr.length - 1]!
-            const message: Record<string, unknown> = {
-              role: 'assistant',
-              content: entry.content ?? ''
-            }
-            if (entry.tool_calls) message.tool_calls = entry.tool_calls
-            return { choices: [{ message }] }
+            const list = chunks(entry)
+            return (async function* () {
+              for (const c of list) yield c
+            })()
           }
         }
       }

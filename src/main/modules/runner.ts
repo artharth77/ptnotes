@@ -18,6 +18,13 @@ import type { RegisteredModule } from './types'
 
 const MAX_ITERATIONS = 30
 const MAX_FINISH_HINTS = 2
+const MAX_STREAM_RETRIES = 3
+const STREAM_RETRY_DELAY_MS = 7000
+
+function isRetryableStreamError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err)
+  return msg.includes('stream idle timeout') || msg.includes('APIConnectionError')
+}
 
 type Role = 'system' | 'user' | 'assistant' | 'tool'
 
@@ -93,6 +100,8 @@ export interface ModuleNotifyEvent {
   error?: string
   summary?: string
   result?: string
+  /** Full updated transcript, attached when `type === 'chat'`. */
+  chat?: ModuleChatMessage[]
 }
 
 export interface ModuleRunnerOptions {
@@ -131,6 +140,13 @@ You operate inside a project. The currently active project is "${activeProject}"
 
 Your task is described in the user message below. Work autonomously and produce the requested file.
 
+SOURCE REFERENCES:
+The task may reference sources inline — resolve them yourself with your own tools before doing the work:
+- note:<notename> → call read_note
+- file:<filename> → call read_file (Excel workbooks support the workspace= query)
+- plan:<schedule id or name> (also written schedule:<...>) → call list_schedules to resolve the id when needed, then read_schedule
+Never ask anyone for the content of a referenced source; fetch it with these tools. If a referenced source does not exist, say so in the final summary instead of inventing its content.
+
 MANDATORY WORKFLOW:
 1. Your FIRST action MUST be a call to the set_plan tool listing every step you will perform (2 to 10 steps). Do not skip this.
 2. Then work through each step, calling update_step with the 1-based step index to mark it "running" when you begin and "done" when you finish. If a step fails, mark it "failed" (with a short detail) and either recover or stop with a clear explanation.
@@ -157,6 +173,8 @@ export class ModuleRunner {
   private planned = false
   private plannedHintSent = false
   private finishHintsSent = 0
+  /** Assistant turn being streamed, shown live in the history overlay until pushed. */
+  private partial: { id: string; content: string } | null = null
 
   constructor(opts: ModuleRunnerOptions) {
     this.service = opts.service
@@ -249,6 +267,7 @@ export class ModuleRunner {
     this.trace.append({ role: 'system', ts: Date.now(), content: systemContent })
     this.trace.append({ role: 'user', ts: Date.now(), content: this.run.prompt })
     this.touch({ type: 'status' })
+    this.notifyChat()
     this.persistChat()
 
     const client = this.clientFn(this.config)
@@ -285,7 +304,7 @@ export class ModuleRunner {
     return [...base, ...this.module.tools, ...framework]
   }
 
-  /** Run one completion turn. Returns 'done' when the run produced a final answer. */
+  /** Run one completion turn (streaming). Returns 'done' when the run produced a final answer. */
   private async runTurn(client: OpenAI): Promise<'done' | 'continue'> {
     const apiMessages = this.messages.map((m) => {
       const base = { role: m.role, content: m.content }
@@ -295,43 +314,116 @@ export class ModuleRunner {
     }) as OpenAI.Chat.ChatCompletionMessageParam[]
 
     const tools = this.toolList()
-    const startTs = Date.now()
-    this.abortController = new AbortController()
-    const signal = this.abortController.signal
 
-    let reply: OpenAI.Chat.ChatCompletion
-    try {
-      reply = await client.chat.completions.create(
-        {
+    let content = ''
+    let toolCalls: {
+      index: number
+      id?: string
+      name?: string
+      args: string
+    }[] = []
+    let finishReason: string | undefined
+    let usage: unknown
+    const partialId = `m${this.messages.length}`
+    let startTs = Date.now()
+
+    for (let attempt = 0; attempt <= MAX_STREAM_RETRIES; attempt++) {
+      if (attempt > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, STREAM_RETRY_DELAY_MS))
+        if (this.stopped) return 'done'
+        content = ''
+        toolCalls = []
+        finishReason = undefined
+        usage = undefined
+        this.partial = null
+      }
+
+      startTs = Date.now()
+      this.abortController = new AbortController()
+      const signal = this.abortController.signal
+
+      let stream: AsyncIterable<OpenAI.Chat.ChatCompletionChunk>
+      try {
+        stream = await client.chat.completions.create(
+          {
+            model: this.config.model,
+            messages: apiMessages,
+            tools: tools.map((t) => t.definition),
+            stream: true,
+            stream_options: { include_usage: true }
+          },
+          { signal }
+        )
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        if (isRetryableStreamError(err) && attempt < MAX_STREAM_RETRIES) continue
+        this.trace.append({
+          role: 'assistant',
+          ts: Date.now(),
+          durationMs: Date.now() - startTs,
           model: this.config.model,
-          messages: apiMessages,
-          tools: tools.map((t) => t.definition),
-          stream: false
-        },
-        { signal }
-      )
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      this.trace.append({
-        role: 'assistant',
-        ts: Date.now(),
-        durationMs: Date.now() - startTs,
-        model: this.config.model,
-        baseUrl: this.config.baseUrl,
-        endpoint: 'chat.completions',
-        error: message
-      })
-      if (this.stopped) return 'done'
-      throw err
+          baseUrl: this.config.baseUrl,
+          endpoint: 'chat.completions',
+          error: message
+        })
+        if (this.stopped) return 'done'
+        throw err
+      }
+
+      try {
+        for await (const chunk of stream) {
+          if (this.stopped) break
+          if (chunk.usage) usage = chunk.usage
+          const finish = chunk.choices?.[0]?.finish_reason
+          if (finish) finishReason = finish
+          const delta = chunk.choices?.[0]?.delta
+          if (!delta) continue
+          if (delta.content) {
+            content += delta.content
+            this.partial = { id: partialId, content }
+            this.notifyChat()
+          }
+          if (delta.tool_calls) {
+            for (const tc of delta.tool_calls) {
+              if (!tc) continue
+              const idx = tc.index ?? toolCalls.length
+              const entry = (toolCalls[idx] ??= { index: idx, args: '' })
+              if (tc.id) entry.id = tc.id
+              if (tc.function?.name) entry.name = tc.function.name
+              if (tc.function?.arguments) entry.args += tc.function.arguments
+            }
+          }
+        }
+        this.partial = null
+      } catch (err) {
+        this.partial = null
+        const message = err instanceof Error ? err.message : String(err)
+        if (isRetryableStreamError(err) && attempt < MAX_STREAM_RETRIES) continue
+        this.trace.append({
+          role: 'assistant',
+          ts: Date.now(),
+          durationMs: Date.now() - startTs,
+          model: this.config.model,
+          baseUrl: this.config.baseUrl,
+          endpoint: 'chat.completions',
+          ...(content ? { content } : {}),
+          error: message
+        })
+        if (this.stopped) return 'done'
+        throw err
+      }
+
+      break // success — exit retry loop
     }
     if (this.stopped) return 'done'
 
-    const message = reply.choices?.[0]?.message
-    const content = message?.content ?? ''
-    const called = (message?.tool_calls ?? []).filter(
-      (tc): tc is OpenAI.Chat.ChatCompletionMessageFunctionToolCall =>
-        'function' in tc && typeof tc.function?.name === 'string'
-    )
+    const called = toolCalls
+      .filter((tc) => tc.name)
+      .map((tc): OpenAI.Chat.ChatCompletionMessageFunctionToolCall => ({
+        id: tc.id ?? `call_${tc.index}`,
+        type: 'function',
+        function: { name: tc.name!, arguments: tc.args || '{}' }
+      }))
     const tracedToolCalls: AiTraceToolCall[] = called.map((tc) => ({
       id: tc.id,
       name: tc.function.name,
@@ -347,22 +439,24 @@ export class ModuleRunner {
       endpoint: 'chat.completions',
       content,
       ...(tracedToolCalls.length > 0 ? { toolCalls: tracedToolCalls } : {}),
-      ...(reply.choices?.[0]?.finish_reason
-        ? { finishReason: reply.choices[0].finish_reason }
-        : {}),
-      ...(reply.usage ? { usage: reply.usage } : {})
+      ...(finishReason ? { finishReason } : {}),
+      ...(usage !== undefined ? { usage } : {}),
+      ...(this.stopped ? { error: 'stopped' } : {})
     })
 
     if (called.length === 0) {
       // The model wants to finish with a text response.
+      const planHint =
+        'You must not finish yet. Your FIRST action must be the set_plan tool call listing the steps you will take for this task. Call set_plan now, then work through each step.'
+      const submitHint =
+        'You must not finish yet. The main chat agent is waiting for your result. Call the submit_result tool with the requested result now, then output your final summary.'
+      const outputHint = `You must not finish yet. The deliverable file for this task has not been created. Call the ${this.module.outputTool} tool with the completed design now, then output your final summary.`
       if (!this.planned && !this.plannedHintSent) {
         this.plannedHintSent = true
         this.push({ role: 'assistant', content: content || '' })
-        this.push({
-          role: 'user',
-          content:
-            'You must not finish yet. Your FIRST action must be the set_plan tool call listing the steps you will take for this task. Call set_plan now, then work through each step.'
-        })
+        this.push({ role: 'user', content: planHint })
+        this.trace.append({ role: 'user', ts: Date.now(), content: planHint })
+        this.notifyChat()
         return 'continue'
       }
       if (!this.module.outputTool || this.run.outputFile) {
@@ -371,11 +465,9 @@ export class ModuleRunner {
         if (this.run.expectResult && !this.run.result && this.finishHintsSent < MAX_FINISH_HINTS) {
           this.finishHintsSent++
           this.push({ role: 'assistant', content: content || '' })
-          this.push({
-            role: 'user',
-            content:
-              'You must not finish yet. The main chat agent is waiting for your result. Call the submit_result tool with the requested result now, then output your final summary.'
-          })
+          this.push({ role: 'user', content: submitHint })
+          this.trace.append({ role: 'user', ts: Date.now(), content: submitHint })
+          this.notifyChat()
           return 'continue'
         }
         return this.finish(content)
@@ -384,10 +476,9 @@ export class ModuleRunner {
       if (this.finishHintsSent < MAX_FINISH_HINTS) {
         this.finishHintsSent++
         this.push({ role: 'assistant', content: content || '' })
-        this.push({
-          role: 'user',
-          content: `You must not finish yet. The deliverable file for this task has not been created. Call the ${this.module.outputTool} tool with the completed design now, then output your final summary.`
-        })
+        this.push({ role: 'user', content: outputHint })
+        this.trace.append({ role: 'user', ts: Date.now(), content: outputHint })
+        this.notifyChat()
         return 'continue'
       }
       this.fail(
@@ -408,15 +499,18 @@ export class ModuleRunner {
             'Your first tool call must be set_plan (with the 1-based steps list). Call set_plan now.'
         })
       })
+      this.notifyChat()
       return 'continue'
     }
 
     this.push({ role: 'assistant', content: content || '', tool_calls: called })
+    this.notifyChat()
     for (const call of called ?? []) {
       if (this.stopped) break
       const toolTs = Date.now()
       const result = await this.executeTool(call, tools)
       this.push({ role: 'tool', tool_call_id: call.id, content: result })
+      this.notifyChat()
       this.trace.append({
         role: 'tool',
         ts: Date.now(),
@@ -570,6 +664,27 @@ export class ModuleRunner {
   private touch(evt: ModuleNotifyEvent): void {
     this.run.updatedAt = Date.now()
     this.notify(this.run, evt)
+  }
+
+  /** Broadcast the current transcript so the history overlay can update live. */
+  private notifyChat(): void {
+    this.notify(this.run, { type: 'chat', chat: this.transcriptWithPartial() })
+  }
+
+  /** Transcript with an in-progress assistant turn appended so it streams live. */
+  private transcriptWithPartial(): ModuleChatMessage[] {
+    const chat = toTranscript(this.messages, this.messageTs)
+    const partial = this.partial
+    if (!partial) return chat
+    const last = chat[chat.length - 1]
+    // Replace the trailing placeholder (if any) with the accumulated partial content.
+    if (last && last.role === 'assistant' && last.id === partial.id) {
+      return [...chat.slice(0, -1), { ...last, content: partial.content }]
+    }
+    return [
+      ...chat,
+      { id: partial.id, role: 'assistant', content: partial.content, ts: Date.now() }
+    ]
   }
 
   applyResult(resultRaw: unknown): string {

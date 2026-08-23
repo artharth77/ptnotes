@@ -389,6 +389,7 @@ assert.equal(design.children.length, 3, 'Wireframes + Spec (addAfter) + Estimate
 assert.equal(design.planStart, '2024-01-01')
 assert.equal(design.planEnd, '2024-01-02', 'parent planEnd rolls up to max child end')
 assert.equal(design.duration, 2)
+assert.equal(design.percentComplete, '0%', 'percentComplete is a percent string')
 
 // taskNo outline numbering matches the editor (1, 1.1, 1.2, 2, ...)
 assert.equal(design.taskNo, '1')

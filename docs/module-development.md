@@ -77,7 +77,9 @@ Stable slug, never changes once shipped. If you change an id, existing run histo
 This text is embedded verbatim into the `start_module` tool description presented to the **main** chat agent. Write it so the main agent knows:
 
 - when it should use this module (keywords / user intents),
-- what kind of **detailed prompt** it must author (goal, audience, outline/spec, `note:<name>` / `file:<name>` references),
+- what kind of **detailed prompt** it must author (goal, audience, outline/spec, and inline
+  source references — `note:<name>`, `file:<name>`, `plan:<schedule id or name>` — that the
+  module subagent resolves itself with its own read tools),
 - roughly what the subagent will do.
 
 Be concrete and thorough — the main agent uses this to write the one-shot prompt that drives the whole run.

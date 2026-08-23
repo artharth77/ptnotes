@@ -155,14 +155,34 @@ export class ModuleRunManager {
     this.active.get(runId)?.stop()
   }
 
-  /** Re-run a previously failed module run, reusing its stored prompt. */
+  /**
+   * Stop and mark every live non-terminal run as cancelled, persisting the final
+   * snapshot. Used on app shutdown so runs are not left as stale `running` entries.
+   */
+  async cancelActive(project?: string): Promise<void> {
+    for (const runner of [...this.active.values()]) {
+      const run = runner.snapshot
+      if (!run) continue
+      if (project && run.project !== project) continue
+      if (ModuleRunManager.terminalStatuses.has(run.status)) continue
+      runner.stop()
+      run.status = 'cancelled'
+      run.finishedAt = Date.now()
+      run.updatedAt = Date.now()
+      await this.service.writeModuleRun(run.project, run.runId, run).catch(() => {})
+      await this.service.writeModuleChat(run.project, run.runId, runner.transcript).catch(() => {})
+      this.emit({ runId: run.runId, project: run.project, type: 'status', run })
+    }
+  }
+
+  /** Re-run a previously failed or cancelled module run, reusing its stored prompt. */
   async retry(project: string, runId: string): Promise<ModuleStartResult> {
     const run = (await this.list(project)).find((r) => r.runId === runId)
     if (!run) {
       return { ok: false, error: 'Module run not found.' }
     }
-    if (run.status !== 'failed') {
-      return { ok: false, error: 'Only failed module runs can be retried.' }
+    if (!['failed', 'cancelled'].includes(run.status)) {
+      return { ok: false, error: 'Only failed or cancelled module runs can be retried.' }
     }
     const def = this.registry.get(run.module.id)
     if (!def) {
@@ -266,6 +286,17 @@ export class ModuleRunManager {
     for (const runner of this.active.values()) {
       const run = runner.snapshot
       if (run && run.project === project) byId.set(run.runId, run)
+    }
+    // A persisted non-terminal run with no live runner was interrupted (crash or quit);
+    // mark it cancelled so it is not left as a phantom "running" entry in history.
+    for (const [id, run] of [...byId]) {
+      if (run.project !== project) continue
+      if (['queued', 'planning', 'running'].includes(run.status) && !this.active.has(id)) {
+        run.status = 'cancelled'
+        run.finishedAt = Date.now()
+        run.updatedAt = Date.now()
+        await this.service.writeModuleRun(project, id, run).catch(() => {})
+      }
     }
     return [...byId.values()].sort((a, b) => b.updatedAt - a.updatedAt)
   }
@@ -473,7 +504,8 @@ export class ModuleRunManager {
       ...(evt.outputFiles ? { outputFiles: evt.outputFiles } : {}),
       ...(evt.error ? { error: evt.error } : {}),
       ...(evt.summary ? { summary: evt.summary } : {}),
-      ...(evt.result ? { result: evt.result } : {})
+      ...(evt.result ? { result: evt.result } : {}),
+      ...(evt.chat ? { chat: evt.chat } : {})
     })
     if (ModuleRunManager.terminalStatuses.has(run.status)) {
       this.fireWaiters(run.runId)

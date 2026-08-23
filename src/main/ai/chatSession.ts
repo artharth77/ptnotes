@@ -29,6 +29,13 @@ export type StreamEmitter = (event: ChatStreamEvent) => void
 export type ToolsProvider = () => Promise<PTTool[]>
 
 const MAX_TOOL_ITERATIONS = 12
+const MAX_STREAM_RETRIES = 3
+const STREAM_RETRY_DELAY_MS = 7000
+
+function isRetryableStreamError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err)
+  return msg.includes('stream idle timeout') || msg.includes('APIConnectionError')
+}
 
 function toToolArgs(args: string | undefined): Record<string, unknown> {
   if (!args) return {}
@@ -62,12 +69,12 @@ Guidelines:
 - When the user asks for up-to-date or factual information, use web_search (and web_fetch for detail) instead of relying only on your own knowledge.
 - After researching, if the user wants it saved, write a well-structured markdown note via create_note/update_note.
 - If the user references a note as \`note:<notename>\` (for example \`note:meeting-notes\`), call the read_note tool to read that specific note before responding.
-- If the user references a project file as \`file:<filename>\` (for example \`file:report.pdf\`, \`file:notes.md\`, \`file:data.json\` or \`file:readme.txt\`), call the read_file tool to read that file before responding.
+- If the user references a project file as \`file:<filename>\` (for example \`file:report.pdf\`, \`file:data.xlsx\`, \`file:notes.md\`, \`file:data.json\` or \`file:readme.txt\`), call the read_file tool to read that file before responding.
 - If the user asks you to use a skill by name (for example \`Use the skill "name": …\`, optionally with the scope in parentheses), call the read_skill tool to load that skill before applying it.
 - If a skill loaded via read_skill references a sibling file (for example \`[FORMAT.md](./FORMAT.md)\` or \`[DOC.md](./doc/DOC.md)\`), call the read_skill_file tool (passing scope, skill and the relative file path) to load that file when you need it.
 - When the user asks you to find notes about a topic, call the search_notes tool.
 - When you need user input — a choice, a detail, or confirmation — before you can proceed, call ask_user with your questions. You may ask several questions in a single call; the user answers them all at once. Only ask when genuinely needed.
-- When a task can be split into parallel deliverables, delegate each part to a background module: call start_module for each (passing the \`expect\` argument to specify the result payload the module must submit back), then call wait_modules with all the returned runIds and continue with the results. Do NOT call wait_modules when you do not need the module output.
+- When a task can be split into parallel deliverables, delegate each part to a background module: call start_module for each (passing the \`expect\` argument to specify the result payload the module must submit back), then call wait_modules with all the returned runIds and continue with the results. Do NOT call wait_modules when you do not need the module output. When delegating, pass source material as inline references in the prompt — \`note:<notename>\`, \`file:<filename>\`, \`plan:<schedule id or name>\` — instead of reading notes/files/schedules yourself first; the module resolves them itself.
 - Quote the snippet returned by search_notes exactly as given; never paraphrase, reword, or summarize it.
 - Whenever you mention an existing note by name in your reply, always link to it: [note name](note:note name). The link opens the note, so never return a bare note name without a link.
 - Whenever you mention an existing todo from the project's todo list by its text in your reply, always link to it: [todo text](todo:todo text). Do NOT link tasks that belong to a schedule/plan — plan tasks have no link, so just mention their text plainly.
@@ -153,6 +160,7 @@ export class ChatSession {
       for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
         if (this.stopped) break
         const result = await this.runTurn(client, messageId)
+        await this.trace?.flush()
         if (result === 'done') break
       }
     } catch (err) {
@@ -226,82 +234,94 @@ export class ChatSession {
     this.traceUser(cleanPrompt, { filename, file_id: filePart.file_id })
 
     try {
-      const stream = await client.responses.create(
-        {
-          model: this.config.model,
-          instructions,
-          input: [
-            {
-              role: 'user',
-              content: [{ type: 'input_text', text: cleanPrompt }, filePart]
-            }
-          ],
-          stream: true
-        },
-        { signal }
-      )
-
-      let content = ''
-      let started = false
-      let failedMessage: string | null = null
-      let usage: unknown
-      for await (const evt of stream) {
-        if (this.stopped) break
-        if (evt.type === 'response.output_text.delta') {
-          if (!started) {
-            started = true
-            this.emit({ type: 'message-start', messageId })
-          }
-          content += evt.delta
-          this.emit({ type: 'content', messageId, content: evt.delta })
+      for (let attempt = 0; attempt <= MAX_STREAM_RETRIES; attempt++) {
+        if (attempt > 0) {
+          await new Promise<void>((resolve) => setTimeout(resolve, STREAM_RETRY_DELAY_MS))
+          if (this.stopped) break
         }
-        if (evt.type === 'response.failed') {
-          const msg = evt.response.error?.message
-          failedMessage = msg || 'The provider rejected the PDF upload.'
+
+        try {
+          const stream = await client.responses.create(
+            {
+              model: this.config.model,
+              instructions,
+              input: [
+                {
+                  role: 'user',
+                  content: [{ type: 'input_text', text: cleanPrompt }, filePart]
+                }
+              ],
+              stream: true
+            },
+            { signal }
+          )
+
+          let content = ''
+          let started = false
+          let failedMessage: string | null = null
+          let usage: unknown
+          for await (const evt of stream) {
+            if (this.stopped) break
+            if (evt.type === 'response.output_text.delta') {
+              if (!started) {
+                started = true
+                this.emit({ type: 'message-start', messageId })
+              }
+              content += evt.delta
+              this.emit({ type: 'content', messageId, content: evt.delta })
+            }
+            if (evt.type === 'response.failed') {
+              const msg = evt.response.error?.message
+              failedMessage = msg || 'The provider rejected the PDF upload.'
+              this.emit({
+                type: 'error',
+                error: `${failedMessage} — try Extract text mode instead.`
+              })
+              break
+            }
+            if (evt.type === 'response.completed') {
+              usage = evt.response?.usage
+              break
+            }
+          }
+          this.trace?.append({
+            role: 'assistant',
+            ts: Date.now(),
+            durationMs: Date.now() - startTs,
+            model: this.config.model,
+            baseUrl: this.config.baseUrl,
+            endpoint: 'responses',
+            file: { filename, file_id: filePart.file_id },
+            ...(content ? { content } : {}),
+            ...(failedMessage ? { error: failedMessage } : {}),
+            ...(this.stopped && !failedMessage ? { error: 'stopped' } : {}),
+            ...(usage !== undefined ? { usage } : {})
+          })
+          if (this.stopped || failedMessage) return
+          this.messages.push({ role: 'assistant', content: content || '…' })
+          this.emit({ type: 'message-end', messageId, ...(usage !== undefined ? { usage } : {}) })
+          break // success — exit retry loop
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          if (isRetryableStreamError(err) && attempt < MAX_STREAM_RETRIES) continue
+          this.trace?.append({
+            role: 'assistant',
+            ts: Date.now(),
+            durationMs: Date.now() - startTs,
+            model: this.config.model,
+            baseUrl: this.config.baseUrl,
+            endpoint: 'responses',
+            file: { filename, file_id: filePart.file_id },
+            error: message
+          })
+          if (this.stopped) return
           this.emit({
             type: 'error',
-            error: `${failedMessage} — try Extract text mode instead.`
+            error: `${message} — try Extract text mode instead.`
           })
-          break
-        }
-        if (evt.type === 'response.completed') {
-          usage = evt.response?.usage
-          break
+          return
         }
       }
-      this.trace?.append({
-        role: 'assistant',
-        ts: Date.now(),
-        durationMs: Date.now() - startTs,
-        model: this.config.model,
-        baseUrl: this.config.baseUrl,
-        endpoint: 'responses',
-        file: { filename, file_id: filePart.file_id },
-        ...(content ? { content } : {}),
-        ...(failedMessage ? { error: failedMessage } : {}),
-        ...(this.stopped && !failedMessage ? { error: 'stopped' } : {}),
-        ...(usage !== undefined ? { usage } : {})
-      })
-      if (this.stopped || failedMessage) return
-      this.messages.push({ role: 'assistant', content: content || '…' })
-      this.emit({ type: 'message-end', messageId, ...(usage !== undefined ? { usage } : {}) })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      this.trace?.append({
-        role: 'assistant',
-        ts: Date.now(),
-        durationMs: Date.now() - startTs,
-        model: this.config.model,
-        baseUrl: this.config.baseUrl,
-        endpoint: 'responses',
-        file: { filename, file_id: filePart.file_id },
-        error: message
-      })
-      if (this.stopped) return
-      this.emit({
-        type: 'error',
-        error: `${message} — try Extract text mode instead.`
-      })
     } finally {
       await this.trace?.flush()
       this.trace = undefined
@@ -408,35 +428,9 @@ export class ChatSession {
     }) as OpenAI.Chat.ChatCompletionMessageParam[]
 
     const toolList = await this.currentTools()
-    const startTs = Date.now()
-
-    this.abortController = new AbortController()
-    const signal = this.abortController.signal
-
-    let stream: AsyncIterable<OpenAI.Chat.ChatCompletionChunk>
-    try {
-      stream = await client.chat.completions.create(
-        {
-          model: this.config.model,
-          messages: apiMessages,
-          tools: toolList.map((t) => t.definition),
-          stream: true,
-          stream_options: { include_usage: true }
-        },
-        { signal }
-      )
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      this.traceAssistant({
-        durationMs: Date.now() - startTs,
-        error: message
-      })
-      if (this.stopped) return 'done'
-      throw err
-    }
 
     let content = ''
-    const toolCalls: {
+    let toolCalls: {
       index: number
       id?: string
       name?: string
@@ -444,65 +438,108 @@ export class ChatSession {
     }[] = []
     let finishReason: string | undefined
     let usage: unknown
-
-    let firstChunk = true
-    let reasoningOpen = false
     let reasoning = ''
-    try {
-      for await (const chunk of stream) {
-        if (chunk.usage) usage = chunk.usage
-        const finish = chunk.choices?.[0]?.finish_reason
-        if (finish) finishReason = finish
-        if (this.stopped) break
-        const delta = chunk.choices?.[0]?.delta as
-          | (OpenAI.Chat.ChatCompletionChunk.Choice.Delta & { reasoning_content?: string })
-          | undefined
-        if (!delta) continue
-        if (firstChunk) {
-          firstChunk = false
-          this.emit({ type: 'message-start', messageId })
-        }
-        if (delta.reasoning_content) {
-          if (!reasoningOpen) {
-            reasoningOpen = true
-            this.emit({ type: 'content', messageId, content: '<think>' })
-          }
-          reasoning += delta.reasoning_content
-          this.emit({ type: 'content', messageId, content: delta.reasoning_content })
-        }
-        if (delta.content) {
-          if (reasoningOpen) {
-            reasoningOpen = false
-            this.emit({ type: 'content', messageId, content: '</think>\n\n' })
-          }
-          content += delta.content
-          this.emit({ type: 'content', messageId, content: delta.content })
-        }
-        if (delta.tool_calls) {
-          for (const tc of delta.tool_calls) {
-            if (!tc) continue
-            const idx = tc.index ?? toolCalls.length
-            const entry = (toolCalls[idx] ??= { index: idx, args: '' })
-            if (tc.id) entry.id = tc.id
-            if (tc.function?.name) entry.name = tc.function.name
-            if (tc.function?.arguments) entry.args += tc.function.arguments
-          }
-        }
+    let startTs = Date.now()
+
+    for (let attempt = 0; attempt <= MAX_STREAM_RETRIES; attempt++) {
+      if (attempt > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, STREAM_RETRY_DELAY_MS))
+        if (this.stopped) return 'done'
+        content = ''
+        toolCalls = []
+        finishReason = undefined
+        usage = undefined
+        reasoning = ''
       }
-      if (reasoningOpen) {
-        reasoningOpen = false
-        this.emit({ type: 'content', messageId, content: '</think>' })
+
+      startTs = Date.now()
+      this.abortController = new AbortController()
+      const signal = this.abortController.signal
+
+      let stream: AsyncIterable<OpenAI.Chat.ChatCompletionChunk>
+      try {
+        stream = await client.chat.completions.create(
+          {
+            model: this.config.model,
+            messages: apiMessages,
+            tools: toolList.map((t) => t.definition),
+            stream: true,
+            stream_options: { include_usage: true }
+          },
+          { signal }
+        )
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        if (isRetryableStreamError(err) && attempt < MAX_STREAM_RETRIES) continue
+        this.traceAssistant({
+          durationMs: Date.now() - startTs,
+          error: message
+        })
+        if (this.stopped) return 'done'
+        throw err
       }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      this.traceAssistant({
-        durationMs: Date.now() - startTs,
-        ...(content ? { content } : {}),
-        ...(reasoning ? { reasoning } : {}),
-        error: message
-      })
-      if (this.stopped) return 'done'
-      throw err
+
+      let firstChunk = true
+      let reasoningOpen = false
+      try {
+        for await (const chunk of stream) {
+          if (chunk.usage) usage = chunk.usage
+          const finish = chunk.choices?.[0]?.finish_reason
+          if (finish) finishReason = finish
+          if (this.stopped) break
+          const delta = chunk.choices?.[0]?.delta as
+            | (OpenAI.Chat.ChatCompletionChunk.Choice.Delta & { reasoning_content?: string })
+            | undefined
+          if (!delta) continue
+          if (firstChunk) {
+            firstChunk = false
+            this.emit({ type: 'message-start', messageId })
+          }
+          if (delta.reasoning_content) {
+            if (!reasoningOpen) {
+              reasoningOpen = true
+              this.emit({ type: 'content', messageId, content: '<think>' })
+            }
+            reasoning += delta.reasoning_content
+            this.emit({ type: 'content', messageId, content: delta.reasoning_content })
+          }
+          if (delta.content) {
+            if (reasoningOpen) {
+              reasoningOpen = false
+              this.emit({ type: 'content', messageId, content: '</think>\n\n' })
+            }
+            content += delta.content
+            this.emit({ type: 'content', messageId, content: delta.content })
+          }
+          if (delta.tool_calls) {
+            for (const tc of delta.tool_calls) {
+              if (!tc) continue
+              const idx = tc.index ?? toolCalls.length
+              const entry = (toolCalls[idx] ??= { index: idx, args: '' })
+              if (tc.id) entry.id = tc.id
+              if (tc.function?.name) entry.name = tc.function.name
+              if (tc.function?.arguments) entry.args += tc.function.arguments
+            }
+          }
+        }
+        if (reasoningOpen) {
+          reasoningOpen = false
+          this.emit({ type: 'content', messageId, content: '</think>' })
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        if (isRetryableStreamError(err) && attempt < MAX_STREAM_RETRIES) continue
+        this.traceAssistant({
+          durationMs: Date.now() - startTs,
+          ...(content ? { content } : {}),
+          ...(reasoning ? { reasoning } : {}),
+          error: message
+        })
+        if (this.stopped) return 'done'
+        throw err
+      }
+
+      break // success — exit retry loop
     }
 
     const tracedToolCalls: AiTraceToolCall[] = toolCalls
