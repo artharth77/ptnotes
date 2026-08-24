@@ -5,16 +5,25 @@
 #### Browser toolset (in-app MCP, chat-only)
 
 - **Playwright browser control** via an in-process MCP server + client over `InMemoryTransport`, implemented in `src/main/mcp/`. Uses `playwright-core` to drive installed Chrome or Edge (no bundled Chromium — auto-detects `channel: 'chrome'` then `channel: 'msedge'`; if neither is installed, browser tools return a clear error). Headful by default.
-- **12 browser tools** (chat-only, never in module subagents): `browser_navigate`, `browser_navigate_back`, `browser_snapshot` (page text + interactive elements), `browser_click`, `browser_type`, `browser_select_option`, `browser_press_key`, `browser_screenshot` (PNG), `browser_evaluate` (run JS on page), `browser_wait_for`, `browser_set_mode` (headful/headless toggle), `browser_close`.
+- **12 browser tools** (chat-only, never in module subagents): `browser_navigate`, `browser_navigate_back`, `browser_snapshot` (structured JSON accessibility tree), `browser_click`, `browser_type`, `browser_select_option`, `browser_press_key`, `browser_screenshot` (PNG), `browser_evaluate` (run JS on page), `browser_wait_for`, `browser_set_mode` (headful/headless toggle), `browser_close`.
+- **Structured `browser_snapshot`**: returns a JSON tree with `role`, `name`, `ref` for each visible element. Hidden elements (`display:none`, `visibility:hidden`, `aria-hidden`, zero-size) are excluded. Interactive elements get unique `ref` strings (`e0`, `e1`, …) and `data-ref` attributes for precise targeting. Supports `depth` (limit tree depth) and `boxes` (include bounding boxes) parameters.
+- **Ref-based element targeting**: `browser_click`, `browser_type`, and `browser_select_option` accept an optional `ref` parameter (from `browser_snapshot`) for unambiguous element selection. Text-based fallback preserved with visibility filtering to avoid clicking hidden elements.
+- **Per-project screenshots**: `browser_screenshot` saves to `<project>/screenshots/` via `PTNotesService.screenshotsDir()`. Accepts optional `project` parameter (defaults to current project).
+- **Headless mode persistence**: `browser_set_mode` now saves the headless/headful preference to `ptnotes-settings.json`, surviving app restarts.
 - **Headless guard**: the system prompt instructs the AI to call `ask_user` for confirmation before switching to headless mode (browser becomes invisible).
+- **`ptfile://` custom protocol**: registers a `ptfile://` scheme in the main process to serve local image files for chat rendering. The protocol reads files from disk and returns them with proper MIME types. CSP updated (`img-src 'self' data: ptfile:`) to allow the protocol.
+- **Chat image rendering**: markdown image tags with absolute paths (`![name](/full/path/image.png)`) are converted to `ptfile://local/full/path/image.png` and rendered inline in the chat.
 - **Settings ▸ Toolsets** category: toggle browser toolset on/off. Warning that each enabled toolset adds tools to every chat turn (more tokens, higher chance of wrong tool selection). Toolsets are extensible for future external MCP connections.
+- `PTNotesService.screenshotsDir(project)` method for per-project screenshot directories.
 - Dependencies: `@modelcontextprotocol/sdk@^1.30.0`, `playwright-core@^1.62`, `zod@^4.4`.
 
 ### Changed
 
 - Tool count: 26 base + 12 browser = 38 total (guideline; browser tools are opt-in).
-- `StorageSettings` now includes `disabledToolsets?: string[]` (persisted in `ptnotes-settings.json`).
-- System prompt accepts an optional extra section (browser toolset instructions injected when enabled).
+- `StorageSettings` now includes `disabledToolsets?: string[]` and `browserHeadless?: boolean` (persisted in `ptnotes-settings.json`).
+- System prompt accepts an optional extra section (browser toolset instructions injected when enabled) and includes guidance for image file paths (`![name](full/path)`).
+- `browser_navigate` and `browser_navigate_back` return structured JSON snapshot instead of plain text.
+- App version (`APP_VERSION`) is now sourced from `package.json` via `app.getVersion()` instead of hardcoded strings.
 
 ## [0.12.0] — 2026-08-24
 

@@ -1,5 +1,6 @@
-import { app, shell, BrowserWindow, Menu, ipcMain } from 'electron'
-import { join } from 'path'
+import { app, shell, BrowserWindow, Menu, ipcMain, protocol } from 'electron'
+import { join, extname } from 'path'
+import { promises as fs } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { PTNotesService } from './service/PTNotesService'
@@ -30,6 +31,14 @@ import { WindowStateStore } from './windowState'
 import type { WindowState } from '@shared/types'
 
 app.setName('PTNotes')
+
+// Custom protocol for serving local images in chat (must be before app.ready)
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'ptfile',
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
+  }
+])
 
 let mainWindow: BrowserWindow | null = null
 let plannerEditActive = false
@@ -186,6 +195,28 @@ function createWindow(windowState: WindowState): void {
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.ptnotes.app')
 
+  // Handle ptfile:// protocol — serves local files for chat images
+  const IMAGE_MIME: Record<string, string> = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.svg': 'image/svg+xml',
+    '.webp': 'image/webp',
+    '.bmp': 'image/bmp',
+    '.ico': 'image/x-icon'
+  }
+  protocol.handle('ptfile', async (request) => {
+    const filePath = new URL(request.url).pathname
+    try {
+      const data = await fs.readFile(filePath)
+      const mime = IMAGE_MIME[extname(filePath).toLowerCase()] ?? 'application/octet-stream'
+      return new Response(data, { headers: { 'Content-Type': mime } })
+    } catch {
+      return new Response('Not found', { status: 404 })
+    }
+  })
+
   Menu.setApplicationMenu(buildAppMenu())
 
   ipcMain.on('planner:set-edit-active', (_e, active: boolean) => {
@@ -233,7 +264,7 @@ app.whenReady().then(async () => {
     return [
       buildStartModuleTool(moduleManager!, moduleRegistry, current.disabledModules ?? []),
       buildWaitModulesTool(moduleManager!),
-      ...(await buildChatTools(current.disabledToolsets ?? []))
+      ...(await buildChatTools(current.disabledToolsets ?? [], service, settingsStore))
     ]
   }
 

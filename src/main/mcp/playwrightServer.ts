@@ -1,7 +1,11 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
+import { promises as fs } from 'fs'
+import { join } from 'path'
 import * as browser from './browser'
 import { APP_VERSION } from '../version'
+import type { SettingsStore } from '../settings'
+import type { PTNotesService } from '../service/PTNotesService'
 
 const TRUNCATE_LEN = 24_000
 
@@ -9,28 +13,267 @@ function truncate(text: string): string {
   return text.length > TRUNCATE_LEN ? text.slice(0, TRUNCATE_LEN) + '\n…(truncated)' : text
 }
 
-async function extractPageState(page: {
-  evaluate: (fn: string) => Promise<string>
-}): Promise<string> {
-  const result = await page.evaluate(`(() => {
-    const title = document.title;
-    const text = document.body?.innerText ?? '';
-    const els = Array.from(document.querySelectorAll('a, button, input, select, textarea, [role], [tabindex]'));
-    const interactive = els.map(el => {
-      const tag = el.tagName.toLowerCase();
-      const role = el.getAttribute('role') ?? '';
-      const name = el.getAttribute('aria-label') ?? el.getAttribute('placeholder') ?? el.textContent?.trim().slice(0, 80) ?? '';
-      const type = el.getAttribute('type') ?? '';
-      const href = el.getAttribute('href') ?? '';
-      const value = tag === 'input' ? el.value : '';
-      return [tag, role, name, type, value, href].filter(Boolean).join(' | ');
-    }).filter(Boolean).join('\\n');
-    return 'Title: ' + title + '\\n\\nText:\\n' + text + (interactive ? '\\n\\nInteractive elements:\\n' + interactive : '');
-  })()`)
+interface SnapshotOptions {
+  depth?: number
+  boxes?: boolean
+}
+
+interface SnapshotNode {
+  role: string
+  name: string
+  ref?: string
+  children?: (SnapshotNode | string)[]
+  text?: string
+  level?: number
+  url?: string
+  placeholder?: string
+  checked?: boolean
+  disabled?: boolean
+  expanded?: boolean
+  selected?: boolean
+  box?: { x: number; y: number; w: number; h: number }
+}
+
+interface PageSnapshot {
+  title: string
+  url: string
+  nodes: SnapshotNode[]
+}
+
+async function extractPageSnapshot(
+  page: {
+    evaluate: (fn: string) => Promise<PageSnapshot>
+  },
+  options?: SnapshotOptions
+): Promise<PageSnapshot> {
+  const result = await page.evaluate(
+    `(() => {
+      const opts = ${JSON.stringify({ depth: options?.depth ?? null, boxes: options?.boxes ?? false })};
+      // Clear previous refs
+      document.querySelectorAll('[data-ref]').forEach(el => el.removeAttribute('data-ref'));
+
+      let refCounter = 0;
+
+      function isHidden(el) {
+        const style = window.getComputedStyle(el);
+        if (style.display === 'none') return true;
+        if (style.visibility === 'hidden') return true;
+        if (el.getAttribute('aria-hidden') === 'true') return true;
+        if (el.offsetWidth === 0 && el.offsetHeight === 0 && style.position !== 'fixed') return true;
+        return false;
+      }
+
+      function getExplicitRole(el) {
+        const r = el.getAttribute('role');
+        return r || null;
+      }
+
+      function inferRole(el) {
+        const tag = el.tagName.toLowerCase();
+        const type = (el.getAttribute('type') || '').toLowerCase();
+        switch (tag) {
+          case 'a': return el.hasAttribute('href') ? 'link' : 'generic';
+          case 'button': return 'button';
+          case 'input':
+            if (['text','','search','email','password','tel','url'].includes(type)) return 'textbox';
+            if (type === 'checkbox') return 'checkbox';
+            if (type === 'radio') return 'radio';
+            if (type === 'range') return 'slider';
+            if (type === 'number') return 'spinbutton';
+            if (type === 'file') return 'button';
+            if (type === 'submit' || type === 'reset' || type === 'button') return 'button';
+            return 'textbox';
+          case 'select': return 'combobox';
+          case 'textarea': return 'textbox';
+          case 'h1': return 'heading';
+          case 'h2': return 'heading';
+          case 'h3': return 'heading';
+          case 'h4': return 'heading';
+          case 'h5': return 'heading';
+          case 'h6': return 'heading';
+          case 'ul': case 'ol': return 'list';
+          case 'li': return 'listitem';
+          case 'table': return 'table';
+          case 'thead': case 'tbody': case 'tfoot': return 'rowgroup';
+          case 'tr': return 'row';
+          case 'td': case 'th': return 'cell';
+          case 'nav': return 'navigation';
+          case 'main': return 'main';
+          case 'header': return 'banner';
+          case 'footer': return 'contentinfo';
+          case 'form': return 'form';
+          case 'img': return 'img';
+          case 'section': return 'region';
+          case 'article': return 'article';
+          case 'aside': return 'complementary';
+          case 'details': return 'group';
+          case 'dialog': return 'dialog';
+          case 'fieldset': return 'group';
+          case 'figure': return 'figure';
+          case 'figcaption': return 'caption';
+          case 'label': return 'generic';
+          case 'summary': return 'button';
+          case 'option': return 'option';
+          case 'optgroup': return 'group';
+          case 'video': case 'audio': return 'generic';
+          default: return 'generic';
+        }
+      }
+
+      function getRole(el) {
+        return getExplicitRole(el) || inferRole(el);
+      }
+
+      function getName(el) {
+        const ariaLabel = el.getAttribute('aria-label');
+        if (ariaLabel) return ariaLabel.trim().slice(0, 200);
+
+        const tag = el.tagName.toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || tag === 'select') {
+          const ph = el.getAttribute('placeholder');
+          if (ph) return ph.trim().slice(0, 200);
+        }
+
+        const title = el.getAttribute('title');
+        if (title) return title.trim().slice(0, 200);
+
+        if (tag === 'img') {
+          const alt = el.getAttribute('alt');
+          if (alt) return alt.trim().slice(0, 200);
+        }
+
+        // For buttons / links / headings / summary — use text content
+        const role = getRole(el);
+        if (['button', 'link', 'heading', 'tab', 'menuitem', 'option', 'cell', 'columnheader', 'rowheader'].includes(role)) {
+          const text = el.textContent?.trim().slice(0, 200);
+          if (text) return text;
+        }
+
+        // Fallback: short text content
+        const text = el.textContent?.trim().slice(0, 100);
+        return text || '';
+      }
+
+      function isInteractive(el) {
+        const role = getRole(el);
+        if (['button','link','textbox','combobox','checkbox','radio','slider','spinbutton','tab','menuitem','option','searchbox'].includes(role)) return true;
+        if (el.hasAttribute('onclick')) return true;
+        if (el.getAttribute('tabindex') !== null && el.getAttribute('tabindex') !== '-1') return true;
+        if (el.tagName.toLowerCase() === 'a' && el.hasAttribute('href')) return true;
+        return false;
+      }
+
+      function buildNode(el, depth, maxDepth, includeBoxes) {
+        if (isHidden(el)) return null;
+
+        const role = getRole(el);
+        const name = getName(el);
+        const node = { role, name };
+
+        // Assign ref to interactive elements
+        if (isInteractive(el)) {
+          const ref = 'e' + refCounter++;
+          node.ref = ref;
+          el.setAttribute('data-ref', ref);
+        }
+
+        // Heading level
+        if (role === 'heading') {
+          const tag = el.tagName.toLowerCase();
+          const level = parseInt(tag.charAt(1));
+          if (!isNaN(level)) node.level = level;
+        }
+
+        // Link URL
+        if (role === 'link') {
+          const href = el.getAttribute('href');
+          if (href && !href.startsWith('javascript:') && !href.startsWith('#')) {
+            node.url = href;
+          }
+        }
+
+        // Input placeholder
+        if (role === 'textbox' || role === 'searchbox') {
+          const ph = el.getAttribute('placeholder');
+          if (ph) node.placeholder = ph;
+        }
+
+        // Checkbox / radio state
+        if (role === 'checkbox' || role === 'radio') {
+          node.checked = el.checked || false;
+        }
+
+        // Disabled
+        if (el.disabled) node.disabled = true;
+
+        // Expanded
+        const expanded = el.getAttribute('aria-expanded');
+        if (expanded !== null) node.expanded = expanded === 'true';
+
+        // Selected
+        const selected = el.getAttribute('aria-selected');
+        if (selected !== null) node.selected = selected === 'true';
+
+        // Bounding box
+        if (includeBoxes) {
+          const rect = el.getBoundingClientRect();
+          if (rect.width > 0 || rect.height > 0) {
+            node.box = {
+              x: Math.round(rect.x),
+              y: Math.round(rect.y),
+              w: Math.round(rect.width),
+              h: Math.round(rect.height)
+            };
+          }
+        }
+
+        // Children (if depth allows)
+        if (maxDepth === null || maxDepth === undefined || depth < maxDepth) {
+          const children = [];
+          for (const child of el.childNodes) {
+            if (child.nodeType === Node.ELEMENT_NODE) {
+              const childNode = buildNode(child, depth + 1, maxDepth, includeBoxes);
+              if (childNode) children.push(childNode);
+            } else if (child.nodeType === Node.TEXT_NODE) {
+              const text = child.textContent?.trim();
+              if (text) children.push(text);
+            }
+          }
+          if (children.length === 1 && typeof children[0] === 'string') {
+            node.text = children[0];
+          } else if (children.length > 0) {
+            node.children = children;
+          }
+        }
+
+        return node;
+      }
+
+      // Build tree from body
+      const body = document.body;
+      if (!body) return { title: document.title, url: location.href, nodes: [] };
+
+      const nodes = [];
+      for (const child of body.childNodes) {
+        if (child.nodeType === Node.ELEMENT_NODE) {
+          const node = buildNode(child, 0, opts.depth, opts.boxes);
+          if (node) nodes.push(node);
+        } else if (child.nodeType === Node.TEXT_NODE) {
+          const text = child.textContent?.trim();
+          if (text) nodes.push(text);
+        }
+      }
+
+      return { title: document.title, url: location.href, nodes };
+    })()`
+  )
   return result
 }
 
-export function createBrowserMcpServer(): McpServer {
+export function createBrowserMcpServer(
+  service?: PTNotesService,
+  settingsStore?: SettingsStore
+): McpServer {
   const server = new McpServer({
     name: 'ptnotes-browser',
     version: APP_VERSION
@@ -40,7 +283,7 @@ export function createBrowserMcpServer(): McpServer {
     'browser_navigate',
     {
       description:
-        'Navigate the browser to a URL. Returns the page title and a summary of the content.',
+        'Navigate the browser to a URL. Returns the page title and a structured snapshot of the content.',
       inputSchema: {
         url: z.string().describe('The URL to navigate to')
       }
@@ -48,12 +291,17 @@ export function createBrowserMcpServer(): McpServer {
     async ({ url }) => {
       const page = await browser.getBrowserPage(browser.headlessMode())
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
-      const state = await extractPageState(page)
+      const snapshot = await extractPageSnapshot(page)
       const headlessNote = browser.headlessMode()
         ? '\n⚠️ Running in headless mode — the browser is invisible to the user.'
         : ''
       return {
-        content: [{ type: 'text' as const, text: `Navigated to ${url}\n${state}${headlessNote}` }]
+        content: [
+          {
+            type: 'text' as const,
+            text: truncate(JSON.stringify(snapshot, null, 2) + headlessNote)
+          }
+        ]
       }
     }
   )
@@ -66,8 +314,10 @@ export function createBrowserMcpServer(): McpServer {
     async () => {
       const page = await browser.getBrowserPage(browser.headlessMode())
       await page.goBack({ waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => {})
-      const title = await page.title()
-      return { content: [{ type: 'text' as const, text: `Navigated back.\nTitle: ${title}` }] }
+      const snapshot = await extractPageSnapshot(page)
+      return {
+        content: [{ type: 'text' as const, text: truncate(JSON.stringify(snapshot, null, 2)) }]
+      }
     }
   )
 
@@ -75,18 +325,21 @@ export function createBrowserMcpServer(): McpServer {
     'browser_snapshot',
     {
       description:
-        'Take a snapshot of the current page — returns the page text and all interactive elements (links, buttons, inputs, selects). Use this to see what is on the page and decide what to click or type.',
+        'Capture a structured accessibility snapshot of the current page. Returns a JSON tree with role, name, and ref for each visible element. Use refs to target elements in browser_click, browser_type, etc.',
       inputSchema: {
-        detailed: z
+        depth: z.number().optional().describe('Limit the depth of the snapshot tree'),
+        boxes: z
           .boolean()
           .optional()
-          .describe('If true, include more detail in the snapshot (default false)')
+          .describe("Include each element's bounding box as {x,y,w,h} in CSS pixels")
       }
     },
-    async () => {
+    async ({ depth, boxes }) => {
       const page = await browser.getBrowserPage(browser.headlessMode())
-      const state = await extractPageState(page)
-      return { content: [{ type: 'text' as const, text: truncate(state) }] }
+      const snapshot = await extractPageSnapshot(page, { depth, boxes })
+      return {
+        content: [{ type: 'text' as const, text: truncate(JSON.stringify(snapshot, null, 2)) }]
+      }
     }
   )
 
@@ -94,22 +347,44 @@ export function createBrowserMcpServer(): McpServer {
     'browser_click',
     {
       description:
-        'Click an element on the page. Use the text visible on the element (link text, button label, etc).',
+        'Click an element on the page. Use ref from browser_snapshot for precise targeting, or element text as fallback.',
       inputSchema: {
-        element: z.string().describe('The visible text or label of the element to click')
+        ref: z
+          .string()
+          .optional()
+          .describe('The ref of the element to click (from browser_snapshot)'),
+        element: z
+          .string()
+          .optional()
+          .describe('The visible text or label of the element to click (fallback if no ref)')
       }
     },
-    async ({ element }) => {
+    async ({ ref, element }) => {
       const page = await browser.getBrowserPage(browser.headlessMode())
-      const target = page.getByText(element, { exact: false }).first()
-      const alt = page.getByRole('button', { name: element }).first()
-      const count = await target.count().catch(() => 0)
-      if (count > 0) {
-        await target.click({ timeout: 10_000 })
-      } else {
-        await alt.click({ timeout: 10_000 })
+      if (ref) {
+        const locator = page.locator(`[data-ref="${ref}"]`)
+        await locator.click({ timeout: 10_000 })
+        return { content: [{ type: 'text' as const, text: `Clicked ref "${ref}".` }] }
       }
-      return { content: [{ type: 'text' as const, text: `Clicked "${element}".` }] }
+      if (element) {
+        // Try visible elements first
+        const candidates = page.getByText(element, { exact: false })
+        const count = await candidates.count().catch(() => 0)
+        for (let i = 0; i < count; i++) {
+          const el = candidates.nth(i)
+          if (await el.isVisible().catch(() => false)) {
+            await el.click({ timeout: 10_000 })
+            return { content: [{ type: 'text' as const, text: `Clicked "${element}".` }] }
+          }
+        }
+        // Fallback: try button role
+        await page.getByRole('button', { name: element }).first().click({ timeout: 10_000 })
+        return { content: [{ type: 'text' as const, text: `Clicked "${element}".` }] }
+      }
+      return {
+        content: [{ type: 'text' as const, text: 'Error: provide ref or element parameter.' }],
+        isError: true
+      }
     }
   )
 
@@ -118,9 +393,11 @@ export function createBrowserMcpServer(): McpServer {
     {
       description: 'Type text into a form input field.',
       inputSchema: {
+        ref: z.string().optional().describe('The ref of the input element (from browser_snapshot)'),
         element: z
           .string()
-          .describe('The placeholder text, label, or aria-label of the input field'),
+          .optional()
+          .describe('The placeholder text, label, or aria-label of the input field (fallback)'),
         text: z.string().describe('The text to type'),
         pressEnter: z
           .boolean()
@@ -128,19 +405,31 @@ export function createBrowserMcpServer(): McpServer {
           .describe('If true, press Enter after typing (default false)')
       }
     },
-    async ({ element, text, pressEnter }) => {
+    async ({ ref, element, text, pressEnter }) => {
       const page = await browser.getBrowserPage(browser.headlessMode())
-      const filled = await page
-        .getByPlaceholder(element)
-        .first()
-        .fill(text, { timeout: 10_000 })
-        .then(() => true)
-        .catch(() => false)
-      if (!filled) {
-        await page.getByLabel(element).first().fill(text, { timeout: 10_000 })
+      if (ref) {
+        const locator = page.locator(`[data-ref="${ref}"]`)
+        await locator.fill(text, { timeout: 10_000 })
+        if (pressEnter) await page.keyboard.press('Enter')
+        return { content: [{ type: 'text' as const, text: `Typed into ref "${ref}".` }] }
       }
-      if (pressEnter) await page.keyboard.press('Enter')
-      return { content: [{ type: 'text' as const, text: `Typed into "${element}".` }] }
+      if (element) {
+        const filled = await page
+          .getByPlaceholder(element)
+          .first()
+          .fill(text, { timeout: 10_000 })
+          .then(() => true)
+          .catch(() => false)
+        if (!filled) {
+          await page.getByLabel(element).first().fill(text, { timeout: 10_000 })
+        }
+        if (pressEnter) await page.keyboard.press('Enter')
+        return { content: [{ type: 'text' as const, text: `Typed into "${element}".` }] }
+      }
+      return {
+        content: [{ type: 'text' as const, text: 'Error: provide ref or element parameter.' }],
+        isError: true
+      }
     }
   )
 
@@ -149,24 +438,46 @@ export function createBrowserMcpServer(): McpServer {
     {
       description: 'Select an option in a <select> dropdown.',
       inputSchema: {
-        element: z.string().describe('The accessible name of the select element'),
+        ref: z
+          .string()
+          .optional()
+          .describe('The ref of the select element (from browser_snapshot)'),
+        element: z
+          .string()
+          .optional()
+          .describe('The accessible name of the select element (fallback)'),
         value: z.string().describe('The option value to select')
       }
     },
-    async ({ element, value }) => {
+    async ({ ref, element, value }) => {
       const page = await browser.getBrowserPage(browser.headlessMode())
-      await page
-        .getByRole('combobox', { name: element })
-        .first()
-        .selectOption(value, { timeout: 10_000 })
-        .catch(async () => {
-          await page
-            .locator('select')
-            .filter({ hasText: element })
-            .first()
-            .selectOption(value, { timeout: 10_000 })
-        })
-      return { content: [{ type: 'text' as const, text: `Selected "${value}" in "${element}".` }] }
+      if (ref) {
+        const locator = page.locator(`[data-ref="${ref}"]`)
+        await locator.selectOption(value, { timeout: 10_000 })
+        return {
+          content: [{ type: 'text' as const, text: `Selected "${value}" in ref "${ref}".` }]
+        }
+      }
+      if (element) {
+        await page
+          .getByRole('combobox', { name: element })
+          .first()
+          .selectOption(value, { timeout: 10_000 })
+          .catch(async () => {
+            await page
+              .locator('select')
+              .filter({ hasText: element })
+              .first()
+              .selectOption(value, { timeout: 10_000 })
+          })
+        return {
+          content: [{ type: 'text' as const, text: `Selected "${value}" in "${element}".` }]
+        }
+      }
+      return {
+        content: [{ type: 'text' as const, text: 'Error: provide ref or element parameter.' }],
+        isError: true
+      }
     }
   )
 
@@ -190,18 +501,28 @@ export function createBrowserMcpServer(): McpServer {
     {
       description: 'Take a screenshot of the current page. Returns the file path of the saved PNG.',
       inputSchema: {
+        project: z.string().optional().describe('Project name. Defaults to the current project.'),
         fullPage: z
           .boolean()
           .optional()
           .describe('If true, capture the full scrollable page (default false)')
       }
     },
-    async ({ fullPage }) => {
+    async ({ project, fullPage }) => {
       const page = await browser.getBrowserPage(browser.headlessMode())
       const ts = Date.now()
-      const path = `browser-${ts}.png`
-      await page.screenshot({ path, fullPage: !!fullPage })
-      return { content: [{ type: 'text' as const, text: `Screenshot saved: ${path}` }] }
+      let dir: string
+      if (service && project) {
+        dir = service.screenshotsDir(project)
+      } else if (settingsStore) {
+        dir = join((await settingsStore.load()).rootDir, 'screenshots')
+      } else {
+        dir = join(process.cwd(), 'screenshots')
+      }
+      await fs.mkdir(dir, { recursive: true })
+      const filePath = join(dir, `browser-${ts}.png`)
+      await page.screenshot({ path: filePath, fullPage: !!fullPage })
+      return { content: [{ type: 'text' as const, text: `Screenshot saved: ${filePath}` }] }
     }
   )
 
@@ -261,6 +582,10 @@ export function createBrowserMcpServer(): McpServer {
     },
     async ({ headless }) => {
       await browser.setMode(headless)
+      if (settingsStore) {
+        const settings = await settingsStore.load()
+        await settingsStore.save({ ...settings, browserHeadless: headless })
+      }
       return {
         content: [
           {

@@ -1,8 +1,11 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { PTTool } from '../ai/tools'
 import { createBrowserMcpServer } from './playwrightServer'
 import { APP_VERSION } from '../version'
+import type { SettingsStore } from '../settings'
+import type { PTNotesService } from '../service/PTNotesService'
 
 export interface Toolset {
   id: string
@@ -12,12 +15,19 @@ export interface Toolset {
   buildTools(): Promise<PTTool[]>
 }
 
+let cachedService: PTNotesService | undefined
+let cachedSettingsStore: SettingsStore | undefined
+
+function createServer(): McpServer {
+  return createBrowserMcpServer(cachedService, cachedSettingsStore)
+}
+
 const BROWSER_TOOLSET: Toolset = {
   id: 'browser',
   name: 'Browser',
   summary: 'Control a Chromium browser for web research and interaction.',
   async toolCount(): Promise<number> {
-    const server = createBrowserMcpServer()
+    const server = createServer()
     const client = new Client({ name: 'ptnotes-chat', version: APP_VERSION })
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
     await server.connect(serverTransport)
@@ -28,7 +38,7 @@ const BROWSER_TOOLSET: Toolset = {
     return count
   },
   async buildTools(): Promise<PTTool[]> {
-    const server = createBrowserMcpServer()
+    const server = createServer()
     const client = new Client({ name: 'ptnotes-chat', version: APP_VERSION })
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
     await server.connect(serverTransport)
@@ -72,7 +82,13 @@ export function listToolsets(): Toolset[] {
 
 const toolCache = new Map<string, PTTool[]>()
 
-export async function buildChatTools(disabledToolsets: string[]): Promise<PTTool[]> {
+export async function buildChatTools(
+  disabledToolsets: string[],
+  service?: PTNotesService,
+  settingsStore?: SettingsStore
+): Promise<PTTool[]> {
+  cachedService = service
+  cachedSettingsStore = settingsStore
   const disabled = new Set(disabledToolsets)
   const result: PTTool[] = []
   for (const ts of listToolsets()) {
@@ -92,9 +108,9 @@ export function buildPromptSection(disabledToolsets: string[]): string | null {
   if (disabled.has('browser')) return null
   return `
 Browser toolset is available. You can navigate, click, type, and read web pages.
-- browser_snapshot returns the accessibility tree — use it to see page content.
+- browser_snapshot returns a JSON tree with role, name, and ref for each visible element. Use refs to target elements in browser_click, browser_type, browser_select_option.
 - browser_evaluate runs arbitrary JavaScript on the page.
-- browser_screenshot saves a PNG screenshot.
+- browser_screenshot saves a PNG screenshot. Pass project to save in the project's screenshots folder.
 - headless mode runs the browser invisibly — always call ask_user to warn the user before calling browser_set_mode(headless=true), and proceed only if they confirm.
 `
 }

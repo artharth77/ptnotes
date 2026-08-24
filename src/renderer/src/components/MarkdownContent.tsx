@@ -49,12 +49,21 @@ export const MarkdownContent = memo(function MarkdownContent({
             url.startsWith('note:') ||
             url.startsWith('skill:') ||
             url.startsWith('plan:') ||
-            url.startsWith('schedule:')
+            url.startsWith('schedule:') ||
+            url.startsWith('ptfile:')
           )
             return url
           return defaultUrlTransform(url)
         }}
         components={{
+          img: ({ src, alt, ...props }) => {
+            // Convert absolute paths to ptfile:// URLs so Electron can load them
+            let resolvedSrc = src
+            if (src && /^\/[^/]/.test(src)) {
+              resolvedSrc = `ptfile://local${src}`
+            }
+            return <img src={resolvedSrc} alt={alt ?? ''} {...props} />
+          },
           a: ({ node: _node, href, children, ...props }) => {
             if (href?.startsWith('note:')) {
               const noteName = slugify(internalNameFromHref(href, 'note:'))
