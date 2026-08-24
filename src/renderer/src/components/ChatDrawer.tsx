@@ -206,6 +206,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const prevBusy = useRef(false)
+  const stopDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [aiReady, setAiReady] = useState(false)
   const [activeModel, setActiveModel] = useState('')
@@ -236,6 +237,12 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
       cancelled = true
     }
   }, [settingsOpen])
+
+  useEffect(() => {
+    return () => {
+      if (stopDelayRef.current) clearTimeout(stopDelayRef.current)
+    }
+  }, [])
 
   const profiles = aiConfig?.profiles ?? []
 
@@ -543,10 +550,13 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
         activeScheduleId
       )
     } finally {
-      setChatBusy(false)
-      setChatStreamProject(null)
-      setChatWaitRuns([])
       await saveCurrent(project)
+      stopDelayRef.current = setTimeout(() => {
+        stopDelayRef.current = null
+        setChatBusy(false)
+        setChatStreamProject(null)
+        setChatWaitRuns([])
+      }, 1000)
     }
     if (isFirstMessage) {
       void refineTitle(project, text)
@@ -639,6 +649,10 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   }
 
   async function stop(): Promise<void> {
+    if (stopDelayRef.current) {
+      clearTimeout(stopDelayRef.current)
+      stopDelayRef.current = null
+    }
     const project = chatStreamProject ?? activeProject
     if (!project) return
     await window.ptnotes.ai.stop(project)

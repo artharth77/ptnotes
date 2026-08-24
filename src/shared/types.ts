@@ -49,6 +49,8 @@ export interface StorageSettings {
   disabledModules?: string[]
   disabledToolsets?: string[]
   browserHeadless?: boolean
+  browserMaximize?: boolean
+  browserIgnoreHttpsErrors?: boolean
   /** User enable/disable choices for builtin (app-shipped, read-only) skills, keyed by skill name. */
   builtinSkillOverrides?: Record<string, boolean>
 }
@@ -80,6 +82,8 @@ export interface ToolsetSettings {
   enabled: boolean
   toolCount: number
   headless?: boolean
+  maximize?: boolean
+  ignoreHttpsErrors?: boolean
 }
 
 export interface AppSettings {
