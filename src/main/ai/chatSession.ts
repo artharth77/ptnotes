@@ -27,6 +27,7 @@ export type StreamEmitter = (event: ChatStreamEvent) => void
 /** Resolve the tool list to expose to the model. Re-evaluated on every turn so
  * runtime state changes (e.g. enabled modules) take effect immediately. */
 export type ToolsProvider = () => Promise<PTTool[]>
+export type PromptSectionProvider = () => Promise<string | null>
 
 const MAX_TOOL_ITERATIONS = 12
 const MAX_STREAM_RETRIES = 3
@@ -50,7 +51,8 @@ function toToolArgs(args: string | undefined): Record<string, unknown> {
 export function buildSystemPrompt(
   activeProject: string,
   currentDate: string,
-  skillsIndex?: string
+  skillsIndex?: string,
+  extraSection?: string | null
 ): string {
   const skillsSection = skillsIndex
     ? `\nSkills:
@@ -58,6 +60,7 @@ You can load skills (named instruction documents) on demand when a task is relev
 ${skillsIndex}
 `
     : ''
+  const extra = extraSection ? `\n${extraSection}` : ''
   return `You are PTNotes assistant, an automation and research assistant inside a markdown notes + todo desktop app.
 
 You operate inside a project. The currently active project is "${activeProject}". Use it by default; you may target other projects by passing the "project" argument to a tool.
@@ -80,8 +83,9 @@ Guidelines:
 - Whenever you mention an existing todo from the project's todo list by its text in your reply, always link to it: [todo text](todo:todo text). Do NOT link tasks that belong to a schedule/plan — plan tasks have no link, so just mention their text plainly.
 - Whenever you mention an existing skill by name in your reply, always link to it: [skill name](skill:skill name). The link opens the skill's editor, so never return a bare skill name without a link.
 - Whenever you mention an existing schedule/plan by name in your reply, always link to it: [plan name](plan:plan name) or [plan name](schedule:plan name). The link opens the schedule, so never return a bare plan name without a link.
+- When referencing an image file by its full path (e.g. a screenshot or diagram output), use a markdown image tag: ![name](full/path/to/image.png). This renders the image inline in the chat.
 - Keep replies short and actionable.
-${skillsSection}Current date: ${currentDate}.`
+${skillsSection}${extra}Current date: ${currentDate}.`
 }
 
 export class ChatSession {
@@ -93,6 +97,7 @@ export class ChatSession {
   private stopped = false
   private abortController: AbortController | undefined
   private readonly toolsProvider?: ToolsProvider
+  private readonly promptSectionProvider?: PromptSectionProvider
   private activeNoteId: string | null = null
   private activeScheduleId: string | null = null
   private lastActiveNoteName: string | null = null
@@ -103,12 +108,14 @@ export class ChatSession {
     getConfig: () => Promise<AIProviderConfig>,
     ctx: ToolContext,
     emit: StreamEmitter,
-    toolsProvider?: ToolsProvider
+    toolsProvider?: ToolsProvider,
+    promptSectionProvider?: PromptSectionProvider
   ) {
     this.getConfig = getConfig
     this.ctx = ctx
     this.emit = emit
     this.toolsProvider = toolsProvider
+    this.promptSectionProvider = promptSectionProvider
     this.config = { baseUrl: '', apiKey: '', model: '' }
   }
 
@@ -383,7 +390,8 @@ export class ChatSession {
   /** (Re)build the system message on every send so mid-session changes (e.g. skills) apply. */
   private async ensureSystemPrompt(date: string): Promise<string> {
     const skillsIndex = await this.ctx.service.renderSkillsIndex(this.ctx.activeProject)
-    const content = buildSystemPrompt(this.ctx.activeProject, date, skillsIndex)
+    const extraSection = this.promptSectionProvider ? await this.promptSectionProvider() : null
+    const content = buildSystemPrompt(this.ctx.activeProject, date, skillsIndex, extraSection)
     const idx = this.messages.findIndex((m) => m.role === 'system')
     if (idx === -1) {
       this.messages.unshift({ role: 'system', content })

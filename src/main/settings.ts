@@ -24,6 +24,9 @@ export class SettingsStore {
       const disabledModules = Array.isArray(parsed.disabledModules)
         ? parsed.disabledModules.filter((id): id is string => typeof id === 'string')
         : []
+      const disabledToolsets = Array.isArray(parsed.disabledToolsets)
+        ? parsed.disabledToolsets.filter((id): id is string => typeof id === 'string')
+        : []
       const builtinSkillOverrides: Record<string, boolean> = {}
       if (
         parsed.builtinSkillOverrides &&
@@ -34,7 +37,13 @@ export class SettingsStore {
           if (typeof value === 'boolean') builtinSkillOverrides[key] = value
         }
       }
-      return { rootDir, disabledModules, builtinSkillOverrides }
+      return {
+        rootDir,
+        disabledModules,
+        disabledToolsets,
+        browserHeadless: !!parsed.browserHeadless,
+        builtinSkillOverrides
+      }
     } catch {
       return defaultSettings()
     }
@@ -50,6 +59,14 @@ export class SettingsStore {
             )
           ]
         : [],
+      disabledToolsets: Array.isArray(settings.disabledToolsets)
+        ? [
+            ...new Set(
+              settings.disabledToolsets.filter((id): id is string => typeof id === 'string')
+            )
+          ]
+        : [],
+      browserHeadless: !!settings.browserHeadless,
       builtinSkillOverrides: {}
     }
     if (settings.builtinSkillOverrides && typeof settings.builtinSkillOverrides === 'object') {

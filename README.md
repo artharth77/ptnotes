@@ -8,8 +8,9 @@ Markdown notes + todo lists + AI assistant, organized by project. Electron + Rea
 - **Markdown notes** — TipTap WYSIWYG editor with markdown as the source of truth; auto-save ~800ms after edits. Notes are one `.md` file each, with create / rename / delete / refresh.
 - **Todo lists** — markdown checklist per project with toggle, progress counts, **Show All** toggle, **Delete completed**, and drag & drop reorder.
 - **Planner** — project schedules in a fourth **Planner** tab: hierarchical tasks with status, owner, duration, plan/actual dates, %complete and notes in a grid editor, plus a **Gantt chart** view (status-bar toggle) with a day-grid timeline, draggable leaf bars (edge handles resize, body drag moves — all day-snapped), day-cell click to set dates on date-less tasks, a right-click bar popup with **Clear Plan**, and a zoom slider. Working-day math computes plan end dates from start + duration (skipping weekends and project holidays — configurable via the **Calendar** button), parents roll up their children's dates, duration, %complete, and status (with a manual-only **On Hold**), and actual dates are never computed. Full undo/redo (toolbar buttons or `⌘Z` / `⇧⌘Z`) in both views.
-- **AI chat assistant** — collapsible right-side drawer with real-time streaming replies. Works with any OpenAI-compatible endpoint (OpenAI, OpenRouter, Groq, LM Studio, Ollama, …); base URL, API key, and model configured in-app.
+- **AI chat assistant** — collapsible right-side drawer with real-time streaming replies. Works with any OpenAI-compatible endpoint (OpenAI, OpenRouter, Groq, LM Studio, Ollama, …); base URL, API key, and model configured in-app. Click any image in a response to view it full-size with a fade-in lightbox (Escape or backdrop to close).
 - **AI tools** — the assistant can create/update/read/delete/search notes, manage todos, read and update project schedules and calendars, search the web (DuckDuckGo, keyless), and read pages locally. Destructive actions (like note deletion) require your confirmation.
+- **Browser toolset** — optional in-app MCP-powered browser control (Chrome / Edge; toggle in **Settings → Toolsets**). The assistant can navigate pages, click, type, take screenshots, and evaluate JavaScript. Headful by default; headless requires your confirmation. Chat-only (never in modules).
 - **Skills** — teach the assistant reusable instructions: named markdown documents (global or per-project) listed in its system prompt and loaded on demand via the `read_skill` tool, with per-skill enable/disable toggles. Managed from **Settings → Skills**.
 - **File attachments** — drag & drop files into the chat; supported files (any text file, PDFs, or Excel workbooks, detected by content) are copied locally to the project and can be reused via `#` mentions. The assistant reads them locally with the `read_file` tool.
 - **Chat mentions** — type `@` to insert a note, `!` to insert a todo, `#` to attach a project file; the AI can link to your notes with clickable `[name](note:name)` links.
@@ -25,6 +26,7 @@ Markdown notes + todo lists + AI assistant, organized by project. Electron + Rea
 - Electron + electron-vite + React 19 + TypeScript
 - TipTap v3 for the WYSIWYG markdown editor
 - `openai` SDK (OpenAI-compatible endpoints) for the AI chat and modules
+- `@modelcontextprotocol/sdk` + `playwright-core` for in-process MCP browser toolset (Chrome/Edge)
 - `pdf-parse` for extracting text from PDFs (chat files, modules)
 - `pptxgenjs` for generating PowerPoint deliverables (modules)
 - `docx` for generating Word document deliverables (modules)
@@ -72,6 +74,7 @@ The **Settings** page (⚙ icon in the top bar) is organized by category:
 - **Storage** — shows the current project root and lets you change where all project data lives (with confirmation). Every project folder, notes, todos, chats, and the project registry are moved to the new location.
 - **AI Settings** — connects the assistant to any OpenAI-compatible provider: base URL, API key, and model (editable combobox of available models), plus an optional **PDF upload** toggle for sending PDFs as raw file attachments.
 - **Modules** — lists the installed background modules and their enable/disable toggles. Disabling a module hides it from the AI assistant and prevents it from being started; the toggles apply immediately.
+- **Toolsets** — lists built-in toolsets (currently: Browser) with enable/disable toggles. Each enabled toolset adds tools to every chat turn — more tokens and higher chance of wrong tool selection. Toolsets are chat-only (never in modules). Designed for future external MCP connections.
 - **Skills** — lists global and project skills (name, description) with a per-skill enable/disable toggle; disabled skills are excluded from the assistant. A `⋮` context menu offers **Edit**, **Move to Global/Project skills**, or **Delete** (with confirmation); create/edit happens in a modal (scope, name, description, markdown content). Changes apply immediately.
 - **About** — read-only pane showing the app icon, name, version, description + tech stack, and the Electron / Chromium / Node.js runtime versions.
 

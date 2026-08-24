@@ -163,6 +163,16 @@ export class PTNotesService {
     return join(this.dataDir(name), 'modules')
   }
 
+  /** Per-project browser screenshots dir (`<project>/.data/browser/`). */
+  browserDataDir(project: string): string {
+    return join(this.dataDir(project), 'browser')
+  }
+
+  /** Per-project screenshots dir (`<project>/screenshots/`). */
+  screenshotsDir(project: string): string {
+    return join(this.projectDir(project), 'screenshots')
+  }
+
   private plannerDir(name: string): string {
     return join(this.projectDir(name), 'planner')
   }

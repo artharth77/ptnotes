@@ -1,4 +1,4 @@
-import { memo } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
@@ -8,6 +8,7 @@ import { NOTE_LINK_ICON, PLAN_LINK_ICON, SKILL_LINK_ICON } from './contentIcons'
 
 interface MarkdownContentProps {
   content: string
+  enableImageZoom?: boolean
   onOpenNote?: (noteName: string) => void
   onOpenSkill?: (skillName: string) => void
   onOpenPlan?: (planName: string) => void
@@ -35,10 +36,38 @@ function normalizeInternalLinks(md: string): string {
 
 export const MarkdownContent = memo(function MarkdownContent({
   content,
+  enableImageZoom = false,
   onOpenNote,
   onOpenSkill,
   onOpenPlan
 }: MarkdownContentProps): React.JSX.Element {
+  const [viewer, setViewer] = useState<{ src: string; alt: string } | null>(null)
+  const [closing, setClosing] = useState(false)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const closeViewer = useCallback((): void => {
+    setClosing(true)
+    timerRef.current = setTimeout(() => {
+      setViewer(null)
+      setClosing(false)
+    }, 200)
+  }, [])
+
+  useEffect(() => {
+    if (!viewer) return
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') closeViewer()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [viewer, closeViewer])
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+    }
+  }, [])
+
   const safeContent = normalizeInternalLinks(content)
   return (
     <div className="markdown-body">
@@ -49,12 +78,38 @@ export const MarkdownContent = memo(function MarkdownContent({
             url.startsWith('note:') ||
             url.startsWith('skill:') ||
             url.startsWith('plan:') ||
-            url.startsWith('schedule:')
+            url.startsWith('schedule:') ||
+            url.startsWith('ptfile:')
           )
             return url
           return defaultUrlTransform(url)
         }}
         components={{
+          img: ({ src, alt, ...props }) => {
+            let resolvedSrc = src
+            if (src && /^\/[^/]/.test(src)) {
+              resolvedSrc = `ptfile://local${src}`
+            }
+            if (enableImageZoom) {
+              return (
+                <span
+                  className="chat-img-clickable"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setViewer({ src: resolvedSrc ?? '', alt: alt ?? '' })}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      setViewer({ src: resolvedSrc ?? '', alt: alt ?? '' })
+                    }
+                  }}
+                >
+                  <img src={resolvedSrc} alt={alt ?? ''} {...props} />
+                </span>
+              )
+            }
+            return <img src={resolvedSrc} alt={alt ?? ''} {...props} />
+          },
           a: ({ node: _node, href, children, ...props }) => {
             if (href?.startsWith('note:')) {
               const noteName = slugify(internalNameFromHref(href, 'note:'))
@@ -129,6 +184,15 @@ export const MarkdownContent = memo(function MarkdownContent({
       >
         {safeContent}
       </ReactMarkdown>
+      {viewer && (
+        <div className={`chat-img-viewer${closing ? ' closing' : ''}`} onClick={closeViewer}>
+          <button className="chat-img-viewer-close" onClick={closeViewer}>
+            ✕
+          </button>
+          <img src={viewer.src} alt={viewer.alt} />
+          {viewer.alt && <div className="chat-img-viewer-caption">{viewer.alt}</div>}
+        </div>
+      )}
     </div>
   )
 })

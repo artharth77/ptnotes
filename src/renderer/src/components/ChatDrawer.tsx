@@ -1032,6 +1032,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                       <div key={i} className="chat-msg-content">
                         <MarkdownContent
                           content={part.content}
+                          enableImageZoom
                           onOpenNote={(n) => void openNote(n)}
                           onOpenSkill={(n) => openSkillEditor(n)}
                           onOpenPlan={(n) => void openSchedule(n)}

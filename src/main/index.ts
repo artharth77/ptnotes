@@ -1,5 +1,6 @@
-import { app, shell, BrowserWindow, Menu, ipcMain } from 'electron'
-import { join } from 'path'
+import { app, shell, BrowserWindow, Menu, ipcMain, protocol } from 'electron'
+import { join, extname } from 'path'
+import { promises as fs } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { PTNotesService } from './service/PTNotesService'
@@ -10,12 +11,14 @@ import { registerFilesIpc } from './ipc/files'
 import { registerSettingsIpc } from './ipc/settings'
 import { registerSkillsIpc } from './ipc/skills'
 import { registerModulesIpc } from './ipc/modules'
+import { registerToolsetsIpc } from './ipc/toolsets'
 import { ModuleRegistry } from './modules/registry'
 import { ModuleRunManager } from './modules/runs'
 import { buildStartModuleTool, buildWaitModulesTool } from './modules/tool'
 import { shutdownChartRenderer } from './modules/shared/chartRenderer'
 import { shutdownDiagramRenderer } from './modules/shared/diagramRenderer'
 import { shutdownInfographicRenderer } from './modules/shared/infographicRenderer'
+import { close as closeBrowser } from './mcp/browser'
 import type { PTTool } from './ai/tools'
 import { createPptxModule } from './modules/pptx'
 import { createInfographicModule } from './modules/infographic'
@@ -28,6 +31,14 @@ import { WindowStateStore } from './windowState'
 import type { WindowState } from '@shared/types'
 
 app.setName('PTNotes')
+
+// Custom protocol for serving local images in chat (must be before app.ready)
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'ptfile',
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
+  }
+])
 
 let mainWindow: BrowserWindow | null = null
 let plannerEditActive = false
@@ -184,6 +195,28 @@ function createWindow(windowState: WindowState): void {
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.ptnotes.app')
 
+  // Handle ptfile:// protocol — serves local files for chat images
+  const IMAGE_MIME: Record<string, string> = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.svg': 'image/svg+xml',
+    '.webp': 'image/webp',
+    '.bmp': 'image/bmp',
+    '.ico': 'image/x-icon'
+  }
+  protocol.handle('ptfile', async (request) => {
+    const filePath = new URL(request.url).pathname
+    try {
+      const data = await fs.readFile(filePath)
+      const mime = IMAGE_MIME[extname(filePath).toLowerCase()] ?? 'application/octet-stream'
+      return new Response(data, { headers: { 'Content-Type': mime } })
+    } catch {
+      return new Response('Not found', { status: 404 })
+    }
+  })
+
   Menu.setApplicationMenu(buildAppMenu())
 
   ipcMain.on('planner:set-edit-active', (_e, active: boolean) => {
@@ -203,6 +236,9 @@ app.whenReady().then(async () => {
   const service = new PTNotesService(settings.rootDir, undefined, settingsStore)
   await service.migrateLegacyFolders()
   const configStore = new AIConfigStore()
+
+  const { setDefaultHeadless } = await import('./mcp/browser')
+  setDefaultHeadless(!!settings.browserHeadless)
 
   const moduleRegistry = new ModuleRegistry()
   moduleRegistry.register(createSubagentModule())
@@ -224,13 +260,19 @@ app.whenReady().then(async () => {
   )
   const toolsProvider = async (): Promise<PTTool[]> => {
     const current = await settingsStore.load()
+    const { buildChatTools } = await import('./mcp/toolsets')
     return [
       buildStartModuleTool(moduleManager!, moduleRegistry, current.disabledModules ?? []),
-      buildWaitModulesTool(moduleManager!)
+      buildWaitModulesTool(moduleManager!),
+      ...(await buildChatTools(current.disabledToolsets ?? [], service, settingsStore))
     ]
   }
 
-  const registry = createSessionRegistry(service, configStore, toolsProvider)
+  const registry = createSessionRegistry(service, configStore, toolsProvider, async () => {
+    const { buildPromptSection } = await import('./mcp/toolsets')
+    const current = await settingsStore.load()
+    return buildPromptSection(current.disabledToolsets ?? [])
+  })
   registerProjectIpc(service)
   registerNoteIpc(service)
   registerTodoIpc(service)
@@ -241,6 +283,7 @@ app.whenReady().then(async () => {
   registerSettingsIpc(service, settingsStore)
   registerSkillsIpc(service)
   registerModulesIpc(moduleManager!, settingsStore, moduleRegistry)
+  registerToolsetsIpc(settingsStore)
 
   windowStateStore = new WindowStateStore()
   const windowState = await windowStateStore.load()
@@ -260,6 +303,7 @@ app.on('window-all-closed', () => {
 app.on('will-quit', () => {
   // Mark any in-flight module runs as cancelled before the process exits.
   void moduleManager?.cancelActive()
+  void closeBrowser()
   shutdownChartRenderer()
   shutdownDiagramRenderer()
   shutdownInfographicRenderer()
