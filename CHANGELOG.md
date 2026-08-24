@@ -15,6 +15,7 @@
 - **Chat image rendering**: markdown image tags with absolute paths (`![name](/full/path/image.png)`) are converted to `ptfile://local/full/path/image.png` and rendered inline in the chat.
 - **Settings ▸ Toolsets** category: toggle browser toolset on/off. Warning that each enabled toolset adds tools to every chat turn (more tokens, higher chance of wrong tool selection). Toolsets are extensible for future external MCP connections.
 - `PTNotesService.screenshotsDir(project)` method for per-project screenshot directories.
+- **Chat image viewer**: click any image in the AI chat response to open a fullscreen lightbox (fade-in animation). The viewer shows the image centered and constrained to the viewport (90vw × 85vh) with the alt text as a caption. Close via backdrop click, Escape key, or the ✕ button (fade-out animation). Only active in assistant messages (note editor images unaffected).
 - Dependencies: `@modelcontextprotocol/sdk@^1.30.0`, `playwright-core@^1.62`, `zod@^4.4`.
 
 ### Changed
