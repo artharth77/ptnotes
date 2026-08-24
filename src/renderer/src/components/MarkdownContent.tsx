@@ -25,6 +25,7 @@ function internalNameFromHref(href: string, prefix: string): string {
 
 function normalizeInternalLinks(md: string): string {
   return md
+    .replace(/\[([^\]]*)\]\(\s*([^()]*?)\s*\)/g, (_m, text, dest) => `[${text}](<${dest.replace(/ /g, '%20')}>)`)
     .replace(/\[([^\]]*)\]\(\s*(note:[^()]*?)\s*\)/g, (_m, text, dest) => `[${text}](<${dest}>)`)
     .replace(/\[([^\]]*)\]\(\s*(skill:[^()]*?)\s*\)/g, (_m, text, dest) => `[${text}](<${dest}>)`)
     .replace(/\[([^\]]*)\]\(\s*(plan:[^()]*?)\s*\)/g, (_m, text, dest) => `[${text}](<${dest}>)`)
@@ -82,13 +83,22 @@ export const MarkdownContent = memo(function MarkdownContent({
             url.startsWith('ptfile:')
           )
             return url
+          // Handle Windows paths like C:\path\to\file and convert to C:/path/to/file
+          if (/^[a-zA-Z]:%5C/.test(url))
+            return url.replace(/%5C/g, '/')
           return defaultUrlTransform(url)
         }}
         components={{
           img: ({ src, alt, ...props }) => {
             let resolvedSrc = src
-            if (src && /^\/[^/]/.test(src)) {
-              resolvedSrc = `ptfile://local${src}`
+            if (src) {
+              if (/^[a-zA-Z]:/.test(src)) {
+                // Handle Windows paths like C:/path/to/file
+                resolvedSrc = `ptfile://local/${src}`
+              } else {
+                // Handle macOS/Linux paths like /path/to/file
+                resolvedSrc = `ptfile://local${src}`
+              }
             }
             if (enableImageZoom) {
               return (

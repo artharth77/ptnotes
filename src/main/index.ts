@@ -207,7 +207,12 @@ app.whenReady().then(async () => {
     '.ico': 'image/x-icon'
   }
   protocol.handle('ptfile', async (request) => {
-    const filePath = new URL(request.url).pathname
+    const rawPath = new URL(request.url).pathname
+    let filePath = rawPath
+    if (/^\/[a-zA-Z]:\//.test(filePath))
+      filePath = filePath.replace(/^\//g, '').replace(/%20/g, ' ')
+    else
+      filePath = filePath.replace(/%20/g, ' ')
     try {
       const data = await fs.readFile(filePath)
       const mime = IMAGE_MIME[extname(filePath).toLowerCase()] ?? 'application/octet-stream'

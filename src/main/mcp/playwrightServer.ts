@@ -7,7 +7,7 @@ import { APP_VERSION } from '../version'
 import type { SettingsStore } from '../settings'
 import type { PTNotesService } from '../service/PTNotesService'
 
-const TRUNCATE_LEN = 24_000
+const TRUNCATE_LEN = 300_000
 
 function truncate(text: string): string {
   return text.length > TRUNCATE_LEN ? text.slice(0, TRUNCATE_LEN) + '\n…(truncated)' : text
