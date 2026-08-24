@@ -21,7 +21,8 @@ import type {
   SkillList,
   SkillMeta,
   SkillScope,
-  StorageSettings
+  StorageSettings,
+  ToolsetSettings
 } from '@shared/types'
 import { AI_ENDPOINTS } from '@shared/aiEndpoints'
 import appIcon from '../../../../resources/icon.png'
@@ -441,6 +442,91 @@ function ModulesPane({
                 disabled={toggling === m.id}
               >
                 <MdiIcon path={m.enabled ? mdiToggleSwitch : mdiToggleSwitchOffOutline} size={32} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  )
+}
+
+function ToolsetsPane({
+  toolsets,
+  setToolsets
+}: {
+  toolsets: ToolsetSettings[] | null
+  setToolsets: (m: ToolsetSettings[]) => void
+}): React.JSX.Element {
+  const [toggling, setToggling] = useState<string | null>(null)
+
+  async function toggle(t: ToolsetSettings): Promise<void> {
+    setToggling(t.id)
+    try {
+      const next = await window.ptnotes.toolsets.setEnabled(t.id, !t.enabled)
+      setToolsets(next)
+    } finally {
+      setToggling(null)
+    }
+  }
+
+  async function toggleConfig(id: string, key: string, value: boolean): Promise<void> {
+    const next = await window.ptnotes.toolsets.setConfig(id, key, value)
+    setToolsets(next)
+  }
+
+  return (
+    <>
+      <p className="hint">
+        Toolsets add extra tools the AI can use during chat. Each enabled toolset adds tools to
+        every chat turn — this uses more tokens and increases the chance the AI selects the wrong
+        tool. Toolsets are only active in the AI chat, never in module subagents.
+      </p>
+      <p className="hint">
+        If you add many toolsets, the AI may fail to select the correct tool &mdash; this is an LLM
+        limitation. Disable any toolsets you don&apos;t actively need.
+      </p>
+      {!toolsets ? (
+        <p className="hint">Loading…</p>
+      ) : toolsets.length === 0 ? (
+        <p className="hint">No toolsets available.</p>
+      ) : (
+        <div className="module-settings-list">
+          {toolsets.map((t) => (
+            <div
+              key={t.id}
+              className={`module-settings-row${t.enabled ? '' : ' disabled'}`}
+              aria-pressed={t.enabled}
+              onClick={() => void toggle(t)}
+            >
+              <span className="module-settings-info">
+                <span className="module-settings-name">
+                  {t.name}
+                  {t.toolCount > 0 && (
+                    <span className="module-settings-count">
+                      {' '}
+                      ({t.toolCount} tool{t.toolCount !== 1 ? 's' : ''})
+                    </span>
+                  )}
+                </span>
+                <span className="module-settings-desc">{t.summary}</span>
+                {t.id === 'browser' && t.headless !== undefined && (
+                  <label className="toolset-sub-config" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={t.headless}
+                      onChange={(e) => void toggleConfig(t.id, 'headless', e.target.checked)}
+                    />
+                    Run in headless mode (browser is invisible)
+                  </label>
+                )}
+              </span>
+              <button
+                className={`module-settings-toggle${t.enabled ? ' on' : ''}`}
+                title={t.enabled ? 'Disable this toolset' : 'Enable this toolset'}
+                disabled={toggling === t.id}
+              >
+                <MdiIcon path={t.enabled ? mdiToggleSwitch : mdiToggleSwitchOffOutline} size={32} />
               </button>
             </div>
           ))}
@@ -911,6 +997,7 @@ export function SettingsDialog(): React.JSX.Element {
   const [storage, setStorage] = useState<StorageSettings | null>(null)
   const [aiConfig, setAiConfig] = useState<AIConfig | null>(null)
   const [modules, setModules] = useState<ModuleSettings[] | null>(null)
+  const [toolsets, setToolsets] = useState<ToolsetSettings[] | null>(null)
   const [error, setError] = useState('')
   const [pendingRoot, setPendingRoot] = useState<string | null>(null)
   const [moving, setMoving] = useState(false)
@@ -919,6 +1006,7 @@ export function SettingsDialog(): React.JSX.Element {
     void window.ptnotes.settings.get().then(setStorage)
     void window.ptnotes.ai.getProfiles().then(setAiConfig)
     void window.ptnotes.modules.listAvailable().then(setModules)
+    void window.ptnotes.toolsets.listAvailable().then(setToolsets)
   }, [])
 
   async function chooseNewRoot(): Promise<void> {
@@ -985,6 +1073,12 @@ export function SettingsDialog(): React.JSX.Element {
             Modules
           </button>
           <button
+            className={category === 'toolsets' ? 'active' : ''}
+            onClick={() => setSettingsCategory('toolsets')}
+          >
+            Toolsets
+          </button>
+          <button
             className={category === 'skills' ? 'active' : ''}
             onClick={() => setSettingsCategory('skills')}
           >
@@ -1018,6 +1112,10 @@ export function SettingsDialog(): React.JSX.Element {
           ) : category === 'modules' ? (
             <>
               <ModulesPane modules={modules} setModules={setModules} />
+            </>
+          ) : category === 'toolsets' ? (
+            <>
+              <ToolsetsPane toolsets={toolsets} setToolsets={setToolsets} />
             </>
           ) : category === 'skills' ? (
             <>

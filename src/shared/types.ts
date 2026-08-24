@@ -47,6 +47,8 @@ export interface AIConfig {
 export interface StorageSettings {
   rootDir: string
   disabledModules?: string[]
+  disabledToolsets?: string[]
+  browserHeadless?: boolean
   /** User enable/disable choices for builtin (app-shipped, read-only) skills, keyed by skill name. */
   builtinSkillOverrides?: Record<string, boolean>
 }
@@ -68,6 +70,16 @@ export interface ModuleSettings {
   enabled: boolean
   /** Optional external link shown under the module row (e.g. a template gallery). */
   link?: { label: string; url: string }
+}
+
+/** A registered toolset's availability state shown in Settings ▸ Toolsets. */
+export interface ToolsetSettings {
+  id: string
+  name: string
+  summary: string
+  enabled: boolean
+  toolCount: number
+  headless?: boolean
 }
 
 export interface AppSettings {

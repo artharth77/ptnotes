@@ -47,7 +47,7 @@ interface AppState {
   confirmRequest: ConfirmRequest | null
   askRequest: AskRequest | null
   settingsOpen: boolean
-  settingsCategory: 'storage' | 'ai' | 'modules' | 'about' | 'skills'
+  settingsCategory: 'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets'
   skillEditRequest: string | null
   sidebarVisible: boolean
   formatHelperEnabled: boolean
@@ -101,8 +101,10 @@ interface AppState {
   setConfirmRequest: (req: ConfirmRequest | null) => void
   setAskRequest: (req: AskRequest | null) => void
   setSettingsOpen: (open: boolean) => void
-  setSettingsCategory: (category: 'storage' | 'ai' | 'modules' | 'about' | 'skills') => void
-  openSettings: (category?: 'storage' | 'ai' | 'modules' | 'about' | 'skills') => void
+  setSettingsCategory: (
+    category: 'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets'
+  ) => void
+  openSettings: (category?: 'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets') => void
   openSkillEditor: (name: string) => void
   clearSkillEditRequest: () => void
   setSidebarVisible: (visible: boolean) => void

@@ -3123,6 +3123,25 @@ body {
   font-weight: 600;
 }
 
+.module-settings-count {
+  font-weight: 400;
+  color: var(--text-dim);
+}
+
+.toolset-sub-config {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+  margin-top: 2px;
+}
+
+.toolset-sub-config input[type='checkbox'] {
+  cursor: pointer;
+}
+
 .module-settings-desc {
   color: var(--text-dim);
   font-size: 12px;

@@ -1,3 +1,21 @@
+## [0.13.0] — 2026-08-24
+
+### Added
+
+#### Browser toolset (in-app MCP, chat-only)
+
+- **Playwright browser control** via an in-process MCP server + client over `InMemoryTransport`, implemented in `src/main/mcp/`. Uses `playwright-core` to drive installed Chrome or Edge (no bundled Chromium — auto-detects `channel: 'chrome'` then `channel: 'msedge'`; if neither is installed, browser tools return a clear error). Headful by default.
+- **12 browser tools** (chat-only, never in module subagents): `browser_navigate`, `browser_navigate_back`, `browser_snapshot` (page text + interactive elements), `browser_click`, `browser_type`, `browser_select_option`, `browser_press_key`, `browser_screenshot` (PNG), `browser_evaluate` (run JS on page), `browser_wait_for`, `browser_set_mode` (headful/headless toggle), `browser_close`.
+- **Headless guard**: the system prompt instructs the AI to call `ask_user` for confirmation before switching to headless mode (browser becomes invisible).
+- **Settings ▸ Toolsets** category: toggle browser toolset on/off. Warning that each enabled toolset adds tools to every chat turn (more tokens, higher chance of wrong tool selection). Toolsets are extensible for future external MCP connections.
+- Dependencies: `@modelcontextprotocol/sdk@^1.30.0`, `playwright-core@^1.62`, `zod@^4.4`.
+
+### Changed
+
+- Tool count: 26 base + 12 browser = 38 total (guideline; browser tools are opt-in).
+- `StorageSettings` now includes `disabledToolsets?: string[]` (persisted in `ptnotes-settings.json`).
+- System prompt accepts an optional extra section (browser toolset instructions injected when enabled).
+
 ## [0.12.0] — 2026-08-24
 
 ### Added

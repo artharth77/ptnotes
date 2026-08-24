@@ -10,12 +10,14 @@ import { registerFilesIpc } from './ipc/files'
 import { registerSettingsIpc } from './ipc/settings'
 import { registerSkillsIpc } from './ipc/skills'
 import { registerModulesIpc } from './ipc/modules'
+import { registerToolsetsIpc } from './ipc/toolsets'
 import { ModuleRegistry } from './modules/registry'
 import { ModuleRunManager } from './modules/runs'
 import { buildStartModuleTool, buildWaitModulesTool } from './modules/tool'
 import { shutdownChartRenderer } from './modules/shared/chartRenderer'
 import { shutdownDiagramRenderer } from './modules/shared/diagramRenderer'
 import { shutdownInfographicRenderer } from './modules/shared/infographicRenderer'
+import { close as closeBrowser } from './mcp/browser'
 import type { PTTool } from './ai/tools'
 import { createPptxModule } from './modules/pptx'
 import { createInfographicModule } from './modules/infographic'
@@ -204,6 +206,9 @@ app.whenReady().then(async () => {
   await service.migrateLegacyFolders()
   const configStore = new AIConfigStore()
 
+  const { setDefaultHeadless } = await import('./mcp/browser')
+  setDefaultHeadless(!!settings.browserHeadless)
+
   const moduleRegistry = new ModuleRegistry()
   moduleRegistry.register(createSubagentModule())
   moduleRegistry.register(createPptxModule())
@@ -224,13 +229,19 @@ app.whenReady().then(async () => {
   )
   const toolsProvider = async (): Promise<PTTool[]> => {
     const current = await settingsStore.load()
+    const { buildChatTools } = await import('./mcp/toolsets')
     return [
       buildStartModuleTool(moduleManager!, moduleRegistry, current.disabledModules ?? []),
-      buildWaitModulesTool(moduleManager!)
+      buildWaitModulesTool(moduleManager!),
+      ...(await buildChatTools(current.disabledToolsets ?? []))
     ]
   }
 
-  const registry = createSessionRegistry(service, configStore, toolsProvider)
+  const registry = createSessionRegistry(service, configStore, toolsProvider, async () => {
+    const { buildPromptSection } = await import('./mcp/toolsets')
+    const current = await settingsStore.load()
+    return buildPromptSection(current.disabledToolsets ?? [])
+  })
   registerProjectIpc(service)
   registerNoteIpc(service)
   registerTodoIpc(service)
@@ -241,6 +252,7 @@ app.whenReady().then(async () => {
   registerSettingsIpc(service, settingsStore)
   registerSkillsIpc(service)
   registerModulesIpc(moduleManager!, settingsStore, moduleRegistry)
+  registerToolsetsIpc(settingsStore)
 
   windowStateStore = new WindowStateStore()
   const windowState = await windowStateStore.load()
@@ -260,6 +272,7 @@ app.on('window-all-closed', () => {
 app.on('will-quit', () => {
   // Mark any in-flight module runs as cancelled before the process exits.
   void moduleManager?.cancelActive()
+  void closeBrowser()
   shutdownChartRenderer()
   shutdownDiagramRenderer()
   shutdownInfographicRenderer()

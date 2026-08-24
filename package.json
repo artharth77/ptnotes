@@ -1,6 +1,6 @@
 {
   "name": "ptnotes",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "Markdown notes + todo lists + AI assistant, organized by project",
   "main": "./out/main/index.js",
   "author": "",
@@ -18,13 +18,14 @@
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "electron-vite build && electron-builder --mac",
     "build:linux": "electron-vite build && electron-builder --linux",
-    "test": "tsx --tsconfig tsconfig.node.json scripts/test-service.mts && tsx --tsconfig tsconfig.node.json scripts/test-ai.mts && tsx --tsconfig tsconfig.node.json scripts/test-config.mts && tsx --tsconfig tsconfig.node.json scripts/test-chat.mts && tsx --tsconfig tsconfig.node.json scripts/test-ask.mts && tsx --tsconfig tsconfig.node.json scripts/test-slash.mts && tsx --tsconfig tsconfig.node.json scripts/test-markdown.mts && tsx --tsconfig tsconfig.node.json scripts/test-pdf.mts && tsx --tsconfig tsconfig.node.json scripts/test-modules.mts && tsx --tsconfig tsconfig.node.json scripts/test-docx.mts && tsx --tsconfig tsconfig.node.json scripts/test-planner.mts && tsx --tsconfig tsconfig.node.json scripts/test-find.mts"
+    "test": "tsx --tsconfig tsconfig.node.json scripts/test-service.mts && tsx --tsconfig tsconfig.node.json scripts/test-ai.mts && tsx --tsconfig tsconfig.node.json scripts/test-config.mts && tsx --tsconfig tsconfig.node.json scripts/test-chat.mts && tsx --tsconfig tsconfig.node.json scripts/test-ask.mts && tsx --tsconfig tsconfig.node.json scripts/test-slash.mts && tsx --tsconfig tsconfig.node.json scripts/test-markdown.mts && tsx --tsconfig tsconfig.node.json scripts/test-pdf.mts && tsx --tsconfig tsconfig.node.json scripts/test-modules.mts && tsx --tsconfig tsconfig.node.json scripts/test-docx.mts && tsx --tsconfig tsconfig.node.json scripts/test-planner.mts && tsx --tsconfig tsconfig.node.json scripts/test-find.mts && tsx --tsconfig tsconfig.node.json scripts/test-mcp.mts"
   },
   "dependencies": {
     "@antv/infographic": "^0.2.19",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@mdi/js": "^7.4.47",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@napi-rs/canvas": "^1.0.5",
     "@resvg/resvg-js": "^2.6.2",
     "chart.js": "^4.5.1",
@@ -35,10 +36,12 @@
     "lucide-static": "^1.30.0",
     "openai": "^7.4.0",
     "pdf-parse": "^2.4.5",
+    "playwright-core": "^1.62.1",
     "pptxgenjs": "^4.0.1",
     "react-markdown": "^10.1.0",
     "remark-breaks": "^4.0.0",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",

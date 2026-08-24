@@ -18,6 +18,7 @@ import type {
   ModuleSettings,
   ModuleStartResult,
   StorageSettings,
+  ToolsetSettings,
   NoteMeta,
   PdfExtractResult,
   Project,
@@ -232,6 +233,13 @@ const api = {
         ipcRenderer.removeListener('modules:event', listener)
       }
     }
+  },
+  toolsets: {
+    listAvailable: (): Promise<ToolsetSettings[]> => ipcRenderer.invoke('toolsets:listAvailable'),
+    setEnabled: (id: string, enabled: boolean): Promise<ToolsetSettings[]> =>
+      ipcRenderer.invoke('toolsets:setEnabled', id, enabled),
+    setConfig: (id: string, key: string, value: unknown): Promise<ToolsetSettings[]> =>
+      ipcRenderer.invoke('toolsets:setConfig', id, key, value)
   }
 }
 
