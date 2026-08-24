@@ -3,7 +3,14 @@ import type { IpcMainInvokeEvent } from 'electron'
 import type { SettingsStore } from '../settings'
 import type { ToolsetSettings } from '@shared/types'
 import { listToolsets } from '../mcp/toolsets'
-import { getDefaultHeadless, setDefaultHeadless } from '../mcp/browser'
+import {
+  getDefaultHeadless,
+  setDefaultHeadless,
+  getDefaultMaximize,
+  setDefaultMaximize,
+  getDefaultIgnoreHttpsErrors,
+  setDefaultIgnoreHttpsErrors
+} from '../mcp/browser'
 
 async function toSettings(disabled: Set<string>): Promise<ToolsetSettings[]> {
   const result: ToolsetSettings[] = []
@@ -15,7 +22,9 @@ async function toSettings(disabled: Set<string>): Promise<ToolsetSettings[]> {
       summary: ts.summary,
       enabled: !disabled.has(ts.id),
       toolCount: count,
-      headless: ts.id === 'browser' ? getDefaultHeadless() : undefined
+      headless: ts.id === 'browser' ? getDefaultHeadless() : undefined,
+      maximize: ts.id === 'browser' ? getDefaultMaximize() : undefined,
+      ignoreHttpsErrors: ts.id === 'browser' ? getDefaultIgnoreHttpsErrors() : undefined
     })
   }
   return result
@@ -54,6 +63,16 @@ export function registerToolsetsIpc(settingsStore: SettingsStore): void {
         setDefaultHeadless(value)
         const settings = await settingsStore.load()
         await settingsStore.save({ ...settings, browserHeadless: value })
+      }
+      if (id === 'browser' && key === 'maximize' && typeof value === 'boolean') {
+        setDefaultMaximize(value)
+        const settings = await settingsStore.load()
+        await settingsStore.save({ ...settings, browserMaximize: value })
+      }
+      if (id === 'browser' && key === 'ignoreHttpsErrors' && typeof value === 'boolean') {
+        setDefaultIgnoreHttpsErrors(value)
+        const settings = await settingsStore.load()
+        await settingsStore.save({ ...settings, browserIgnoreHttpsErrors: value })
       }
       const settings = await settingsStore.load()
       return toSettings(new Set(settings.disabledToolsets ?? []))

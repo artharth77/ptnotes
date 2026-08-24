@@ -1,3 +1,14 @@
+## [0.13.1] — 2026-08-25
+
+### Added
+
+- **Browser maximize option**: new "Maximize browser window" toggle in Settings ▸ Toolsets (below the existing headless toggle). When enabled, the browser launches maximized — uses `--start-maximized` on Windows/Linux and `--window-size` + `--window-position` on macOS. The viewport is set to `null` so Playwright does not constrain the page size. Persisted as `browserMaximize` in `ptnotes-settings.json`.
+- **Browser HTTPS certificate bypass**: new "Ignore HTTPS certificate errors" toggle in Settings ▸ Toolsets. When enabled, Playwright skips certificate verification (`ignoreHTTPSErrors: true`). Only use with trusted sites — never enter sensitive data while this is enabled. Persisted as `browserIgnoreHttpsErrors` in `ptnotes-settings.json`.
+
+### Changed
+
+- AI chat streaming now keeps the busy/indicator state for 1 second after the stream ends, giving the user time to see the last content before the UI transitions. The Stop button still takes effect immediately.
+
 ## [0.13.0] — 2026-08-24
 
 ### Added

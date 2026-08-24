@@ -42,6 +42,8 @@ export class SettingsStore {
         disabledModules,
         disabledToolsets,
         browserHeadless: !!parsed.browserHeadless,
+        browserMaximize: !!parsed.browserMaximize,
+        browserIgnoreHttpsErrors: !!parsed.browserIgnoreHttpsErrors,
         builtinSkillOverrides
       }
     } catch {
@@ -67,6 +69,8 @@ export class SettingsStore {
           ]
         : [],
       browserHeadless: !!settings.browserHeadless,
+      browserMaximize: !!settings.browserMaximize,
+      browserIgnoreHttpsErrors: !!settings.browserIgnoreHttpsErrors,
       builtinSkillOverrides: {}
     }
     if (settings.builtinSkillOverrides && typeof settings.builtinSkillOverrides === 'object') {

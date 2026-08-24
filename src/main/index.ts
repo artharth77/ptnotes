@@ -211,8 +211,7 @@ app.whenReady().then(async () => {
     let filePath = rawPath
     if (/^\/[a-zA-Z]:\//.test(filePath))
       filePath = filePath.replace(/^\//g, '').replace(/%20/g, ' ')
-    else
-      filePath = filePath.replace(/%20/g, ' ')
+    else filePath = filePath.replace(/%20/g, ' ')
     try {
       const data = await fs.readFile(filePath)
       const mime = IMAGE_MIME[extname(filePath).toLowerCase()] ?? 'application/octet-stream'
@@ -242,8 +241,11 @@ app.whenReady().then(async () => {
   await service.migrateLegacyFolders()
   const configStore = new AIConfigStore()
 
-  const { setDefaultHeadless } = await import('./mcp/browser')
+  const { setDefaultHeadless, setDefaultMaximize, setDefaultIgnoreHttpsErrors } =
+    await import('./mcp/browser')
   setDefaultHeadless(!!settings.browserHeadless)
+  setDefaultMaximize(!!settings.browserMaximize)
+  setDefaultIgnoreHttpsErrors(!!settings.browserIgnoreHttpsErrors)
 
   const moduleRegistry = new ModuleRegistry()
   moduleRegistry.register(createSubagentModule())

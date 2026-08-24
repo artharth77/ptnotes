@@ -289,7 +289,11 @@ export function createBrowserMcpServer(
       }
     },
     async ({ url }) => {
-      const page = await browser.getBrowserPage(browser.headlessMode())
+      const page = await browser.getBrowserPage(
+        browser.headlessMode(),
+        browser.getDefaultMaximize(),
+        browser.getDefaultIgnoreHttpsErrors()
+      )
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
       const snapshot = await extractPageSnapshot(page)
       const headlessNote = browser.headlessMode()
@@ -312,7 +316,11 @@ export function createBrowserMcpServer(
       description: 'Navigate the browser back one page in history.'
     },
     async () => {
-      const page = await browser.getBrowserPage(browser.headlessMode())
+      const page = await browser.getBrowserPage(
+        browser.headlessMode(),
+        browser.getDefaultMaximize(),
+        browser.getDefaultIgnoreHttpsErrors()
+      )
       await page.goBack({ waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => {})
       const snapshot = await extractPageSnapshot(page)
       return {
@@ -335,7 +343,11 @@ export function createBrowserMcpServer(
       }
     },
     async ({ depth, boxes }) => {
-      const page = await browser.getBrowserPage(browser.headlessMode())
+      const page = await browser.getBrowserPage(
+        browser.headlessMode(),
+        browser.getDefaultMaximize(),
+        browser.getDefaultIgnoreHttpsErrors()
+      )
       const snapshot = await extractPageSnapshot(page, { depth, boxes })
       return {
         content: [{ type: 'text' as const, text: truncate(JSON.stringify(snapshot, null, 2)) }]
@@ -360,7 +372,11 @@ export function createBrowserMcpServer(
       }
     },
     async ({ ref, element }) => {
-      const page = await browser.getBrowserPage(browser.headlessMode())
+      const page = await browser.getBrowserPage(
+        browser.headlessMode(),
+        browser.getDefaultMaximize(),
+        browser.getDefaultIgnoreHttpsErrors()
+      )
       if (ref) {
         const locator = page.locator(`[data-ref="${ref}"]`)
         await locator.click({ timeout: 10_000 })
@@ -406,7 +422,11 @@ export function createBrowserMcpServer(
       }
     },
     async ({ ref, element, text, pressEnter }) => {
-      const page = await browser.getBrowserPage(browser.headlessMode())
+      const page = await browser.getBrowserPage(
+        browser.headlessMode(),
+        browser.getDefaultMaximize(),
+        browser.getDefaultIgnoreHttpsErrors()
+      )
       if (ref) {
         const locator = page.locator(`[data-ref="${ref}"]`)
         await locator.fill(text, { timeout: 10_000 })
@@ -450,7 +470,11 @@ export function createBrowserMcpServer(
       }
     },
     async ({ ref, element, value }) => {
-      const page = await browser.getBrowserPage(browser.headlessMode())
+      const page = await browser.getBrowserPage(
+        browser.headlessMode(),
+        browser.getDefaultMaximize(),
+        browser.getDefaultIgnoreHttpsErrors()
+      )
       if (ref) {
         const locator = page.locator(`[data-ref="${ref}"]`)
         await locator.selectOption(value, { timeout: 10_000 })
@@ -490,7 +514,11 @@ export function createBrowserMcpServer(
       }
     },
     async ({ key }) => {
-      const page = await browser.getBrowserPage(browser.headlessMode())
+      const page = await browser.getBrowserPage(
+        browser.headlessMode(),
+        browser.getDefaultMaximize(),
+        browser.getDefaultIgnoreHttpsErrors()
+      )
       await page.keyboard.press(key)
       return { content: [{ type: 'text' as const, text: `Pressed "${key}".` }] }
     }
@@ -509,7 +537,11 @@ export function createBrowserMcpServer(
       }
     },
     async ({ project, fullPage }) => {
-      const page = await browser.getBrowserPage(browser.headlessMode())
+      const page = await browser.getBrowserPage(
+        browser.headlessMode(),
+        browser.getDefaultMaximize(),
+        browser.getDefaultIgnoreHttpsErrors()
+      )
       const ts = Date.now()
       let dir: string
       if (service && project) {
@@ -536,7 +568,11 @@ export function createBrowserMcpServer(
       }
     },
     async ({ expression }) => {
-      const page = await browser.getBrowserPage(browser.headlessMode())
+      const page = await browser.getBrowserPage(
+        browser.headlessMode(),
+        browser.getDefaultMaximize(),
+        browser.getDefaultIgnoreHttpsErrors()
+      )
       const result = await page.evaluate(expression)
       return { content: [{ type: 'text' as const, text: truncate(String(result ?? '')) }] }
     }
@@ -554,7 +590,11 @@ export function createBrowserMcpServer(
       }
     },
     async ({ selector, text, timeout }) => {
-      const page = await browser.getBrowserPage(browser.headlessMode())
+      const page = await browser.getBrowserPage(
+        browser.headlessMode(),
+        browser.getDefaultMaximize(),
+        browser.getDefaultIgnoreHttpsErrors()
+      )
       const ms = timeout ?? 10_000
       if (selector) {
         await page.waitForSelector(selector, { timeout: ms })

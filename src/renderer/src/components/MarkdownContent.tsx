@@ -25,7 +25,10 @@ function internalNameFromHref(href: string, prefix: string): string {
 
 function normalizeInternalLinks(md: string): string {
   return md
-    .replace(/\[([^\]]*)\]\(\s*([^()]*?)\s*\)/g, (_m, text, dest) => `[${text}](<${dest.replace(/ /g, '%20')}>)`)
+    .replace(
+      /\[([^\]]*)\]\(\s*([^()]*?)\s*\)/g,
+      (_m, text, dest) => `[${text}](<${dest.replace(/ /g, '%20')}>)`
+    )
     .replace(/\[([^\]]*)\]\(\s*(note:[^()]*?)\s*\)/g, (_m, text, dest) => `[${text}](<${dest}>)`)
     .replace(/\[([^\]]*)\]\(\s*(skill:[^()]*?)\s*\)/g, (_m, text, dest) => `[${text}](<${dest}>)`)
     .replace(/\[([^\]]*)\]\(\s*(plan:[^()]*?)\s*\)/g, (_m, text, dest) => `[${text}](<${dest}>)`)
@@ -84,8 +87,7 @@ export const MarkdownContent = memo(function MarkdownContent({
           )
             return url
           // Handle Windows paths like C:\path\to\file and convert to C:/path/to/file
-          if (/^[a-zA-Z]:%5C/.test(url))
-            return url.replace(/%5C/g, '/')
+          if (/^[a-zA-Z]:%5C/.test(url)) return url.replace(/%5C/g, '/')
           return defaultUrlTransform(url)
         }}
         components={{

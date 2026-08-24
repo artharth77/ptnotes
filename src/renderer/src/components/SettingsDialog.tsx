@@ -520,6 +520,41 @@ function ToolsetsPane({
                     Run in headless mode (browser is invisible)
                   </label>
                 )}
+                {t.id === 'browser' && t.maximize !== undefined && (
+                  <label className="toolset-sub-config" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={t.maximize}
+                      onChange={(e) => void toggleConfig(t.id, 'maximize', e.target.checked)}
+                    />
+                    Maximize browser window
+                  </label>
+                )}
+                {t.id === 'browser' && t.ignoreHttpsErrors !== undefined && (
+                  <label className="toolset-sub-config" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={t.ignoreHttpsErrors}
+                      onChange={(e) =>
+                        void toggleConfig(t.id, 'ignoreHttpsErrors', e.target.checked)
+                      }
+                    />
+                    Ignore HTTPS certificate errors
+                  </label>
+                )}
+                {t.id === 'browser' && t.ignoreHttpsErrors && (
+                  <p
+                    className="hint"
+                    style={{
+                      marginLeft: 22,
+                      marginTop: 2,
+                      fontStyle: 'italic',
+                      color: 'var(--danger)'
+                    }}
+                  >
+                    Disables certificate verification. Only use with trusted sites.
+                  </p>
+                )}
               </span>
               <button
                 className={`module-settings-toggle${t.enabled ? ' on' : ''}`}
