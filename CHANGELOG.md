@@ -2,6 +2,7 @@
 
 ### Added
 
+- **Splash screen on startup**: a small frameless window with the app icon, "PTNotes" title and a spinner appears as soon as the app launches (before settings/service init), and closes when the main window is ready to show — no more blank screen during startup. The splash skips the taskbar, isn't resizable, and is also dismissed if the renderer fails to load.
 - **Copy buttons in the AI trace viewer detail pane**: labeled content blocks in the item-detail view now get an icon button (right of the block label) that copies the raw text to the clipboard — Content for system/user/assistant messages, Result for tool calls, assistant Reasoning (the button inside the collapsible summary no longer toggles it), and per-tool-call arguments JSON. The icon swaps to a checkmark for 1.5s after copying.
 
 ### Changed
@@ -12,6 +13,7 @@
 - **Form state is now visible to the AI**: textboxes/searchboxes/spinbuttons expose their current `value`, `<select>` exposes its selected option(s), and `aria-describedby` is captured as a `description` field.
 - **ARIA-aware element state**: checkbox/radio/switch/menuitemcheckbox/menuitemradio prefer `aria-checked` over the DOM property (custom role-based widgets no longer report unchecked) with `indeterminate` support; `aria-disabled`, toggle-button `aria-pressed`, slider/progressbar/spinbutton `aria-valuenow`, heading `aria-level` for non-`h*` elements, and native `option.selected` are all captured.
 - **Traversal scope widened**: open shadow roots (`element.shadowRoot`) and same-origin iframe documents (`contentDocument`, cross-origin safely skipped) are now included; `contenteditable` elements infer role `textbox` and receive refs so `browser_type` can target rich-text editors.
+- **Clickables without `onclick` are now detected**: an element receives a ref if it carries any inline `on*` event-handler attribute (`onmousedown`, `onpointerdown`, `ontouchstart`, …), has an interactive ARIA attribute (`aria-haspopup`, `aria-expanded`, `aria-pressed`, `aria-activedescendant`, `aria-controls`), or computes to `cursor: pointer` — so framework-built clickables (React/Vue `onClick`, jQuery `.on()`) on plain `span`/`div` are now targetable via `browser_click`.
 - **Role table extended**: `hr`→separator, `progress`/`meter`→progressbar, `output`→status, `<search>`→search, `menu`/`dl`→list, `datalist` and multi-select `select`→listbox, `area`→link, `canvas`→img, `input type=search`→searchbox. Explicit `role="presentation"/"none"` renders as a transparent container (no name/state/ref).
 - **Visibility heuristic** additionally treats `opacity: 0` and `visibility: collapse` as hidden.
 - **Ref attribute renamed** `data-ref` → `data-ptnotes-ref` so snapshots no longer clobber host pages that use their own `data-ref` attributes.

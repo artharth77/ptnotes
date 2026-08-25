@@ -80,7 +80,6 @@ async function extractPageSnapshot(
         if (style.visibility === 'hidden' || style.visibility === 'collapse') return true;
         if (style.opacity === '0') return true;
         if (el.getAttribute('aria-hidden') === 'true') return true;
-        if (el.offsetWidth === 0 && el.offsetHeight === 0 && style.position !== 'fixed') return true;
         return false;
       }
 
@@ -232,6 +231,12 @@ async function extractPageSnapshot(
           if (text) return text;
         }
 
+        // Interactive elements (clickable span/div without a semantic role) also get a text name
+        if (isInteractive(el)) {
+          const text = (el.textContent || '').trim().slice(0, MAX_NAME_LEN);
+          if (text) return text;
+        }
+
         // Fallback: short text of leaf elements only (avoids duplicating child text)
         if (el.children.length === 0) {
           const text = (el.textContent || '').trim().slice(0, 100);
@@ -244,11 +249,18 @@ async function extractPageSnapshot(
       function isInteractive(el) {
         const role = getRole(el);
         if (['button','link','textbox','searchbox','combobox','listbox','checkbox','radio','switch','slider','spinbutton','tab','menuitem','menuitemcheckbox','menuitemradio','option','treeitem'].includes(role)) return true;
-        if (el.hasAttribute('onclick')) return true;
         const tabindex = el.getAttribute('tabindex');
         if (tabindex !== null && tabindex !== '-1') return true;
         const tag = el.tagName.toLowerCase();
         if ((tag === 'a' || tag === 'area') && el.hasAttribute('href')) return true;
+        // Inline event handler attributes (onclick, onmousedown, onpointerdown, ontouchstart, ...)
+        for (const attr of el.attributes) {
+          if (/^on[a-z]/i.test(attr.name)) return true;
+        }
+        // Interactive ARIA attributes on plain elements (custom widgets)
+        if (el.hasAttribute('aria-haspopup') || el.hasAttribute('aria-expanded') || el.hasAttribute('aria-pressed') || el.hasAttribute('aria-activedescendant') || el.hasAttribute('aria-controls')) return true;
+        // Cursor pointer (framework-built clickables that style their target)
+        if (window.getComputedStyle(el).cursor === 'pointer') return true;
         return false;
       }
 
