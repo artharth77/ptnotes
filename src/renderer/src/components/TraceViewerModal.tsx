@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useAppStore } from '../store/useAppStore'
 import { Modal } from './Modal'
+import { MdiIcon } from './MdiIcon'
 import type { AiTraceEntry, AiTraceFile, AiTraceRole } from '@shared/types'
 import { normalizeUsage } from '@shared/usage'
+import { mdiCheck, mdiContentCopy } from '@mdi/js'
 
 interface TraceViewerTarget {
   kind: 'chat' | 'module'
@@ -296,7 +298,11 @@ function TraceDetail({ entry }: { entry: AiTraceEntry | null }): React.JSX.Eleme
           <Row k="Tool" v={entry.name ?? '—'} />
           <Row k="Call ID" v={entry.toolCallId ?? '—'} />
           <Row k="Duration" v={formatMs(entry.durationMs)} />
-          {entry.content && <Block label="Result">{entry.content}</Block>}
+          {entry.content && (
+            <Block label="Result" copyText={entry.content}>
+              {entry.content}
+            </Block>
+          )}
         </>
       )}
 
@@ -307,16 +313,29 @@ function TraceDetail({ entry }: { entry: AiTraceEntry | null }): React.JSX.Eleme
           <Row k="Finish reason" v={entry.finishReason ?? '—'} />
           {entry.reasoning && (
             <details className="trace-detail-collapse">
-              <summary>Reasoning</summary>
+              <summary className="trace-summary-row">
+                <span>Reasoning</span>
+                <CopyIconButton text={entry.reasoning} title="Copy reasoning" />
+              </summary>
               <div className="trace-detail-content trace-detail-mono">{entry.reasoning}</div>
             </details>
           )}
-          {entry.content && <Block label="Content">{entry.content}</Block>}
+          {entry.content && (
+            <Block label="Content" copyText={entry.content}>
+              {entry.content}
+            </Block>
+          )}
           {entry.toolCalls && entry.toolCalls.length > 0 && (
             <Block label="Tool calls">
               {entry.toolCalls.map((tc) => (
                 <div className="trace-toolcall" key={tc.id}>
-                  <div className="trace-toolcall-name">{tc.name}</div>
+                  <div className="trace-toolcall-head">
+                    <span className="trace-toolcall-name">{tc.name}</span>
+                    <CopyIconButton
+                      text={JSON.stringify(tc.args, null, 2)}
+                      title={`Copy ${tc.name} arguments`}
+                    />
+                  </div>
                   <pre className="trace-toolcall-args">{JSON.stringify(tc.args, null, 2)}</pre>
                 </div>
               ))}
@@ -327,7 +346,11 @@ function TraceDetail({ entry }: { entry: AiTraceEntry | null }): React.JSX.Eleme
 
       {(entry.role === 'system' || entry.role === 'user') && (
         <>
-          {entry.content && <Block label="Content">{entry.content}</Block>}
+          {entry.content && (
+            <Block label="Content" copyText={entry.content}>
+              {entry.content}
+            </Block>
+          )}
           {entry.file && <Row k="Attachment" v={entry.file.filename} />}
         </>
       )}
@@ -360,17 +383,50 @@ function endpointLabel(entry: AiTraceEntry): string {
 function Block({
   label,
   children,
-  mono
+  mono,
+  copyText
 }: {
   label: string
   children: ReactNode
   mono?: boolean
+  copyText?: string
 }): React.JSX.Element {
   return (
     <div className="trace-detail-block">
-      <div className="trace-detail-label">{label}</div>
+      <div className="trace-detail-label-row">
+        <div className="trace-detail-label">{label}</div>
+        {copyText != null && copyText !== '' && (
+          <CopyIconButton text={copyText} title={`Copy ${label.toLowerCase()}`} />
+        )}
+      </div>
       <div className={`trace-detail-content${mono ? ' trace-detail-mono' : ''}`}>{children}</div>
     </div>
+  )
+}
+
+function CopyIconButton({ text, title }: { text: string; title?: string }): React.JSX.Element {
+  const [copied, setCopied] = useState(false)
+  async function onCopy(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // clipboard unavailable — ignore
+    }
+  }
+  return (
+    <button
+      className={`icon-btn trace-copy-btn${copied ? ' copied' : ''}`}
+      title={copied ? 'Copied' : (title ?? 'Copy')}
+      onClick={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        void onCopy()
+      }}
+    >
+      <MdiIcon path={copied ? mdiCheck : mdiContentCopy} size={13} />
+    </button>
   )
 }
 

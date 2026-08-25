@@ -923,4 +923,282 @@ assert.equal(
   'legacy .trace.json removed after append migration'
 )
 
+// ---- e2e: ask_user secret → ${SECRET:<id>} token → browser_type substitution ----
+
+const SECRET_VALUE = 's3cr3t-e2e-value'
+const TOKEN_RE = /\$\{SECRET:[0-9a-f]+\}/
+
+const capturedBrowserArgs: Record<string, unknown>[] = []
+const fakeBrowserType: PTTool = {
+  definition: {
+    type: 'function',
+    function: {
+      name: 'browser_type',
+      description: 'fake browser_type',
+      parameters: { type: 'object', properties: {} }
+    }
+  },
+  execute: async (args) => {
+    capturedBrowserArgs.push(args)
+    return 'Typed.'
+  }
+}
+
+let secretTurn = 0
+const secretServer = http.createServer((req, res) => {
+  let body = ''
+  req.on('data', (d) => (body += d))
+  req.on('end', () => {
+    const parsed = JSON.parse(body)
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive'
+    })
+    const toolCall = (id: string, name: string, argumentsJson: string): string =>
+      sse({
+        id,
+        object: 'chat.completion.chunk',
+        created: 1,
+        model: 't',
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                { index: 0, id, type: 'function', function: { name, arguments: argumentsJson } }
+              ]
+            },
+            finish_reason: null
+          }
+        ]
+      })
+    const finish = (reason: string): string =>
+      sse({
+        id: 's',
+        object: 'chat.completion.chunk',
+        created: 1,
+        model: 't',
+        choices: [{ index: 0, delta: {}, finish_reason: reason }]
+      })
+
+    if (secretTurn === 0) {
+      res.write(
+        toolCall(
+          'call_ask',
+          'ask_user',
+          JSON.stringify({ questions: [{ id: 'pw', question: 'Password?', secret: true }] })
+        )
+      )
+      res.write(finish('tool_calls'))
+    } else if (secretTurn === 1) {
+      const toolMsgs = (parsed.messages as { role: string; content?: string }[]).filter(
+        (m) => m.role === 'tool'
+      )
+      const token = toolMsgs
+        .map((m) => m.content ?? '')
+        .join('\n')
+        .match(TOKEN_RE)?.[0]
+      assert.ok(token, 'ask_user result carries a ${SECRET:<id>} token')
+      res.write(toolCall('call_type', 'browser_type', JSON.stringify({ ref: 'e1', text: token })))
+      res.write(finish('tool_calls'))
+    } else {
+      res.write(
+        sse({
+          id: 's',
+          object: 'chat.completion.chunk',
+          created: 1,
+          model: 't',
+          choices: [
+            { index: 0, delta: { role: 'assistant', content: 'Done.' }, finish_reason: null }
+          ]
+        })
+      )
+      res.write(finish('stop'))
+    }
+    secretTurn += 1
+    res.write('data: [DONE]\n\n')
+    res.end()
+  })
+})
+await new Promise<void>((r) => secretServer.listen(0, '127.0.0.1', r))
+const secretPort = (secretServer.address() as { port: number }).port
+
+const secretTraceKey = 'secret-e2e'
+const secretTrace = new AiTraceRecorder({
+  project: 'Test',
+  key: secretTraceKey,
+  kind: 'chat',
+  append: (header, lines) => service.appendChatTrace('Test', secretTraceKey, header, lines)
+})
+const secretEvents: unknown[] = []
+const secretSession = new ChatSession(
+  async () => ({
+    baseUrl: `http://127.0.0.1:${secretPort}/v1`,
+    apiKey: '',
+    model: 'test-model'
+  }),
+  {
+    service,
+    activeProject: 'Test',
+    ask: async () => ({ answers: [{ id: 'pw', answer: SECRET_VALUE }] })
+  },
+  (evt) => secretEvents.push(evt),
+  async () => [fakeBrowserType]
+)
+await secretSession.send('log in for me', [], null, null, secretTrace)
+secretServer.close()
+
+assert.equal(capturedBrowserArgs.length, 1, 'browser_type executed once')
+assert.equal(
+  capturedBrowserArgs[0]?.text,
+  SECRET_VALUE,
+  'token substituted with the real secret before execution'
+)
+
+const secretToolEvents = (secretEvents as { type?: string; toolCall?: unknown }[]).filter(
+  (e) => e.type === 'tool'
+)
+const askEvt = secretToolEvents.find((e) => (e.toolCall as { name?: string })?.name === 'ask_user')
+  ?.toolCall as { name: string; args: Record<string, unknown>; ok: boolean; result: string }
+const typeEvt = secretToolEvents.find(
+  (e) => (e.toolCall as { name?: string })?.name === 'browser_type'
+)?.toolCall as { name: string; args: Record<string, unknown>; ok: boolean; result: string }
+assert.ok(askEvt && typeEvt, 'ask_user and browser_type tool events emitted')
+assert.match(askEvt!.result, TOKEN_RE, 'ask_user result carries the token')
+assert.ok(!askEvt!.result.includes(SECRET_VALUE), 'ask_user result has no raw secret')
+assert.equal(
+  typeEvt!.args.text,
+  askEvt!.result.match(TOKEN_RE)?.[0],
+  'streamed browser_type args keep the token'
+)
+assert.ok(!JSON.stringify(secretEvents).includes(SECRET_VALUE), 'no stream event leaks the secret')
+
+const secretTraceFile = await service.readChatTrace('Test', secretTraceKey)
+assert.ok(secretTraceFile, 'secret e2e trace written')
+assert.ok(
+  !JSON.stringify(secretTraceFile).includes(SECRET_VALUE),
+  'trace never contains the secret value'
+)
+const tracedTypeCall = secretTraceFile!.entries
+  .flatMap((e) => e.toolCalls ?? [])
+  .find((tc) => tc.name === 'browser_type')
+assert.ok(tracedTypeCall, 'browser_type traced')
+assert.match(String(tracedTypeCall!.args.text), TOKEN_RE, 'traced browser_type args keep the token')
+const secretTraceRaw = await fs.readFile(secretTraceFile!.path!, 'utf8')
+assert.ok(!secretTraceRaw.includes(SECRET_VALUE), 'raw trace file never contains the secret')
+
+// ---- unknown secret token → error, tool not executed ----
+
+let unknownCalls = 0
+const unknownBrowserType: PTTool = {
+  definition: {
+    type: 'function',
+    function: {
+      name: 'browser_type',
+      description: 'fake browser_type',
+      parameters: { type: 'object', properties: {} }
+    }
+  },
+  execute: async () => {
+    unknownCalls += 1
+    return 'Typed.'
+  }
+}
+
+let unknownTurn = 0
+const unknownServer = http.createServer((req, res) => {
+  let body = ''
+  req.on('data', (d) => (body += d))
+  req.on('end', () => {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive'
+    })
+    if (unknownTurn === 0) {
+      res.write(
+        sse({
+          id: 'u',
+          object: 'chat.completion.chunk',
+          created: 1,
+          model: 't',
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'call_u',
+                    type: 'function',
+                    function: {
+                      name: 'browser_type',
+                      arguments: JSON.stringify({ text: '${SECRET:deadbeef}' })
+                    }
+                  }
+                ]
+              },
+              finish_reason: null
+            }
+          ]
+        })
+      )
+      res.write(
+        sse({
+          id: 'u',
+          object: 'chat.completion.chunk',
+          created: 1,
+          model: 't',
+          choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }]
+        })
+      )
+    } else {
+      res.write(
+        sse({
+          id: 'u',
+          object: 'chat.completion.chunk',
+          created: 1,
+          model: 't',
+          choices: [{ index: 0, delta: { role: 'assistant', content: 'ok' }, finish_reason: null }]
+        })
+      )
+      res.write(
+        sse({
+          id: 'u',
+          object: 'chat.completion.chunk',
+          created: 1,
+          model: 't',
+          choices: [{ index: 0, delta: {}, finish_reason: 'stop' }]
+        })
+      )
+    }
+    unknownTurn += 1
+    res.write('data: [DONE]\n\n')
+    res.end()
+  })
+})
+await new Promise<void>((r) => unknownServer.listen(0, '127.0.0.1', r))
+const unknownPort = (unknownServer.address() as { port: number }).port
+const unknownEvents: unknown[] = []
+const unknownSession = new ChatSession(
+  async () => ({
+    baseUrl: `http://127.0.0.1:${unknownPort}/v1`,
+    apiKey: '',
+    model: 'test-model'
+  }),
+  { service, activeProject: 'Test' },
+  (evt) => unknownEvents.push(evt),
+  async () => [unknownBrowserType]
+)
+await unknownSession.send('type it', [], null, null)
+unknownServer.close()
+
+assert.equal(unknownCalls, 0, 'unknown token → tool not executed')
+const unknownEvt = (unknownEvents as { type?: string; toolCall?: unknown }[]).find(
+  (e) => e.type === 'tool'
+)?.toolCall as { name: string; ok: boolean; result: string }
+assert.match(unknownEvt.result, /Unknown secret reference/, 'error names the unknown token')
+assert.equal(unknownEvt.ok, false, 'unknown token tool call reported as failed')
+
 console.log('CHAT SESSION TEST PASSED')

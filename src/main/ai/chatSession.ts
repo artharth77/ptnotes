@@ -1,6 +1,7 @@
 import OpenAI from 'openai'
-import { randomUUID } from 'crypto'
+import { randomBytes, randomUUID } from 'crypto'
 import { toFile } from 'openai/uploads'
+import { resolveSecretTokens, secretToken } from '@shared/secrets'
 import type {
   AIProviderConfig,
   AiTraceEntry,
@@ -76,7 +77,7 @@ Guidelines:
 - If the user asks you to use a skill by name (for example \`Use the skill "name": …\`, optionally with the scope in parentheses), call the read_skill tool to load that skill before applying it.
 - If a skill loaded via read_skill references a sibling file (for example \`[FORMAT.md](./FORMAT.md)\` or \`[DOC.md](./doc/DOC.md)\`), call the read_skill_file tool (passing scope, skill and the relative file path) to load that file when you need it.
 - When the user asks you to find notes about a topic, call the search_notes tool.
-- When you need user input — a choice, a detail, or confirmation — before you can proceed, call ask_user with your questions. You may ask several questions in a single call; the user answers them all at once. Only ask when genuinely needed.
+- When you need user input — a choice, a detail, or confirmation — before you can proceed, call ask_user with your questions. You may ask several questions in a single call; the user answers them all at once. Only ask when genuinely needed. For sensitive input (passwords, API keys, tokens), set secret: true on that question; the answer comes back as a \${SECRET:<id>} token, not the value. Pass the token unchanged in later browser tool calls (e.g. browser_type text) and the real value is substituted before execution. Never try to display, repeat, or store the secret value.
 - When a task can be split into parallel deliverables, delegate each part to a background module: call start_module for each (passing the \`expect\` argument to specify the result payload the module must submit back), then call wait_modules with all the returned runIds and continue with the results. Do NOT call wait_modules when you do not need the module output. When delegating, pass source material as inline references in the prompt — \`note:<notename>\`, \`file:<filename>\`, \`plan:<schedule id or name>\` — instead of reading notes/files/schedules yourself first; the module resolves them itself.
 - Quote the snippet returned by search_notes exactly as given; never paraphrase, reword, or summarize it.
 - Whenever you mention an existing note by name in your reply, always link to it: [note name](note:note name). The link opens the note, so never return a bare note name without a link.
@@ -103,6 +104,8 @@ export class ChatSession {
   private lastActiveNoteName: string | null = null
   private lastActiveScheduleName: string | null = null
   private trace: AiTraceRecorder | undefined
+  /** In-memory secret answers (ask_user secret questions). Dropped with the session; never persisted. */
+  private secrets = new Map<string, string>()
 
   constructor(
     getConfig: () => Promise<AIProviderConfig>,
@@ -164,11 +167,21 @@ export class ChatSession {
     const messageId = randomUUID()
 
     try {
-      for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
+      let maxIter = MAX_TOOL_ITERATIONS
+      for (let iter = 0; iter < maxIter; iter++) {
         if (this.stopped) break
         const result = await this.runTurn(client, messageId)
         await this.trace?.flush()
         if (result === 'done') break
+        if (iter + 1 >= maxIter) {
+          const decision = await this.askIterationLimit(iter + 1)
+          if (decision === 'stop') {
+            this.stopped = true
+            break
+          }
+          maxIter =
+            decision === 'unlimited' ? Number.POSITIVE_INFINITY : maxIter + MAX_TOOL_ITERATIONS
+        }
       }
     } catch (err) {
       if (this.stopped) return
@@ -426,6 +439,29 @@ export class ChatSession {
     return parts.length > 0 ? ` ${parts.join(' ')}` : ''
   }
 
+  private async askIterationLimit(used: number): Promise<'more' | 'unlimited' | 'stop'> {
+    if (!this.ctx.ask) return 'stop'
+    try {
+      const res = await this.ctx.ask({
+        project: this.ctx.activeProject,
+        questions: [
+          {
+            id: 'iteration-limit',
+            question: `The assistant has used ${used} tool steps for this request and is not finished. How should it continue?`,
+            options: ['Allow 12 more steps', 'Allow until finished', 'Stop']
+          }
+        ]
+      })
+      if (res.cancelled) return 'stop'
+      const answer = res.answers[0]?.answer ?? ''
+      if (answer === 'Allow until finished') return 'unlimited'
+      if (answer === 'Stop') return 'stop'
+      return 'more'
+    } catch {
+      return 'stop'
+    }
+  }
+
   /** Run one streaming turn. Returns 'done' when the model produced a final answer. */
   private async runTurn(client: OpenAI, messageId: string): Promise<'done' | 'continue'> {
     const apiMessages = this.messages.map((m) => {
@@ -600,6 +636,13 @@ export class ChatSession {
     return 'done'
   }
 
+  /** Store a secret answer in memory and return its `${SECRET:<id>}` token. */
+  private registerSecret(value: string): string {
+    const id = randomBytes(6).toString('hex')
+    this.secrets.set(id, value)
+    return secretToken(id)
+  }
+
   private async executeTool(
     call: OpenAI.Chat.ChatCompletionMessageFunctionToolCall
   ): Promise<string> {
@@ -619,15 +662,32 @@ export class ChatSession {
       return result
     }
 
+    // Secrets may only leave memory into browser tools; logs/traces keep the tokens.
+    let execArgs = args
+    if (call.function.name.startsWith('browser_')) {
+      const { value, unknown } = resolveSecretTokens(args, this.secrets)
+      if (unknown.length > 0) {
+        const tokens = unknown.map((id) => secretToken(id)).join(', ')
+        const result = JSON.stringify({
+          ok: false,
+          error: `Unknown secret reference: ${tokens}. Secret tokens are only valid within the current chat session.`
+        })
+        this.emitTool(call.function.name, args, false, result)
+        return result
+      }
+      execArgs = value as Record<string, unknown>
+    }
+
     try {
       if (call.function.name === 'wait_modules') {
         const runIds = Array.isArray(args.runIds) ? args.runIds.map(String) : []
         this.emit({ type: 'waiting', runIds })
       }
-      const result = await tool.execute(args, {
+      const result = await tool.execute(execArgs, {
         ...this.ctx,
         activeNoteId: this.activeNoteId,
-        isStopped: () => this.stopped
+        isStopped: () => this.stopped,
+        registerSecret: (v: string) => this.registerSecret(v)
       })
       this.emitTool(call.function.name, args, true, result)
       return result

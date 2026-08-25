@@ -3,6 +3,7 @@ import { join, extname } from 'path'
 import { promises as fs } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import splashUrl from '../../resources/splash.html?asset'
 import { PTNotesService } from './service/PTNotesService'
 import { registerProjectIpc, registerNoteIpc, registerTodoIpc, registerChatIpc } from './ipc'
 import { registerPlannerIpc } from './ipc/planner'
@@ -41,6 +42,7 @@ protocol.registerSchemesAsPrivileged([
 ])
 
 let mainWindow: BrowserWindow | null = null
+let splashWindow: BrowserWindow | null = null
 let plannerEditActive = false
 let windowStateStore: WindowStateStore
 let moduleManager: ModuleRunManager | undefined
@@ -109,6 +111,41 @@ function openExternalSafely(url: string): void {
   }
 }
 
+function createSplashWindow(): void {
+  splashWindow = new BrowserWindow({
+    width: 420,
+    height: 260,
+    center: true,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    frame: false,
+    show: false,
+    skipTaskbar: true,
+    title: 'PTNotes',
+    webPreferences: {
+      sandbox: true
+    }
+  })
+
+  splashWindow.once('ready-to-show', () => {
+    splashWindow?.show()
+  })
+  splashWindow.on('closed', () => {
+    splashWindow = null
+  })
+
+  void splashWindow.loadFile(splashUrl, { query: { icon } })
+}
+
+function closeSplashWindow(): void {
+  if (splashWindow && !splashWindow.isDestroyed()) {
+    splashWindow.destroy()
+  }
+  splashWindow = null
+}
+
 function createWindow(windowState: WindowState): void {
   const state = windowState.isMaximized
     ? { width: windowState.width, height: windowState.height }
@@ -152,6 +189,11 @@ function createWindow(windowState: WindowState): void {
 
   mainWindow.on('ready-to-show', () => {
     mainWindow?.show()
+    closeSplashWindow()
+  })
+
+  mainWindow.webContents.on('did-fail-load', () => {
+    closeSplashWindow()
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -194,6 +236,8 @@ function createWindow(windowState: WindowState): void {
 
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.ptnotes.app')
+
+  createSplashWindow()
 
   // Handle ptfile:// protocol — serves local files for chat images
   const IMAGE_MIME: Record<string, string> = {

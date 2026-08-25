@@ -16,27 +16,36 @@ function truncate(text: string): string {
 interface SnapshotOptions {
   depth?: number
   boxes?: boolean
+  maxNodes?: number
 }
 
 interface SnapshotNode {
   role: string
-  name: string
+  name?: string
+  tag?: string
   ref?: string
   children?: (SnapshotNode | string)[]
   text?: string
   level?: number
   url?: string
   placeholder?: string
+  value?: string
+  description?: string
   checked?: boolean
+  indeterminate?: boolean
   disabled?: boolean
   expanded?: boolean
   selected?: boolean
+  pressed?: boolean
+  valuenow?: number | string
+  truncated?: boolean
   box?: { x: number; y: number; w: number; h: number }
 }
 
 interface PageSnapshot {
   title: string
   url: string
+  nodesTruncated?: boolean
   nodes: SnapshotNode[]
 }
 
@@ -48,18 +57,29 @@ async function extractPageSnapshot(
 ): Promise<PageSnapshot> {
   const result = await page.evaluate(
     `(() => {
-      const opts = ${JSON.stringify({ depth: options?.depth ?? null, boxes: options?.boxes ?? false })};
+      const opts = ${JSON.stringify({
+        depth: options?.depth ?? null,
+        boxes: options?.boxes ?? false,
+        maxNodes: options?.maxNodes ?? null
+      })};
+      const MAX_NODES = opts.maxNodes || 1500;
+      const MAX_VALUE_LEN = 500;
+      const MAX_NAME_LEN = 200;
+      const REF_ATTR = 'data-ptnotes-ref';
+
       // Clear previous refs
-      document.querySelectorAll('[data-ref]').forEach(el => el.removeAttribute('data-ref'));
+      document.querySelectorAll('[' + REF_ATTR + ']').forEach(el => el.removeAttribute(REF_ATTR));
 
       let refCounter = 0;
+      let nodeCount = 0;
+      let nodesTruncated = false;
 
       function isHidden(el) {
         const style = window.getComputedStyle(el);
         if (style.display === 'none') return true;
-        if (style.visibility === 'hidden') return true;
+        if (style.visibility === 'hidden' || style.visibility === 'collapse') return true;
+        if (style.opacity === '0') return true;
         if (el.getAttribute('aria-hidden') === 'true') return true;
-        if (el.offsetWidth === 0 && el.offsetHeight === 0 && style.position !== 'fixed') return true;
         return false;
       }
 
@@ -69,13 +89,16 @@ async function extractPageSnapshot(
       }
 
       function inferRole(el) {
+        if (el.isContentEditable) return 'textbox';
         const tag = el.tagName.toLowerCase();
         const type = (el.getAttribute('type') || '').toLowerCase();
         switch (tag) {
           case 'a': return el.hasAttribute('href') ? 'link' : 'generic';
+          case 'area': return 'link';
           case 'button': return 'button';
           case 'input':
-            if (['text','','search','email','password','tel','url'].includes(type)) return 'textbox';
+            if (type === '' || ['text','email','password','tel','url'].includes(type)) return 'textbox';
+            if (type === 'search') return 'searchbox';
             if (type === 'checkbox') return 'checkbox';
             if (type === 'radio') return 'radio';
             if (type === 'range') return 'slider';
@@ -83,7 +106,8 @@ async function extractPageSnapshot(
             if (type === 'file') return 'button';
             if (type === 'submit' || type === 'reset' || type === 'button') return 'button';
             return 'textbox';
-          case 'select': return 'combobox';
+          case 'select': return el.hasAttribute('multiple') ? 'listbox' : 'combobox';
+          case 'datalist': return 'listbox';
           case 'textarea': return 'textbox';
           case 'h1': return 'heading';
           case 'h2': return 'heading';
@@ -91,8 +115,10 @@ async function extractPageSnapshot(
           case 'h4': return 'heading';
           case 'h5': return 'heading';
           case 'h6': return 'heading';
-          case 'ul': case 'ol': return 'list';
+          case 'ul': case 'ol': case 'menu': return 'list';
           case 'li': return 'listitem';
+          case 'dl': return 'list';
+          case 'dt': case 'dd': return 'listitem';
           case 'table': return 'table';
           case 'thead': case 'tbody': case 'tfoot': return 'rowgroup';
           case 'tr': return 'row';
@@ -103,6 +129,9 @@ async function extractPageSnapshot(
           case 'footer': return 'contentinfo';
           case 'form': return 'form';
           case 'img': return 'img';
+          case 'svg':
+            return el.querySelector(':scope > title') ? 'img' : 'generic';
+          case 'canvas': return 'img';
           case 'section': return 'region';
           case 'article': return 'article';
           case 'aside': return 'complementary';
@@ -115,6 +144,11 @@ async function extractPageSnapshot(
           case 'summary': return 'button';
           case 'option': return 'option';
           case 'optgroup': return 'group';
+          case 'hr': return 'separator';
+          case 'progress': case 'meter': return 'progressbar';
+          case 'output': return 'status';
+          case 'search': return 'search';
+          case 'iframe': return 'iframe';
           case 'video': case 'audio': return 'generic';
           default: return 'generic';
         }
@@ -124,95 +158,227 @@ async function extractPageSnapshot(
         return getExplicitRole(el) || inferRole(el);
       }
 
+      function refsText(el, attr) {
+        const ids = (el.getAttribute(attr) || '').split(/\\s+/).filter(Boolean);
+        if (!ids.length) return '';
+        const parts = [];
+        for (const id of ids) {
+          const target = document.getElementById(id);
+          const t = target ? (target.textContent || '').trim() : '';
+          if (t) parts.push(t);
+        }
+        return parts.join(' ').slice(0, MAX_NAME_LEN);
+      }
+
+      function getLabelText(el) {
+        try {
+          if (el.labels && el.labels.length > 0) {
+            const t = (el.labels[0].textContent || '').trim();
+            if (t) return t.slice(0, MAX_NAME_LEN);
+          }
+        } catch (e) {}
+        return '';
+      }
+
       function getName(el) {
         const ariaLabel = el.getAttribute('aria-label');
-        if (ariaLabel) return ariaLabel.trim().slice(0, 200);
+        if (ariaLabel) return ariaLabel.trim().slice(0, MAX_NAME_LEN);
+
+        const labelledBy = refsText(el, 'aria-labelledby');
+        if (labelledBy) return labelledBy;
 
         const tag = el.tagName.toLowerCase();
+
+        if (tag === 'svg') {
+          const titleEl = el.querySelector(':scope > title');
+          const svgTitle = titleEl ? (titleEl.textContent || '').trim() : '';
+          if (svgTitle) return svgTitle.slice(0, MAX_NAME_LEN);
+        }
+
+        const type = (el.getAttribute('type') || '').toLowerCase();
+
+        // Input buttons carry their label in the value attribute
+        if (tag === 'input' && ['submit','reset','button','file'].includes(type)) {
+          const v = el.getAttribute('value');
+          if (v) return v.trim().slice(0, MAX_NAME_LEN);
+        }
+        if (tag === 'input' && type === 'image') {
+          const alt = el.getAttribute('alt');
+          if (alt) return alt.trim().slice(0, MAX_NAME_LEN);
+        }
+
+        // <label> association (wrapping or for=)
+        const labelText = getLabelText(el);
+        if (labelText) return labelText;
+
         if (tag === 'input' || tag === 'textarea' || tag === 'select') {
           const ph = el.getAttribute('placeholder');
-          if (ph) return ph.trim().slice(0, 200);
+          if (ph) return ph.trim().slice(0, MAX_NAME_LEN);
         }
 
         const title = el.getAttribute('title');
-        if (title) return title.trim().slice(0, 200);
+        if (title) return title.trim().slice(0, MAX_NAME_LEN);
 
         if (tag === 'img') {
           const alt = el.getAttribute('alt');
-          if (alt) return alt.trim().slice(0, 200);
+          if (alt) return alt.trim().slice(0, MAX_NAME_LEN);
         }
 
         // For buttons / links / headings / summary — use text content
         const role = getRole(el);
-        if (['button', 'link', 'heading', 'tab', 'menuitem', 'option', 'cell', 'columnheader', 'rowheader'].includes(role)) {
-          const text = el.textContent?.trim().slice(0, 200);
+        if (['button', 'link', 'heading', 'tab', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'option', 'cell', 'columnheader', 'rowheader', 'treeitem', 'switch'].includes(role)) {
+          const text = (el.textContent || '').trim().slice(0, MAX_NAME_LEN);
           if (text) return text;
         }
 
-        // Fallback: short text content
-        const text = el.textContent?.trim().slice(0, 100);
-        return text || '';
+        // Interactive elements (clickable span/div without a semantic role) also get a text name
+        if (isInteractive(el)) {
+          const text = (el.textContent || '').trim().slice(0, MAX_NAME_LEN);
+          if (text) return text;
+        }
+
+        // Fallback: short text of leaf elements only (avoids duplicating child text)
+        if (el.children.length === 0) {
+          const text = (el.textContent || '').trim().slice(0, 100);
+          if (text) return text;
+        }
+
+        return '';
       }
 
       function isInteractive(el) {
         const role = getRole(el);
-        if (['button','link','textbox','combobox','checkbox','radio','slider','spinbutton','tab','menuitem','option','searchbox'].includes(role)) return true;
-        if (el.hasAttribute('onclick')) return true;
-        if (el.getAttribute('tabindex') !== null && el.getAttribute('tabindex') !== '-1') return true;
-        if (el.tagName.toLowerCase() === 'a' && el.hasAttribute('href')) return true;
+        if (['button','link','textbox','searchbox','combobox','listbox','checkbox','radio','switch','slider','spinbutton','tab','menuitem','menuitemcheckbox','menuitemradio','option','treeitem'].includes(role)) return true;
+        const tabindex = el.getAttribute('tabindex');
+        if (tabindex !== null && tabindex !== '-1') return true;
+        const tag = el.tagName.toLowerCase();
+        if ((tag === 'a' || tag === 'area') && el.hasAttribute('href')) return true;
+        // Inline event handler attributes (onclick, onmousedown, onpointerdown, ontouchstart, ...)
+        for (const attr of el.attributes) {
+          if (/^on[a-z]/i.test(attr.name)) return true;
+        }
+        // Interactive ARIA attributes on plain elements (custom widgets)
+        if (el.hasAttribute('aria-haspopup') || el.hasAttribute('aria-expanded') || el.hasAttribute('aria-pressed') || el.hasAttribute('aria-activedescendant') || el.hasAttribute('aria-controls')) return true;
+        // Cursor pointer (framework-built clickables that style their target)
+        if (window.getComputedStyle(el).cursor === 'pointer') return true;
         return false;
+      }
+
+      function collectChildren(container, depth, maxDepth, includeBoxes, out) {
+        for (const child of container.childNodes) {
+          if (child.nodeType === Node.ELEMENT_NODE) {
+            const childNode = buildNode(child, depth + 1, maxDepth, includeBoxes);
+            if (childNode) out.push(childNode);
+          } else if (child.nodeType === Node.TEXT_NODE) {
+            const text = (child.textContent || '').trim();
+            if (text) out.push(text);
+          }
+        }
       }
 
       function buildNode(el, depth, maxDepth, includeBoxes) {
         if (isHidden(el)) return null;
+        nodeCount++;
+        if (nodeCount > MAX_NODES) {
+          nodesTruncated = true;
+          return null;
+        }
 
-        const role = getRole(el);
-        const name = getName(el);
-        const node = { role, name };
+        let role = getRole(el);
+        const transparent = role === 'presentation' || role === 'none';
+        if (transparent) role = 'generic';
+
+        const tag = el.tagName.toLowerCase();
+        const name = transparent ? '' : getName(el);
+        const node = { role };
+        if (name) node.name = name;
+        else node.tag = tag;
 
         // Assign ref to interactive elements
-        if (isInteractive(el)) {
+        if (!transparent && isInteractive(el)) {
           const ref = 'e' + refCounter++;
           node.ref = ref;
-          el.setAttribute('data-ref', ref);
+          el.setAttribute(REF_ATTR, ref);
         }
 
-        // Heading level
-        if (role === 'heading') {
-          const tag = el.tagName.toLowerCase();
-          const level = parseInt(tag.charAt(1));
-          if (!isNaN(level)) node.level = level;
-        }
-
-        // Link URL
-        if (role === 'link') {
-          const href = el.getAttribute('href');
-          if (href && !href.startsWith('javascript:') && !href.startsWith('#')) {
-            node.url = href;
+        if (!transparent) {
+          // Heading level (h1-h6 or aria-level)
+          if (role === 'heading') {
+            let level = NaN;
+            if (/^h[1-6]$/.test(tag)) level = parseInt(tag.charAt(1));
+            else level = parseInt(el.getAttribute('aria-level') || '', 10);
+            if (!isNaN(level)) node.level = level;
           }
-        }
 
-        // Input placeholder
-        if (role === 'textbox' || role === 'searchbox') {
-          const ph = el.getAttribute('placeholder');
-          if (ph) node.placeholder = ph;
-        }
+          // Link / iframe URL
+          if (role === 'link' || role === 'iframe') {
+            const href = el.getAttribute(role === 'iframe' ? 'src' : 'href');
+            if (href && !href.startsWith('javascript:') && !href.startsWith('#')) {
+              node.url = href;
+            }
+          }
 
-        // Checkbox / radio state
-        if (role === 'checkbox' || role === 'radio') {
-          node.checked = el.checked || false;
+          // Placeholder + current value for editable fields
+          if (role === 'textbox' || role === 'searchbox' || role === 'spinbutton') {
+            const ph = el.getAttribute('placeholder');
+            if (ph) node.placeholder = ph;
+            const v = typeof el.value === 'string' ? el.value : '';
+            if (v) node.value = v.slice(0, MAX_VALUE_LEN);
+          }
+          if (role === 'combobox') {
+            const sel = [];
+            for (const o of el.selectedOptions || []) {
+              const t = String(o.textContent || o.value || '').trim();
+              if (t) sel.push(t);
+            }
+            if (sel.length) node.value = sel.join(', ').slice(0, MAX_VALUE_LEN);
+          }
+
+          // Checkbox / radio / switch state (ARIA-aware)
+          if (['checkbox','radio','switch','menuitemcheckbox','menuitemradio'].includes(role)) {
+            const ariaChecked = el.getAttribute('aria-checked');
+            if (ariaChecked === 'mixed') {
+              node.checked = false;
+              node.indeterminate = true;
+            } else if (ariaChecked !== null) {
+              node.checked = ariaChecked === 'true';
+            } else if (typeof el.checked === 'boolean') {
+              node.checked = el.checked;
+              if (el.indeterminate) node.indeterminate = true;
+            }
+          }
+
+          // Slider / progressbar value
+          if (role === 'slider' || role === 'spinbutton' || role === 'progressbar') {
+            const raw = el.getAttribute('aria-valuenow');
+            const val = raw !== null ? raw : (el.value !== undefined && el.value !== '' ? String(el.value) : null);
+            if (val !== null) {
+              const n = Number(val);
+              node.valuenow = Number.isNaN(n) ? val : n;
+            }
+          }
+
+          // Toggle button state
+          if (role === 'button') {
+            const pressed = el.getAttribute('aria-pressed');
+            if (pressed !== null) node.pressed = pressed === 'true';
+          }
+
+          const describedBy = refsText(el, 'aria-describedby');
+          if (describedBy) node.description = describedBy.slice(0, 300);
         }
 
         // Disabled
-        if (el.disabled) node.disabled = true;
+        if (el.disabled === true || el.getAttribute('aria-disabled') === 'true') node.disabled = true;
 
         // Expanded
         const expanded = el.getAttribute('aria-expanded');
         if (expanded !== null) node.expanded = expanded === 'true';
 
-        // Selected
-        const selected = el.getAttribute('aria-selected');
-        if (selected !== null) node.selected = selected === 'true';
+        // Selected (aria-selected or native option)
+        const selectedAttr = el.getAttribute('aria-selected');
+        if (selectedAttr !== null) node.selected = selectedAttr === 'true';
+        else if (tag === 'option' && el.selected) node.selected = true;
 
         // Bounding box
         if (includeBoxes) {
@@ -230,19 +396,29 @@ async function extractPageSnapshot(
         // Children (if depth allows)
         if (maxDepth === null || maxDepth === undefined || depth < maxDepth) {
           const children = [];
-          for (const child of el.childNodes) {
-            if (child.nodeType === Node.ELEMENT_NODE) {
-              const childNode = buildNode(child, depth + 1, maxDepth, includeBoxes);
-              if (childNode) children.push(childNode);
-            } else if (child.nodeType === Node.TEXT_NODE) {
-              const text = child.textContent?.trim();
-              if (text) children.push(text);
-            }
+          collectChildren(el, depth, maxDepth, includeBoxes, children);
+          // Open shadow roots
+          if (el.shadowRoot) {
+            collectChildren(el.shadowRoot, depth, maxDepth, includeBoxes, children);
+          }
+          // Same-origin iframe content
+          if (tag === 'iframe') {
+            try {
+              const doc = el.contentDocument;
+              if (doc && doc.body) collectChildren(doc.body, depth, maxDepth, includeBoxes, children);
+            } catch (e) {}
           }
           if (children.length === 1 && typeof children[0] === 'string') {
             node.text = children[0];
           } else if (children.length > 0) {
             node.children = children;
+          }
+        } else if (el.childNodes.length > 0) {
+          for (const c of el.childNodes) {
+            if (c.nodeType === Node.ELEMENT_NODE || (c.nodeType === Node.TEXT_NODE && (c.textContent || '').trim())) {
+              node.truncated = true;
+              break;
+            }
           }
         }
 
@@ -251,7 +427,7 @@ async function extractPageSnapshot(
 
       // Build tree from body
       const body = document.body;
-      if (!body) return { title: document.title, url: location.href, nodes: [] };
+      if (!body) return { title: document.title, url: location.href, nodes: [], nodesTruncated: false };
 
       const nodes = [];
       for (const child of body.childNodes) {
@@ -259,12 +435,12 @@ async function extractPageSnapshot(
           const node = buildNode(child, 0, opts.depth, opts.boxes);
           if (node) nodes.push(node);
         } else if (child.nodeType === Node.TEXT_NODE) {
-          const text = child.textContent?.trim();
+          const text = (child.textContent || '').trim();
           if (text) nodes.push(text);
         }
       }
 
-      return { title: document.title, url: location.href, nodes };
+      return { title: document.title, url: location.href, nodes, nodesTruncated };
     })()`
   )
   return result
@@ -339,16 +515,25 @@ export function createBrowserMcpServer(
         boxes: z
           .boolean()
           .optional()
-          .describe("Include each element's bounding box as {x,y,w,h} in CSS pixels")
+          .describe("Include each element's bounding box as {x,y,w,h} in CSS pixels"),
+        maxNodes: z
+          .number()
+          .int()
+          .positive()
+          .max(20_000)
+          .optional()
+          .describe(
+            'Maximum number of visible elements to include (default 1500). Raise for very large pages; output grows accordingly.'
+          )
       }
     },
-    async ({ depth, boxes }) => {
+    async ({ depth, boxes, maxNodes }) => {
       const page = await browser.getBrowserPage(
         browser.headlessMode(),
         browser.getDefaultMaximize(),
         browser.getDefaultIgnoreHttpsErrors()
       )
-      const snapshot = await extractPageSnapshot(page, { depth, boxes })
+      const snapshot = await extractPageSnapshot(page, { depth, boxes, maxNodes })
       return {
         content: [{ type: 'text' as const, text: truncate(JSON.stringify(snapshot, null, 2)) }]
       }
@@ -378,7 +563,7 @@ export function createBrowserMcpServer(
         browser.getDefaultIgnoreHttpsErrors()
       )
       if (ref) {
-        const locator = page.locator(`[data-ref="${ref}"]`)
+        const locator = page.locator(`[data-ptnotes-ref="${ref}"]`)
         await locator.click({ timeout: 10_000 })
         return { content: [{ type: 'text' as const, text: `Clicked ref "${ref}".` }] }
       }
@@ -428,7 +613,7 @@ export function createBrowserMcpServer(
         browser.getDefaultIgnoreHttpsErrors()
       )
       if (ref) {
-        const locator = page.locator(`[data-ref="${ref}"]`)
+        const locator = page.locator(`[data-ptnotes-ref="${ref}"]`)
         await locator.fill(text, { timeout: 10_000 })
         if (pressEnter) await page.keyboard.press('Enter')
         return { content: [{ type: 'text' as const, text: `Typed into ref "${ref}".` }] }
@@ -476,7 +661,7 @@ export function createBrowserMcpServer(
         browser.getDefaultIgnoreHttpsErrors()
       )
       if (ref) {
-        const locator = page.locator(`[data-ref="${ref}"]`)
+        const locator = page.locator(`[data-ptnotes-ref="${ref}"]`)
         await locator.selectOption(value, { timeout: 10_000 })
         return {
           content: [{ type: 'text' as const, text: `Selected "${value}" in ref "${ref}".` }]

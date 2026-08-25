@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   mdiCheckboxBlankOutline,
   mdiCheckboxMarked,
+  mdiLock,
   mdiRadioboxBlank,
   mdiRadioboxMarked
 } from '@mdi/js'
@@ -35,6 +36,7 @@ export function AskUserDialog(): React.JSX.Element | null {
   const setAskRequest = useAppStore((s) => s.setAskRequest)
 
   const questions = useMemo<AskQuestion[]>(() => askRequest?.questions ?? [], [askRequest])
+  const singleSelect = questions.length === 1 && !isFree(questions[0]) && !isMulti(questions[0])
   const confirmPane = questions.length
   const [flow, setFlow] = useState<AskFlowState>(() => initFlow(questions))
   const pane = Math.min(flow.pane, confirmPane)
@@ -61,15 +63,23 @@ export function AskUserDialog(): React.JSX.Element | null {
     [confirmPane, focusPane]
   )
 
+  const respond = useCallback(
+    async (answers: AskAnswer[]) => {
+      if (respondedRef.current) return
+      respondedRef.current = true
+      if (askRequest) {
+        await window.ptnotes.ai.askResponse({ id: askRequest.id, answers })
+      }
+      setAskRequest(null)
+    },
+    [askRequest, setAskRequest]
+  )
+
   const submit = useCallback(async () => {
     if (respondedRef.current) return
-    respondedRef.current = true
     const answers: AskAnswer[] = buildAnswers(flow, questions)
-    if (askRequest) {
-      await window.ptnotes.ai.askResponse({ id: askRequest.id, answers })
-    }
-    setAskRequest(null)
-  }, [flow, questions, askRequest, setAskRequest])
+    await respond(answers)
+  }, [flow, questions, respond])
 
   const cancel = useCallback(async () => {
     if (respondedRef.current) return
@@ -84,6 +94,14 @@ export function AskUserDialog(): React.JSX.Element | null {
     (e: React.KeyboardEvent): void => {
       if (e.key === 'Escape') {
         void cancel()
+        return
+      }
+      if (singleSelect && (e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault()
+        const sel = flow.selections[0]
+        if (sel && sel.length > 0) {
+          void respond([{ id: questions[0].id, answer: sel[0], selections: sel }])
+        }
         return
       }
       const cur = questions[flow.pane]
@@ -106,7 +124,7 @@ export function AskUserDialog(): React.JSX.Element | null {
           break
       }
     },
-    [flow, questions, cancel, submit, focusPane]
+    [flow, questions, singleSelect, cancel, respond, submit, focusPane]
   )
 
   if (!askRequest) return null
@@ -131,12 +149,14 @@ export function AskUserDialog(): React.JSX.Element | null {
               </span>
             </button>
           ))}
-          <button
-            className={`ask-nav-item${pane === confirmPane ? ' active' : ''}`}
-            onClick={() => go(confirmPane)}
-          >
-            <span className="ask-nav-text">Confirm</span>
-          </button>
+          {!singleSelect && (
+            <button
+              className={`ask-nav-item${pane === confirmPane ? ' active' : ''}`}
+              onClick={() => go(confirmPane)}
+            >
+              <span className="ask-nav-text">Confirm</span>
+            </button>
+          )}
         </nav>
 
         <div
@@ -149,16 +169,24 @@ export function AskUserDialog(): React.JSX.Element | null {
         >
           {q ? (
             <>
-              <div className="ask-question-full">{q.question}</div>
+              <div className="ask-question-full">
+                {q.secret && (
+                  <span className="ask-secret-lock" title="Answer is hidden">
+                    <MdiIcon path={mdiLock} size={14} />
+                  </span>
+                )}
+                {q.question}
+              </div>
               {isFree(q) ? (
                 <input
                   ref={freeTextRef}
                   className="ask-free-text"
+                  type={q.secret ? 'password' : 'text'}
                   value={flow.freeText[pane]}
                   onChange={(e) =>
                     setFlow(reduce(flow, { type: 'text', value: e.target.value }, questions).state)
                   }
-                  placeholder="Type your answer…"
+                  placeholder={q.secret ? 'Type your secret answer (hidden)…' : 'Type your answer…'}
                 />
               ) : (
                 <div className="ask-options" role={isMulti(q) ? 'group' : 'radiogroup'}>
@@ -172,9 +200,13 @@ export function AskUserDialog(): React.JSX.Element | null {
                         className={`ask-option${checked ? ' checked' : ''}${
                           i === flow.cursor[pane] ? ' cursor' : ''
                         }`}
-                        onClick={() =>
-                          setFlow(reduce(flow, { type: 'click', index: i }, questions).state)
-                        }
+                        onClick={() => {
+                          if (singleSelect) {
+                            void respond([{ id: q.id, answer: opt, selections: [opt] }])
+                          } else {
+                            setFlow(reduce(flow, { type: 'click', index: i }, questions).state)
+                          }
+                        }}
                       >
                         <span className="ask-option-bullet">
                           <MdiIcon
@@ -205,7 +237,7 @@ export function AskUserDialog(): React.JSX.Element | null {
                     {i + 1}. {qitem.question}
                   </span>
                   <span className={`ask-confirm-a${flow.answered[i] ? '' : ' missing'}`}>
-                    {answerText(flow, i)}
+                    {qitem.secret && flow.answered[i] ? '••••••' : answerText(flow, i)}
                   </span>
                 </div>
               ))}
@@ -213,17 +245,29 @@ export function AskUserDialog(): React.JSX.Element | null {
           )}
 
           <div className="ask-nav-actions">
-            <button className="btn" disabled={pane === 0} onClick={() => go(pane - 1)}>
-              Previous
-            </button>
-            {pane < confirmPane ? (
-              <button className="btn primary" onClick={() => go(pane + 1)}>
-                Next
+            {singleSelect ? (
+              <button className="btn" onClick={() => void cancel()}>
+                Cancel
               </button>
             ) : (
-              <button className="btn primary" disabled={!allAnswered} onClick={() => void submit()}>
-                Confirm
-              </button>
+              <>
+                <button className="btn" disabled={pane === 0} onClick={() => go(pane - 1)}>
+                  Previous
+                </button>
+                {pane < confirmPane ? (
+                  <button className="btn primary" onClick={() => go(pane + 1)}>
+                    Next
+                  </button>
+                ) : (
+                  <button
+                    className="btn primary"
+                    disabled={!allAnswered}
+                    onClick={() => void submit()}
+                  >
+                    Confirm
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>
