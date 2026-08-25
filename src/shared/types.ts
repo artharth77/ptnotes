@@ -208,6 +208,8 @@ export interface AskQuestion {
   /** Empty/omitted → free-text input. Present → single-select radio (or checkbox multi-select when `multiple`). */
   options?: string[]
   multiple?: boolean
+  /** Sensitive free-text answer (password, API key). Masked input; the model receives a `${SECRET:<id>}` token, never the value. */
+  secret?: boolean
 }
 
 export interface AskRequest {

@@ -82,10 +82,14 @@ function AskToolSummary({
     return raw
       .map((r) =>
         typeof r === 'object' && r !== null
-          ? (r as { id?: unknown; question?: unknown })
-          : ({} as { id?: unknown; question?: unknown })
+          ? (r as { id?: unknown; question?: unknown; secret?: unknown })
+          : ({} as { id?: unknown; question?: unknown; secret?: unknown })
       )
-      .map((q) => ({ id: String(q.id ?? ''), question: String(q.question ?? '') }))
+      .map((q) => ({
+        id: String(q.id ?? ''),
+        question: String(q.question ?? ''),
+        secret: q.secret === true
+      }))
       .filter((q) => q.id && q.question)
   }, [args])
   const { cancelled, byId } = useMemo(() => {
@@ -111,13 +115,23 @@ function AskToolSummary({
   return (
     <div className="ask-tool-summary">
       {cancelled && <div className="ask-tool-cancelled">Cancelled by user</div>}
-      {questions.map((q, i) => (
-        <div key={q.id} className="ask-tool-item">
-          <div className="ask-tool-qlabel">Question {i + 1}</div>
-          <div className="ask-tool-qtext">{q.question}</div>
-          <div className="ask-tool-atext">{byId[q.id] ?? (cancelled ? '—' : '…')}</div>
-        </div>
-      ))}
+      {questions.map((q, i) => {
+        const raw = byId[q.id]
+        const shown = q.secret
+          ? raw
+            ? '••••••'
+            : cancelled
+              ? '—'
+              : '…'
+          : (raw ?? (cancelled ? '—' : '…'))
+        return (
+          <div key={q.id} className="ask-tool-item">
+            <div className="ask-tool-qlabel">Question {i + 1}</div>
+            <div className="ask-tool-qtext">{q.question}</div>
+            <div className="ask-tool-atext">{shown}</div>
+          </div>
+        )
+      })}
     </div>
   )
 }

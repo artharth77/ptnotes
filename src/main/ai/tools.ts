@@ -2,6 +2,7 @@ import type { PTNotesService } from '../service/PTNotesService'
 import { duckDuckGoSearch } from './search/duckduckgo'
 import { fetchWebPage } from './search/webFetch'
 import { slugify } from '@shared/slug'
+import { secretToken } from '@shared/secrets'
 import { readFileAsText, parseWorkbookQuery } from './reader'
 import {
   applyDateRule,
@@ -33,6 +34,8 @@ export interface ToolContext {
   confirm: (req: Omit<ConfirmRequest, 'id'>) => Promise<boolean>
   /** Present only in the interactive chat (module subagents never provide it). */
   ask?: (req: Omit<AskRequest, 'id'>) => Promise<{ answers: AskAnswer[]; cancelled?: boolean }>
+  /** Present only in the interactive chat; stores a secret answer in memory and returns its `${SECRET:<id>}` token. */
+  registerSecret?: (value: string) => string
   /** Present only in the interactive chat; lets long-running tools abort when the chat is stopped. */
   isStopped?: () => boolean
 }
@@ -1022,7 +1025,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'ask_user',
         description:
-          'Ask the user for input — a choice, a detail, or confirmation — before continuing. You may include several questions in a single call; the user answers them all at once in a dialog. Each question has an id and question text, plus optional predefined options (2-6 choices; omit options for free text, set multiple true for multi-select). Only call this when you genuinely need input from the user.',
+          'Ask the user for input — a choice, a detail, or confirmation — before continuing. You may include several questions in a single call; the user answers them all at once in a dialog. Each question has an id and question text, plus optional predefined options (2-6 choices; omit options for free text, set multiple true for multi-select). For sensitive free-text answers (passwords, API keys, tokens) set secret true: the user types in a masked field and you receive a ${SECRET:<id>} token instead of the value — pass the token unchanged in later browser tool calls (e.g. browser_type text) and the real value is substituted before execution. Only call this when you genuinely need input from the user.',
         parameters: {
           type: 'object',
           properties: {
@@ -1041,6 +1044,11 @@ export const tools: PTTool[] = [
                   multiple: {
                     type: 'boolean',
                     description: 'True to allow selecting multiple options (checkboxes).'
+                  },
+                  secret: {
+                    type: 'boolean',
+                    description:
+                      'True for sensitive free-text answers (passwords, API keys, tokens). Masked input; you receive a ${SECRET:<id>} token, never the value. Free text only (no options).'
                   }
                 },
                 required: ['id', 'question']
@@ -1086,21 +1094,46 @@ export const tools: PTTool[] = [
             error: `Question "${id}" needs 2-6 options, or none for free text.`
           })
         }
+        if (q.secret === true && (options.length > 0 || q.multiple === true)) {
+          return JSON.stringify({
+            ok: false,
+            error: `Question "${id}" is secret and must be free text (no options, no multiple).`
+          })
+        }
         questions.push({
           id,
           question,
           ...(options.length > 0 ? { options } : {}),
-          ...(options.length > 0 && q.multiple === true ? { multiple: true } : {})
+          ...(options.length > 0 && q.multiple === true ? { multiple: true } : {}),
+          ...(q.secret === true ? { secret: true } : {})
         })
       }
       if (!ctx.ask) {
         return JSON.stringify({ ok: false, error: 'ask_user requires the interactive chat' })
       }
       const res = await ctx.ask({ project: ctx.activeProject, questions })
+      const secretIds = new Set(questions.filter((q) => q.secret).map((q) => q.id))
+      if (res.answers.some((a) => secretIds.has(a.id) && a.answer) && !ctx.registerSecret) {
+        return JSON.stringify({
+          ok: false,
+          error: 'ask_user secret answers require the interactive chat'
+        })
+      }
+      let secretCount = 0
+      const answers = res.answers.map((a) => {
+        if (!secretIds.has(a.id) || !a.answer) return a
+        secretCount += 1
+        return { ...a, answer: ctx.registerSecret!(a.answer) }
+      })
       return JSON.stringify({
         ok: !res.cancelled,
         cancelled: !!res.cancelled,
-        answers: res.answers
+        answers,
+        ...(secretCount > 0
+          ? {
+              note: `Secret answers are shown as ${secretToken('<id>')} tokens, not values. Pass a token unchanged in a later browser tool call (e.g. browser_type text) and the real value is substituted before execution. The value is never shown to you or stored.`
+            }
+          : {})
       })
     }
   },

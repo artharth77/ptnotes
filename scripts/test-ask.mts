@@ -32,9 +32,10 @@ const baseCtx: ToolContext = {
 
 const callAsk = async (
   args: Record<string, unknown>,
-  ask?: ToolContext['ask']
+  ask?: ToolContext['ask'],
+  registerSecret?: ToolContext['registerSecret']
 ): Promise<unknown> => {
-  const res = await askTool.execute(args, { ...baseCtx, ask })
+  const res = await askTool.execute(args, { ...baseCtx, ask, registerSecret })
   return JSON.parse(res)
 }
 
@@ -114,6 +115,79 @@ r = await callAsk(
 assert.equal(r.ok, false)
 assert.equal(r.cancelled, true)
 assert.deepEqual(r.answers, [])
+
+// ---- secret questions ----
+
+r = await callAsk(
+  { questions: [{ id: 'q1', question: 'Key', secret: true, options: ['a', 'b'] }] },
+  async () => ({ answers: [] })
+)
+assert.equal(r.ok, false, 'secret with options → error')
+assert.match(r.error, /free text/)
+r = await callAsk(
+  { questions: [{ id: 'q1', question: 'Key', secret: true, multiple: true }] },
+  async () => ({ answers: [] })
+)
+assert.equal(r.ok, false, 'secret with multiple → error')
+
+const registered: string[] = []
+r = await callAsk(
+  {
+    questions: [
+      { id: 'pw', question: 'Password?', secret: true },
+      { id: 'name', question: 'Name?' }
+    ]
+  },
+  async (req) => {
+    assert.deepEqual(req.questions[0], { id: 'pw', question: 'Password?', secret: true })
+    assert.deepEqual(req.questions[1], { id: 'name', question: 'Name?' })
+    return {
+      answers: [
+        { id: 'pw', answer: 's3cr3t-value' },
+        { id: 'name', answer: 'Ada' }
+      ]
+    }
+  },
+  (v) => {
+    registered.push(v)
+    return '${SECRET:abcd1234ef56}'
+  }
+)
+assert.equal(r.ok, true)
+assert.equal(registered.length, 1, 'secret value registered once')
+assert.equal(registered[0], 's3cr3t-value', 'registerSecret receives the raw value')
+const pwAnswer = (r.answers as { id: string; answer: string }[]).find((a) => a.id === 'pw')
+assert.equal(pwAnswer?.answer, '${SECRET:abcd1234ef56}', 'secret answer replaced by token')
+const nameAnswer = (r.answers as { id: string; answer: string }[]).find((a) => a.id === 'name')
+assert.equal(nameAnswer?.answer, 'Ada', 'non-secret answer untouched')
+assert.ok(!JSON.stringify(r).includes('s3cr3t-value'), 'raw secret never in result')
+assert.match(r.note as string, /SECRET/, 'note explains token usage')
+
+r = await callAsk({ questions: [{ id: 'pw', question: 'Password?', secret: true }] }, async () => ({
+  answers: [{ id: 'pw', answer: 'x' }]
+}))
+assert.equal(r.ok, false, 'secret answer without registerSecret → error')
+assert.match(r.error, /interactive chat/)
+
+// ---- shared/secrets token resolution ----
+
+const { resolveSecretTokens, secretToken } = await import('../src/shared/secrets')
+assert.equal(secretToken('abc'), '${SECRET:abc}')
+const secrets = new Map([['abc123', 'p@ss']])
+let rr = resolveSecretTokens(
+  { text: 'use ${SECRET:abc123} now', list: ['${SECRET:abc123}', 'plain'], n: 1 },
+  secrets
+)
+assert.deepEqual(rr, {
+  value: { text: 'use p@ss now', list: ['p@ss', 'plain'], n: 1 },
+  unknown: []
+})
+rr = resolveSecretTokens('x ${SECRET:abc123} y ${SECRET:abc123}', secrets)
+assert.equal(rr.value, 'x p@ss y p@ss', 'repeated tokens all resolved')
+rr = resolveSecretTokens('${SECRET:zzz}', secrets)
+assert.deepEqual(rr, { value: '${SECRET:zzz}', unknown: ['zzz'] }, 'unknown token kept + reported')
+rr = resolveSecretTokens(42, secrets)
+assert.deepEqual(rr, { value: 42, unknown: [] }, 'non-strings pass through')
 
 // ---- shared/ask flow reducer ----
 

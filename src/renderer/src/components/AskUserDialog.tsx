@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   mdiCheckboxBlankOutline,
   mdiCheckboxMarked,
+  mdiLock,
   mdiRadioboxBlank,
   mdiRadioboxMarked
 } from '@mdi/js'
@@ -168,16 +169,24 @@ export function AskUserDialog(): React.JSX.Element | null {
         >
           {q ? (
             <>
-              <div className="ask-question-full">{q.question}</div>
+              <div className="ask-question-full">
+                {q.secret && (
+                  <span className="ask-secret-lock" title="Answer is hidden">
+                    <MdiIcon path={mdiLock} size={14} />
+                  </span>
+                )}
+                {q.question}
+              </div>
               {isFree(q) ? (
                 <input
                   ref={freeTextRef}
                   className="ask-free-text"
+                  type={q.secret ? 'password' : 'text'}
                   value={flow.freeText[pane]}
                   onChange={(e) =>
                     setFlow(reduce(flow, { type: 'text', value: e.target.value }, questions).state)
                   }
-                  placeholder="Type your answer…"
+                  placeholder={q.secret ? 'Type your secret answer (hidden)…' : 'Type your answer…'}
                 />
               ) : (
                 <div className="ask-options" role={isMulti(q) ? 'group' : 'radiogroup'}>
@@ -228,7 +237,7 @@ export function AskUserDialog(): React.JSX.Element | null {
                     {i + 1}. {qitem.question}
                   </span>
                   <span className={`ask-confirm-a${flow.answered[i] ? '' : ' missing'}`}>
-                    {answerText(flow, i)}
+                    {qitem.secret && flow.answered[i] ? '••••••' : answerText(flow, i)}
                   </span>
                 </div>
               ))}

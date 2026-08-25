@@ -4330,6 +4330,14 @@ body {
   overflow-wrap: anywhere;
 }
 
+.ask-secret-lock {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 6px;
+  color: var(--text-dim);
+  vertical-align: -2px;
+}
+
 .ask-options {
   display: flex;
   flex-direction: column;
