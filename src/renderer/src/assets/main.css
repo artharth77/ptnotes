@@ -3833,6 +3833,29 @@ body {
   margin-bottom: 4px;
 }
 
+.trace-detail-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.icon-btn.trace-copy-btn {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  flex: none;
+  opacity: 0.75;
+}
+
+.icon-btn.trace-copy-btn:hover {
+  opacity: 1;
+}
+
+.icon-btn.trace-copy-btn.copied {
+  color: var(--ok);
+}
+
 .trace-detail-content {
   font-size: 13px;
   line-height: 1.55;
@@ -3894,6 +3917,13 @@ body {
   color: var(--text-dim);
 }
 
+.trace-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
 .trace-detail-collapse .trace-detail-content {
   border-top: 1px solid var(--border);
   border-radius: 0 0 8px 8px;
@@ -3906,13 +3936,20 @@ body {
   overflow: hidden;
 }
 
+.trace-toolcall-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 3px 4px 3px 10px;
+  background: var(--bg-hover);
+  border-bottom: 1px solid var(--border);
+}
+
 .trace-toolcall-name {
-  padding: 6px 10px;
   font-size: 12px;
   font-weight: 600;
   color: var(--accent);
-  background: var(--bg-hover);
-  border-bottom: 1px solid var(--border);
 }
 
 .trace-toolcall-args {

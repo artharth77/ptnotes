@@ -1,4 +1,23 @@
-## [0.13.1] — 2026-08-25
+## [0.13.2] — 2026-08-25
+
+### Added
+
+- **Copy buttons in the AI trace viewer detail pane**: labeled content blocks in the item-detail view now get an icon button (right of the block label) that copies the raw text to the clipboard — Content for system/user/assistant messages, Result for tool calls, assistant Reasoning (the button inside the collapsible summary no longer toggles it), and per-tool-call arguments JSON. The icon swaps to a checkmark for 1.5s after copying.
+
+### Changed
+
+#### Browser snapshot coverage (`browser_snapshot`)
+
+- **Accessible-name computation rewritten**: names now resolve `aria-label` → `aria-labelledby` (id refs resolved) → `<label>` association (wrapping or `for=`) → placeholder → `title` → `alt` → text content. Input buttons (`type=submit/reset/button/file`) read their `value` attribute (previously always empty names); `input type=image` uses `alt`; SVGs with `<title>` are named images. The generic text fallback now only applies to leaf elements, removing the previous name/text duplication on containers.
+- **Form state is now visible to the AI**: textboxes/searchboxes/spinbuttons expose their current `value`, `<select>` exposes its selected option(s), and `aria-describedby` is captured as a `description` field.
+- **ARIA-aware element state**: checkbox/radio/switch/menuitemcheckbox/menuitemradio prefer `aria-checked` over the DOM property (custom role-based widgets no longer report unchecked) with `indeterminate` support; `aria-disabled`, toggle-button `aria-pressed`, slider/progressbar/spinbutton `aria-valuenow`, heading `aria-level` for non-`h*` elements, and native `option.selected` are all captured.
+- **Traversal scope widened**: open shadow roots (`element.shadowRoot`) and same-origin iframe documents (`contentDocument`, cross-origin safely skipped) are now included; `contenteditable` elements infer role `textbox` and receive refs so `browser_type` can target rich-text editors.
+- **Role table extended**: `hr`→separator, `progress`/`meter`→progressbar, `output`→status, `<search>`→search, `menu`/`dl`→list, `datalist` and multi-select `select`→listbox, `area`→link, `canvas`→img, `input type=search`→searchbox. Explicit `role="presentation"/"none"` renders as a transparent container (no name/state/ref).
+- **Visibility heuristic** additionally treats `opacity: 0` and `visibility: collapse` as hidden.
+- **Ref attribute renamed** `data-ref` → `data-ptnotes-ref` so snapshots no longer clobber host pages that use their own `data-ref` attributes.
+- **Honest truncation**: subtrees cut by the `depth` parameter are marked `truncated: true`, and traversal stops at a node cap — 1500 *visible* elements by default (hidden elements don't consume the budget) — setting top-level `nodesTruncated` instead of slicing the JSON output mid-string at 300k chars. New optional `maxNodes` parameter on `browser_snapshot` (1–20000) raises the ceiling for very large pages.
+- Docs updated (`docs/ARCHITECTURE.md` → Browser toolset).
+
 
 ### Added
 
