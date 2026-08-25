@@ -16,8 +16,10 @@
 - **Visibility heuristic** additionally treats `opacity: 0` and `visibility: collapse` as hidden.
 - **Ref attribute renamed** `data-ref` → `data-ptnotes-ref` so snapshots no longer clobber host pages that use their own `data-ref` attributes.
 - **Honest truncation**: subtrees cut by the `depth` parameter are marked `truncated: true`, and traversal stops at a node cap — 1500 *visible* elements by default (hidden elements don't consume the budget) — setting top-level `nodesTruncated` instead of slicing the JSON output mid-string at 300k chars. New optional `maxNodes` parameter on `browser_snapshot` (1–20000) raises the ceiling for very large pages.
+- **No more blank names in snapshots**: nodes without an accessible name omit the `name` field entirely and carry `tag` (lowercase HTML tag, e.g. `"div"`) instead, so every node stays identifiable without empty-string noise.
 - Docs updated (`docs/ARCHITECTURE.md` → Browser toolset).
 
+## [0.13.1] — 2026-08-25
 
 ### Added
 

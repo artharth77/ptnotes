@@ -21,7 +21,8 @@ interface SnapshotOptions {
 
 interface SnapshotNode {
   role: string
-  name: string
+  name?: string
+  tag?: string
   ref?: string
   children?: (SnapshotNode | string)[]
   text?: string
@@ -277,7 +278,9 @@ async function extractPageSnapshot(
 
         const tag = el.tagName.toLowerCase();
         const name = transparent ? '' : getName(el);
-        const node = { role, name };
+        const node = { role };
+        if (name) node.name = name;
+        else node.tag = tag;
 
         // Assign ref to interactive elements
         if (!transparent && isInteractive(el)) {
