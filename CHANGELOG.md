@@ -4,6 +4,7 @@
 
 - **Splash screen on startup**: a small frameless window with the app icon, "PTNotes" title and a spinner appears as soon as the app launches (before settings/service init), and closes when the main window is ready to show — no more blank screen during startup. The splash skips the taskbar, isn't resizable, and is also dismissed if the renderer fails to load.
 - **Copy buttons in the AI trace viewer detail pane**: labeled content blocks in the item-detail view now get an icon button (right of the block label) that copies the raw text to the clipboard — Content for system/user/assistant messages, Result for tool calls, assistant Reasoning (the button inside the collapsible summary no longer toggles it), and per-tool-call arguments JSON. The icon swaps to a checkmark for 1.5s after copying.
+- **Chat tool-loop confirmation**: when the chat hits the 12-iteration tool-loop cap and the model still wants to continue, the user is asked how to proceed — allow 12 more steps, allow until finished, or stop. Closing the dialog stops the chat. Pending `ask_user` responses are also resolved on session stop/clear (defensive).
 
 ### Changed
 
@@ -20,6 +21,10 @@
 - **Honest truncation**: subtrees cut by the `depth` parameter are marked `truncated: true`, and traversal stops at a node cap — 1500 *visible* elements by default (hidden elements don't consume the budget) — setting top-level `nodesTruncated` instead of slicing the JSON output mid-string at 300k chars. New optional `maxNodes` parameter on `browser_snapshot` (1–20000) raises the ceiling for very large pages.
 - **No more blank names in snapshots**: nodes without an accessible name omit the `name` field entirely and carry `tag` (lowercase HTML tag, e.g. `"div"`) instead, so every node stays identifiable without empty-string noise.
 - Docs updated (`docs/ARCHITECTURE.md` → Browser toolset).
+
+#### Ask dialog
+
+- **Single single-select questions submit on click**: when the `ask_user` tool (or the new tool-loop confirmation) presents a single multiple-choice question, clicking an option immediately submits the answer — no confirm pane. Multi-question and free-text flows are unchanged.
 
 ## [0.13.1] — 2026-08-25
 

@@ -164,11 +164,21 @@ export class ChatSession {
     const messageId = randomUUID()
 
     try {
-      for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
+      let maxIter = MAX_TOOL_ITERATIONS
+      for (let iter = 0; iter < maxIter; iter++) {
         if (this.stopped) break
         const result = await this.runTurn(client, messageId)
         await this.trace?.flush()
         if (result === 'done') break
+        if (iter + 1 >= maxIter) {
+          const decision = await this.askIterationLimit(iter + 1)
+          if (decision === 'stop') {
+            this.stopped = true
+            break
+          }
+          maxIter =
+            decision === 'unlimited' ? Number.POSITIVE_INFINITY : maxIter + MAX_TOOL_ITERATIONS
+        }
       }
     } catch (err) {
       if (this.stopped) return
@@ -424,6 +434,29 @@ export class ChatSession {
     this.lastActiveScheduleName = activeScheduleName
 
     return parts.length > 0 ? ` ${parts.join(' ')}` : ''
+  }
+
+  private async askIterationLimit(used: number): Promise<'more' | 'unlimited' | 'stop'> {
+    if (!this.ctx.ask) return 'stop'
+    try {
+      const res = await this.ctx.ask({
+        project: this.ctx.activeProject,
+        questions: [
+          {
+            id: 'iteration-limit',
+            question: `The assistant has used ${used} tool steps for this request and is not finished. How should it continue?`,
+            options: ['Allow 12 more steps', 'Allow until finished', 'Stop']
+          }
+        ]
+      })
+      if (res.cancelled) return 'stop'
+      const answer = res.answers[0]?.answer ?? ''
+      if (answer === 'Allow until finished') return 'unlimited'
+      if (answer === 'Stop') return 'stop'
+      return 'more'
+    } catch {
+      return 'stop'
+    }
   }
 
   /** Run one streaming turn. Returns 'done' when the model produced a final answer. */

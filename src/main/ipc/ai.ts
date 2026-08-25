@@ -91,11 +91,19 @@ export function createSessionRegistry(
       }
       return session
     },
-    clear(project) {
-      sessions.delete(project)
-    },
     stop(project) {
       sessions.get(project)?.stop()
+      for (const [id, pending] of pendingAsks) {
+        pending.resolve({ answers: [], cancelled: true })
+        pendingAsks.delete(id)
+      }
+    },
+    clear(project) {
+      sessions.delete(project)
+      for (const [id, pending] of pendingAsks) {
+        pending.resolve({ answers: [], cancelled: true })
+        pendingAsks.delete(id)
+      }
     },
     respond(resp) {
       const pending = pendingConfirms.get(resp.id)
