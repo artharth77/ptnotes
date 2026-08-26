@@ -82,19 +82,71 @@ r = await callWith('read_note', { title: 'Active Override' }, { activeNoteId: 'e
 assert.equal(r.note, 'active-override')
 assert.match(r.content, /override body/)
 
-// search_notes
+// read_note line range
+await call('create_note', { title: 'Range Note', content: 'l1\nl2\nl3\nl4\nl5' })
+r = await call('read_note', { title: 'range-note' })
+assert.equal(r.ok, true)
+assert.equal(r.content, 'l1\nl2\nl3\nl4\nl5')
+assert.equal(r.totalLines, 5)
+assert.equal(r.startLine, undefined)
+assert.equal(r.endLine, undefined)
+
+r = await call('read_note', { title: 'range-note', startLine: 2, endLine: 3 })
+assert.equal(r.content, 'l2\nl3')
+assert.equal(r.startLine, 2)
+assert.equal(r.endLine, 3)
+assert.equal(r.totalLines, 5)
+
+r = await call('read_note', { title: 'range-note', startLine: 4 })
+assert.equal(r.content, 'l4\nl5')
+assert.equal(r.startLine, 4)
+assert.equal(r.endLine, 5)
+
+r = await call('read_note', { title: 'range-note', endLine: 2 })
+assert.equal(r.content, 'l1\nl2')
+assert.equal(r.startLine, 1)
+assert.equal(r.endLine, 2)
+
+// endLine beyond the note clamps to the last line
+r = await call('read_note', { title: 'range-note', startLine: 4, endLine: 99 })
+assert.equal(r.content, 'l4\nl5')
+assert.equal(r.endLine, 5)
+
+// startLine beyond the note fails with totalLines
+r = await call('read_note', { title: 'range-note', startLine: 6 })
+assert.equal(r.ok, false)
+assert.equal(r.totalLines, 5)
+assert.match(r.error, /5 line/)
+
+// startLine after endLine fails
+r = await call('read_note', { title: 'range-note', startLine: 3, endLine: 2 })
+assert.equal(r.ok, false)
+assert.match(r.error, /less than or equal/)
+
+// non-integer line argument fails
+r = await call('read_note', { title: 'range-note', startLine: 'abc' })
+assert.equal(r.ok, false)
+assert.match(r.error, /integers/)
+
+// trailing newline does not count as an extra line
+await call('create_note', { title: 'Trailing Newline', content: 'a\nb\n' })
+r = await call('read_note', { title: 'trailing-newline' })
+assert.equal(r.totalLines, 2)
+assert.equal(r.content, 'a\nb\n')
+
+// list_notes with query
 await call('create_note', { title: 'Meeting Notes', content: 'Agenda' })
-r = await call('search_notes', { query: 'electron' })
+r = await call('list_notes', { query: 'electron' })
 assert.equal(r.notes.length, 1)
 assert.equal(r.notes[0].name, 'electron-tips')
-r = await call('search_notes', { query: 'meet' })
+r = await call('list_notes', { query: 'meet' })
 assert.equal(r.notes.length, 1)
 assert.equal(r.notes[0].name, 'meeting-notes')
-r = await call('search_notes', { query: 'zzz-no-match' })
+r = await call('list_notes', { query: 'zzz-no-match' })
 assert.equal(r.notes.length, 0)
 // content match (query only appears in note body, not the slug)
 await call('create_note', { title: 'Q2 Ideas', content: 'The strawberry roadmap' })
-r = await call('search_notes', { query: 'strawberry' })
+r = await call('list_notes', { query: 'strawberry' })
 assert.equal(r.notes.length, 1)
 assert.equal(r.notes[0].name, 'q2-ideas')
 assert.match(r.notes[0].snippet ?? '', /strawberry/)

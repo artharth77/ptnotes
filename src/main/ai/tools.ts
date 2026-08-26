@@ -70,6 +70,21 @@ function findNote(
   )
 }
 
+/** Split note content into lines; a trailing newline does not add an empty line. */
+function noteLines(content: string): string[] {
+  if (content === '') return []
+  const lines = content.split('\n')
+  if (lines[lines.length - 1] === '') lines.pop()
+  return lines
+}
+
+/** Parse a 1-based line number argument; null when absent, NaN when invalid. */
+function lineArg(v: unknown): number | null {
+  if (v === undefined || v === null || v === '') return null
+  const n = typeof v === 'number' ? v : Number(String(v).trim())
+  return Number.isInteger(n) && n >= 1 ? n : NaN
+}
+
 function scopeOf(args: Record<string, unknown>): SkillScope | null {
   const scope = String(args.scope ?? 'project')
   return scope === 'global' || scope === 'project' || scope === 'builtin' ? scope : null
@@ -329,13 +344,19 @@ export const tools: PTTool[] = [
       type: 'function',
       function: {
         name: 'list_notes',
-        description: 'List all note titles in a project.',
+        description:
+          'List note titles in a project. Omit the query to list all notes. Pass a word or phrase as the query to only return notes whose title or content matches, each with a short snippet. Use this when the user asks to find notes about a topic.',
         parameters: {
           type: 'object',
           properties: {
             project: {
               type: 'string',
               description: 'Project name. Defaults to the current project.'
+            },
+            query: {
+              type: 'string',
+              description:
+                'Optional word or phrase. When provided, only notes whose title or content match are returned (with a snippet).'
             }
           }
         }
@@ -343,8 +364,45 @@ export const tools: PTTool[] = [
     },
     async execute(args, ctx) {
       const project = projectOf(args, ctx)
+      const query = String(args.query ?? '').trim()
       const notes = await ctx.service.listNotes(project)
-      return JSON.stringify({ ok: true, project, notes: notes.map((n) => n.name) })
+      if (!query) {
+        return JSON.stringify({ ok: true, project, notes: notes.map((n) => n.name) })
+      }
+      const q = query.toLowerCase()
+      const words = q.split(/\s+/).filter(Boolean)
+      const matches: { name: string; snippet?: string }[] = []
+      for (const n of notes) {
+        const name = n.name.toLowerCase()
+        if (name.includes(q) || words.some((w) => name.includes(w))) {
+          matches.push({ name: n.name })
+          continue
+        }
+        const content = await ctx.service.readNote(project, n.id)
+        const text = content.toLowerCase()
+        const positions: number[] = []
+        if (q) {
+          const i = text.indexOf(q)
+          if (i !== -1) positions.push(i)
+        }
+        for (const w of words) {
+          const i = text.indexOf(w)
+          if (i !== -1) positions.push(i)
+        }
+        if (positions.length === 0) continue
+        const start = Math.max(0, Math.min(...positions) - 40)
+        const snippet = content
+          .slice(start, start + 200)
+          .replace(/\s+/g, ' ')
+          .trim()
+        matches.push({ name: n.name, snippet: snippet || undefined })
+      }
+      return JSON.stringify({
+        ok: true,
+        project,
+        query,
+        notes: matches
+      })
     }
   },
   {
@@ -353,7 +411,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'read_note',
         description:
-          'Read the full markdown content of a note in a project. Omit the title to read the currently active note (the one the user is viewing).',
+          'Read the markdown content of a note in a project. Omit the title to read the currently active note (the one the user is viewing). For long notes, pass startLine/endLine (1-based, inclusive) to read only a portion.',
         parameters: {
           type: 'object',
           properties: {
@@ -364,6 +422,18 @@ export const tools: PTTool[] = [
             title: {
               type: 'string',
               description: 'Title of the note to read. Omit to read the currently active note.'
+            },
+            startLine: {
+              type: 'integer',
+              minimum: 1,
+              description:
+                'First line to read (1-based, inclusive). Omit to start at the first line.'
+            },
+            endLine: {
+              type: 'integer',
+              minimum: 1,
+              description:
+                'Last line to read (1-based, inclusive). Omit to read to the end of the note.'
             }
           }
         }
@@ -394,7 +464,46 @@ export const tools: PTTool[] = [
         })
       }
       const content = await ctx.service.readNote(project, found.id)
-      return JSON.stringify({ ok: true, project, note: found.id, content })
+      const lines = noteLines(content)
+      const totalLines = lines.length
+      const start = lineArg(args.startLine)
+      const end = lineArg(args.endLine)
+      if (start === null && end === null) {
+        return JSON.stringify({ ok: true, project, note: found.id, content, totalLines })
+      }
+      if (Number.isNaN(start) || Number.isNaN(end)) {
+        return JSON.stringify({
+          ok: false,
+          error: 'startLine and endLine must be integers greater than or equal to 1.'
+        })
+      }
+      const startLine = start ?? 1
+      if (startLine > totalLines) {
+        return JSON.stringify({
+          ok: false,
+          totalLines,
+          error: `startLine ${startLine} is beyond the end of the note (it has ${totalLines} line(s)).`
+        })
+      }
+      const endLine = end ?? totalLines
+      if (startLine > endLine) {
+        return JSON.stringify({
+          ok: false,
+          totalLines,
+          error: `startLine (${startLine}) must be less than or equal to endLine (${endLine}).`
+        })
+      }
+      const effectiveEnd = Math.min(endLine, totalLines)
+      const ranged = lines.slice(startLine - 1, effectiveEnd).join('\n')
+      return JSON.stringify({
+        ok: true,
+        project,
+        note: found.id,
+        content: ranged,
+        totalLines,
+        startLine,
+        endLine: effectiveEnd
+      })
     }
   },
   {
@@ -469,67 +578,6 @@ export const tools: PTTool[] = [
           error: `Could not read "${name}": ${err instanceof Error ? err.message : String(err)}`
         })
       }
-    }
-  },
-  {
-    definition: {
-      type: 'function',
-      function: {
-        name: 'search_notes',
-        description:
-          'Search notes in a project by a word or related word. Searches both note titles and note content and returns the matching note names (with a short snippet). Use this when the user asks you to find notes about a topic.',
-        parameters: {
-          type: 'object',
-          properties: {
-            project: {
-              type: 'string',
-              description: 'Project name. Defaults to the current project.'
-            },
-            query: { type: 'string', description: 'Word or phrase to search for' }
-          },
-          required: ['query']
-        }
-      }
-    },
-    async execute(args, ctx) {
-      const project = projectOf(args, ctx)
-      const query = String(args.query ?? '').trim()
-      if (!query) return JSON.stringify({ ok: false, error: 'No search query provided' })
-      const q = query.toLowerCase()
-      const words = q.split(/\s+/).filter(Boolean)
-      const notes = await ctx.service.listNotes(project)
-      const matches: { name: string; snippet?: string }[] = []
-      for (const n of notes) {
-        const name = n.name.toLowerCase()
-        if (name.includes(q) || words.some((w) => name.includes(w))) {
-          matches.push({ name: n.name })
-          continue
-        }
-        const content = await ctx.service.readNote(project, n.id)
-        const text = content.toLowerCase()
-        const positions: number[] = []
-        if (q) {
-          const i = text.indexOf(q)
-          if (i !== -1) positions.push(i)
-        }
-        for (const w of words) {
-          const i = text.indexOf(w)
-          if (i !== -1) positions.push(i)
-        }
-        if (positions.length === 0) continue
-        const start = Math.max(0, Math.min(...positions) - 40)
-        const snippet = content
-          .slice(start, start + 200)
-          .replace(/\s+/g, ' ')
-          .trim()
-        matches.push({ name: n.name, snippet: snippet || undefined })
-      }
-      return JSON.stringify({
-        ok: true,
-        project,
-        query,
-        notes: matches
-      })
     }
   },
   {
