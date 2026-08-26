@@ -71,15 +71,17 @@ You can create and update notes (markdown), manage the todo list, and research t
 Guidelines:
 - When the user asks to create a note or add todos, do it with the tools and confirm concisely.
 - When the user asks for up-to-date or factual information, use web_search (and web_fetch for detail) instead of relying only on your own knowledge.
-- After researching, if the user wants it saved, write a well-structured markdown note via create_note/update_note.
+- After researching, if the user wants it saved, write a well-structured markdown note via create_note (new note or full rewrite) or update_note (targeted line edits to an existing note).
 - If the user references a note as \`note:<notename>\` (for example \`note:meeting-notes\`), call the read_note tool to read that specific note before responding.
+- read_note returns line-numbered content (each line prefixed with its 1-based line number and ": "). For long notes, read only the part you need by passing startLine/endLine (1-based, inclusive); the response includes totalLines so you can read more if needed.
+- To edit part of an existing note, first read it with read_note and use the displayed line numbers verbatim (do not recount), then call update_note with an edits array of {startLine, endLine, content} hunks: a hunk replaces lines startLine..endLine with content — aim each hunk at the exact line(s) to change; endLine = startLine - 1 inserts before line startLine; startLine = totalLines + 1 appends at the end; an empty content deletes the lines. All hunks use the original line numbers and are applied in one atomic write. Never include the line-number prefixes in the content you write. Use create_note only for new notes or full rewrites.
 - If the user references a project file as \`file:<filename>\` (for example \`file:report.pdf\`, \`file:data.xlsx\`, \`file:notes.md\`, \`file:data.json\` or \`file:readme.txt\`), call the read_file tool to read that file before responding.
 - If the user asks you to use a skill by name (for example \`Use the skill "name": …\`, optionally with the scope in parentheses), call the read_skill tool to load that skill before applying it.
 - If a skill loaded via read_skill references a sibling file (for example \`[FORMAT.md](./FORMAT.md)\` or \`[DOC.md](./doc/DOC.md)\`), call the read_skill_file tool (passing scope, skill and the relative file path) to load that file when you need it.
-- When the user asks you to find notes about a topic, call the search_notes tool.
+- When the user asks you to find notes about a topic, call the list_notes tool with a query. To list all notes in a project, call it without a query.
 - When you need user input — a choice, a detail, or confirmation — before you can proceed, call ask_user with your questions. You may ask several questions in a single call; the user answers them all at once. Only ask when genuinely needed. For sensitive input (passwords, API keys, tokens), set secret: true on that question; the answer comes back as a \${SECRET:<id>} token, not the value. Pass the token unchanged in later browser tool calls (e.g. browser_type text) and the real value is substituted before execution. Never try to display, repeat, or store the secret value.
 - When a task can be split into parallel deliverables, delegate each part to a background module: call start_module for each (passing the \`expect\` argument to specify the result payload the module must submit back), then call wait_modules with all the returned runIds and continue with the results. Do NOT call wait_modules when you do not need the module output. When delegating, pass source material as inline references in the prompt — \`note:<notename>\`, \`file:<filename>\`, \`plan:<schedule id or name>\` — instead of reading notes/files/schedules yourself first; the module resolves them itself.
-- Quote the snippet returned by search_notes exactly as given; never paraphrase, reword, or summarize it.
+- Quote the snippet returned by list_notes exactly as given; never paraphrase, reword, or summarize it.
 - Whenever you mention an existing note by name in your reply, always link to it: [note name](note:note name). The link opens the note, so never return a bare note name without a link.
 - Whenever you mention an existing todo from the project's todo list by its text in your reply, always link to it: [todo text](todo:todo text). Do NOT link tasks that belong to a schedule/plan — plan tasks have no link, so just mention their text plainly.
 - Whenever you mention an existing skill by name in your reply, always link to it: [skill name](skill:skill name). The link opens the skill's editor, so never return a bare skill name without a link.
@@ -480,6 +482,7 @@ export class ChatSession {
       name?: string
       args: string
     }[] = []
+    const receivingEmitted = new Set<number>()
     let finishReason: string | undefined
     let usage: unknown
     let reasoning = ''
@@ -491,6 +494,7 @@ export class ChatSession {
         if (this.stopped) return 'done'
         content = ''
         toolCalls = []
+        receivingEmitted.clear()
         finishReason = undefined
         usage = undefined
         reasoning = ''
@@ -563,6 +567,13 @@ export class ChatSession {
               if (tc.id) entry.id = tc.id
               if (tc.function?.name) entry.name = tc.function.name
               if (tc.function?.arguments) entry.args += tc.function.arguments
+              if (entry.id && entry.name && !receivingEmitted.has(idx)) {
+                receivingEmitted.add(idx)
+                this.emit({
+                  type: 'tool',
+                  toolCall: { id: entry.id, name: entry.name, args: {}, status: 'receiving' }
+                })
+              }
             }
           }
         }
@@ -617,7 +628,21 @@ export class ChatSession {
       this.emit({ type: 'message-end', messageId, ...(usage !== undefined ? { usage } : {}) })
 
       for (const call of completed) {
+        this.emitToolStatus(
+          call.id,
+          call.function.name,
+          toToolArgs(call.function.arguments),
+          'queued'
+        )
+      }
+      for (const call of completed) {
         if (this.stopped) break
+        this.emitToolStatus(
+          call.id,
+          call.function.name,
+          toToolArgs(call.function.arguments),
+          'running'
+        )
         const toolTs = Date.now()
         const result = await this.executeTool(call)
         this.messages.push({
@@ -658,7 +683,7 @@ export class ChatSession {
     )
     if (!tool) {
       const result = JSON.stringify({ ok: false, error: `Unknown tool: ${call.function.name}` })
-      this.emitTool(call.function.name, args, false, result)
+      this.emitTool(call.id, call.function.name, args, false, result)
       return result
     }
 
@@ -672,7 +697,7 @@ export class ChatSession {
           ok: false,
           error: `Unknown secret reference: ${tokens}. Secret tokens are only valid within the current chat session.`
         })
-        this.emitTool(call.function.name, args, false, result)
+        this.emitTool(call.id, call.function.name, args, false, result)
         return result
       }
       execArgs = value as Record<string, unknown>
@@ -689,20 +714,36 @@ export class ChatSession {
         isStopped: () => this.stopped,
         registerSecret: (v: string) => this.registerSecret(v)
       })
-      this.emitTool(call.function.name, args, true, result)
+      this.emitTool(call.id, call.function.name, args, true, result)
       return result
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       const result = JSON.stringify({ ok: false, error: message })
-      this.emitTool(call.function.name, args, false, result)
+      this.emitTool(call.id, call.function.name, args, false, result)
       return result
     }
   }
 
-  private emitTool(name: string, args: Record<string, unknown>, ok: boolean, result: string): void {
+  /** Emit a transient tool lifecycle event (receiving/queued/running) keyed by the model's call id. */
+  private emitToolStatus(
+    id: string,
+    name: string,
+    args: Record<string, unknown>,
+    status: 'receiving' | 'queued' | 'running'
+  ): void {
+    this.emit({ type: 'tool', toolCall: { id, name, args, status } })
+  }
+
+  private emitTool(
+    id: string,
+    name: string,
+    args: Record<string, unknown>,
+    ok: boolean,
+    result: string
+  ): void {
     this.emit({
       type: 'tool',
-      toolCall: { id: randomUUID(), name, args, ok, result }
+      toolCall: { id, name, args, ok, result, status: 'done' }
     })
   }
 

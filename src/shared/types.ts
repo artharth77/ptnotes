@@ -181,8 +181,11 @@ export interface ToolCallInfo {
   id: string
   name: string
   args: Record<string, unknown>
-  ok: boolean
+  /** Defined once the tool finished executing; absent while receiving/queued/running. */
+  ok?: boolean
   result?: string
+  /** Transient lifecycle while the chat is live: receiving (streaming from the model) → queued → running → done. Absent on persisted/historical tool calls. */
+  status?: 'receiving' | 'queued' | 'running' | 'done'
 }
 
 export interface ChatStreamEvent {
@@ -301,7 +304,8 @@ export interface ModuleChatMessage {
   toolCalls?: ToolCallInfo[]
 }
 
-export type ModuleEventType = 'status' | 'step' | 'output' | 'error' | 'done' | 'result' | 'chat'
+export type ModuleEventType =
+  'status' | 'step' | 'output' | 'error' | 'done' | 'result' | 'chat' | 'tool'
 
 export type ModuleStartResult =
   { ok: true; runId: string; module: ModuleInfo; title: string } | { ok: false; error: string }
@@ -320,6 +324,8 @@ export interface ModuleEvent {
   result?: string
   /** Full updated transcript, attached when `type === 'chat'`. */
   chat?: ModuleChatMessage[]
+  /** Subagent tool-call lifecycle snapshot, attached when `type === 'tool'` (transient, not persisted). */
+  toolCall?: ToolCallInfo
 }
 
 // ---- Raw AI trace (readable app ↔ provider conversation log, JSONL) ----

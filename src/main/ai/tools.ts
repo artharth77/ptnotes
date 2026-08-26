@@ -70,6 +70,21 @@ function findNote(
   )
 }
 
+/** Split note content into lines; a trailing newline does not add an empty line. */
+function noteLines(content: string): string[] {
+  if (content === '') return []
+  const lines = content.split('\n')
+  if (lines[lines.length - 1] === '') lines.pop()
+  return lines
+}
+
+/** Parse a line number argument (>= min); null when absent, NaN when invalid. */
+function lineArg(v: unknown, min = 1): number | null {
+  if (v === undefined || v === null || v === '') return null
+  const n = typeof v === 'number' ? v : Number(String(v).trim())
+  return Number.isInteger(n) && n >= min ? n : NaN
+}
+
 function scopeOf(args: Record<string, unknown>): SkillScope | null {
   const scope = String(args.scope ?? 'project')
   return scope === 'global' || scope === 'project' || scope === 'builtin' ? scope : null
@@ -258,7 +273,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'create_note',
         description:
-          'Create a new markdown note in a project. If a note with the given title already exists, update it instead.',
+          'Create a new markdown note in a project. If a note with the given title already exists, replace its entire content (full rewrite). For small targeted changes to an existing note, use update_note instead.',
         parameters: {
           type: 'object',
           properties: {
@@ -294,7 +309,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'update_note',
         description:
-          'Overwrite the content of an existing note in a project. Creates the note if it does not exist.',
+          'Edit an existing note in a project with line-based, diff-style hunks. Read the note first with read_note and use the line numbers it displays verbatim (do not recount), then pass an edits array of {startLine, endLine, content} hunks: a hunk replaces lines startLine..endLine (1-based, inclusive) with content — aim each hunk at the exact line(s) to change; endLine = startLine - 1 inserts content before line startLine; startLine = totalLines + 1 (with endLine = totalLines) appends at the end; an empty content deletes the lines. All hunks reference the original line numbers and are applied in one atomic write, so multiple hunks never shift each other. The content you write is raw markdown — never include the line-number prefixes. The note must already exist — use create_note to create it.',
         parameters: {
           type: 'object',
           properties: {
@@ -302,26 +317,170 @@ export const tools: PTTool[] = [
               type: 'string',
               description: 'Project name. Defaults to the current project.'
             },
-            title: { type: 'string', description: 'Title of the note to update' },
-            content: { type: 'string', description: 'New markdown content' }
+            title: { type: 'string', description: 'Title of the note to edit' },
+            edits: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  startLine: {
+                    type: 'integer',
+                    minimum: 1,
+                    description:
+                      'First line to replace (1-based, inclusive). For an insertion, the line before which to insert (pair with endLine = startLine - 1).'
+                  },
+                  endLine: {
+                    type: 'integer',
+                    minimum: 0,
+                    description:
+                      'Last line to replace (1-based, inclusive). Use endLine = startLine - 1 for a zero-width insertion before startLine.'
+                  },
+                  content: {
+                    type: 'string',
+                    description:
+                      'Replacement text (markdown lines). Empty string deletes the line range.'
+                  }
+                },
+                required: ['startLine', 'endLine', 'content']
+              },
+              description:
+                'One or more hunks, all referencing the original line numbers of the note'
+            }
           },
-          required: ['title', 'content']
+          required: ['title', 'edits']
         }
       }
     },
     async execute(args, ctx) {
       const project = projectOf(args, ctx)
       const title = String(args.title ?? '')
-      const content = String(args.content ?? '')
+      const rawEdits = Array.isArray(args.edits) ? (args.edits as unknown[]) : []
+      if (rawEdits.length === 0) {
+        return JSON.stringify({
+          ok: false,
+          error:
+            'update_note requires a non-empty edits array of {startLine, endLine, content} hunks.'
+        })
+      }
       const existing = await ctx.service.listNotes(project)
       const found = findNote(existing, title)
-      if (found) {
-        await ctx.service.saveNote(project, found.id, content)
-        return JSON.stringify({ ok: true, action: 'updated', note: found.id, project })
+      if (!found) {
+        return JSON.stringify({
+          ok: false,
+          error: `Note "${title}" not found in project "${project}". Use create_note to create it.`
+        })
       }
-      const note = await ctx.service.createNote(project, title)
-      await ctx.service.saveNote(project, note.id, content)
-      return JSON.stringify({ ok: true, action: 'created', note: note.id, project })
+      const raw = await ctx.service.readNote(project, found.id)
+      const lines = noteLines(raw)
+      const totalLines = lines.length
+      const hadTrailingNewline = raw !== '' && raw.endsWith('\n')
+
+      type Hunk = { startLine: number; endLine: number; content: string }
+      const hunks: Hunk[] = []
+      for (let i = 0; i < rawEdits.length; i++) {
+        const e = (
+          typeof rawEdits[i] === 'object' && rawEdits[i] !== null ? rawEdits[i] : {}
+        ) as Record<string, unknown>
+        const startLine = lineArg(e.startLine)
+        const endLine = lineArg(e.endLine, 0)
+        if (startLine === null || endLine === null) {
+          return JSON.stringify({
+            ok: false,
+            error: `Hunk ${i + 1} needs startLine (>= 1) and endLine (>= 0) as integers.`
+          })
+        }
+        if (Number.isNaN(startLine) || Number.isNaN(endLine)) {
+          return JSON.stringify({
+            ok: false,
+            error: `Hunk ${i + 1}: startLine and endLine must be integers (startLine >= 1, endLine >= 0).`
+          })
+        }
+        if (typeof e.content !== 'string') {
+          return JSON.stringify({
+            ok: false,
+            error: `Hunk ${i + 1}: content must be a string (use "" to delete the line range).`
+          })
+        }
+        if (endLine < startLine - 1) {
+          return JSON.stringify({
+            ok: false,
+            error: `Hunk ${i + 1}: endLine (${endLine}) must be >= startLine - 1 (${startLine - 1}); use endLine = startLine - 1 to insert before line ${startLine}.`
+          })
+        }
+        if (endLine >= startLine && endLine > totalLines) {
+          return JSON.stringify({
+            ok: false,
+            totalLines,
+            error: `Hunk ${i + 1}: endLine ${endLine} is beyond the end of the note (it has ${totalLines} line(s)).`
+          })
+        }
+        if (endLine < startLine && startLine > totalLines + 1) {
+          return JSON.stringify({
+            ok: false,
+            totalLines,
+            error: `Hunk ${i + 1}: cannot insert before line ${startLine} — the note has ${totalLines} line(s); use startLine ${totalLines + 1} to append at the end.`
+          })
+        }
+        hunks.push({ startLine, endLine, content: e.content })
+      }
+
+      const isInsert = (h: Hunk): boolean => h.endLine < h.startLine
+      for (let i = 0; i < hunks.length; i++) {
+        for (let j = i + 1; j < hunks.length; j++) {
+          const a = hunks[i]
+          const b = hunks[j]
+          const aIns = isInsert(a)
+          const bIns = isInsert(b)
+          if (aIns && bIns) {
+            if (a.startLine === b.startLine) {
+              return JSON.stringify({
+                ok: false,
+                error: `Hunks ${i + 1} and ${j + 1} both insert before line ${a.startLine}.`
+              })
+            }
+            continue
+          }
+          if (aIns || bIns) {
+            const ins = aIns ? a : b
+            const rep = aIns ? b : a
+            if (rep.startLine < ins.startLine && ins.startLine <= rep.endLine) {
+              return JSON.stringify({
+                ok: false,
+                error: `Hunk ${aIns ? i + 1 : j + 1} inserts before line ${ins.startLine}, which is inside hunk ${aIns ? j + 1 : i + 1}'s range (${rep.startLine}-${rep.endLine}).`
+              })
+            }
+            continue
+          }
+          if (a.startLine <= b.endLine && b.startLine <= a.endLine) {
+            return JSON.stringify({
+              ok: false,
+              error: `Hunks ${i + 1} and ${j + 1} overlap (lines ${a.startLine}-${a.endLine} and ${b.startLine}-${b.endLine}).`
+            })
+          }
+        }
+      }
+
+      const sorted = [...hunks].sort((x, y) => y.startLine - x.startLine || y.endLine - x.endLine)
+      for (const h of sorted) {
+        const contentLines = h.content === '' ? [] : noteLines(h.content)
+        if (h.endLine >= h.startLine) {
+          lines.splice(h.startLine - 1, h.endLine - h.startLine + 1, ...contentLines)
+        } else {
+          lines.splice(h.startLine - 1, 0, ...contentLines)
+        }
+      }
+
+      let out = lines.join('\n')
+      if (out !== '' && hadTrailingNewline) out += '\n'
+      await ctx.service.saveNote(project, found.id, out)
+      return JSON.stringify({
+        ok: true,
+        action: 'updated',
+        note: found.id,
+        project,
+        edits: hunks.length,
+        totalLines: lines.length
+      })
     }
   },
   {
@@ -329,13 +488,19 @@ export const tools: PTTool[] = [
       type: 'function',
       function: {
         name: 'list_notes',
-        description: 'List all note titles in a project.',
+        description:
+          'List note titles in a project. Omit the query to list all notes. Pass a word or phrase as the query to only return notes whose title or content matches, each with a short snippet. Use this when the user asks to find notes about a topic.',
         parameters: {
           type: 'object',
           properties: {
             project: {
               type: 'string',
               description: 'Project name. Defaults to the current project.'
+            },
+            query: {
+              type: 'string',
+              description:
+                'Optional word or phrase. When provided, only notes whose title or content match are returned (with a snippet).'
             }
           }
         }
@@ -343,8 +508,45 @@ export const tools: PTTool[] = [
     },
     async execute(args, ctx) {
       const project = projectOf(args, ctx)
+      const query = String(args.query ?? '').trim()
       const notes = await ctx.service.listNotes(project)
-      return JSON.stringify({ ok: true, project, notes: notes.map((n) => n.name) })
+      if (!query) {
+        return JSON.stringify({ ok: true, project, notes: notes.map((n) => n.name) })
+      }
+      const q = query.toLowerCase()
+      const words = q.split(/\s+/).filter(Boolean)
+      const matches: { name: string; snippet?: string }[] = []
+      for (const n of notes) {
+        const name = n.name.toLowerCase()
+        if (name.includes(q) || words.some((w) => name.includes(w))) {
+          matches.push({ name: n.name })
+          continue
+        }
+        const content = await ctx.service.readNote(project, n.id)
+        const text = content.toLowerCase()
+        const positions: number[] = []
+        if (q) {
+          const i = text.indexOf(q)
+          if (i !== -1) positions.push(i)
+        }
+        for (const w of words) {
+          const i = text.indexOf(w)
+          if (i !== -1) positions.push(i)
+        }
+        if (positions.length === 0) continue
+        const start = Math.max(0, Math.min(...positions) - 40)
+        const snippet = content
+          .slice(start, start + 200)
+          .replace(/\s+/g, ' ')
+          .trim()
+        matches.push({ name: n.name, snippet: snippet || undefined })
+      }
+      return JSON.stringify({
+        ok: true,
+        project,
+        query,
+        notes: matches
+      })
     }
   },
   {
@@ -353,7 +555,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'read_note',
         description:
-          'Read the full markdown content of a note in a project. Omit the title to read the currently active note (the one the user is viewing).',
+          'Read the markdown content of a note in a project. Omit the title to read the currently active note (the one the user is viewing). The content is line-numbered — each line is prefixed with its 1-based line number and ": " — use those numbers verbatim as startLine/endLine for update_note hunks. For long notes, pass startLine/endLine (1-based, inclusive) to read only a portion.',
         parameters: {
           type: 'object',
           properties: {
@@ -364,6 +566,18 @@ export const tools: PTTool[] = [
             title: {
               type: 'string',
               description: 'Title of the note to read. Omit to read the currently active note.'
+            },
+            startLine: {
+              type: 'integer',
+              minimum: 1,
+              description:
+                'First line to read (1-based, inclusive). Omit to start at the first line.'
+            },
+            endLine: {
+              type: 'integer',
+              minimum: 1,
+              description:
+                'Last line to read (1-based, inclusive). Omit to read to the end of the note.'
             }
           }
         }
@@ -394,7 +608,57 @@ export const tools: PTTool[] = [
         })
       }
       const content = await ctx.service.readNote(project, found.id)
-      return JSON.stringify({ ok: true, project, note: found.id, content })
+      const lines = noteLines(content)
+      const totalLines = lines.length
+      const width = String(totalLines).length
+      const numbered = (from: number, to: number): string =>
+        lines
+          .slice(from - 1, to)
+          .map((line, i) => `${String(from + i).padStart(width, ' ')}: ${line}`)
+          .join('\n')
+      const start = lineArg(args.startLine)
+      const end = lineArg(args.endLine)
+      if (start === null && end === null) {
+        return JSON.stringify({
+          ok: true,
+          project,
+          note: found.id,
+          content: numbered(1, totalLines),
+          totalLines
+        })
+      }
+      if (Number.isNaN(start) || Number.isNaN(end)) {
+        return JSON.stringify({
+          ok: false,
+          error: 'startLine and endLine must be integers greater than or equal to 1.'
+        })
+      }
+      const startLine = start ?? 1
+      if (startLine > totalLines) {
+        return JSON.stringify({
+          ok: false,
+          totalLines,
+          error: `startLine ${startLine} is beyond the end of the note (it has ${totalLines} line(s)).`
+        })
+      }
+      const endLine = end ?? totalLines
+      if (startLine > endLine) {
+        return JSON.stringify({
+          ok: false,
+          totalLines,
+          error: `startLine (${startLine}) must be less than or equal to endLine (${endLine}).`
+        })
+      }
+      const effectiveEnd = Math.min(endLine, totalLines)
+      return JSON.stringify({
+        ok: true,
+        project,
+        note: found.id,
+        content: numbered(startLine, effectiveEnd),
+        totalLines,
+        startLine,
+        endLine: effectiveEnd
+      })
     }
   },
   {
@@ -469,67 +733,6 @@ export const tools: PTTool[] = [
           error: `Could not read "${name}": ${err instanceof Error ? err.message : String(err)}`
         })
       }
-    }
-  },
-  {
-    definition: {
-      type: 'function',
-      function: {
-        name: 'search_notes',
-        description:
-          'Search notes in a project by a word or related word. Searches both note titles and note content and returns the matching note names (with a short snippet). Use this when the user asks you to find notes about a topic.',
-        parameters: {
-          type: 'object',
-          properties: {
-            project: {
-              type: 'string',
-              description: 'Project name. Defaults to the current project.'
-            },
-            query: { type: 'string', description: 'Word or phrase to search for' }
-          },
-          required: ['query']
-        }
-      }
-    },
-    async execute(args, ctx) {
-      const project = projectOf(args, ctx)
-      const query = String(args.query ?? '').trim()
-      if (!query) return JSON.stringify({ ok: false, error: 'No search query provided' })
-      const q = query.toLowerCase()
-      const words = q.split(/\s+/).filter(Boolean)
-      const notes = await ctx.service.listNotes(project)
-      const matches: { name: string; snippet?: string }[] = []
-      for (const n of notes) {
-        const name = n.name.toLowerCase()
-        if (name.includes(q) || words.some((w) => name.includes(w))) {
-          matches.push({ name: n.name })
-          continue
-        }
-        const content = await ctx.service.readNote(project, n.id)
-        const text = content.toLowerCase()
-        const positions: number[] = []
-        if (q) {
-          const i = text.indexOf(q)
-          if (i !== -1) positions.push(i)
-        }
-        for (const w of words) {
-          const i = text.indexOf(w)
-          if (i !== -1) positions.push(i)
-        }
-        if (positions.length === 0) continue
-        const start = Math.max(0, Math.min(...positions) - 40)
-        const snippet = content
-          .slice(start, start + 200)
-          .replace(/\s+/g, ' ')
-          .trim()
-        matches.push({ name: n.name, snippet: snippet || undefined })
-      }
-      return JSON.stringify({
-        ok: true,
-        project,
-        query,
-        notes: matches
-      })
     }
   },
   {

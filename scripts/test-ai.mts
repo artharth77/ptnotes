@@ -55,10 +55,143 @@ assert.equal(r.ok, true)
 assert.equal(r.action, 'created')
 assert.equal(await service.readNote('Research', 'electron-tips'), '# Electron\n\nUse sandbox.')
 
-// update_note (existing)
-r = await call('update_note', { title: 'electron tips', content: '# Electron\n\nv2' })
+// create_note on an existing title replaces the entire content (full rewrite)
+r = await call('create_note', { title: 'electron tips', content: '# Electron\n\nv2' })
+assert.equal(r.ok, true)
 assert.equal(r.action, 'updated')
 assert.equal(await service.readNote('Research', 'electron-tips'), '# Electron\n\nv2')
+
+// update_note: line-based, diff-style hunks
+await call('create_note', { title: 'Patch Note', content: 'l1\nl2\nl3\nl4\nl5' })
+
+// replace a middle range
+r = await call('update_note', {
+  title: 'patch-note',
+  edits: [{ startLine: 2, endLine: 3, content: 'x\ny' }]
+})
+assert.equal(r.ok, true)
+assert.equal(r.action, 'updated')
+assert.equal(r.note, 'patch-note')
+assert.equal(r.edits, 1)
+assert.equal(r.totalLines, 5)
+assert.equal(await service.readNote('Research', 'patch-note'), 'l1\nx\ny\nl4\nl5')
+
+// insert before a line (endLine = startLine - 1)
+r = await call('update_note', {
+  title: 'patch-note',
+  edits: [{ startLine: 1, endLine: 0, content: 'top' }]
+})
+assert.equal(r.ok, true)
+assert.equal(r.totalLines, 6)
+assert.equal(await service.readNote('Research', 'patch-note'), 'top\nl1\nx\ny\nl4\nl5')
+
+// append at the end (startLine = totalLines + 1)
+r = await call('update_note', {
+  title: 'patch-note',
+  edits: [{ startLine: 7, endLine: 6, content: 'bottom' }]
+})
+assert.equal(r.ok, true)
+assert.equal(r.totalLines, 7)
+assert.equal(await service.readNote('Research', 'patch-note'), 'top\nl1\nx\ny\nl4\nl5\nbottom')
+
+// delete a line (empty content)
+r = await call('update_note', {
+  title: 'patch-note',
+  edits: [{ startLine: 2, endLine: 2, content: '' }]
+})
+assert.equal(r.ok, true)
+assert.equal(r.totalLines, 6)
+assert.equal(await service.readNote('Research', 'patch-note'), 'top\nx\ny\nl4\nl5\nbottom')
+
+// multiple hunks in one call use the original line numbers (applied bottom-up)
+await call('create_note', { title: 'Multi Hunk', content: 'a\nb\nc\nd\ne' })
+r = await call('update_note', {
+  title: 'multi-hunk',
+  edits: [
+    { startLine: 1, endLine: 1, content: 'A1\nA2' },
+    { startLine: 5, endLine: 5, content: 'E' },
+    { startLine: 3, endLine: 2, content: 'inserted' }
+  ]
+})
+assert.equal(r.ok, true)
+assert.equal(r.edits, 3)
+assert.equal(r.totalLines, 7)
+assert.equal(await service.readNote('Research', 'multi-hunk'), 'A1\nA2\nb\ninserted\nc\nd\nE')
+
+// overlapping hunks are rejected (nothing written)
+r = await call('update_note', {
+  title: 'patch-note',
+  edits: [
+    { startLine: 1, endLine: 3, content: 'a' },
+    { startLine: 2, endLine: 4, content: 'b' }
+  ]
+})
+assert.equal(r.ok, false)
+assert.match(r.error, /overlap/)
+
+// insertion inside another hunk's range is rejected
+r = await call('update_note', {
+  title: 'patch-note',
+  edits: [
+    { startLine: 2, endLine: 4, content: 'a' },
+    { startLine: 3, endLine: 2, content: 'b' }
+  ]
+})
+assert.equal(r.ok, false)
+assert.match(r.error, /inside/)
+
+// out-of-range endLine fails with totalLines
+r = await call('update_note', {
+  title: 'patch-note',
+  edits: [{ startLine: 5, endLine: 99, content: 'x' }]
+})
+assert.equal(r.ok, false)
+assert.equal(r.totalLines, 6)
+assert.match(r.error, /beyond the end/)
+
+// out-of-range insertion fails
+r = await call('update_note', {
+  title: 'patch-note',
+  edits: [{ startLine: 99, endLine: 98, content: 'x' }]
+})
+assert.equal(r.ok, false)
+assert.match(r.error, /cannot insert/)
+
+// invalid hunk shape fails
+r = await call('update_note', { title: 'patch-note', edits: [{ startLine: 1, content: 'x' }] })
+assert.equal(r.ok, false)
+assert.match(r.error, /endLine/)
+
+// empty edits array fails
+r = await call('update_note', { title: 'patch-note', edits: [] })
+assert.equal(r.ok, false)
+
+// missing note is an error suggesting create_note
+r = await call('update_note', {
+  title: 'no-such-note',
+  edits: [{ startLine: 1, endLine: 0, content: 'x' }]
+})
+assert.equal(r.ok, false)
+assert.match(r.error, /create_note/)
+
+// trailing newline is preserved
+await service.saveNote('Research', 'patch-note', 'a\nb\n')
+r = await call('update_note', {
+  title: 'patch-note',
+  edits: [{ startLine: 2, endLine: 2, content: 'B' }]
+})
+assert.equal(r.ok, true)
+assert.equal(await service.readNote('Research', 'patch-note'), 'a\nB\n')
+
+// insertion into an empty note
+await service.saveNote('Research', 'patch-note', '')
+r = await call('update_note', {
+  title: 'patch-note',
+  edits: [{ startLine: 1, endLine: 0, content: 'first' }]
+})
+assert.equal(r.ok, true)
+assert.equal(r.totalLines, 1)
+assert.equal(await service.readNote('Research', 'patch-note'), 'first')
 
 // list_notes / read_note
 r = await call('list_notes', {})
@@ -82,19 +215,72 @@ r = await callWith('read_note', { title: 'Active Override' }, { activeNoteId: 'e
 assert.equal(r.note, 'active-override')
 assert.match(r.content, /override body/)
 
-// search_notes
+// read_note line range
+await call('create_note', { title: 'Range Note', content: 'l1\nl2\nl3\nl4\nl5' })
+r = await call('read_note', { title: 'range-note' })
+assert.equal(r.ok, true)
+assert.equal(r.content, '1: l1\n2: l2\n3: l3\n4: l4\n5: l5')
+assert.equal(r.totalLines, 5)
+assert.equal(r.startLine, undefined)
+assert.equal(r.endLine, undefined)
+
+// ranged reads keep the note's absolute line numbers
+r = await call('read_note', { title: 'range-note', startLine: 2, endLine: 3 })
+assert.equal(r.content, '2: l2\n3: l3')
+assert.equal(r.startLine, 2)
+assert.equal(r.endLine, 3)
+assert.equal(r.totalLines, 5)
+
+r = await call('read_note', { title: 'range-note', startLine: 4 })
+assert.equal(r.content, '4: l4\n5: l5')
+assert.equal(r.startLine, 4)
+assert.equal(r.endLine, 5)
+
+r = await call('read_note', { title: 'range-note', endLine: 2 })
+assert.equal(r.content, '1: l1\n2: l2')
+assert.equal(r.startLine, 1)
+assert.equal(r.endLine, 2)
+
+// endLine beyond the note clamps to the last line
+r = await call('read_note', { title: 'range-note', startLine: 4, endLine: 99 })
+assert.equal(r.content, '4: l4\n5: l5')
+assert.equal(r.endLine, 5)
+
+// startLine beyond the note fails with totalLines
+r = await call('read_note', { title: 'range-note', startLine: 6 })
+assert.equal(r.ok, false)
+assert.equal(r.totalLines, 5)
+assert.match(r.error, /5 line/)
+
+// startLine after endLine fails
+r = await call('read_note', { title: 'range-note', startLine: 3, endLine: 2 })
+assert.equal(r.ok, false)
+assert.match(r.error, /less than or equal/)
+
+// non-integer line argument fails
+r = await call('read_note', { title: 'range-note', startLine: 'abc' })
+assert.equal(r.ok, false)
+assert.match(r.error, /integers/)
+
+// trailing newline does not count as an extra line
+await call('create_note', { title: 'Trailing Newline', content: 'a\nb\n' })
+r = await call('read_note', { title: 'trailing-newline' })
+assert.equal(r.totalLines, 2)
+assert.equal(r.content, '1: a\n2: b')
+
+// list_notes with query
 await call('create_note', { title: 'Meeting Notes', content: 'Agenda' })
-r = await call('search_notes', { query: 'electron' })
+r = await call('list_notes', { query: 'electron' })
 assert.equal(r.notes.length, 1)
 assert.equal(r.notes[0].name, 'electron-tips')
-r = await call('search_notes', { query: 'meet' })
+r = await call('list_notes', { query: 'meet' })
 assert.equal(r.notes.length, 1)
 assert.equal(r.notes[0].name, 'meeting-notes')
-r = await call('search_notes', { query: 'zzz-no-match' })
+r = await call('list_notes', { query: 'zzz-no-match' })
 assert.equal(r.notes.length, 0)
 // content match (query only appears in note body, not the slug)
 await call('create_note', { title: 'Q2 Ideas', content: 'The strawberry roadmap' })
-r = await call('search_notes', { query: 'strawberry' })
+r = await call('list_notes', { query: 'strawberry' })
 assert.equal(r.notes.length, 1)
 assert.equal(r.notes[0].name, 'q2-ideas')
 assert.match(r.notes[0].snippet ?? '', /strawberry/)

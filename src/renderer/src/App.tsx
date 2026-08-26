@@ -218,6 +218,11 @@ function reloadActiveNoteIfUpdated(toolCall: ToolCallInfo): void {
   }
 }
 
+function upsertToolCall(list: ToolCallInfo[], tc: ToolCallInfo): ToolCallInfo[] {
+  const idx = list.findIndex((t) => t.id === tc.id)
+  return idx === -1 ? [...list, tc] : list.map((t, i) => (i === idx ? tc : t))
+}
+
 function ConfirmDeleteDialog(): React.JSX.Element {
   const confirmRequest = useAppStore((s) => s.confirmRequest)
   const setConfirmRequest = useAppStore((s) => s.setConfirmRequest)
@@ -320,33 +325,39 @@ function App(): React.JSX.Element {
           }
           break
         case 'tool':
-          if (project && evt.toolCall) {
-            state.updateLastAssistantMessage(project, (m) => ({
-              ...m,
-              toolCalls: [...(m.toolCalls ?? []), evt.toolCall!]
-            }))
-            chatNewTurnRef.current = true
-          }
           if (evt.toolCall) {
-            if (NOTE_TOOLS.has(evt.toolCall.name)) {
-              void state.refreshNotes()
-              if (evt.toolCall.name === 'update_note') {
-                reloadActiveNoteIfUpdated(evt.toolCall)
+            const tc = evt.toolCall
+            const done = tc.ok !== undefined
+            if (project) {
+              state.updateLastAssistantMessage(project, (m) => ({
+                ...m,
+                toolCalls: upsertToolCall(m.toolCalls ?? [], tc)
+              }))
+              if (done) {
+                chatNewTurnRef.current = true
               }
             }
-            if (TODO_TOOLS.has(evt.toolCall.name)) {
-              void state.refreshTodos()
-            }
-            if (PLANNER_TOOLS.has(evt.toolCall.name)) {
-              void state.refreshSchedules()
-              if (
-                (evt.toolCall.name === 'add_task' || evt.toolCall.name === 'update_task') &&
-                state.activeScheduleId
-              ) {
-                void state.selectSchedule(state.activeScheduleId)
+            if (done) {
+              if (NOTE_TOOLS.has(tc.name)) {
+                void state.refreshNotes()
+                if (tc.name === 'create_note' || tc.name === 'update_note') {
+                  reloadActiveNoteIfUpdated(tc)
+                }
               }
-              if (evt.toolCall.name === 'set_calendar') {
-                void state.loadCalendar()
+              if (TODO_TOOLS.has(tc.name)) {
+                void state.refreshTodos()
+              }
+              if (PLANNER_TOOLS.has(tc.name)) {
+                void state.refreshSchedules()
+                if (
+                  (tc.name === 'add_task' || tc.name === 'update_task') &&
+                  state.activeScheduleId
+                ) {
+                  void state.selectSchedule(state.activeScheduleId)
+                }
+                if (tc.name === 'set_calendar') {
+                  void state.loadCalendar()
+                }
               }
             }
           }
@@ -358,7 +369,10 @@ function App(): React.JSX.Element {
               state.updateLastAssistantMessage(target, (m) => ({
                 ...m,
                 error: true,
-                content: m.content ? `${m.content}\n\n⚠️ ${evt.error}` : evt.error!
+                content: m.content ? `${m.content}\n\n⚠️ ${evt.error}` : evt.error!,
+                toolCalls: (m.toolCalls ?? []).map((t) =>
+                  t.ok === undefined ? { ...t, status: undefined } : t
+                )
               }))
             }
             state.setChatBusy(false)

@@ -183,11 +183,18 @@ assert.ok(contentEvents.length > 0, 'received streamed content')
 const finalContent = contentEvents.map((e) => (e as { content: string }).content).join('')
 assert.match(finalContent, /Done: created note/)
 
-const toolEvents = events.filter((e: { type?: string }) => (e as { type: string }).type === 'tool')
-assert.equal(toolEvents.length, 1, 'one tool call')
-const tc = toolEvents[0] as { toolCall: { name: string; ok: boolean } }
-assert.equal(tc.toolCall.name, 'create_note')
-assert.equal(tc.toolCall.ok, true)
+const toolEvents = events.filter(
+  (e: { type?: string; toolCall?: { id?: string } }) =>
+    (e as { type: string }).type === 'tool' &&
+    (e as { toolCall?: { id?: string } }).toolCall?.id === 'call_1'
+)
+assert.equal(toolEvents.length, 4, 'receiving → queued → running → done for the tool call')
+const statuses = toolEvents.map((e) => (e as { toolCall: { status?: string } }).toolCall.status)
+assert.deepEqual(statuses, ['receiving', 'queued', 'running', 'done'], 'tool status lifecycle')
+const doneTc = (toolEvents[3] as { toolCall: { name: string; ok?: boolean; result?: string } })
+  .toolCall
+assert.equal(doneTc.name, 'create_note')
+assert.equal(doneTc.ok, true)
 
 const noteExists = await fs
   .readFile(`${ROOT}/Test/notes/from-chat.md`, 'utf8')
@@ -605,7 +612,11 @@ assert.match(
   'final answer carries the submitted result payloads'
 )
 
-const e2eTools = e2eEvents.filter((e) => (e as { type: string }).type === 'tool') as {
+const e2eTools = e2eEvents.filter(
+  (e) =>
+    (e as { type: string }).type === 'tool' &&
+    (e as { toolCall?: { ok?: boolean } }).toolCall?.ok !== undefined
+) as {
   toolCall: { name: string; ok: boolean }
 }[]
 const startedNames = e2eTools.filter((t) => t.toolCall.name === 'start_module')
@@ -1057,7 +1068,7 @@ assert.equal(
 )
 
 const secretToolEvents = (secretEvents as { type?: string; toolCall?: unknown }[]).filter(
-  (e) => e.type === 'tool'
+  (e) => e.type === 'tool' && (e.toolCall as { ok?: boolean })?.ok !== undefined
 )
 const askEvt = secretToolEvents.find((e) => (e.toolCall as { name?: string })?.name === 'ask_user')
   ?.toolCall as { name: string; args: Record<string, unknown>; ok: boolean; result: string }
@@ -1195,8 +1206,8 @@ await unknownSession.send('type it', [], null, null)
 unknownServer.close()
 
 assert.equal(unknownCalls, 0, 'unknown token → tool not executed')
-const unknownEvt = (unknownEvents as { type?: string; toolCall?: unknown }[]).find(
-  (e) => e.type === 'tool'
+const unknownEvt = (unknownEvents as { type?: string; toolCall?: { ok?: boolean } }[]).find(
+  (e) => e.type === 'tool' && e.toolCall?.ok !== undefined
 )?.toolCall as { name: string; ok: boolean; result: string }
 assert.match(unknownEvt.result, /Unknown secret reference/, 'error names the unknown token')
 assert.equal(unknownEvt.ok, false, 'unknown token tool call reported as failed')

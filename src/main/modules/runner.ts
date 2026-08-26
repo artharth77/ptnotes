@@ -102,6 +102,8 @@ export interface ModuleNotifyEvent {
   result?: string
   /** Full updated transcript, attached when `type === 'chat'`. */
   chat?: ModuleChatMessage[]
+  /** Subagent tool-call lifecycle snapshot, attached when `type === 'tool'`. */
+  toolCall?: ToolCallInfo
 }
 
 export interface ModuleRunnerOptions {
@@ -322,6 +324,7 @@ export class ModuleRunner {
       name?: string
       args: string
     }[] = []
+    const receivingEmitted = new Set<number>()
     let finishReason: string | undefined
     let usage: unknown
     const partialId = `m${this.messages.length}`
@@ -333,6 +336,7 @@ export class ModuleRunner {
         if (this.stopped) return 'done'
         content = ''
         toolCalls = []
+        receivingEmitted.clear()
         finishReason = undefined
         usage = undefined
         this.partial = null
@@ -391,6 +395,15 @@ export class ModuleRunner {
               if (tc.id) entry.id = tc.id
               if (tc.function?.name) entry.name = tc.function.name
               if (tc.function?.arguments) entry.args += tc.function.arguments
+              if (entry.id && entry.name && !receivingEmitted.has(idx)) {
+                receivingEmitted.add(idx)
+                this.notifyToolEvent({
+                  id: entry.id,
+                  name: entry.name,
+                  args: {},
+                  status: 'receiving'
+                })
+              }
             }
           }
         }
@@ -424,6 +437,15 @@ export class ModuleRunner {
         type: 'function',
         function: { name: tc.name!, arguments: tc.args || '{}' }
       }))
+
+    for (const call of called) {
+      this.notifyToolEvent({
+        id: call.id,
+        name: call.function.name,
+        args: toToolArgs(call.function.arguments),
+        status: 'queued'
+      })
+    }
     const tracedToolCalls: AiTraceToolCall[] = called.map((tc) => ({
       id: tc.id,
       name: tc.function.name,
@@ -489,27 +511,53 @@ export class ModuleRunner {
 
     // Planning is mandatory as the first tool call.
     if (!this.planned && !called.some((c) => c.function?.name === 'set_plan')) {
+      const rejected = JSON.stringify({
+        ok: false,
+        error:
+          'Your first tool call must be set_plan (with the 1-based steps list). Call set_plan now.'
+      })
       this.push({ role: 'assistant', content: content || '', tool_calls: called })
       this.push({
         role: 'tool',
         tool_call_id: called[0]?.id ?? 'call_unplanned',
-        content: JSON.stringify({
-          ok: false,
-          error:
-            'Your first tool call must be set_plan (with the 1-based steps list). Call set_plan now.'
-        })
+        content: rejected
       })
+      for (const call of called) {
+        this.notifyToolEvent({
+          id: call.id,
+          name: call.function.name,
+          args: toToolArgs(call.function.arguments),
+          ok: false,
+          result: rejected,
+          status: 'done'
+        })
+      }
       this.notifyChat()
       return 'continue'
     }
 
     this.push({ role: 'assistant', content: content || '', tool_calls: called })
     this.notifyChat()
-    for (const call of called ?? []) {
+    for (const call of called) {
       if (this.stopped) break
+      const args = toToolArgs(call.function.arguments)
+      this.notifyToolEvent({
+        id: call.id,
+        name: call.function.name,
+        args,
+        status: 'running'
+      })
       const toolTs = Date.now()
       const result = await this.executeTool(call, tools)
       this.push({ role: 'tool', tool_call_id: call.id, content: result })
+      this.notifyToolEvent({
+        id: call.id,
+        name: call.function.name,
+        args,
+        ok: toolResultOk(result),
+        result,
+        status: 'done'
+      })
       this.notifyChat()
       this.trace.append({
         role: 'tool',
@@ -664,6 +712,11 @@ export class ModuleRunner {
   private touch(evt: ModuleNotifyEvent): void {
     this.run.updatedAt = Date.now()
     this.notify(this.run, evt)
+  }
+
+  /** Broadcast a subagent tool-call lifecycle snapshot for the module panel (transient). */
+  private notifyToolEvent(toolCall: ToolCallInfo): void {
+    this.notify(this.run, { type: 'tool', toolCall })
   }
 
   /** Broadcast the current transcript so the history overlay can update live. */

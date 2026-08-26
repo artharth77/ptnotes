@@ -299,6 +299,18 @@ ChatPanel (renderer) ──send──▶ Main process
 - While the chat is inside `wait_modules`, a `'waiting'` stream event (with `runIds`) is emitted
   and the drawer shows "Waiting for N module run(s)…".
 
+### Subagent tool-call lifecycle
+
+- The module runner mirrors the main chat's tool lifecycle: `'tool'` **module** events carry a
+  `ToolCallInfo` with transient `status` — `receiving` (once per call while its id+name stream
+  in), `queued` (all calls of a turn, after the stream completes), `running`, then a final
+  `done` (with `ok` + raw `result`). Calls rejected by the mandatory-first-`set_plan` guard
+  settle straight from `queued` to `done` with `ok:false`.
+- These events are transient (never persisted on `ModuleRun`; `handleUpdate` skips the run-file
+  write for them). The renderer keeps them in the store's per-runId `moduleToolCalls` slice:
+  rows are dropped when a call settles and the whole entry is cleared when the run reaches a
+  terminal status. `ModuleCard` shows the in-flight calls as compact live rows under the title.
+
 ### Raw AI trace
 
 - Every app↔provider exchange is persisted as a readable **JSONL** trace file (one record
@@ -335,15 +347,14 @@ ChatPanel (renderer) ──send──▶ Main process
   icon button on the module run's transcript overlay (`modules.readTrace`). If no trace
   exists, the modal shows "No trace data found for this session." instead of loading.
 
-### Tools (26 + 12 browser = 38 total)
+### Tools (25 + 12 browser = 37 total)
 
 | Tool                    | Action                                                                                                                                                                                                                                                                                                                                                                        |
 | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `create_note`           | new `.md` in project `notes/`                                                                                                                                                                                                                                                                                                                                                 |
-| `update_note`           | overwrite / rename existing note                                                                                                                                                                                                                                                                                                                                              |
-| `list_notes`            | model context                                                                                                                                                                                                                                                                                                                                                                 |
-| `read_note`             | model context; omit `title` to read the currently active note (the one the user is viewing)                                                                                                                                                                                                                                                                                   |
-| `search_notes`          | search note titles + content, return matching names + snippet                                                                                                                                                                                                                                                                                                                 |
+| `create_note`           | new `.md` in project `notes/`; if the title already exists, replace its entire content (full rewrite)                                                                                                                                                                                                                                                                        |
+| `update_note`           | line-based, diff-style edits to an existing note: `edits` array of `{startLine, endLine, content}` hunks (1-based inclusive, `read_note` convention) — a hunk replaces lines `startLine..endLine`; `endLine = startLine - 1` inserts before `startLine`; `startLine = totalLines + 1` appends; empty `content` deletes; all hunks reference the original line numbers and are applied bottom-up in one atomic write; the note must exist (else error pointing to `create_note`) |
+| `list_notes`            | list all note titles; with optional `query`, search note titles + content and return matching names + snippet                                                                                                                                                                                                                                                                                                          |
+| `read_note`             | model context; omit `title` to read the currently active note (the one the user is viewing); optional `startLine`/`endLine` (1-based, inclusive) read a portion — content is **line-numbered** (each line prefixed with its 1-based line number and `": "`, absolute numbers even for ranged reads) so the model can target `update_note` hunks exactly; response always includes `totalLines`, effective `startLine`/`endLine` when ranged |
 | `delete_note`           | delete one or more notes (requires user confirmation dialog)                                                                                                                                                                                                                                                                                                                  |
 | `create_todos`          | append `- [ ]` items to `TODO.md`                                                                                                                                                                                                                                                                                                                                             |
 | `toggle_todo`           | toggle a checklist item                                                                                                                                                                                                                                                                                                                                                       |
@@ -373,7 +384,7 @@ ChatPanel (renderer) ──send──▶ Main process
 | `browser_type`          | type text into a form input by `ref` or placeholder/label; optional `pressEnter`; chat-only                                                                                                                                                                                                                                                                                   |
 | `browser_select_option` | select an option in a `<select>` dropdown by `ref` or accessible name; chat-only                                                                                                                                                                                                                                                                                              |
 | `browser_press_key`     | press a keyboard key (Enter, Escape, Tab, etc.); chat-only                                                                                                                                                                                                                                                                                                                    |
-| `browser_screenshot`    | take a PNG screenshot to `<project>/screenshots/`; optional `project` param; chat-only                                                                                                                                                                                                                                                                                        |
+| `browser_screenshot`    | take a PNG screenshot to `<project>/screenshots/`; optional `project` param (defaults to the active project, errors if none); chat-only                                                                                                                                                                                                                                                                                        |
 | `browser_evaluate`      | execute JavaScript on the page; chat-only                                                                                                                                                                                                                                                                                                                                     |
 | `browser_wait_for`      | wait for a CSS selector, text, or timeout; chat-only                                                                                                                                                                                                                                                                                                                          |
 | `browser_set_mode`      | switch headful/headless (relaunches browser); persists preference to config; headless requires `ask_user` confirmation; chat-only                                                                                                                                                                                                                                             |
@@ -404,6 +415,13 @@ ChatPanel (renderer) ──send──▶ Main process
 - User chat bubbles longer than `USER_MSG_COLLAPSE_LIMIT` (400 chars) show only the head with a
   "… Show more" button; clicking toggles the full message ("Show less").
 - In an assistant message, tool-call bubbles are rendered **above** the response content.
+- **Tool-call lifecycle**: `tool` stream events carry a transient `status` — `receiving` (emitted
+  by `ChatSession` as soon as a streamed tool call's id + name arrive), then `queued` for every
+  call in the turn, `running` while each executes (tools run sequentially), and `done` with
+  `ok`/`result` on completion. The renderer upserts tool-call bubbles by call id, so a bubble
+  appears as "receiving…"/"queued"/"running…" and settles into the final ok/fail state; Stop or
+  a stream error clears the transient status of unfinished calls. `status` is never persisted —
+  historical messages only carry completed calls.
 - `create_note` / `update_note` tool bubbles show a clickable `📄 <note>` pill in the header (CSS
   truncated, max-width 180px) that opens the note, whether the bubble is collapsed or expanded.
   Parsed from the tool result JSON (`{ ok, note }`) via `noteIdFromToolCall`.
@@ -590,7 +608,7 @@ JSON in `<project>/planner/<slug>.json`; the whole feature is pure data — no m
   - **State & values**: textbox/searchbox/spinbutton expose their current `value`; combobox exposes selected options; checkbox/radio/switch state prefers `aria-checked` (with `indeterminate` support) over the property; `aria-disabled`, `aria-expanded`, `aria-selected` (plus native `option.selected`), `aria-pressed`, `aria-valuenow` and heading `aria-level` are captured; `aria-describedby` becomes `description`.
   - **Scope**: traverses open shadow roots (`shadowRoot`) and same-origin iframes (`contentDocument`; cross-origin safely skipped). `contenteditable` elements infer role `textbox` and are interactive. Extra roles: `separator` (hr), `progressbar` (progress/meter), `status` (output), `search`, `list` (menu/dl), `listbox` (datalist / multi-select), `link` (area), `img` (canvas, titled SVG). Explicit `role="presentation"/"none"` renders as a transparent container without name/state/ref.
   - **Output hygiene**: depth-cut subtrees are marked `truncated: true`; traversal stops at a node cap (default 1500 **visible** elements, overridable per call via the `maxNodes` parameter) and sets top-level `nodesTruncated` instead of slicing JSON mid-string. Supports `depth`, `boxes`, and `maxNodes` parameters.
-- **`browser_screenshot`** saves PNGs to `<project>/screenshots/` via `PTNotesService.screenshotsDir()`. Accepts optional `project` parameter.
+- **`browser_screenshot`** saves PNGs to `<project>/screenshots/` via `PTNotesService.screenshotsDir()`. Accepts optional `project` parameter; when omitted, the chat tool wrapper injects the session's active project at call time, and the tool errors if there is no active project.
 - **`ptfile://` custom protocol** serves local image files for chat rendering. Registered via `protocol.registerSchemesAsPrivileged` (before `app.ready`) and `protocol.handle` (after `app.ready`) with `fs.readFile`. CSP updated (`img-src 'self' data: ptfile:`). Markdown image tags with absolute paths are converted to `ptfile://local/…` in the renderer's `MarkdownContent` component.
 - **Toolsets settings category** holds built-in toolsets (currently: Browser) and is designed for future external MCP connections. Persisted in `ptnotes-settings.json` as `disabledToolsets`.
 

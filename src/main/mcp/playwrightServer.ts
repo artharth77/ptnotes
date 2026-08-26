@@ -722,20 +722,24 @@ export function createBrowserMcpServer(
       }
     },
     async ({ project, fullPage }) => {
+      if (!project || !service) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: 'Error: no project specified and no active project is available.'
+            }
+          ],
+          isError: true
+        }
+      }
       const page = await browser.getBrowserPage(
         browser.headlessMode(),
         browser.getDefaultMaximize(),
         browser.getDefaultIgnoreHttpsErrors()
       )
       const ts = Date.now()
-      let dir: string
-      if (service && project) {
-        dir = service.screenshotsDir(project)
-      } else if (settingsStore) {
-        dir = join((await settingsStore.load()).rootDir, 'screenshots')
-      } else {
-        dir = join(process.cwd(), 'screenshots')
-      }
+      const dir = service.screenshotsDir(project)
       await fs.mkdir(dir, { recursive: true })
       const filePath = join(dir, `browser-${ts}.png`)
       await page.screenshot({ path: filePath, fullPage: !!fullPage })
