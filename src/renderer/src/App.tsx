@@ -340,7 +340,7 @@ function App(): React.JSX.Element {
             if (done) {
               if (NOTE_TOOLS.has(tc.name)) {
                 void state.refreshNotes()
-                if (tc.name === 'update_note') {
+                if (tc.name === 'create_note' || tc.name === 'update_note') {
                   reloadActiveNoteIfUpdated(tc)
                 }
               }
