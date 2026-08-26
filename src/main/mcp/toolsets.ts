@@ -1,7 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import type { PTTool } from '../ai/tools'
+import type { PTTool, ToolContext } from '../ai/tools'
 import { createBrowserMcpServer } from './playwrightServer'
 import { APP_VERSION } from '../version'
 import type { SettingsStore } from '../settings'
@@ -57,7 +57,13 @@ const BROWSER_TOOLSET: Toolset = {
               : { type: 'object' as const, properties: {} }
         }
       },
-      async execute(args: Record<string, unknown>): Promise<string> {
+      async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
+        if (mcpTool.name === 'browser_screenshot') {
+          const p = args.project
+          if ((typeof p !== 'string' || !p.trim()) && ctx.activeProject) {
+            args = { ...args, project: ctx.activeProject }
+          }
+        }
         const result = await client.callTool({ name: mcpTool.name, arguments: args })
         if (result.isError) {
           const text = Array.isArray(result.content)
@@ -110,7 +116,7 @@ export function buildPromptSection(disabledToolsets: string[]): string | null {
 Browser toolset is available. You can navigate, click, type, and read web pages.
 - browser_snapshot returns a JSON tree with role, name, and ref for each visible element. Use refs to target elements in browser_click, browser_type, browser_select_option.
 - browser_evaluate runs arbitrary JavaScript on the page.
-- browser_screenshot saves a PNG screenshot. Pass project to save in the project's screenshots folder.
+- browser_screenshot saves a PNG screenshot to the active project's screenshots folder; pass project to target another project.
 - headless mode runs the browser invisibly — always call ask_user to warn the user before calling browser_set_mode(headless=true), and proceed only if they confirm.
 `
 }

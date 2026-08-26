@@ -1,3 +1,9 @@
+## [0.13.3] — 2026-08-26
+
+### Changed
+
+- **`browser_screenshot` defaults to the active project**: when the `project` parameter is omitted, the screenshot is now saved to the active project's `screenshots/` folder (resolved per call from the chat session) instead of the notes root's `screenshots/` folder. If there is no active project, the tool returns an error.
+
 ## [0.13.2] — 2026-08-25
 
 ### Added
