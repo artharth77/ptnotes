@@ -13,7 +13,8 @@ import type {
   Schedule,
   ScheduleMeta,
   Tab,
-  Todo
+  Todo,
+  ToolCallInfo
 } from '@shared/types'
 
 interface AppState {
@@ -39,6 +40,8 @@ interface AppState {
   chatSessions: Record<string, ChatSessionMeta[]>
   chatTitles: Record<string, string>
   moduleRuns: Record<string, ModuleRun[]>
+  /** Live subagent tool-call lifecycle per run id (transient; never persisted). */
+  moduleToolCalls: Record<string, ToolCallInfo[]>
   moduleHistoryRunId: string | null
   traceViewer: { kind: 'chat' | 'module'; key: string; title: string } | null
   chatBusy: boolean
@@ -141,6 +144,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   chatSessions: {},
   chatTitles: {},
   moduleRuns: {},
+  moduleToolCalls: {},
   moduleHistoryRunId: null,
   traceViewer: null,
   chatBusy: false,
@@ -446,10 +450,42 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async loadModules(project) {
     const runs = await window.ptnotes.modules.list(project)
-    set((s) => ({ moduleRuns: { ...s.moduleRuns, [project]: runs } }))
+    set((s) => {
+      const live = new Set(runs.map((r) => r.runId))
+      const toolCalls = Object.fromEntries(
+        Object.entries(s.moduleToolCalls).filter(([runId]) => live.has(runId))
+      )
+      return {
+        moduleRuns: { ...s.moduleRuns, [project]: runs },
+        moduleToolCalls: toolCalls
+      }
+    })
   },
 
   applyModuleEvent(evt) {
+    if (evt.type === 'tool' && evt.toolCall) {
+      const tc = evt.toolCall
+      set((s) => {
+        const list = s.moduleToolCalls[evt.runId] ?? []
+        const idx = list.findIndex((t) => t.id === tc.id)
+        const settled = tc.ok !== undefined
+        let next: ToolCallInfo[]
+        if (settled && idx === -1) return {}
+        if (idx === -1) next = [...list, tc]
+        else if (settled) next = list.filter((t) => t.id !== tc.id)
+        else next = list.map((t, i) => (i === idx ? tc : t))
+        return { moduleToolCalls: { ...s.moduleToolCalls, [evt.runId]: next } }
+      })
+      return
+    }
+    if (['done', 'failed', 'cancelled'].includes(evt.run.status)) {
+      set((s) => {
+        if (!s.moduleToolCalls[evt.runId]) return {}
+        const next = { ...s.moduleToolCalls }
+        delete next[evt.runId]
+        return { moduleToolCalls: next }
+      })
+    }
     set((s) => {
       const list = s.moduleRuns[evt.project] ?? []
       const idx = list.findIndex((r) => r.runId === evt.runId)

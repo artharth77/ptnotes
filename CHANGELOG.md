@@ -2,6 +2,9 @@
 
 ### Changed
 
+- **Live tool-call status in chat**: tool-call bubbles now show their lifecycle in real time — "receiving…" while the model streams the call, then `queued` / `running…` as each tool executes (tools still run sequentially), settling into the final 🛠/⚠️ state with the result. Stop or a stream error marks unfinished calls as interrupted. The transient `status` is never persisted to saved chats.
+- **Live tool-call status on module cards**: module runs now broadcast the same lifecycle for the subagent's own tool calls (`receiving` → `queued` → `running` → `done`) via a new transient `'tool'` module event; active cards in the Module panel show compact live rows (spinner + tool name + state) for every in-flight call, and rows clear when a call settles or the run reaches a terminal state. Calls rejected by the mandatory-first-`set_plan` guard settle with `ok:false`.
+- **Failed tool responses highlighted in the AI trace viewer**: in the trace message list, tool entries whose result carries `"ok":false` (error response) now render their tool name in red for quick scanning.
 - **`browser_screenshot` defaults to the active project**: when the `project` parameter is omitted, the screenshot is now saved to the active project's `screenshots/` folder (resolved per call from the chat session) instead of the notes root's `screenshots/` folder. If there is no active project, the tool returns an error.
 
 ## [0.13.2] — 2026-08-25
@@ -25,7 +28,7 @@
 - **Role table extended**: `hr`→separator, `progress`/`meter`→progressbar, `output`→status, `<search>`→search, `menu`/`dl`→list, `datalist` and multi-select `select`→listbox, `area`→link, `canvas`→img, `input type=search`→searchbox. Explicit `role="presentation"/"none"` renders as a transparent container (no name/state/ref).
 - **Visibility heuristic** additionally treats `opacity: 0` and `visibility: collapse` as hidden.
 - **Ref attribute renamed** `data-ref` → `data-ptnotes-ref` so snapshots no longer clobber host pages that use their own `data-ref` attributes.
-- **Honest truncation**: subtrees cut by the `depth` parameter are marked `truncated: true`, and traversal stops at a node cap — 1500 *visible* elements by default (hidden elements don't consume the budget) — setting top-level `nodesTruncated` instead of slicing the JSON output mid-string at 300k chars. New optional `maxNodes` parameter on `browser_snapshot` (1–20000) raises the ceiling for very large pages.
+- **Honest truncation**: subtrees cut by the `depth` parameter are marked `truncated: true`, and traversal stops at a node cap — 1500 _visible_ elements by default (hidden elements don't consume the budget) — setting top-level `nodesTruncated` instead of slicing the JSON output mid-string at 300k chars. New optional `maxNodes` parameter on `browser_snapshot` (1–20000) raises the ceiling for very large pages.
 - **No more blank names in snapshots**: nodes without an accessible name omit the `name` field entirely and carry `tag` (lowercase HTML tag, e.g. `"div"`) instead, so every node stays identifiable without empty-string noise.
 - Docs updated (`docs/ARCHITECTURE.md` → Browser toolset).
 

@@ -480,6 +480,7 @@ export class ChatSession {
       name?: string
       args: string
     }[] = []
+    const receivingEmitted = new Set<number>()
     let finishReason: string | undefined
     let usage: unknown
     let reasoning = ''
@@ -491,6 +492,7 @@ export class ChatSession {
         if (this.stopped) return 'done'
         content = ''
         toolCalls = []
+        receivingEmitted.clear()
         finishReason = undefined
         usage = undefined
         reasoning = ''
@@ -563,6 +565,13 @@ export class ChatSession {
               if (tc.id) entry.id = tc.id
               if (tc.function?.name) entry.name = tc.function.name
               if (tc.function?.arguments) entry.args += tc.function.arguments
+              if (entry.id && entry.name && !receivingEmitted.has(idx)) {
+                receivingEmitted.add(idx)
+                this.emit({
+                  type: 'tool',
+                  toolCall: { id: entry.id, name: entry.name, args: {}, status: 'receiving' }
+                })
+              }
             }
           }
         }
@@ -617,7 +626,21 @@ export class ChatSession {
       this.emit({ type: 'message-end', messageId, ...(usage !== undefined ? { usage } : {}) })
 
       for (const call of completed) {
+        this.emitToolStatus(
+          call.id,
+          call.function.name,
+          toToolArgs(call.function.arguments),
+          'queued'
+        )
+      }
+      for (const call of completed) {
         if (this.stopped) break
+        this.emitToolStatus(
+          call.id,
+          call.function.name,
+          toToolArgs(call.function.arguments),
+          'running'
+        )
         const toolTs = Date.now()
         const result = await this.executeTool(call)
         this.messages.push({
@@ -658,7 +681,7 @@ export class ChatSession {
     )
     if (!tool) {
       const result = JSON.stringify({ ok: false, error: `Unknown tool: ${call.function.name}` })
-      this.emitTool(call.function.name, args, false, result)
+      this.emitTool(call.id, call.function.name, args, false, result)
       return result
     }
 
@@ -672,7 +695,7 @@ export class ChatSession {
           ok: false,
           error: `Unknown secret reference: ${tokens}. Secret tokens are only valid within the current chat session.`
         })
-        this.emitTool(call.function.name, args, false, result)
+        this.emitTool(call.id, call.function.name, args, false, result)
         return result
       }
       execArgs = value as Record<string, unknown>
@@ -689,20 +712,36 @@ export class ChatSession {
         isStopped: () => this.stopped,
         registerSecret: (v: string) => this.registerSecret(v)
       })
-      this.emitTool(call.function.name, args, true, result)
+      this.emitTool(call.id, call.function.name, args, true, result)
       return result
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       const result = JSON.stringify({ ok: false, error: message })
-      this.emitTool(call.function.name, args, false, result)
+      this.emitTool(call.id, call.function.name, args, false, result)
       return result
     }
   }
 
-  private emitTool(name: string, args: Record<string, unknown>, ok: boolean, result: string): void {
+  /** Emit a transient tool lifecycle event (receiving/queued/running) keyed by the model's call id. */
+  private emitToolStatus(
+    id: string,
+    name: string,
+    args: Record<string, unknown>,
+    status: 'receiving' | 'queued' | 'running'
+  ): void {
+    this.emit({ type: 'tool', toolCall: { id, name, args, status } })
+  }
+
+  private emitTool(
+    id: string,
+    name: string,
+    args: Record<string, unknown>,
+    ok: boolean,
+    result: string
+  ): void {
     this.emit({
       type: 'tool',
-      toolCall: { id: randomUUID(), name, args, ok, result }
+      toolCall: { id, name, args, ok, result, status: 'done' }
     })
   }
 

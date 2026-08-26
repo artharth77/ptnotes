@@ -490,9 +490,12 @@ export class ModuleRunManager {
   }
 
   private handleUpdate(run: ModuleRun, evt: ModuleNotifyEvent): void {
-    void this.service.writeModuleRun(run.project, run.runId, run).catch(() => {
-      // persistence is best-effort; broadcast still proceeds
-    })
+    if (evt.type !== 'tool') {
+      // Tool lifecycle events carry no run changes; skip the redundant disk write.
+      void this.service.writeModuleRun(run.project, run.runId, run).catch(() => {
+        // persistence is best-effort; broadcast still proceeds
+      })
+    }
     this.emit({
       runId: run.runId,
       project: run.project,
@@ -505,7 +508,8 @@ export class ModuleRunManager {
       ...(evt.error ? { error: evt.error } : {}),
       ...(evt.summary ? { summary: evt.summary } : {}),
       ...(evt.result ? { result: evt.result } : {}),
-      ...(evt.chat ? { chat: evt.chat } : {})
+      ...(evt.chat ? { chat: evt.chat } : {}),
+      ...(evt.toolCall ? { toolCall: evt.toolCall } : {})
     })
     if (ModuleRunManager.terminalStatuses.has(run.status)) {
       this.fireWaiters(run.runId)

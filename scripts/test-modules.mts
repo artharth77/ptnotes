@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs'
 import assert from 'node:assert/strict'
 import { join } from 'node:path'
 import type { OpenAI } from 'openai'
-import type { AIProviderConfig } from '../src/shared/types'
+import type { AIProviderConfig, ModuleEvent } from '../src/shared/types'
 import type { AIConfigStore } from '../src/main/ai/config'
 
 const ROOT = '/tmp/ptnotes-modules-test-root'
@@ -945,6 +945,7 @@ function makeScriptedClient(
 }
 
 const eventTypes: string[] = []
+const moduleEvents: ModuleEvent[] = []
 const registry = new ModuleRegistry()
 registry.register(createPptxModule())
 const manager = new ModuleRunManager(
@@ -953,6 +954,7 @@ const manager = new ModuleRunManager(
   registry,
   (evt) => {
     eventTypes.push(evt.type)
+    moduleEvents.push(evt)
   },
   fakeClientFactory
 )
@@ -993,6 +995,24 @@ assert.ok(outStat.size > 100, 'output pptx exists on disk')
 assert.ok(eventTypes.includes('step'), 'step events were broadcast')
 assert.ok(eventTypes.includes('output'), 'output event was broadcast')
 assert.ok(eventTypes.includes('done'), 'done event was broadcast')
+
+// ---- subagent tool-call lifecycle: receiving → queued → running → done per call ----
+const toolEvents = moduleEvents.filter((e) => e.type === 'tool' && e.toolCall)
+const callIds = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8']
+assert.equal(toolEvents.length, callIds.length * 4, '4 lifecycle events per subagent tool call')
+for (const id of callIds) {
+  const statuses = toolEvents.filter((e) => e.toolCall!.id === id).map((e) => e.toolCall!.status)
+  assert.deepEqual(statuses, ['receiving', 'queued', 'running', 'done'], `tool lifecycle for ${id}`)
+}
+const doneToolEvents = toolEvents.filter((e) => e.toolCall!.status === 'done')
+assert.ok(
+  doneToolEvents.every((e) => e.toolCall!.ok === true),
+  'all scripted calls succeeded'
+)
+assert.ok(
+  doneToolEvents.every((e) => typeof e.toolCall!.result === 'string'),
+  'done events carry the raw result'
+)
 
 const stored = await service.listStoredModuleRuns(PROJECT)
 const storedRun = stored.find((s) => s.runId === runId)
@@ -1213,6 +1233,42 @@ assert.ok(pRun, 'premature run exists')
 assert.equal(pRun!.status, 'failed', 'run without an output file ends failed, not done')
 assert.ok(!pRun!.outputFile, 'no output file produced')
 assert.match(pRun!.error ?? '', /output file/, 'failure mentions the missing output file')
+
+// ---- unplanned first tool call: rejected + settled with ok:false (no 'running') ----
+const unplannedToolEvents: ModuleEvent[] = []
+const unplannedScript: { content?: string; tool_calls?: FakeToolCall[] }[] = [
+  { tool_calls: [step('u0', 'update_step', { index: 1, status: 'running' })] },
+  {
+    tool_calls: [step('p9', 'set_plan', { steps: ['Research', 'Generate'] })]
+  },
+  { content: 'Half done.' },
+  { content: 'Still no file.' }
+]
+const unplannedManager = new ModuleRunManager(
+  service,
+  configStore,
+  registry,
+  (evt) => {
+    if (evt.type === 'tool' && evt.toolCall?.id === 'u0') unplannedToolEvents.push(evt)
+  },
+  makeScriptedClient(unplannedScript)
+)
+const uStart = await unplannedManager.start(PROJECT, 'pptx', 'Unplanned deck', 'Do the work.')
+assert.equal(uStart.ok, true, 'unplanned run accepted')
+const uRunId = uStart.ok ? uStart.runId : ''
+await waitFor(async () => {
+  const runs = await unplannedManager.list(PROJECT)
+  return runs.some((r) => r.runId === uRunId && (r.status === 'done' || r.status === 'failed'))
+})
+const uStatuses = unplannedToolEvents.map((e) => e.toolCall!.status)
+assert.deepEqual(
+  uStatuses,
+  ['receiving', 'queued', 'done'],
+  'rejected call skips the running phase'
+)
+const uDone = unplannedToolEvents[unplannedToolEvents.length - 1]!.toolCall!
+assert.equal(uDone.ok, false, 'rejected call settles with ok:false')
+assert.match(uDone.result ?? '', /set_plan/, 'rejection result explains the required first call')
 
 // ---- module result channel: submit_result stores the payload + 'result' event ----
 const resultEvents: string[] = []

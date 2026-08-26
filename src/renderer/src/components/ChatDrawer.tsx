@@ -38,6 +38,7 @@ import type {
   Todo
 } from '@shared/types'
 import { formatTokens, sumUsage } from '@shared/usage'
+import { TOOL_STATE_LABELS, toolDisplayState } from './moduleStatus'
 
 const NO_SESSIONS: ChatSessionMeta[] = []
 const NO_MODULE_RUNS: ModuleRun[] = []
@@ -670,6 +671,12 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     const project = chatStreamProject ?? activeProject
     if (!project) return
     await window.ptnotes.ai.stop(project)
+    useAppStore.getState().updateLastAssistantMessage(project, (m) => ({
+      ...m,
+      toolCalls: (m.toolCalls ?? []).map((t) =>
+        t.ok === undefined ? { ...t, status: undefined } : t
+      )
+    }))
     setChatBusy(false)
     setChatStreamProject(null)
     setChatWaitRuns([])
@@ -1079,62 +1086,77 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                 })}
             {m.role === 'assistant' && (m.toolCalls?.length ?? 0) > 0 && (
               <div className="chat-tools">
-                {(m.toolCalls ?? []).map((tc) => (
-                  <div key={tc.id} className={`chat-tool ${tc.ok ? 'ok' : 'fail'}`}>
-                    <div className="chat-tool-header">
-                      <button
-                        className="chat-tool-toggle-btn"
-                        onClick={() =>
-                          setExpandedTools((prev) => ({ ...prev, [tc.id]: !prev[tc.id] }))
-                        }
-                      >
-                        <span className="chat-tool-name">
-                          {tc.ok ? '🛠' : '⚠️'} {tc.name}
-                        </span>
-                        <span className="chat-tool-toggle">{expandedTools[tc.id] ? '▲' : '▼'}</span>
-                      </button>
-                      {(() => {
-                        const noteId = noteIdFromToolCall(tc.name, tc.result)
-                        return noteId ? (
-                          <button
-                            className="chat-tool-note"
-                            title={`Open note: ${noteId}`}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              void openNote(noteId)
-                            }}
-                          >
-                            <MdiIcon path={NOTE_LINK_ICON} size={16} /> {noteId}
-                          </button>
-                        ) : null
-                      })()}
+                {(m.toolCalls ?? []).map((tc) => {
+                  const st = toolDisplayState(tc)
+                  const label = st === 'interrupted' ? 'interrupted' : TOOL_STATE_LABELS[st]
+                  return (
+                    <div key={tc.id} className={`chat-tool ${st}`}>
+                      <div className="chat-tool-header">
+                        <button
+                          className="chat-tool-toggle-btn"
+                          onClick={() =>
+                            setExpandedTools((prev) => ({ ...prev, [tc.id]: !prev[tc.id] }))
+                          }
+                        >
+                          <span className="chat-tool-name">
+                            {(st === 'receiving' || st === 'running') && (
+                              <span className="chat-spinner chat-tool-spin" />
+                            )}
+                            {st === 'queued' && '⏳ '}
+                            {st === 'ok' && '🛠 '}
+                            {(st === 'fail' || st === 'interrupted') && '⚠️ '}
+                            {tc.name}
+                            {label && <span className="chat-tool-state">{label}</span>}
+                          </span>
+                          <span className="chat-tool-toggle">
+                            {expandedTools[tc.id] ? '▲' : '▼'}
+                          </span>
+                        </button>
+                        {(() => {
+                          const noteId = noteIdFromToolCall(tc.name, tc.result)
+                          return noteId ? (
+                            <button
+                              className="chat-tool-note"
+                              title={`Open note: ${noteId}`}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                void openNote(noteId)
+                              }}
+                            >
+                              <MdiIcon path={NOTE_LINK_ICON} size={16} /> {noteId}
+                            </button>
+                          ) : null
+                        })()}
+                      </div>
+                      {expandedTools[tc.id] &&
+                        tc.result &&
+                        (tc.name === 'ask_user' ? (
+                          <AskToolSummary args={tc.args} result={tc.result} />
+                        ) : (
+                          <pre className="chat-tool-result">{tc.result}</pre>
+                        ))}
+                      {tc.name === 'start_module' &&
+                        (() => {
+                          let runId = ''
+                          try {
+                            runId =
+                              (JSON.parse(tc.result ?? '{}') as { runId?: string }).runId ?? ''
+                          } catch {
+                            /* unparseable start_module result */
+                          }
+                          const run = runId ? moduleRuns.find((r) => r.runId === runId) : undefined
+                          return run ? <ModuleCard run={run} compact defaultExpanded /> : null
+                        })()}
                     </div>
-                    {expandedTools[tc.id] &&
-                      tc.result &&
-                      (tc.name === 'ask_user' ? (
-                        <AskToolSummary args={tc.args} result={tc.result} />
-                      ) : (
-                        <pre className="chat-tool-result">{tc.result}</pre>
-                      ))}
-                    {tc.name === 'start_module' &&
-                      (() => {
-                        let runId = ''
-                        try {
-                          runId = (JSON.parse(tc.result ?? '{}') as { runId?: string }).runId ?? ''
-                        } catch {
-                          /* unparseable start_module result */
-                        }
-                        const run = runId ? moduleRuns.find((r) => r.runId === runId) : undefined
-                        return run ? <ModuleCard run={run} compact defaultExpanded /> : null
-                      })()}
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
             {chatBusy &&
               m.id === list[list.length - 1]?.id &&
               m.role === 'assistant' &&
-              !m.content && <span className="chat-typing">thinking…</span>}
+              !m.content &&
+              (m.toolCalls?.length ?? 0) === 0 && <span className="chat-typing">thinking…</span>}
           </div>
         ))}
         {chatBusy && (

@@ -37,6 +37,17 @@ function previewFor(entry: AiTraceEntry): string {
   return entry.content ?? ''
 }
 
+/** True for tool responses whose JSON result carries `ok: false`. */
+function toolResultFailed(entry: AiTraceEntry): boolean {
+  if (entry.role !== 'tool' || !entry.content) return false
+  try {
+    const parsed = JSON.parse(entry.content) as { ok?: unknown }
+    return parsed.ok === false
+  } catch {
+    return false
+  }
+}
+
 function formatMs(ms?: number): string {
   return ms == null ? '—' : `${ms}ms`
 }
@@ -266,7 +277,9 @@ function TraceList({
           onClick={() => onSelect(e.seq)}
         >
           <span className={`trace-list-tag trace-role-${e.role}`}>{roleLabel(e.role)}</span>
-          <span className="trace-list-preview">{previewFor(e) || '—'}</span>
+          <span className={`trace-list-preview${toolResultFailed(e) ? ' error' : ''}`}>
+            {previewFor(e) || '—'}
+          </span>
           <span className="trace-list-time">{new Date(e.ts).toLocaleTimeString()}</span>
         </button>
       ))}

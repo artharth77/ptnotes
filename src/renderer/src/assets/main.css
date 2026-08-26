@@ -2602,6 +2602,27 @@ body {
   color: var(--danger);
 }
 
+.chat-tool.receiving .chat-tool-name,
+.chat-tool.queued .chat-tool-name,
+.chat-tool.running .chat-tool-name,
+.chat-tool.interrupted .chat-tool-name {
+  color: var(--text-faint);
+}
+
+.chat-tool-spin {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-width: 2px;
+  margin-right: 6px;
+  vertical-align: -1px;
+}
+
+.chat-tool-state {
+  margin-left: 6px;
+  font-weight: 400;
+}
+
 .chat-tool-result {
   margin: 0;
   padding: 6px 10px;
@@ -3372,6 +3393,32 @@ body {
   overflow-wrap: anywhere;
 }
 
+.module-card-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.module-card-tool {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+.module-card-tool-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+.module-card-tool-state {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+
 .module-card-meta {
   display: flex;
   align-items: center;
@@ -3763,6 +3810,10 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.trace-list-item .trace-list-preview.error {
+  color: var(--danger);
 }
 
 .trace-list-time {

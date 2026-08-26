@@ -299,6 +299,18 @@ ChatPanel (renderer) ──send──▶ Main process
 - While the chat is inside `wait_modules`, a `'waiting'` stream event (with `runIds`) is emitted
   and the drawer shows "Waiting for N module run(s)…".
 
+### Subagent tool-call lifecycle
+
+- The module runner mirrors the main chat's tool lifecycle: `'tool'` **module** events carry a
+  `ToolCallInfo` with transient `status` — `receiving` (once per call while its id+name stream
+  in), `queued` (all calls of a turn, after the stream completes), `running`, then a final
+  `done` (with `ok` + raw `result`). Calls rejected by the mandatory-first-`set_plan` guard
+  settle straight from `queued` to `done` with `ok:false`.
+- These events are transient (never persisted on `ModuleRun`; `handleUpdate` skips the run-file
+  write for them). The renderer keeps them in the store's per-runId `moduleToolCalls` slice:
+  rows are dropped when a call settles and the whole entry is cleared when the run reaches a
+  terminal status. `ModuleCard` shows the in-flight calls as compact live rows under the title.
+
 ### Raw AI trace
 
 - Every app↔provider exchange is persisted as a readable **JSONL** trace file (one record
@@ -404,6 +416,13 @@ ChatPanel (renderer) ──send──▶ Main process
 - User chat bubbles longer than `USER_MSG_COLLAPSE_LIMIT` (400 chars) show only the head with a
   "… Show more" button; clicking toggles the full message ("Show less").
 - In an assistant message, tool-call bubbles are rendered **above** the response content.
+- **Tool-call lifecycle**: `tool` stream events carry a transient `status` — `receiving` (emitted
+  by `ChatSession` as soon as a streamed tool call's id + name arrive), then `queued` for every
+  call in the turn, `running` while each executes (tools run sequentially), and `done` with
+  `ok`/`result` on completion. The renderer upserts tool-call bubbles by call id, so a bubble
+  appears as "receiving…"/"queued"/"running…" and settles into the final ok/fail state; Stop or
+  a stream error clears the transient status of unfinished calls. `status` is never persisted —
+  historical messages only carry completed calls.
 - `create_note` / `update_note` tool bubbles show a clickable `📄 <note>` pill in the header (CSS
   truncated, max-width 180px) that opens the note, whether the bubble is collapsed or expanded.
   Parsed from the tool result JSON (`{ ok, note }`) via `noteIdFromToolCall`.
