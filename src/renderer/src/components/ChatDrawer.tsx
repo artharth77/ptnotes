@@ -2,10 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   mdiChevronDown,
+  mdiContentCopy,
   mdiFileOutline,
   mdiHistory,
+  mdiKeyboardReturn,
   mdiMenuUp,
   mdiPencil,
+  mdiSelect,
+  mdiSelectAll,
   mdiTimelineClockOutline,
   mdiTrashCanOutline,
   mdiTrayArrowDown,
@@ -218,6 +222,15 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   const [slashDismissed, setSlashDismissed] = useState(false)
   const [nav, setNav] = useState<{ entries: string[]; index: number } | null>(null)
   const [showJumpDown, setShowJumpDown] = useState(false)
+  const [bubbleMenu, setBubbleMenu] = useState<{
+    x: number
+    y: number
+    content: string
+    role: string
+    selectionText: string | null
+    bubbleEl: HTMLElement | null
+  } | null>(null)
+  const bubbleMenuRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const prevBusy = useRef(false)
@@ -231,6 +244,268 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   const [profileMenuPos, setProfileMenuPos] = useState<{ top: number; right: number } | null>(null)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const profileNameBtnRef = useRef<HTMLButtonElement>(null)
+
+  const chatBubbleOriginRef = useRef<Element | null>(null)
+  const chatBubbleLockRef = useRef<Element[]>([])
+  const chatBubbleBodyPrevRef = useRef<{ userSelect: string; webkitUserSelect: string } | null>(
+    null
+  )
+  useEffect(() => {
+    const scrollEl = scrollRef.current
+    const lockOtherBubbles = (origin: Element | null): void => {
+      if (!origin) return
+      const drawerEl = document.querySelector('.chat-drawer') as HTMLElement | null
+      const bodyEl = document.body as unknown as HTMLElement
+      chatBubbleLockRef.current = []
+      chatBubbleBodyPrevRef.current = {
+        userSelect: bodyEl.style.userSelect,
+        webkitUserSelect: (bodyEl.style as unknown as Record<string, string>).webkitUserSelect ?? ''
+      }
+      bodyEl.style.userSelect = 'none'
+      ;(bodyEl.style as unknown as Record<string, string>).webkitUserSelect = 'none'
+      if (drawerEl) {
+        drawerEl.dataset.prevUserSelect = drawerEl.style.userSelect
+        drawerEl.dataset.prevWebkitUserSelect = (
+          drawerEl.style as unknown as Record<string, string>
+        ).webkitUserSelect as string
+        drawerEl.style.userSelect = 'none'
+        ;(drawerEl.style as unknown as Record<string, string>).webkitUserSelect = 'none'
+        chatBubbleLockRef.current.push(drawerEl)
+      }
+      if (!scrollEl) return
+      const all = Array.from(scrollEl.querySelectorAll('.chat-msg')) as Element[]
+      for (const el of all) {
+        if (el !== origin) {
+          const he = el as HTMLElement
+          he.dataset.prevUserSelect = he.style.userSelect
+          he.dataset.prevWebkitUserSelect = (he.style as unknown as Record<string, string>)[
+            'webkitUserSelect'
+          ] as string
+          he.style.userSelect = 'none'
+          ;(he.style as unknown as Record<string, string>).webkitUserSelect = 'none'
+          chatBubbleLockRef.current.push(el)
+        }
+      }
+      const heOrigin = origin as HTMLElement
+      heOrigin.style.userSelect = 'text'
+      ;(heOrigin.style as unknown as Record<string, string>).webkitUserSelect = 'text'
+      chatBubbleLockRef.current.push(heOrigin)
+    }
+    const unlockBubbles = (): void => {
+      const bodyEl = document.body as unknown as HTMLElement
+      if (chatBubbleBodyPrevRef.current) {
+        bodyEl.style.userSelect = chatBubbleBodyPrevRef.current.userSelect
+        ;(bodyEl.style as unknown as Record<string, string>).webkitUserSelect =
+          chatBubbleBodyPrevRef.current.webkitUserSelect
+        chatBubbleBodyPrevRef.current = null
+      } else {
+        bodyEl.style.userSelect = ''
+        ;(bodyEl.style as unknown as Record<string, string>).webkitUserSelect = ''
+      }
+      for (const el of chatBubbleLockRef.current) {
+        const he = el as HTMLElement
+        const prev = he.dataset.prevUserSelect
+        const prevWebkit = he.dataset.prevWebkitUserSelect
+        he.style.userSelect = prev ?? ''
+        ;(he.style as unknown as Record<string, string>).webkitUserSelect = prevWebkit ?? ''
+        delete he.dataset.prevUserSelect
+        delete he.dataset.prevWebkitUserSelect
+      }
+      chatBubbleLockRef.current = []
+    }
+    const onMouseDown = (e: MouseEvent): void => {
+      if (e.button !== 0) return
+      const target = e.target as Element | null
+      const bubble = target?.closest?.('.chat-msg') ?? null
+      chatBubbleOriginRef.current = bubble
+      if (bubble) lockOtherBubbles(bubble)
+    }
+    const onMouseUp = (): void => {
+      unlockBubbles()
+    }
+    const onSelectionChange = (): void => {
+      const sel = window.getSelection()
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return
+      const anchorNode = sel.anchorNode
+      const focusNode = sel.focusNode
+      if (!anchorNode || !focusNode) return
+      const anchorEl =
+        anchorNode instanceof Element ? anchorNode : (anchorNode.parentElement as Element | null)
+      const focusEl =
+        focusNode instanceof Element ? focusNode : (focusNode.parentElement as Element | null)
+      const anchorBubble = anchorEl?.closest?.('.chat-msg')
+      const focusBubble = focusEl?.closest?.('.chat-msg')
+      const inChatDrawer =
+        anchorEl?.closest?.('.chat-drawer') != null || focusEl?.closest?.('.chat-drawer') != null
+      if (!inChatDrawer) return
+      if (anchorBubble && focusBubble && anchorBubble !== focusBubble) {
+        const origin = chatBubbleOriginRef.current ?? anchorBubble
+        if (!origin) return
+        const range = document.createRange()
+        range.selectNodeContents(origin)
+        sel.removeAllRanges()
+        sel.addRange(range)
+        return
+      }
+      if (!anchorBubble && focusBubble) {
+        const range = document.createRange()
+        range.selectNodeContents(focusBubble)
+        sel.removeAllRanges()
+        sel.addRange(range)
+        return
+      }
+      if (anchorBubble && !focusBubble) {
+        const range = document.createRange()
+        range.selectNodeContents(anchorBubble)
+        sel.removeAllRanges()
+        sel.addRange(range)
+      }
+    }
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a' && !e.shiftKey && !e.altKey) {
+        const ae = document.activeElement as HTMLElement | null
+        if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable))
+          return
+        const sel = window.getSelection()
+        const node = sel?.anchorNode as Node | null
+        const el = (
+          node instanceof Element ? node : (node?.parentElement as Element | null)
+        ) as Element | null
+        const bubble = el?.closest?.('.chat-msg') ?? (ae?.closest?.('.chat-msg') as Element | null)
+        if (bubble) {
+          e.preventDefault()
+          const range = document.createRange()
+          range.selectNodeContents(bubble)
+          sel?.removeAllRanges()
+          sel?.addRange(range)
+          return
+        }
+        const inChatDrawer =
+          el?.closest?.('.chat-drawer') != null || ae?.closest?.('.chat-drawer') != null
+        if (inChatDrawer) {
+          e.preventDefault()
+          return
+        }
+        const inApp = ae === document.body || ae === document.documentElement || ae == null
+        if (inApp) e.preventDefault()
+      }
+    }
+    if (scrollEl) scrollEl.addEventListener('mousedown', onMouseDown)
+    window.addEventListener('mouseup', onMouseUp)
+    document.addEventListener('selectionchange', onSelectionChange)
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      if (scrollEl) scrollEl.removeEventListener('mousedown', onMouseDown)
+      window.removeEventListener('mouseup', onMouseUp)
+      document.removeEventListener('selectionchange', onSelectionChange)
+      window.removeEventListener('keydown', onKeyDown)
+      unlockBubbles()
+    }
+  }, [])
+
+  function onBubbleContextMenu(e: React.MouseEvent, content: string, role: string): void {
+    e.preventDefault()
+    e.stopPropagation()
+    const sel = window.getSelection()
+    let selectionText: string | null = null
+    if (sel && !sel.isCollapsed) {
+      const text = sel.toString()
+      if (text.trim()) {
+        const anchorNode = sel.anchorNode
+        const focusNode = sel.focusNode
+        const anchorEl =
+          anchorNode instanceof Element ? anchorNode : (anchorNode?.parentElement as Element | null)
+        const focusEl =
+          focusNode instanceof Element ? focusNode : (focusNode?.parentElement as Element | null)
+        const bubbleEl = (e.currentTarget as HTMLElement).closest('.chat-msg')
+        const anchorBubble = anchorEl?.closest?.('.chat-msg')
+        const focusBubble = focusEl?.closest?.('.chat-msg')
+        if (bubbleEl && anchorBubble === bubbleEl && focusBubble === bubbleEl) {
+          selectionText = text
+        } else if (text && bubbleEl && (anchorBubble === bubbleEl || focusBubble === bubbleEl)) {
+          selectionText = text
+        }
+      }
+    }
+    const x = Math.min(e.clientX, window.innerWidth - 240)
+    const y = Math.min(e.clientY, window.innerHeight - 160)
+    const bubbleEl = (e.currentTarget as HTMLElement).closest('.chat-msg') as HTMLElement | null
+    setBubbleMenu({ x, y, content, role, selectionText, bubbleEl })
+  }
+
+  function selectAllInBubble(): void {
+    const bubbleEl = bubbleMenu?.bubbleEl
+    if (!bubbleEl) return
+    const range = document.createRange()
+    range.selectNodeContents(bubbleEl)
+    const sel = window.getSelection()
+    sel?.removeAllRanges()
+    sel?.addRange(range)
+    setBubbleMenu(null)
+  }
+
+  async function copyToClipboard(text: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      ta.remove()
+    }
+    setBubbleMenu(null)
+  }
+
+  function pasteToPrompt(text: string): void {
+    setInput(text)
+    setBubbleMenu(null)
+    requestAnimationFrame(() => {
+      const el = textareaRef.current
+      if (el) {
+        el.focus()
+        el.setSelectionRange(text.length, text.length)
+      }
+    })
+  }
+
+  useEffect(() => {
+    if (!bubbleMenu) return
+    const onClick = (): void => setBubbleMenu(null)
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setBubbleMenu(null)
+    }
+    window.addEventListener('click', onClick)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('click', onClick)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [bubbleMenu])
+
+  useEffect(() => {
+    if (!bubbleMenu) return
+    const el = bubbleMenuRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const margin = 8
+    let nx = bubbleMenu.x
+    let ny = bubbleMenu.y
+    if (rect.right > window.innerWidth - margin)
+      nx = Math.max(margin, window.innerWidth - rect.width - margin)
+    if (rect.bottom > window.innerHeight - margin)
+      ny = Math.max(margin, window.innerHeight - rect.height - margin)
+    if (rect.left < margin) nx = margin
+    if (rect.top < margin) ny = margin
+    if (nx !== bubbleMenu.x || ny !== bubbleMenu.y) {
+      requestAnimationFrame(() =>
+        setBubbleMenu((prev) => (prev ? { ...prev, x: nx, y: ny } : null))
+      )
+    }
+  }, [bubbleMenu])
 
   useEffect(() => {
     let cancelled = false
@@ -1065,7 +1340,11 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                 .map((part, i) => {
                   if (m.role === 'assistant' && !m.error) {
                     return (
-                      <div key={i} className="chat-msg-content">
+                      <div
+                        key={i}
+                        className="chat-msg-content"
+                        onContextMenu={(e) => onBubbleContextMenu(e, part.content, m.role)}
+                      >
                         <MarkdownContent
                           content={part.content}
                           enableImageZoom
@@ -1077,10 +1356,21 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                     )
                   }
                   if (m.role === 'user') {
-                    return <UserBubble key={i} content={part.content} />
+                    return (
+                      <div
+                        key={i}
+                        onContextMenu={(e) => onBubbleContextMenu(e, part.content, m.role)}
+                      >
+                        <UserBubble content={part.content} />
+                      </div>
+                    )
                   }
                   return (
-                    <div key={i} className={`chat-msg-content ${m.error ? 'error' : ''}`}>
+                    <div
+                      key={i}
+                      className={`chat-msg-content ${m.error ? 'error' : ''}`}
+                      onContextMenu={(e) => onBubbleContextMenu(e, part.content, m.role)}
+                    >
                       {part.content}
                     </div>
                   )
@@ -1352,6 +1642,59 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
           <span>Drop PDF, Excel or text files to add to project files</span>
         </div>
       )}
+      {bubbleMenu &&
+        createPortal(
+          <>
+            <div className="menu-overlay" onClick={() => setBubbleMenu(null)} />
+            <div
+              ref={bubbleMenuRef}
+              className="note-menu"
+              style={{ left: bubbleMenu.x, top: bubbleMenu.y, position: 'fixed' }}
+            >
+              <button
+                className="note-menu-item"
+                onClick={() => void copyToClipboard(bubbleMenu.content)}
+              >
+                <span className="note-menu-icon">
+                  <MdiIcon path={mdiContentCopy} size={16} />
+                </span>
+                Copy message
+              </button>
+              {bubbleMenu.selectionText && (
+                <button
+                  className="note-menu-item"
+                  onClick={() => void copyToClipboard(bubbleMenu.selectionText!)}
+                >
+                  <span className="note-menu-icon">
+                    <MdiIcon path={mdiSelect} size={16} />
+                  </span>
+                  Copy selection
+                </button>
+              )}
+              <button className="note-menu-item" onClick={() => selectAllInBubble()}>
+                <span className="note-menu-icon">
+                  <MdiIcon path={mdiSelectAll} size={16} />
+                </span>
+                Select all
+              </button>
+              {bubbleMenu.role === 'user' && (
+                <button
+                  className="note-menu-item"
+                  onClick={() => {
+                    void copyToClipboard(bubbleMenu.content)
+                    pasteToPrompt(bubbleMenu.content)
+                  }}
+                >
+                  <span className="note-menu-icon">
+                    <MdiIcon path={mdiKeyboardReturn} size={16} />
+                  </span>
+                  Copy &amp; paste to prompt
+                </button>
+              )}
+            </div>
+          </>,
+          document.body
+        )}
     </aside>
   )
 }
