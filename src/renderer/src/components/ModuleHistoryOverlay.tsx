@@ -4,10 +4,10 @@ import { useAppStore } from '../store/useAppStore'
 import { mdiTimelineClockOutline } from '@mdi/js'
 import { MdiIcon } from './MdiIcon'
 import { NOTE_LINK_ICON } from './contentIcons'
-import { STATUS_LABELS } from './moduleStatus'
+import { STATUS_LABELS, TOOL_STATE_LABELS, toolDisplayState } from './moduleStatus'
 import { splitContent } from './chatContent'
 import { AssistantBubble, ThinkBox, UserBubble } from './chatBubbles'
-import type { ModuleChatMessage, ModuleRun } from '@shared/types'
+import type { ModuleChatMessage, ModuleRun, ToolCallInfo } from '@shared/types'
 
 function noteIdFromToolCall(name: string, result?: string): string | null {
   if (name !== 'create_note' && name !== 'update_note') return null
@@ -35,6 +35,7 @@ function toolHeading(t: NonNullable<ModuleChatMessage['toolCalls']>[number]): st
 }
 
 const NO_RUNS: ModuleRun[] = []
+const NO_TOOLS: ToolCallInfo[] = []
 const HISTORY_WIDTH_DEFAULT = 400
 const HISTORY_ANIM_MS = 250
 
@@ -105,6 +106,8 @@ function ModuleHistoryPanel({
   const active = run
     ? run.status === 'queued' || run.status === 'planning' || run.status === 'running'
     : false
+  const liveTools = useAppStore((s) => s.moduleToolCalls[runId] ?? NO_TOOLS)
+  const inFlightTools = liveTools.filter((t) => t.ok === undefined)
 
   useEffect(() => {
     let cancelled = false
@@ -146,7 +149,7 @@ function ModuleHistoryPanel({
   useEffect(() => {
     const el = listRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [messages, runId])
+  }, [messages, runId, inFlightTools.length])
 
   const runChatMessages = messages.filter((m) => m.role !== 'system')
   const lastAssistantId = runChatMessages.reduceRight<string | undefined>(
@@ -298,6 +301,23 @@ function ModuleHistoryPanel({
                 )}
               </div>
             )
+          )}
+          {active && inFlightTools.length > 0 && (
+            <div className="module-history-tools">
+              {inFlightTools.map((tc) => {
+                const st = toolDisplayState(tc)
+                return (
+                  <div key={tc.id} className={`module-history-tool ${st}`}>
+                    {(st === 'receiving' || st === 'running') && (
+                      <span className="chat-spinner chat-tool-spin" />
+                    )}
+                    {st === 'queued' && '⏳ '}
+                    <span className="module-history-tool-name">{tc.name}</span>
+                    <span className="module-history-tool-state">{TOOL_STATE_LABELS[st] ?? st}</span>
+                  </div>
+                )
+              })}
+            </div>
           )}
           {active && (
             <div className="chat-status">

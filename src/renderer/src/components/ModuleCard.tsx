@@ -1,13 +1,11 @@
 import { useState } from 'react'
 import { mdiChatProcessingOutline, mdiRefresh } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
-import type { ModuleRun, ModuleStepState, ToolCallInfo } from '@shared/types'
+import type { ModuleRun, ModuleStepState } from '@shared/types'
 import { Modal } from './Modal'
 import { MdiIcon } from './MdiIcon'
 import { fileTypeIcon } from './contentIcons'
-import { STATUS_LABELS, TOOL_STATE_LABELS, toolDisplayState } from './moduleStatus'
-
-const NO_TOOLS: ToolCallInfo[] = []
+import { STATUS_LABELS } from './moduleStatus'
 
 function stepIcon(step: ModuleStepState): string {
   switch (step.status) {
@@ -45,9 +43,7 @@ export function ModuleCard({
 }): React.JSX.Element {
   const activeProject = useAppStore((s) => s.activeProject)
   const loadModules = useAppStore((s) => s.loadModules)
-  const liveTools = useAppStore((s) => s.moduleToolCalls[run.runId] ?? NO_TOOLS)
   const active = !['done', 'failed', 'cancelled'].includes(run.status)
-  const inFlightTools = liveTools.filter((t) => t.ok === undefined)
   const doneSteps = run.steps.filter((s) => s.status === 'done' || s.status === 'failed').length
   const [showSteps, setShowSteps] = useState(false)
   const [actionsOpen, setActionsOpen] = useState(defaultExpanded)
@@ -142,23 +138,6 @@ export function ModuleCard({
       <div className="module-card-title" title={run.title}>
         {run.title}
       </div>
-      {active && inFlightTools.length > 0 && (
-        <div className="module-card-tools">
-          {inFlightTools.map((tc) => {
-            const st = toolDisplayState(tc)
-            return (
-              <div key={tc.id} className={`module-card-tool ${st}`}>
-                {(st === 'receiving' || st === 'running') && (
-                  <span className="chat-spinner chat-tool-spin" />
-                )}
-                {st === 'queued' && '⏳ '}
-                <span className="module-card-tool-name">{tc.name}</span>
-                <span className="module-card-tool-state">{TOOL_STATE_LABELS[st] ?? st}</span>
-              </div>
-            )
-          })}
-        </div>
-      )}
       {run.error && <div className="module-card-error">⚠ {run.error}</div>}
       {run.steps.length > 0 && (
         <div className="module-steps">
