@@ -736,6 +736,7 @@ body {
   font-size: 13px;
   text-align: left;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .note-menu-item:hover,
@@ -2230,6 +2231,8 @@ body {
   color: var(--text-faint);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .chat-msg-content {
@@ -3418,7 +3421,6 @@ body {
   white-space: nowrap;
 }
 
-
 .module-card-meta {
   display: flex;
   align-items: center;
@@ -4108,6 +4110,33 @@ body {
   color: var(--text-dim);
   border-top: 1px dashed var(--border);
   background: var(--bg);
+}
+
+.module-history-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+
+.module-history-tool {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+.module-history-tool-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+.module-history-tool-state {
+  margin-left: auto;
+  white-space: nowrap;
 }
 
 .module-steps {

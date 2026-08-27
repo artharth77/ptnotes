@@ -34,7 +34,14 @@ export type DocxBlock =
     }
   | { type: 'bullets'; items?: string[] }
   | { type: 'numbered'; items?: string[] }
-  | { type: 'table'; title?: string; headers?: string[]; rows?: string[][] }
+  | {
+      type: 'table'
+      title?: string
+      headers?: string[]
+      rows?: string[][]
+      widths?: number[]
+      width?: number
+    }
   | { type: 'quote'; text?: string; author?: string }
   | { type: 'callout'; title?: string; text?: string }
   | { type: 'chart' | 'diagram' | 'infographic'; png?: string; caption?: string; width?: number }
@@ -389,7 +396,13 @@ export async function buildDocx(spec: unknown, outPath: string): Promise<DocxBui
           break
         }
         case 'table': {
-          const table = b as { title?: string; headers?: string[]; rows?: string[][] }
+          const table = b as {
+            title?: string
+            headers?: string[]
+            rows?: string[][]
+            widths?: unknown
+            width?: unknown
+          }
           const title =
             typeof table.title === 'string' && table.title.trim() ? table.title.trim() : ''
           if (title) {
@@ -414,6 +427,23 @@ export async function buildDocx(spec: unknown, outPath: string): Promise<DocxBui
             : []
           if (headers.length === 0 && rows.length === 0) break
           const cols = Math.max(headers.length, ...rows.map((r) => r.length))
+          const rawWidths = Array.isArray(table.widths)
+            ? (table.widths as unknown[])
+                .map((v) => Number(v))
+                .filter((n) => Number.isFinite(n) && n > 0)
+            : []
+          let colWidths: number[] = []
+          if (rawWidths.length === cols) {
+            const sum = rawWidths.reduce((a, b) => a + b, 0)
+            colWidths = sum > 0 ? rawWidths.map((w) => (w / sum) * 100) : []
+          }
+          if (colWidths.length !== cols) {
+            colWidths = Array(cols).fill(100 / cols)
+          }
+          const tableWidth =
+            typeof table.width === 'number' && Number.isFinite(table.width) && table.width > 0
+              ? Math.min(100, Math.max(10, table.width))
+              : 100
           const allRows: string[][] = []
           if (headers.length > 0) allRows.push(headers)
           for (const r of rows) {
@@ -433,9 +463,9 @@ export async function buildDocx(spec: unknown, outPath: string): Promise<DocxBui
               new TableRow({
                 tableHeader: i === 0,
                 children: r.map(
-                  (cell) =>
+                  (cell, colIdx) =>
                     new TableCell({
-                      width: { size: 100 / cols, type: WidthType.PERCENTAGE },
+                      width: { size: colWidths[colIdx] ?? 100 / cols, type: WidthType.PERCENTAGE },
                       shading: {
                         type: ShadingType.CLEAR,
                         fill: i === 0 ? t.primary : i % 2 === 0 ? 'FFFFFF' : 'F2F6FC'
@@ -461,7 +491,7 @@ export async function buildDocx(spec: unknown, outPath: string): Promise<DocxBui
           )
           children.push(
             new Table({
-              width: { size: 100, type: WidthType.PERCENTAGE },
+              width: { size: tableWidth, type: WidthType.PERCENTAGE },
               borders,
               rows: tableRows
             })

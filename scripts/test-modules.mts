@@ -1797,7 +1797,7 @@ await waitFor(async () => {
 
 const skillToolNames = new Set(offeredToolNames)
 assert.ok(skillToolNames.has('read_skill'), 'modules are offered read_skill')
-assert.ok(skillToolNames.has('read_skill_file'), 'modules are offered read_skill_file')
+assert.ok(!skillToolNames.has('read_skill_file'), 'read_skill_file merged into read_skill')
 assert.ok(!skillToolNames.has('create_skill'), 'modules are NOT offered create_skill (read-only)')
 assert.ok(!skillToolNames.has('delete_skill'), 'modules are NOT offered delete_skill (read-only)')
 assert.ok(!skillToolNames.has('ask_user'), 'modules are not offered ask_user')

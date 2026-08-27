@@ -15,6 +15,7 @@ import { isLocalEndpoint } from '../ai/chatSession'
 import { AiTraceRecorder } from '../ai/trace'
 import type { PTNotesService } from '../service/PTNotesService'
 import type { RegisteredModule } from './types'
+import { SKILLS_PREAMBLE } from '../ai/promptConstants'
 
 const MAX_ITERATIONS = 30
 const MAX_FINISH_HINTS = 2
@@ -119,15 +120,11 @@ export interface ModuleRunnerOptions {
 function buildSystemPrompt(
   module: RegisteredModule,
   activeProject: string,
+  currentDate: string,
   skillsIndex?: string,
   expectResult?: string
 ): string {
-  const skillsSection = skillsIndex
-    ? `\nSkills:
-You can load skills (named instruction documents) on demand when a task is relevant. Call the read_skill tool to load a skill's full content before applying it.
-${skillsIndex}
-`
-    : ''
+  const skillsSection = skillsIndex ? `\nSkills:\n${SKILLS_PREAMBLE}\n${skillsIndex}\n` : ''
   const resultSection = expectResult
     ? `
 RESULT REQUIREMENT:
@@ -138,7 +135,7 @@ The result is a free-form string (JSON, markdown or plain text). Do not finish w
     : ''
   return `You are the "${module.name}" module of PTNotes, a background subagent that produces a deliverable file for the user.
 
-You operate inside a project. The currently active project is "${activeProject}". Use it by default.
+You operate inside a project. All tools target the current project.
 
 Your task is described in the user message below. Work autonomously and produce the requested file.
 
@@ -155,7 +152,9 @@ MANDATORY WORKFLOW:
 3. Use whatever tools you need — reading project notes/files, web research, and the module's own creation tools — to complete each step.
 4. When every step is done, produce a short final summary. Mention the output file path. No extra commentary.
 ${resultSection}${skillsSection}
-${module.systemPrompt ? `MODULE GUIDANCE:\n${module.systemPrompt}` : ''}`
+${module.systemPrompt ? `MODULE GUIDANCE:\n${module.systemPrompt}` : ''}
+Current project: "${activeProject}".
+Current date: ${currentDate}.`
 }
 
 export class ModuleRunner {
@@ -258,9 +257,11 @@ export class ModuleRunner {
     this.messages = []
     this.messageTs = []
     const skillsIndex = await this.service.renderSkillsIndex(this.activeProject)
+    const currentDate = new Date().toISOString().slice(0, 10)
     const systemContent = buildSystemPrompt(
       this.module,
       this.activeProject,
+      currentDate,
       skillsIndex,
       this.run.expectResult
     )
