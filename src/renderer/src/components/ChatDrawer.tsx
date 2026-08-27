@@ -802,6 +802,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     }
     if (e.key === 'ArrowUp') {
       if (userHistory.length === 0) return
+      if (!nav && input !== '') return
       e.preventDefault()
       if (!nav) {
         const entries = [...userHistory]

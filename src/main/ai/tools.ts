@@ -277,10 +277,6 @@ export const tools: PTTool[] = [
         parameters: {
           type: 'object',
           properties: {
-            project: {
-              type: 'string',
-              description: 'Project name. Defaults to the current project.'
-            },
             title: { type: 'string', description: 'Title of the note' },
             content: { type: 'string', description: 'Markdown content of the note' }
           },
@@ -313,10 +309,6 @@ export const tools: PTTool[] = [
         parameters: {
           type: 'object',
           properties: {
-            project: {
-              type: 'string',
-              description: 'Project name. Defaults to the current project.'
-            },
             title: { type: 'string', description: 'Title of the note to edit' },
             edits: {
               type: 'array',
@@ -493,10 +485,6 @@ export const tools: PTTool[] = [
         parameters: {
           type: 'object',
           properties: {
-            project: {
-              type: 'string',
-              description: 'Project name. Defaults to the current project.'
-            },
             query: {
               type: 'string',
               description:
@@ -559,10 +547,6 @@ export const tools: PTTool[] = [
         parameters: {
           type: 'object',
           properties: {
-            project: {
-              type: 'string',
-              description: 'Project name. Defaults to the current project.'
-            },
             title: {
               type: 'string',
               description: 'Title of the note to read. Omit to read the currently active note.'
@@ -671,10 +655,6 @@ export const tools: PTTool[] = [
         parameters: {
           type: 'object',
           properties: {
-            project: {
-              type: 'string',
-              description: 'Project name. Defaults to the current project.'
-            },
             name: {
               type: 'string',
               description:
@@ -745,10 +725,6 @@ export const tools: PTTool[] = [
         parameters: {
           type: 'object',
           properties: {
-            project: {
-              type: 'string',
-              description: 'Project name. Defaults to the current project.'
-            },
             titles: {
               type: 'array',
               items: { type: 'string' },
@@ -801,10 +777,6 @@ export const tools: PTTool[] = [
         parameters: {
           type: 'object',
           properties: {
-            project: {
-              type: 'string',
-              description: 'Project name. Defaults to the current project.'
-            },
             tasks: {
               type: 'array',
               items: { type: 'string' },
@@ -831,10 +803,6 @@ export const tools: PTTool[] = [
         parameters: {
           type: 'object',
           properties: {
-            project: {
-              type: 'string',
-              description: 'Project name. Defaults to the current project.'
-            },
             text: { type: 'string', description: 'Exact text of the task to toggle' }
           },
           required: ['text']
@@ -860,10 +828,6 @@ export const tools: PTTool[] = [
         parameters: {
           type: 'object',
           properties: {
-            project: {
-              type: 'string',
-              description: 'Project name. Defaults to the current project.'
-            },
             text: { type: 'string', description: 'Exact text of the task to delete' }
           },
           required: ['text']
@@ -888,12 +852,7 @@ export const tools: PTTool[] = [
         description: 'List all todo tasks in a project with their completion status.',
         parameters: {
           type: 'object',
-          properties: {
-            project: {
-              type: 'string',
-              description: 'Project name. Defaults to the current project.'
-            }
-          }
+          properties: {}
         }
       }
     },
@@ -982,10 +941,6 @@ export const tools: PTTool[] = [
             content: {
               type: 'string',
               description: 'Full skill instructions (markdown)'
-            },
-            project: {
-              type: 'string',
-              description: 'Project name. Defaults to the current project.'
             }
           },
           required: ['name', 'description', 'content']
@@ -1030,7 +985,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'read_skill',
         description:
-          'Load the full content of a skill (a named instruction document) before applying it. Skills are listed by name and description in the system prompt; call this to get the complete instructions.',
+          "Load a skill (a named instruction document) or a file inside that skill folder. Omit `file` to load the skill's SKILL.md instructions; pass `file` (relative path like FORMAT.md or doc/DOC.md, e.g. `[FORMAT.md](./FORMAT.md)` in SKILL.md) to load a sibling file referenced from SKILL.md. Skills are listed in the system prompt. Sibling files accept PDF and text (markdown, JSON, YAML, etc.); path is relative to the skill folder only.",
         parameters: {
           type: 'object',
           properties: {
@@ -1041,9 +996,10 @@ export const tools: PTTool[] = [
                 'Where the skill lives: "global" (all projects), "project" (current project) or "builtin" (app-shipped, read-only). Defaults to "project".'
             },
             name: { type: 'string', description: 'Name of the skill to load' },
-            project: {
+            file: {
               type: 'string',
-              description: 'Project name. Defaults to the current project.'
+              description:
+                'Relative path of a file inside the skill folder, e.g. FORMAT.md or doc/DOC.md. Omit to load SKILL.md itself.'
             }
           },
           required: ['name']
@@ -1061,8 +1017,25 @@ export const tools: PTTool[] = [
       }
       const name = String(args.name ?? '').trim()
       if (!name) return JSON.stringify({ ok: false, error: 'No skill name provided' })
-      const skill = await ctx.service.readSkill(project, scope, name)
-      if (!skill) {
+      const rawFile = args.file as unknown
+      const file = rawFile != null ? String(rawFile).trim() : ''
+      if (!file) {
+        const skill = await ctx.service.readSkill(project, scope, name)
+        if (!skill) {
+          return JSON.stringify({
+            ok: false,
+            error: `Skill "${name}" (${scope}) not found. Available skills: ${
+              (await skillNames(ctx)).join(', ') || '(none)'
+            }`
+          })
+        }
+        if (!skill.enabled) {
+          return JSON.stringify({ ok: false, error: `Skill "${name}" (${scope}) is disabled.` })
+        }
+        return JSON.stringify({ ok: true, ...skill })
+      }
+      const loaded = await ctx.service.readSkill(project, scope, name)
+      if (!loaded) {
         return JSON.stringify({
           ok: false,
           error: `Skill "${name}" (${scope}) not found. Available skills: ${
@@ -1070,73 +1043,14 @@ export const tools: PTTool[] = [
           }`
         })
       }
-      if (!skill.enabled) {
+      if (!loaded.enabled) {
         return JSON.stringify({ ok: false, error: `Skill "${name}" (${scope}) is disabled.` })
       }
-      return JSON.stringify({ ok: true, ...skill })
-    }
-  },
-  {
-    definition: {
-      type: 'function',
-      function: {
-        name: 'read_skill_file',
-        description:
-          "Read the content of a file stored inside a skill's folder, referenced from its SKILL.md via a relative link such as `[FORMAT.md](./FORMAT.md)` or `[DOC.md](./doc/DOC.md)`. Call this after read_skill when the skill's instructions reference a sibling file you need. Accepts PDF and text files (markdown, JSON, YAML, etc.); the path is relative to the skill folder only.",
-        parameters: {
-          type: 'object',
-          properties: {
-            scope: {
-              type: 'string',
-              enum: ['global', 'project', 'builtin'],
-              description:
-                'Where the skill lives: "global" (all projects), "project" (current project) or "builtin" (app-shipped, read-only). Defaults to "project".'
-            },
-            skill: { type: 'string', description: 'Name of the skill the file belongs to' },
-            file: {
-              type: 'string',
-              description:
-                'Relative path of the file inside the skill folder, e.g. FORMAT.md or doc/DOC.md'
-            },
-            project: {
-              type: 'string',
-              description: 'Project name. Defaults to the current project.'
-            }
-          },
-          required: ['skill', 'file']
-        }
-      }
-    },
-    async execute(args, ctx) {
-      const project = projectOf(args, ctx)
-      const scope = scopeOf(args)
-      if (!scope) {
-        return JSON.stringify({
-          ok: false,
-          error: 'scope must be "global", "project" or "builtin"'
-        })
-      }
-      const skill = String(args.skill ?? '').trim()
-      if (!skill) return JSON.stringify({ ok: false, error: 'No skill name provided' })
-      const file = String(args.file ?? '').trim()
-      if (!file) return JSON.stringify({ ok: false, error: 'No file path provided' })
-      const loaded = await ctx.service.readSkill(project, scope, skill)
-      if (!loaded) {
-        return JSON.stringify({
-          ok: false,
-          error: `Skill "${skill}" (${scope}) not found. Available skills: ${
-            (await skillNames(ctx)).join(', ') || '(none)'
-          }`
-        })
-      }
-      if (!loaded.enabled) {
-        return JSON.stringify({ ok: false, error: `Skill "${skill}" (${scope}) is disabled.` })
-      }
-      const found = await ctx.service.readSkillFile(project, scope, skill, file)
+      const found = await ctx.service.readSkillFile(project, scope, name, file)
       if (!found) {
         return JSON.stringify({
           ok: false,
-          error: `File "${file}" not found inside skill "${skill}" (${scope}). Relative paths only.`
+          error: `File "${file}" not found inside skill "${name}" (${scope}). Relative paths only.`
         })
       }
       try {
@@ -1144,7 +1058,7 @@ export const tools: PTTool[] = [
         return JSON.stringify({
           ok: true,
           scope,
-          skill,
+          skill: name,
           file: found.path,
           pageCount,
           charCount,
@@ -1154,7 +1068,7 @@ export const tools: PTTool[] = [
       } catch (err) {
         return JSON.stringify({
           ok: false,
-          error: `Could not read "${file}" in skill "${skill}": ${
+          error: `Could not read "${file}" in skill "${name}": ${
             err instanceof Error ? err.message : String(err)
           }`
         })
@@ -1176,11 +1090,7 @@ export const tools: PTTool[] = [
               enum: ['global', 'project'],
               description: 'Where the skill lives: "global" or "project". Defaults to "project".'
             },
-            name: { type: 'string', description: 'Name of the skill to delete' },
-            project: {
-              type: 'string',
-              description: 'Project name. Defaults to the current project.'
-            }
+            name: { type: 'string', description: 'Name of the skill to delete' }
           },
           required: ['name']
         }
@@ -1350,10 +1260,6 @@ export const tools: PTTool[] = [
         parameters: {
           type: 'object',
           properties: {
-            project: {
-              type: 'string',
-              description: 'Project name. Defaults to the current project.'
-            },
             query: {
               type: 'string',
               description: 'Optional search query for schedule id or name.'
@@ -1392,10 +1298,6 @@ export const tools: PTTool[] = [
         parameters: {
           type: 'object',
           properties: {
-            project: {
-              type: 'string',
-              description: 'Project name. Defaults to the current project.'
-            },
             schedule: {
               type: 'string',
               description: 'Schedule id'
@@ -1435,10 +1337,6 @@ export const tools: PTTool[] = [
         parameters: {
           type: 'object',
           properties: {
-            project: {
-              type: 'string',
-              description: 'Project name. Defaults to the current project.'
-            },
             name: { type: 'string', description: 'Schedule name' }
           },
           required: ['name']
@@ -1468,10 +1366,6 @@ export const tools: PTTool[] = [
         parameters: {
           type: 'object',
           properties: {
-            project: {
-              type: 'string',
-              description: 'Project name. Defaults to the current project.'
-            },
             schedule: {
               type: 'string',
               description: 'Schedule id to rename'
@@ -1512,10 +1406,6 @@ export const tools: PTTool[] = [
         parameters: {
           type: 'object',
           properties: {
-            project: {
-              type: 'string',
-              description: 'Project name. Defaults to the current project.'
-            },
             schedule: { type: 'string', description: 'Schedule id' },
             parent: {
               type: 'string',
@@ -1633,10 +1523,6 @@ export const tools: PTTool[] = [
         parameters: {
           type: 'object',
           properties: {
-            project: {
-              type: 'string',
-              description: 'Project name. Defaults to the current project.'
-            },
             schedule: { type: 'string', description: 'Schedule id' },
             task: {
               type: 'string',
@@ -1774,10 +1660,6 @@ export const tools: PTTool[] = [
         parameters: {
           type: 'object',
           properties: {
-            project: {
-              type: 'string',
-              description: 'Project name. Defaults to the current project.'
-            },
             weekStart: { type: 'number', description: 'First working weekday (0=Sun..6=Sat)' },
             weekEnd: { type: 'number', description: 'Last working weekday (0=Sun..6=Sat)' },
             holidays: {

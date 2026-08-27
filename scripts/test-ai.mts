@@ -325,28 +325,28 @@ r = await call('read_skill', { scope: 'project', name: 'code-review' })
 assert.equal(r.ok, true)
 assert.match(r.content, /Read the diff/)
 
-// read_skill_file: sibling file referenced from SKILL.md
+// read_skill with file: sibling file referenced from SKILL.md (merged read_skill_file)
 const skillFolder = `${ROOT}/Research/.data/skills/code-review`
 await fs.mkdir(`${skillFolder}/doc`, { recursive: true })
 await fs.writeFile(`${skillFolder}/FORMAT.md`, '# Format\n\nUse tabs.\n', 'utf8')
 await fs.writeFile(`${skillFolder}/doc/DOC.md`, '# Doc\n\nDetails here.\n', 'utf8')
-r = await call('read_skill_file', { scope: 'project', skill: 'code-review', file: 'FORMAT.md' })
+r = await call('read_skill', { scope: 'project', name: 'code-review', file: 'FORMAT.md' })
 assert.equal(r.ok, true)
 assert.match(r.text, /Use tabs/)
-r = await call('read_skill_file', {
+r = await call('read_skill', {
   scope: 'project',
-  skill: 'code-review',
+  name: 'code-review',
   file: 'doc/DOC.md'
 })
 assert.equal(r.ok, true)
 assert.match(r.text, /Details here/)
 
-// read_skill_file: missing file and traversal are refused
-r = await call('read_skill_file', { scope: 'project', skill: 'code-review', file: 'nope.md' })
+// read_skill with file: missing file and traversal are refused
+r = await call('read_skill', { scope: 'project', name: 'code-review', file: 'nope.md' })
 assert.equal(r.ok, false, 'missing file refused')
-r = await call('read_skill_file', {
+r = await call('read_skill', {
   scope: 'project',
-  skill: 'code-review',
+  name: 'code-review',
   file: '../FORMAT.md'
 })
 assert.equal(r.ok, false, 'traversal refused')

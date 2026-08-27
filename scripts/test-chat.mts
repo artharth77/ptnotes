@@ -277,10 +277,13 @@ assert.ok(
   sentUsers.some((c) => c.includes('Remember this context.')),
   'history user message is included in model context'
 )
-assert.equal(
-  sentUsers[sentUsers.length - 1],
-  'and my new question',
+assert.ok(
+  sentUsers[sentUsers.length - 1]!.startsWith('and my new question'),
   'new message appended after history'
+)
+assert.ok(
+  sentUsers[sentUsers.length - 1]!.includes('[Context] Active project: "Test".'),
+  'active project context appended on first turn'
 )
 
 // ---- End-to-end: main chat starts 2 modules → wait_modules → continues with results ----

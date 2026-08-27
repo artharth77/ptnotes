@@ -12,6 +12,7 @@ import type {
 import { tools, type PTTool, type ToolContext } from './tools'
 import { createClient } from './client'
 import type { AiTraceRecorder } from './trace'
+import { SKILLS_PREAMBLE } from './promptConstants'
 
 type Role = 'system' | 'user' | 'assistant' | 'tool'
 
@@ -50,21 +51,15 @@ function toToolArgs(args: string | undefined): Record<string, unknown> {
 }
 
 export function buildSystemPrompt(
-  activeProject: string,
   currentDate: string,
   skillsIndex?: string,
   extraSection?: string | null
 ): string {
-  const skillsSection = skillsIndex
-    ? `\nSkills:
-You can load skills (named instruction documents) on demand when a task is relevant. Call the read_skill tool to load a skill's full content before applying it.
-${skillsIndex}
-`
-    : ''
+  const skillsSection = skillsIndex ? `\nSkills:\n${SKILLS_PREAMBLE}\n${skillsIndex}\n` : ''
   const extra = extraSection ? `\n${extraSection}` : ''
   return `You are PTNotes assistant, an automation and research assistant inside a markdown notes + todo desktop app.
 
-You operate inside a project. The currently active project is "${activeProject}". Use it by default; you may target other projects by passing the "project" argument to a tool.
+You operate inside a project. All tools target the current project (given in context). To work in another project, ask the user to switch the active project first.
 
 You can create and update notes (markdown), manage the todo list, and research the web.
 
@@ -77,7 +72,7 @@ Guidelines:
 - To edit part of an existing note, first read it with read_note and use the displayed line numbers verbatim (do not recount), then call update_note with an edits array of {startLine, endLine, content} hunks: a hunk replaces lines startLine..endLine with content — aim each hunk at the exact line(s) to change; endLine = startLine - 1 inserts before line startLine; startLine = totalLines + 1 appends at the end; an empty content deletes the lines. All hunks use the original line numbers and are applied in one atomic write. Never include the line-number prefixes in the content you write. Use create_note only for new notes or full rewrites.
 - If the user references a project file as \`file:<filename>\` (for example \`file:report.pdf\`, \`file:data.xlsx\`, \`file:notes.md\`, \`file:data.json\` or \`file:readme.txt\`), call the read_file tool to read that file before responding.
 - If the user asks you to use a skill by name (for example \`Use the skill "name": …\`, optionally with the scope in parentheses), call the read_skill tool to load that skill before applying it.
-- If a skill loaded via read_skill references a sibling file (for example \`[FORMAT.md](./FORMAT.md)\` or \`[DOC.md](./doc/DOC.md)\`), call the read_skill_file tool (passing scope, skill and the relative file path) to load that file when you need it.
+- If a skill loaded via read_skill references a sibling file (for example \`[FORMAT.md](./FORMAT.md)\` or \`[DOC.md](./doc/DOC.md)\`), call read_skill again with the same scope/name plus the relative \`file\` path to load that sibling file when you need it.
 - When the user asks you to find notes about a topic, call the list_notes tool with a query. To list all notes in a project, call it without a query.
 - When you need user input — a choice, a detail, or confirmation — before you can proceed, call ask_user with your questions. You may ask several questions in a single call; the user answers them all at once. Only ask when genuinely needed. For sensitive input (passwords, API keys, tokens), set secret: true on that question; the answer comes back as a \${SECRET:<id>} token, not the value. Pass the token unchanged in later browser tool calls (e.g. browser_type text) and the real value is substituted before execution. Never try to display, repeat, or store the secret value.
 - When a task can be split into parallel deliverables, delegate each part to a background module: call start_module for each (passing the \`expect\` argument to specify the result payload the module must submit back), then call wait_modules with all the returned runIds and continue with the results. Do NOT call wait_modules when you do not need the module output. When delegating, pass source material as inline references in the prompt — \`note:<notename>\`, \`file:<filename>\`, \`plan:<schedule id or name>\` — instead of reading notes/files/schedules yourself first; the module resolves them itself.
@@ -105,6 +100,7 @@ export class ChatSession {
   private activeScheduleId: string | null = null
   private lastActiveNoteName: string | null = null
   private lastActiveScheduleName: string | null = null
+  private lastActiveProject: string | null = null
   private trace: AiTraceRecorder | undefined
   /** In-memory secret answers (ask_user secret questions). Dropped with the session; never persisted. */
   private secrets = new Map<string, string>()
@@ -221,7 +217,7 @@ export class ChatSession {
     const date = new Date().toISOString().slice(0, 10)
     const skillsIndex = await this.ctx.service.renderSkillsIndex(this.ctx.activeProject)
     this.trace = trace
-    this.traceSystem(buildSystemPrompt(this.ctx.activeProject, date, skillsIndex))
+    this.traceSystem(buildSystemPrompt(date, skillsIndex))
     this.messages.push({ role: 'user', content: cleanPrompt })
 
     const client = createClient(this.config)
@@ -251,7 +247,7 @@ export class ChatSession {
     }
 
     const startTs = Date.now()
-    const instructions = buildSystemPrompt(this.ctx.activeProject, date, skillsIndex)
+    const instructions = buildSystemPrompt(date, skillsIndex)
     // The raw PDF base64 is never traced — only the resolved file id / filename.
     this.traceUser(cleanPrompt, { filename, file_id: filePart.file_id })
 
@@ -357,6 +353,9 @@ export class ChatSession {
 
   clear(): void {
     this.messages.length = 0
+    this.lastActiveProject = null
+    this.lastActiveNoteName = null
+    this.lastActiveScheduleName = null
   }
 
   /**
@@ -406,7 +405,7 @@ export class ChatSession {
   private async ensureSystemPrompt(date: string): Promise<string> {
     const skillsIndex = await this.ctx.service.renderSkillsIndex(this.ctx.activeProject)
     const extraSection = this.promptSectionProvider ? await this.promptSectionProvider() : null
-    const content = buildSystemPrompt(this.ctx.activeProject, date, skillsIndex, extraSection)
+    const content = buildSystemPrompt(date, skillsIndex, extraSection)
     const idx = this.messages.findIndex((m) => m.role === 'system')
     if (idx === -1) {
       this.messages.unshift({ role: 'system', content })
@@ -416,7 +415,7 @@ export class ChatSession {
     return content
   }
 
-  /** Build a context suffix for the user message with the active note/schedule only when it changed since the last send. */
+  /** Build a context suffix for the user message with the active project/note/schedule only when it changed since the last send. */
   private async buildActiveContextSuffix(): Promise<string> {
     const notes = this.activeNoteId ? await this.ctx.service.listNotes(this.ctx.activeProject) : []
     const activeNoteName =
@@ -428,6 +427,9 @@ export class ChatSession {
       (this.activeScheduleId && schedules.find((s) => s.id === this.activeScheduleId)?.name) ?? null
 
     const parts: string[] = []
+    if (this.ctx.activeProject !== this.lastActiveProject) {
+      parts.push(`[Context] Active project: "${this.ctx.activeProject}".`)
+    }
     if (activeNoteName && activeNoteName !== this.lastActiveNoteName) {
       parts.push(`[Context] Active note: "${activeNoteName}".`)
     }
@@ -435,6 +437,7 @@ export class ChatSession {
       parts.push(`[Context] Active schedule: "${activeScheduleName}".`)
     }
 
+    this.lastActiveProject = this.ctx.activeProject
     this.lastActiveNoteName = activeNoteName
     this.lastActiveScheduleName = activeScheduleName
 
