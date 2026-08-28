@@ -57,20 +57,22 @@ export function buildSystemPrompt(
 ): string {
   const skillsSection = skillsIndex ? `\nSkills:\n${SKILLS_PREAMBLE}\n${skillsIndex}\n` : ''
   const extra = extraSection ? `\n${extraSection}` : ''
-  return `You are PTNotes assistant, an automation and research assistant inside a markdown notes + todo desktop app.
+  return `You are PTNotes assistant, an automation and research assistant inside a markdown notes + kanban desktop app.
 
 You operate inside a project. All tools target the current project (given in context). To work in another project, ask the user to switch the active project first.
 
-You can create and update notes (markdown), manage the todo list, and research the web.
+You can create and update notes (markdown), manage the kanban board, and research the web.
 
 Guidelines:
-- When the user asks to create a note or add todos, do it with the tools and confirm concisely.
+- When the user asks to create a note or add kanban cards, do it with the tools and confirm concisely.
+- To change an existing kanban card, always use update_kanban_card (matched by its current title) — never create a duplicate card. The card details/body go in the description parameter; attributes are only for structured key/value metadata.
 - When the user asks for up-to-date or factual information, use web_search (and web_fetch for detail) instead of relying only on your own knowledge.
 - After researching, if the user wants it saved, write a well-structured markdown note via create_note (new note or full rewrite) or update_note (targeted line edits to an existing note).
 - If the user references a note as \`note:<notename>\` (for example \`note:meeting-notes\`), call the read_note tool to read that specific note before responding.
 - read_note returns line-numbered content (each line prefixed with its 1-based line number and ": "). For long notes, read only the part you need by passing startLine/endLine (1-based, inclusive); the response includes totalLines so you can read more if needed.
 - To edit part of an existing note, first read it with read_note and use the displayed line numbers verbatim (do not recount), then call update_note with an edits array of {startLine, endLine, content} hunks: a hunk replaces lines startLine..endLine with content — aim each hunk at the exact line(s) to change; endLine = startLine - 1 inserts before line startLine; startLine = totalLines + 1 appends at the end; an empty content deletes the lines. All hunks use the original line numbers and are applied in one atomic write. Never include the line-number prefixes in the content you write. Use create_note only for new notes or full rewrites.
 - If the user references a project file as \`file:<filename>\` (for example \`file:report.pdf\`, \`file:data.xlsx\`, \`file:notes.md\`, \`file:data.json\` or \`file:readme.txt\`), call the read_file tool to read that file before responding.
+- If the user references a kanban card as \`kanban:<card id>\`, call list_kanban_cards with that id to resolve the card (title, column, current fields) before responding or updating it — kanban tools match cards by title, not id.
 - If the user asks you to use a skill by name (for example \`Use the skill "name": …\`, optionally with the scope in parentheses), call the read_skill tool to load that skill before applying it.
 - If a skill loaded via read_skill references a sibling file (for example \`[FORMAT.md](./FORMAT.md)\` or \`[DOC.md](./doc/DOC.md)\`), call read_skill again with the same scope/name plus the relative \`file\` path to load that sibling file when you need it.
 - When the user asks you to find notes about a topic, call the list_notes tool with a query. To list all notes in a project, call it without a query.
@@ -78,7 +80,7 @@ Guidelines:
 - When a task can be split into parallel deliverables, delegate each part to a background module: call start_module for each (passing the \`expect\` argument to specify the result payload the module must submit back), then call wait_modules with all the returned runIds and continue with the results. Do NOT call wait_modules when you do not need the module output. When delegating, pass source material as inline references in the prompt — \`note:<notename>\`, \`file:<filename>\`, \`plan:<schedule id or name>\` — instead of reading notes/files/schedules yourself first; the module resolves them itself.
 - Quote the snippet returned by list_notes exactly as given; never paraphrase, reword, or summarize it.
 - Whenever you mention an existing note by name in your reply, always link to it: [note name](note:note name). The link opens the note, so never return a bare note name without a link.
-- Whenever you mention an existing todo from the project's todo list by its text in your reply, always link to it: [todo text](todo:todo text). Do NOT link tasks that belong to a schedule/plan — plan tasks have no link, so just mention their text plainly.
+- Whenever you mention an existing kanban card from the project's board by its title in your reply, always link to it: [card title](kanban:card title). Do NOT link tasks that belong to a schedule/plan — plan tasks have no link, so just mention their text plainly.
 - Whenever you mention an existing skill by name in your reply, always link to it: [skill name](skill:skill name). The link opens the skill's editor, so never return a bare skill name without a link.
 - Whenever you mention an existing schedule/plan by name in your reply, always link to it: [plan name](plan:plan name) or [plan name](schedule:plan name). The link opens the schedule, so never return a bare plan name without a link.
 - When referencing an image file by its full path (e.g. a screenshot or diagram output), use a markdown image tag: ![name](full/path/to/image.png). Replace any space characters (\` \`) in the file path with \`%20\`. This renders the image inline in the chat. 
@@ -98,8 +100,10 @@ export class ChatSession {
   private readonly promptSectionProvider?: PromptSectionProvider
   private activeNoteId: string | null = null
   private activeScheduleId: string | null = null
+  private activeKanbanCardId: string | null = null
   private lastActiveNoteName: string | null = null
   private lastActiveScheduleName: string | null = null
+  private lastActiveCardName: string | null = null
   private lastActiveProject: string | null = null
   private trace: AiTraceRecorder | undefined
   /** In-memory secret answers (ask_user secret questions). Dropped with the session; never persisted. */
@@ -130,12 +134,14 @@ export class ChatSession {
     history?: ChatMessage[],
     activeNoteId?: string | null,
     activeScheduleId?: string | null,
-    trace?: AiTraceRecorder
+    trace?: AiTraceRecorder,
+    activeKanbanCardId?: string | null
   ): Promise<void> {
     this.stopped = false
     this.abortController = undefined
     this.activeNoteId = activeNoteId ?? null
     this.activeScheduleId = activeScheduleId ?? null
+    this.activeKanbanCardId = activeKanbanCardId ?? null
     this.config = await this.getConfig()
     if (!this.config.apiKey && !isLocalEndpoint(this.config.baseUrl)) {
       this.emit({
@@ -356,6 +362,7 @@ export class ChatSession {
     this.lastActiveProject = null
     this.lastActiveNoteName = null
     this.lastActiveScheduleName = null
+    this.lastActiveCardName = null
   }
 
   /**
@@ -415,7 +422,7 @@ export class ChatSession {
     return content
   }
 
-  /** Build a context suffix for the user message with the active project/note/schedule only when it changed since the last send. */
+  /** Build a context suffix for the user message with the active project/note/schedule/kanban card only when it changed since the last send. */
   private async buildActiveContextSuffix(): Promise<string> {
     const notes = this.activeNoteId ? await this.ctx.service.listNotes(this.ctx.activeProject) : []
     const activeNoteName =
@@ -425,6 +432,11 @@ export class ChatSession {
       : []
     const activeScheduleName =
       (this.activeScheduleId && schedules.find((s) => s.id === this.activeScheduleId)?.name) ?? null
+    let activeCardName: string | null = null
+    if (this.activeKanbanCardId) {
+      const board = await this.ctx.service.loadKanban(this.ctx.activeProject)
+      activeCardName = board.cards.find((c) => c.id === this.activeKanbanCardId)?.title ?? null
+    }
 
     const parts: string[] = []
     if (this.ctx.activeProject !== this.lastActiveProject) {
@@ -436,10 +448,14 @@ export class ChatSession {
     if (activeScheduleName && activeScheduleName !== this.lastActiveScheduleName) {
       parts.push(`[Context] Active schedule: "${activeScheduleName}".`)
     }
+    if (activeCardName && activeCardName !== this.lastActiveCardName) {
+      parts.push(`[Context] Active kanban card: "${activeCardName}".`)
+    }
 
     this.lastActiveProject = this.ctx.activeProject
     this.lastActiveNoteName = activeNoteName
     this.lastActiveScheduleName = activeScheduleName
+    this.lastActiveCardName = activeCardName
 
     return parts.length > 0 ? ` ${parts.join(' ')}` : ''
   }
@@ -690,9 +706,13 @@ export class ChatSession {
       return result
     }
 
-    // Secrets may only leave memory into browser tools; logs/traces keep the tokens.
+    // Secrets may only leave memory into browser tools and kanban card attributes; logs/traces keep the tokens.
     let execArgs = args
-    if (call.function.name.startsWith('browser_')) {
+    if (
+      call.function.name.startsWith('browser_') ||
+      call.function.name === 'create_kanban_card' ||
+      call.function.name === 'update_kanban_card'
+    ) {
       const { value, unknown } = resolveSecretTokens(args, this.secrets)
       if (unknown.length > 0) {
         const tokens = unknown.map((id) => secretToken(id)).join(', ')

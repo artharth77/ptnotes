@@ -1,19 +1,19 @@
 # PTNotes
 
-Markdown notes + todo lists + AI assistant, organized by project. Electron + React + TypeScript.
+Write notes, track tasks, plan schedules, and chat with an AI assistant — all organized by project.
 
 ## Features
 
-- **Projects** — each project is a folder on disk with its own notes, todo list, schedules, and chat history. Create, rename, delete, and switch projects from the top bar.
+- **Projects** — each project is a folder on disk with its own notes, kanban board, schedules, and chat history. Create, rename, delete, and switch projects from the top bar.
 - **Markdown notes** — TipTap WYSIWYG editor with markdown as the source of truth; auto-save ~800ms after edits. Notes are one `.md` file each, with create / rename / delete / refresh.
-- **Todo lists** — markdown checklist per project with toggle, progress counts, **Show All** toggle, **Delete completed**, and drag & drop reorder.
+- **Kanban boards** — a kanban board per project with columns and cards: drag & drop between columns, priorities, due dates (overdue highlighted), labels, story points, assignees, and custom key/value attributes. Add, rename, and delete columns (a board always keeps at least one).
 - **Planner** — project schedules in a fourth **Planner** tab: hierarchical tasks with status, owner, duration, plan/actual dates, %complete and notes in a grid editor, plus a **Gantt chart** view (status-bar toggle) with a day-grid timeline, draggable leaf bars (edge handles resize, body drag moves — all day-snapped), day-cell click to set dates on date-less tasks, a right-click bar popup with **Clear Plan**, and a zoom slider. Working-day math computes plan end dates from start + duration (skipping weekends and project holidays — configurable via the **Calendar** button), parents roll up their children's dates, duration, %complete, and status (with a manual-only **On Hold**), and actual dates are never computed. Full undo/redo (toolbar buttons or `⌘Z` / `⇧⌘Z`) in both views.
 - **AI chat assistant** — collapsible right-side drawer with real-time streaming replies. Works with any OpenAI-compatible endpoint (OpenAI, OpenRouter, Groq, LM Studio, Ollama, …); base URL, API key, and model configured in-app. Click any image in a response to view it full-size with a fade-in lightbox (Escape or backdrop to close).
-- **AI tools** — the assistant can create/update/read/delete/search notes, manage todos, read and update project schedules and calendars, search the web (DuckDuckGo, keyless), and read pages locally. Destructive actions (like note deletion) require your confirmation.
+- **AI tools** — the assistant can create/update/read/delete/search notes, manage kanban cards (list, create, update, move, delete), read and update project schedules and calendars, search the web (DuckDuckGo, keyless), and read pages locally. Destructive actions (like note or card deletion) require your confirmation.
 - **Browser toolset** — optional in-app MCP-powered browser control (Chrome / Edge; toggle in **Settings → Toolsets**). The assistant can navigate pages, click, type, take screenshots, and evaluate JavaScript. Headful by default; headless requires your confirmation. Chat-only (never in modules).
 - **Skills** — teach the assistant reusable instructions: named markdown documents (global or per-project) listed in its system prompt and loaded on demand via the `read_skill` tool, with per-skill enable/disable toggles. Managed from **Settings → Skills**.
 - **File attachments** — drag & drop files into the chat; supported files (any text file, PDFs, or Excel workbooks, detected by content) are copied locally to the project and can be reused via `#` mentions. The assistant reads them locally with the `read_file` tool.
-- **Chat mentions** — type `@` to insert a note, `!` to insert a todo, `#` to attach a project file; the AI can link to your notes with clickable `[name](note:name)` links.
+- **Chat mentions** — type `@` to insert a note, `!` to insert a kanban card, `#` to attach a project file; the AI can link to your notes and kanban cards with clickable `[name](note:name)` / `[name](kanban:name)` links.
 - **Slash commands** — type `/` in the chat to open a command + skill picker: `/new` starts a new chat, `/models` opens AI settings, and any **enabled skill** becomes a command (`/skillname my prompt`) that the assistant loads via `read_skill` and applies. **Tab** autocompletes the command, **Enter** runs it.
 - **Chat history** — each session is auto-saved to a JSON file; **New Chat** archives the current thread and a history picker lets you reopen, rename, or delete old sessions.
 - **Background modules** — the assistant can launch long-running background subagents that plan steps and generate work autonomously. Specialized modules produce deliverables (PPTX/PowerPoint, Word/DOCX, Infographic) and a general-purpose **Subagent (long-run)** handles open-ended research/analysis tasks. The right-side drawer's **Module** button (🧩, top bar) shows live status and per-step progress; click the 💬 button on any run to open a read-only overlay of the module's full conversation (its system prompt, tool calls, and reasoning). The AI decides when to delegate (or you can ask it to "run the subagent"), can start several modules in parallel, tell each what result to return, and `wait_modules` blocks until they all finish and reports their results back. Just ask e.g. _"make a PowerPoint about…"_, _"write a Word document about…"_, _"make an infographic about…"_, or _"do a deep research pass…"_ to start one.
@@ -51,7 +51,7 @@ Data lives under `~/Documents/PTNotes/`:
 ├── .skills/             (global skills, shared by all projects)
 └── <ProjectName>/
     ├── notes/*.md          (one file per note)
-    ├── TODO.md             (markdown checklist)
+    ├── kanban/board.json   (kanban board: columns + cards)
     ├── files/*             (attachments dropped into the chat, module outputs)
     ├── planner/            (project schedules + calendar)
     │   ├── <slug>.json     (one file per schedule)
@@ -71,7 +71,7 @@ The folder on disk is the source of truth, and the project root is configurable 
 
 The **Settings** page (⚙ icon in the top bar) is organized by category:
 
-- **Storage** — shows the current project root and lets you change where all project data lives (with confirmation). Every project folder, notes, todos, chats, and the project registry are moved to the new location.
+- **Storage** — shows the current project root and lets you change where all project data lives (with confirmation). Every project folder, notes, kanban boards, chats, and the project registry are moved to the new location.
 - **AI Settings** — connects the assistant to any OpenAI-compatible provider: base URL, API key, and model (editable combobox of available models), plus an optional **PDF upload** toggle for sending PDFs as raw file attachments.
 - **Modules** — lists the installed background modules and their enable/disable toggles. Disabling a module hides it from the AI assistant and prevents it from being started; the toggles apply immediately.
 - **Toolsets** — lists built-in toolsets (currently: Browser) with enable/disable toggles. Each enabled toolset adds tools to every chat turn — more tokens and higher chance of wrong tool selection. Toolsets are chat-only (never in modules). Designed for future external MCP connections.

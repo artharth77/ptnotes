@@ -73,7 +73,7 @@ export function ModulePanel(): React.JSX.Element {
       <div className="list-header">
         <span>Modules</span>
         <button
-          className="icon-btn todo-menu-btn"
+          className="icon-btn"
           title="Module options"
           onClick={toggleMenu}
           aria-expanded={menuOpen}

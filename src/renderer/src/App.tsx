@@ -3,7 +3,9 @@ import { useAppStore } from './store/useAppStore'
 import { friendlyError } from './errors'
 import { TopBar } from './components/TopBar'
 import { NoteList } from './components/NoteList'
-import { TodoPanel } from './components/TodoPanel'
+import { KanbanPanel } from './components/KanbanPanel'
+import { KanbanBoard } from './components/KanbanBoard'
+import { KanbanCardModal } from './components/KanbanCardModal'
 import { PlannerPanel } from './components/PlannerPanel'
 import { PlannerEditor } from './components/PlannerEditor'
 import { MarkdownEditor } from './components/MarkdownEditor'
@@ -29,13 +31,13 @@ function SideTabs(): React.JSX.Element {
 
   return (
     <div className="side-tabs">
-      {(['notes', 'todo', 'planner'] as Tab[]).map((t) => (
+      {(['notes', 'kanban', 'planner'] as Tab[]).map((t) => (
         <button
           key={t}
           className={`side-tab ${tab === t ? 'active' : ''}`}
           onClick={() => setTab(t)}
         >
-          {t === 'notes' ? 'Notes' : t === 'todo' ? 'Todo' : t === 'planner' ? 'Planner' : ''}
+          {t === 'notes' ? 'Notes' : t === 'kanban' ? 'Kanban' : t === 'planner' ? 'Planner' : ''}
         </button>
       ))}
     </div>
@@ -49,7 +51,7 @@ function EmptyProject(): React.JSX.Element {
   return (
     <div className="empty-state">
       <h1>Welcome to PTNotes</h1>
-      <p>Create your first project to start writing notes and managing todos.</p>
+      <p>Create your first project to start writing notes and managing tasks.</p>
       <button className="btn primary" onClick={() => setCreating(true)}>
         + New Project
       </button>
@@ -70,17 +72,9 @@ function EmptyProject(): React.JSX.Element {
 }
 
 function EmptyNote(): React.JSX.Element {
-  const tab = useAppStore((s) => s.tab)
   const createNote = useAppStore((s) => s.createNote)
   const [creating, setCreating] = useState(false)
 
-  if (tab !== 'notes') {
-    return (
-      <div className="empty-state">
-        <p>Manage your tasks on the Todo tab.</p>
-      </div>
-    )
-  }
   return (
     <div className="empty-state">
       <p>Select a note or create a new one.</p>
@@ -270,6 +264,9 @@ function App(): React.JSX.Element {
   const settingsOpen = useAppStore((s) => s.settingsOpen)
   const sidebarVisible = useAppStore((s) => s.sidebarVisible)
   const askRequest = useAppStore((s) => s.askRequest)
+  const kanbanEditingId = useAppStore((s) => s.kanbanEditingId)
+  const kanbanViewingId = useAppStore((s) => s.kanbanViewingId)
+  const kanbanCreatingColumnId = useAppStore((s) => s.kanbanCreatingColumnId)
   const [sidebarWidth, setSidebarWidth] = useState(280)
   const [chatWidth, setChatWidth] = useState(360)
   const [chatResizing, setChatResizing] = useState(false)
@@ -283,10 +280,16 @@ function App(): React.JSX.Element {
     void init()
   }, [init])
 
-  // Handle AI stream events: update chat store, auto-refresh notes/todos on tool calls
+  // Handle AI stream events: update chat store, auto-refresh notes/kanban on tool calls
   useEffect(() => {
     const NOTE_TOOLS = new Set(['create_note', 'update_note', 'delete_note'])
-    const TODO_TOOLS = new Set(['create_todos', 'toggle_todo', 'delete_todo'])
+    const KANBAN_TOOLS = new Set([
+      'list_kanban_cards',
+      'create_kanban_card',
+      'update_kanban_card',
+      'move_kanban_card',
+      'delete_kanban_card'
+    ])
     const PLANNER_TOOLS = new Set([
       'list_schedules',
       'read_schedule',
@@ -344,8 +347,8 @@ function App(): React.JSX.Element {
                   reloadActiveNoteIfUpdated(tc)
                 }
               }
-              if (TODO_TOOLS.has(tc.name)) {
-                void state.refreshTodos()
+              if (KANBAN_TOOLS.has(tc.name)) {
+                void state.refreshKanban()
               }
               if (PLANNER_TOOLS.has(tc.name)) {
                 void state.refreshSchedules()
@@ -469,7 +472,13 @@ function App(): React.JSX.Element {
             style={{ width: sidebarVisible ? sidebarWidth : 0 }}
           >
             <SideTabs />
-            {tab === 'todo' ? <TodoPanel /> : tab === 'planner' ? <PlannerPanel /> : <NoteList />}
+            {tab === 'kanban' ? (
+              <KanbanPanel />
+            ) : tab === 'planner' ? (
+              <PlannerPanel />
+            ) : (
+              <NoteList />
+            )}
           </aside>
           {sidebarVisible && (
             <Resizer
@@ -487,6 +496,8 @@ function App(): React.JSX.Element {
               ) : (
                 <EmptyPlanner />
               )
+            ) : tab === 'kanban' ? (
+              <KanbanBoard />
             ) : activeNoteId ? (
               <MarkdownEditor key={activeNoteId} noteId={activeNoteId} content={noteContent} />
             ) : (
@@ -555,6 +566,9 @@ function App(): React.JSX.Element {
       )}
 
       {settingsOpen && <SettingsDialog />}
+      {(kanbanEditingId || kanbanCreatingColumnId || kanbanViewingId) && (
+        <KanbanCardModal key={kanbanEditingId ?? kanbanCreatingColumnId ?? kanbanViewingId} />
+      )}
       <ConfirmDeleteDialog />
       <AskUserDialog key={askRequest?.id ?? 'none'} />
       <ModuleHistoryOverlay />

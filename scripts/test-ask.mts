@@ -189,6 +189,31 @@ assert.deepEqual(rr, { value: '${SECRET:zzz}', unknown: ['zzz'] }, 'unknown toke
 rr = resolveSecretTokens(42, secrets)
 assert.deepEqual(rr, { value: 42, unknown: [] }, 'non-strings pass through')
 
+// kanban secret tokens: ${K_SECRET:<id>|<key>}
+const { kanbanSecretToken, secretIdFromToken } = await import('../src/shared/secrets')
+assert.equal(kanbanSecretToken('abc123', 'apiKey'), '${K_SECRET:abc123|apiKey}')
+assert.equal(secretIdFromToken('${SECRET:abc123}'), 'abc123')
+assert.equal(secretIdFromToken('not-a-token'), null)
+rr = resolveSecretTokens(kanbanSecretToken('abc123', 'apiKey'), secrets)
+assert.equal(rr.value, 'p@ss', 'kanban token resolves to the value')
+assert.deepEqual(rr.unknown, [])
+rr = resolveSecretTokens(
+  { attributes: { apiKey: kanbanSecretToken('abc123', 'apiKey'), env: 'prod' } },
+  secrets
+)
+assert.deepEqual(rr.value, { attributes: { apiKey: 'p@ss', env: 'prod' } })
+rr = resolveSecretTokens(kanbanSecretToken('zzz', 'k'), secrets)
+assert.deepEqual(
+  rr,
+  { value: kanbanSecretToken('zzz', 'k'), unknown: ['zzz'] },
+  'unknown kanban token kept + reported'
+)
+assert.equal(
+  resolveSecretTokens('${SECRET:abc123}', secrets).value,
+  'p@ss',
+  'plain SECRET tokens still resolve'
+)
+
 // ---- shared/ask flow reducer ----
 
 const { buildAnswers, initFlow, isAllAnswered, reduce } = await import('../src/shared/ask')

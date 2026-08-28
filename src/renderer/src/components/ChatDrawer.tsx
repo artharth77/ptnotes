@@ -20,7 +20,7 @@ import { useAppStore } from '../store/useAppStore'
 import { MarkdownContent } from './MarkdownContent'
 import { ModuleCard } from './ModuleCard'
 import { MdiIcon } from './MdiIcon'
-import { NOTE_LINK_ICON, TODO_LINK_ICON } from './contentIcons'
+import { KANBAN_LINK_ICON, NOTE_LINK_ICON } from './contentIcons'
 import { isReasoningOpen, splitContent } from './chatContent'
 import { ThinkBox, UserBubble } from './chatBubbles'
 import { builtinSlashCommands, builtinSlashNames } from '../commands'
@@ -39,7 +39,7 @@ import type {
   ModuleRun,
   NoteMeta,
   SkillList,
-  Todo
+  KanbanCard
 } from '@shared/types'
 import { formatTokens, sumUsage } from '@shared/usage'
 import { TOOL_STATE_LABELS, toolDisplayState } from './moduleStatus'
@@ -145,8 +145,10 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   const activeProject = useAppStore((s) => s.activeProject)
   const activeNoteId = useAppStore((s) => s.activeNoteId)
   const activeScheduleId = useAppStore((s) => s.activeScheduleId)
+  const activeKanbanCardId = useAppStore((s) => s.activeKanbanCardId)
   const notes = useAppStore((s) => s.notes)
-  const todos = useAppStore((s) => s.todos)
+  const kanban = useAppStore((s) => s.kanban)
+  const setActiveKanbanCard = useAppStore((s) => s.setActiveKanbanCard)
   const projectFiles = useAppStore((s) => s.projectFiles)
   const refreshFiles = useAppStore((s) => s.refreshFiles)
   const messages = useAppStore((s) =>
@@ -211,7 +213,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   const [input, setInput] = useState('')
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({})
   const [mention, setMention] = useState<{
-    kind: 'note' | 'todo' | 'file'
+    kind: 'note' | 'kanban' | 'file'
     start: number
     query: string
   } | null>(null)
@@ -585,11 +587,11 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     [list]
   )
 
-  const mentionItems = useMemo<(NoteMeta | Todo | string)[]>(() => {
+  const mentionItems = useMemo<(NoteMeta | KanbanCard | string)[]>(() => {
     if (!mention) return []
     const q = mention.query.toLowerCase()
-    if (mention.kind === 'todo') {
-      return todos.filter((t) => t.text.toLowerCase().includes(q))
+    if (mention.kind === 'kanban') {
+      return (kanban?.cards ?? []).filter((c) => c.title.toLowerCase().includes(q))
     }
     if (mention.kind === 'file') {
       return projectFiles.filter((f) => f.toLowerCase().includes(q))
@@ -600,10 +602,10 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
       return [active, ...filtered.filter((n) => n.id !== active.id)]
     }
     return filtered
-  }, [mention, notes, todos, projectFiles, activeNoteId])
+  }, [mention, notes, kanban, projectFiles, activeNoteId])
 
-  const mentionName = (item: NoteMeta | Todo | string): string =>
-    typeof item === 'string' ? item : 'name' in item ? item.name : item.text
+  const mentionName = (item: NoteMeta | KanbanCard | string): string =>
+    typeof item === 'string' ? item : 'name' in item ? item.name : item.title
 
   const commands = useMemo<SlashCommand[]>(
     () =>
@@ -734,7 +736,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
       return
     }
     if (last === at) setMention({ kind: 'note', start: last, query: token })
-    else if (last === bang) setMention({ kind: 'todo', start: last, query: token })
+    else if (last === bang) setMention({ kind: 'kanban', start: last, query: token })
     else {
       if (!mention || mention.kind !== 'file' || mention.start !== last) {
         void refreshFiles()
@@ -744,16 +746,17 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     setMentionIndex(0)
   }
 
-  function insertMention(name: string): void {
+  function insertMention(item: NoteMeta | KanbanCard | string): void {
     if (!mention) return
     const before = input.slice(0, mention.start)
     const after = input.slice(mention.start + 1 + mention.query.length)
+    const isCard = typeof item !== 'string' && !('name' in item)
     const token =
-      mention.kind === 'todo'
-        ? `todo:${name} `
+      mention.kind === 'kanban'
+        ? `kanban:${isCard ? item.id : mentionName(item)} `
         : mention.kind === 'file'
-          ? `file:${name} `
-          : `note:${name} `
+          ? `file:${mentionName(item)} `
+          : `note:${mentionName(item)} `
     setInput(`${before}${token}${after}`)
     setMention(null)
     requestAnimationFrame(() => {
@@ -837,7 +840,8 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
         text,
         history,
         activeNoteId,
-        activeScheduleId
+        activeScheduleId,
+        activeKanbanCardId
       )
     } finally {
       await saveCurrent(project)
@@ -979,6 +983,15 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     setTab('planner')
   }
 
+  function openKanbanCard(cardTitle: string): void {
+    if (!activeProject || !kanban) return
+    const q = cardTitle.trim().toLowerCase()
+    const card = kanban.cards.find((c) => c.title.toLowerCase() === q)
+    if (!card) return
+    setTab('kanban')
+    setActiveKanbanCard(card.id)
+  }
+
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>): void {
     const mod = (IS_MAC ? e.metaKey : e.ctrlKey) && e.shiftKey
     if (mod && !e.altKey) {
@@ -1066,7 +1079,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
       }
       if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault()
-        insertMention(mentionName(mentionItems[mentionIndex]!))
+        insertMention(mentionItems[mentionIndex]!)
         return
       }
       if (e.key === 'Escape') {
@@ -1283,14 +1296,16 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
         )}
         {list.length === 0 && (
           <div className="chat-empty">
-            <p>Ask me to create notes, manage todos, or research the web and save findings.</p>
+            <p>
+              Ask me to create notes, manage kanban cards, or research the web and save findings.
+            </p>
             <p className="chat-empty-project">
               Working on: <strong>{activeProject}</strong>
             </p>
             <p className="chat-empty-hint">
-              Type / for commands and skills, @ to reference a note, ! to reference a todo, # to
-              reference a file. Drop PDFs, Excel (.xlsx/.xlsm) or text files (markdown, JSON, logs,
-              YAML, plain text) to add them to the project&apos;s files.
+              Type / for commands and skills, @ to reference a note, ! to reference a kanban card, #
+              to reference a file. Drop PDFs, Excel (.xlsx/.xlsm) or text files (markdown, JSON,
+              logs, YAML, plain text) to add them to the project&apos;s files.
             </p>
           </div>
         )}
@@ -1351,6 +1366,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                           onOpenNote={(n) => void openNote(n)}
                           onOpenSkill={(n) => openSkillEditor(n)}
                           onOpenPlan={(n) => void openSchedule(n)}
+                          onOpenKanban={(t) => openKanbanCard(t)}
                         />
                       </div>
                     )
@@ -1578,19 +1594,19 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
           <div className="mention-popup">
             {mentionItems.map((item, i) => (
               <div
-                key={typeof item === 'string' ? item : 'name' in item ? item.name : item.text}
+                key={typeof item === 'string' ? item : 'name' in item ? item.name : item.title}
                 className={`mention-item ${i === mentionIndex ? 'active' : ''}`}
                 onMouseDown={(e) => {
                   e.preventDefault()
-                  insertMention(mentionName(item))
+                  insertMention(item)
                 }}
                 onMouseEnter={() => setMentionIndex(i)}
               >
                 <span className="mention-icon">
                   <MdiIcon
                     path={
-                      mention?.kind === 'todo'
-                        ? TODO_LINK_ICON
+                      mention?.kind === 'kanban'
+                        ? KANBAN_LINK_ICON
                         : mention?.kind === 'file'
                           ? mdiFileOutline
                           : NOTE_LINK_ICON
@@ -1607,7 +1623,9 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
           ref={textareaRef}
           value={input}
           placeholder={
-            activeProject ? 'Ask the assistant… (@ note, ! todo, # file)' : 'Select a project first'
+            activeProject
+              ? 'Ask the assistant… (@ note, ! kanban card, # file)'
+              : 'Select a project first'
           }
           disabled={!activeProject || chatBusy}
           rows={2}

@@ -24,7 +24,7 @@ Read the section(s) relevant to your task rather than the whole file when possib
 
 ## Project
 
-PTNotes is a desktop app (Electron) for markdown notes, todo task lists, and an AI chat assistant, organized by **project** — each project is a folder on disk.
+PTNotes is a desktop app (Electron) for markdown notes, kanban task boards, and an AI chat assistant, organized by **project** — each project is a folder on disk.
 
 ## Stack
 
@@ -61,23 +61,23 @@ Run `npm run typecheck` and `npm run lint` after any change.
 
 ## Decisions (locked in)
 
-| Area              | Decision                                                                                                                                                                                                                            |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Interface         | Desktop GUI (Electron)                                                                                                                                                                                                              |
-| Editor            | WYSIWYG rich text (TipTap) with markdown as source of truth                                                                                                                                                                         |
-| Todo storage      | Markdown checklist file (`TODO.md`)                                                                                                                                                                                                 |
-| Stack             | Electron + electron-vite + React 19 + TypeScript                                                                                                                                                                                    |
-| Project selector  | Top bar: current project name dropdown + New Project button                                                                                                                                                                         |
-| Project registry  | Persistent known-project list so folders deleted externally still show (missing paths marked red)                                                                                                                                   |
-| Chat placement    | Collapsible right-side drawer, shared with the **Module** panel (top-bar toggles, one view at a time)                                                                                                                               |
-| AI streaming      | Yes (real-time)                                                                                                                                                                                                                     |
-| Settings dialog   | Two-panel dialog: **Storage** (project root path) + **AI Settings** (profile set: active selector, per-profile base URL/API key/model with endpoint presets, global PDF toggle) + Modules + Skills + About                          |
-| Project root      | Configurable via settings; default `~/Documents/PTNotes`; changing it moves all data + registry to the new location after confirmation                                                                                              |
-| Chat history      | Persisted per session as JSON files under `<project>/.data/chat/`; auto-saved per message; New Chat archives current thread; history picker can view/reopen old sessions                                                            |
-| Chat titles       | Hybrid: local heuristic from first message immediately, refined by a background AI completion; manual rename supported; history popup shows title + message count                                                                   |
-| Chat note mention | `@` opens note list → inserts `note:<notename>` → AI calls `read_note`                                                                                                                                                              |
-| Chat todo mention | `!` opens todo list → inserts `todo:<todotext>` (filterable by text)                                                                                                                                                                |
-| Chat file mention | `#` opens project file list (`files:list` → `<project>/files/*` for PDF + Excel + text) → inserts `file:<filename>` → AI calls `read_file` (content-based: pdf-parse for PDFs, exceljs for .xlsx/.xlsm, raw text for any text file) |
+| Area                | Decision                                                                                                                                                                                                                            |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Interface           | Desktop GUI (Electron)                                                                                                                                                                                                              |
+| Editor              | WYSIWYG rich text (TipTap) with markdown as source of truth                                                                                                                                                                         |
+| Kanban storage      | JSON board file (`kanban/board.json`: columns + flat `cards[]`, array order = card order)                                                                                                                                           |
+| Stack               | Electron + electron-vite + React 19 + TypeScript                                                                                                                                                                                    |
+| Project selector    | Top bar: current project name dropdown + New Project button                                                                                                                                                                         |
+| Project registry    | Persistent known-project list so folders deleted externally still show (missing paths marked red)                                                                                                                                   |
+| Chat placement      | Collapsible right-side drawer, shared with the **Module** panel (top-bar toggles, one view at a time)                                                                                                                               |
+| AI streaming        | Yes (real-time)                                                                                                                                                                                                                     |
+| Settings dialog     | Two-panel dialog: **Storage** (project root path) + **AI Settings** (profile set: active selector, per-profile base URL/API key/model with endpoint presets, global PDF toggle) + Modules + Skills + About                          |
+| Project root        | Configurable via settings; default `~/Documents/PTNotes`; changing it moves all data + registry to the new location after confirmation                                                                                              |
+| Chat history        | Persisted per session as JSON files under `<project>/.data/chat/`; auto-saved per message; New Chat archives current thread; history picker can view/reopen old sessions                                                            |
+| Chat titles         | Hybrid: local heuristic from first message immediately, refined by a background AI completion; manual rename supported; history popup shows title + message count                                                                   |
+| Chat note mention   | `@` opens note list → inserts `note:<notename>` → AI calls `read_note`                                                                                                                                                              |
+| Chat kanban mention | `!` opens kanban cards → inserts `kanban:<card title>` (filterable by title)                                                                                                                                                        |
+| Chat file mention   | `#` opens project file list (`files:list` → `<project>/files/*` for PDF + Excel + text) → inserts `file:<filename>` → AI calls `read_file` (content-based: pdf-parse for PDFs, exceljs for .xlsx/.xlsm, raw text for any text file) |
 
 | Chat file drop | Multi-file drag & drop into the chat: every supported file is copied silently to `<project>/files/` (no popup) and referenced via `#` mentions; support is **content-based** (any text file plus PDFs, detected by content not extension) — non-PDF binary files are rejected; if none are added, an alert is shown |
 | Chat response rendering | Markdown via `react-markdown` + `remark-gfm` + `remark-breaks` (raw HTML escaped → XSS-safe) |
@@ -91,7 +91,7 @@ Run `npm run typecheck` and `npm run lint` after any change.
 ├── .skills/             (global skills: `<skill>/SKILL.md` with OpenAI skill-guide front-matter (`name:` + `description:`), shared by all projects)
 └── <ProjectName>/
     ├── notes/*.md          (one file per note)
-    ├── TODO.md             (markdown checklist: `- [ ]` / `- [x]`)
+    ├── kanban/board.json   (kanban board: columns + flat cards array)
     ├── files/*.{pdf,md,txt,json,log,yaml,yml} (attachments copied on chat drop) + module deliverables (.pptx, .svg/.png, .docx)
     ├── planner/            (project schedules + calendar)
     │   ├── <slug>.json     (one file per schedule: id, name, timestamps, nested task tree)
@@ -113,7 +113,7 @@ Run `npm run typecheck` and `npm run lint` after any change.
 
 - App AI config stored in Electron `userData/ai-provider.json`, `chmod 600`, never in the renderer bundle. Shape: `{ version, profiles: [{id,name,baseUrl,apiKey,model}], activeProfileId, uploadPdfEnabled }` — a set of named profiles plus the active one and a global PDF toggle. Legacy flat configs migrate into a single "Profile 1".
 - App settings (project root path + `disabledModules` module toggles + `disabledToolsets` toolset toggles + `browserHeadless` preference) stored in Electron `userData/ptnotes-settings.json`, `chmod 600`.
-- Creating a project initializes folder + `TODO.md` + `welcome.md`.
+- Creating a project initializes folder + `kanban/board.json` (default columns) + `welcome.md`.
 - `.ptnotes-projects.json` in the root dir is the persistent project registry so externally-deleted folders still show (missing paths flagged `pathExists: false`).
 
 ## Architecture
@@ -124,11 +124,11 @@ src/
 │   ├── index.ts         # window creation, app lifecycle
 │   ├── settings.ts      # SettingsStore (userData/ptnotes-settings.json → project root)
 │   ├── service/
-│   │   └── PTNotesService.ts   # all fs operations (projects/notes/todos/chats/skills) + changeRootDir
+│   │   └── PTNotesService.ts   # all fs operations (projects/notes/kanban/chats/skills) + changeRootDir
 │   ├── ipc/             # ipcMain.handle registrations
 │   │   ├── projects.ts
 │   │   ├── notes.ts
-│   │   ├── todos.ts
+│   │   ├── kanban.ts   # kanban:load / kanban:save (whole-board, atomic tmp+rename)
 │   │   ├── planner.ts  # planner:list/read/save/create/rename/delete/getCalendar/saveCalendar/set-edit-active/undo-redo
 │   │   ├── chat.ts      # chat history persistence (list/read/write/delete/rename)
 │   │   ├── ai.ts        # chat session registry + ai:generateTitle (chat titles)
@@ -176,7 +176,9 @@ src/
 │   │   │   ├── TopBar.tsx           # project dropdown + New Project + Settings + chat toggle
 │   │   │   ├── ProjectDropdown.tsx
 │   │   │   ├── NoteList.tsx         # Notes tab
-│   │   │   ├── TodoPanel.tsx        # Todo tab (checkboxes + progress)
+│   │   │   ├── KanbanPanel.tsx      # Kanban tab sidebar (columns + card rows, column/card context menus)
+│   │   │   ├── KanbanBoard.tsx      # Kanban main view (horizontal columns, HTML5 drag & drop)
+│   │   │   ├── KanbanCardModal.tsx  # unified create/edit card modal (two-step delete)
 │   │   │   ├── PlannerPanel.tsx     # Planner tab (schedule list + create/rename/delete)
 │   │   │   ├── PlannerEditor.tsx    # schedule grid editor (hierarchical tasks, rollups, autosave, undo/redo history) + view toggle
 │   │   │   ├── GanttChart.tsx       # planner Gantt view (day-grid timeline, draggable bars, bar popup)
@@ -188,7 +190,8 @@ src/
 │   │   │   └── SettingsDialog.tsx  # two-panel Settings (Storage + AI Settings)
 │   └── ...
 └── shared/
-    ├── types.ts         # Project, NoteMeta, Todo, ChatMessage, tool types
+    ├── types.ts         # Project, NoteMeta, ChatMessage, tool types
+    ├── kanban.ts        # kanban board types + pure helpers (normalize, lookups, due-date formatting) shared by main + renderer + tests
     └── planner.ts       # pure planner engine (dates, status rules, rollups) shared by main + renderer + tests
 ```
 
@@ -205,7 +208,7 @@ src/
 
 - Follow existing patterns in neighboring files (store actions, IPC handler shapes, component style).
 - Project names and note/chat ids are slugified and validated before building file paths (see `validateNoteId` / `chatDir` in `PTNotesService`).
-- Todo storage is a markdown checklist file (`TODO.md`, `- [ ]` / `- [x]`); the line content derives the id.
+- Kanban storage is a JSON board file (`kanban/board.json`): columns + a flat `cards[]` (array order = card order); card ids are UUIDs. A legacy `TODO.md` in a project folder migrates to the board on first load (open lines → To Do, checked lines → Done) and is deleted.
 - Use existing utilities; do not add new dependencies without checking `package.json`.
 - Do not add comments unless necessary.
 
@@ -215,7 +218,7 @@ src/
 ┌──────────────────────────────────────────────────────────────┐
 │ ⚙ Project A ▾ [New Project]   [Settings] [🧩 Module] [💬 Chat]│
 ├─────────────────┬────────────────────────────────────────────┤
-│ Notes│Todo│      │  Editor area        │  Module / Chat drawer│
+│ Notes│Kanban│    │  Editor area        │  Module / Chat drawer│
 │ Planner          │  ┌ toolbar ───────┐ │  (collapsible,       │
 │ ▸ note 1        │  │ TipTap editor  │ │  one view at a time) │
 │ ▸ note 2        │  └────────────────┘ │                      │
@@ -224,7 +227,8 @@ src/
 ```
 
 - **Top bar:** current project name with dropdown (switch / new / rename / delete), Settings, and a **Chat / Module** segmented view toggle (`mdiChatProcessingOutline` / `mdiPuzzleOutline`). Both views share the collapsible right-side drawer, showing **Chat or Module one at a time**; the Module button is disabled when no project is open. Shortcuts: `⌘⇧C`/`Ctrl+Shift+C` toggles chat, `⌘⇧M`/`Ctrl+Shift+M` toggles modules.
-- **Middle column:** tabs for Notes (list + create/rename/delete), Todo (interactive checklist + progress), and Planner (project schedules — see [Planner](#planner)).
+- **Middle column:** tabs for Notes (list + create/rename/delete), Kanban (columns + cards with drag & drop), and Planner (project schedules — see [Planner](#planner)).
+  - **Kanban:** the sidebar (`KanbanPanel`) lists columns with collapsible card rows (context menus for cards and columns; add/rename/delete column, delete card); the main area (`KanbanBoard`) renders the columns horizontally with native HTML5 drag & drop (drop before/append within a column, or onto another column). Clicking a card opens the unified create/edit modal (`KanbanCardModal`: title, column, priority, due date, story points, assignee, labels, description, key/value attributes, two-step delete). The store's `kanban` board is the single source of truth; every edit saves the whole board optimistically via `kanban:save` (re-fetch on error).
   - **Main area:** TipTap WYSIWYG editor for notes; auto-save to `.md` ~800ms after edits (debounced). The toolbar includes an **underline** button (StarterKit v3 registers `Underline`; markdown round-trips as GitLab-style `++text++`). Links in the editor use a custom `<span>` implementation to disable default browser navigation; they require Cmd/Ctrl+click to navigate: external links open in the OS browser, while `note:`, `skill:`, and `file:` links open the note, skill editor, or reveal the file in Finder, respectively.
 
 - **Format helper (bubble popup):** selecting text shows an icon-only bubble (`BubbleMenu` from `@tiptap/react/menus` — no new dependency) with **Bold / Italic / Underline / Strikethrough / Inline code** buttons (active states + tooltips); a circular `mdiCloseCircle` X button in its top-right corner closes it and turns the feature off. Enabled by default, persisted in `localStorage` (`ptnotes:formatHelper`), and toggled from a status-bar button on the right (icon + label).
@@ -236,7 +240,7 @@ src/
 
 - **Projects:** `list` (returns `pathExists` per project), `create`, `rename`, `delete`, `recreate` (rebuild folder for a project whose path is missing)
 - **Notes:** `list`, `read`, `save`, `create`, `rename`, `delete`
-- **Todos:** `read` (parse checklist), `save` (serialize `- [ ]`/`- [x]`), `toggle`, `deleteCompleted`, `reorder`
+- **Kanban:** `load` (board; migrates a legacy `TODO.md` on first load and deletes it), `save` (whole board, normalized, atomic tmp+rename)
 - **Planner:** `list` (schedule metas), `read` (full schedule or `null`), `save` (atomic tmp+rename), `create` (slugified id), `rename`, `delete`; `getCalendar` (defaults to Mon–Fri), `saveCalendar` (normalized). All ids validated with `validateScheduleId` (same rule as the note-id guard). Plus `setEditActive` (renderer→main `send`: gates the main-process `before-input-event` shortcut interception) and `onUndoRedo` (main→renderer: forwards `⌘Z`/`⇧⌘Z`/`Ctrl+Y` to the planner editor — see [Editor (PlannerEditor)](#editor-plannereditor)).
 - **Chat history:** `list`, `read`, `write`, `delete`, `rename`, `readTrace` (raw AI trace `AiTraceFile` for a session, or `null`)
 - **AI:** `send` (message → streamed reply; takes `sessionId` so the run is traced), `getConfig`, `setConfig`, `listModels(baseUrl, apiKey)`, `generateTitle` (takes `sessionId`; the title call is traced into the session's trace file), `stop`, `clear`, `confirmResponse`, `askResponse` (human-in-the-loop answers for `ask_user`), `onStreamEvent` (token chunks + tool-call logs + confirm events)
@@ -273,7 +277,7 @@ ChatPanel (renderer) ──send──▶ Main process
   when at least one skill is enabled. Modules are offered `read_skill` (with optional `file` param for sibling files) from the base
   tool set, while `create_skill` / `delete_skill` are **excluded** so background modules can read skills
   but never mutate them.
-- A `!` todo mention inserts `todo:<todotext>` which is sent to the model as-is.
+- A `!` kanban mention inserts `kanban:<card title>` which is sent to the model as-is.
 - A `#` file mention inserts `file:<filename>`; the system prompt instructs the AI that a
   `file:<filename>` message means it must call `read_file` (content-based local extraction;
   `.pdf` via pdf-parse, any text file as raw text) before responding — so previously dropped
@@ -356,10 +360,11 @@ ChatPanel (renderer) ──send──▶ Main process
 | `list_notes`            | list all note titles; with optional `query`, search note titles + content and return matching names + snippet                                                                                                                                                                                                                                                                                                                                                                   |
 | `read_note`             | model context; omit `title` to read the currently active note (the one the user is viewing); optional `startLine`/`endLine` (1-based, inclusive) read a portion — content is **line-numbered** (each line prefixed with its 1-based line number and `": "`, absolute numbers even for ranged reads) so the model can target `update_note` hunks exactly; response always includes `totalLines`, effective `startLine`/`endLine` when ranged                                     |
 | `delete_note`           | delete one or more notes (requires user confirmation dialog)                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `create_todos`          | append `- [ ]` items to `TODO.md`                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `toggle_todo`           | toggle a checklist item                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `delete_todo`           | remove an item                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `list_todos`            | model context                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `list_kanban_cards`     | model context; all cards grouped by column (priority, due date, labels, assignee, story points)                                                                                                                                                                                                                                                                                                                                                                                 |
+| `create_kanban_card`    | new card (required `title`; optional description, `column` matched by name — default "To Do" —, priority, labels, dueDate, storyPoints, assignee, key/value attributes)                                                                                                                                                                                                                                                                                                         |
+| `update_kanban_card`    | update fields of an existing card (matched by title, case-insensitive); only the provided fields are changed, `null` clears, `newTitle` renames                                                                                                                                                                                                                                                                                                                                 |
+| `move_kanban_card`      | move a card (matched by title) to another column (matched by name)                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `delete_kanban_card`    | delete a card (matched by title; requires user confirmation dialog)                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `read_file`             | extract text of a project file locally via `readFileAsText` (pdf-parse for `.pdf`, exceljs for `.xlsx`/`.xlsm` with optional `query` — `workspace=<name\|n>` sheet filter or `list=workspace` index/name list, raw text for any text file)                                                                                                                                                                                                                                      |
 | `create_skill`          | upsert a skill (`scope`: `global`/`project`) from name + description + content                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `read_skill`            | load a skill's `SKILL.md` or a sibling file inside that skill folder (`file` param, relative path like `FORMAT.md` or `doc/DOC.md`); skills are listed in the system prompt, no separate `list_skills`                                                                                                                                                                                                                                                                          |
@@ -592,14 +597,14 @@ JSON in `<project>/planner/<slug>.json`; the whole feature is pure data — no m
 ## Notes & caveats
 
 - DuckDuckGo scraping can be rate-limited; errors are surfaced to the model so it can retry/adapt.
-- Tool count is 26 (a guideline; acceptable tradeoff for the skills + HITL + module orchestration + planner features).
+- Tool count is 27 (a guideline; acceptable tradeoff for the skills + HITL + module orchestration + planner features).
 - `ask_user` is **chat-only**: module subagents never receive it (filtered out of the module tool list), and `ToolContext.ask` is absent in module runs so it can never pop a dialog from a background run.
 - **`ask_user` secrets**: questions with `secret: true` render a masked (`type="password"`) input with a lock badge; the answer travels over IPC into an in-memory `Map<id, value>` on the `ChatSession` (`src/main/ai/chatSession.ts`) and the tool result returns only a `${SECRET:<id>}` token (12-hex id, `src/shared/secrets.ts`). When a later tool call's name starts with `browser_`, `ChatSession.executeTool` deep-resolves tokens in the args right before execution (substitution is deliberately **browser-tools-only**, so secrets can never reach notes/files); unknown/stale tokens fail the tool call without executing it. The token — never the value — appears everywhere else: model context, raw AI trace JSONL, persisted chat JSON, streamed tool events, and UI bubbles. Secrets die with the session (cleared on "new chat" / app quit).
 - `submit_result` is **module-only** and `start_module`/`wait_modules` are **chat-only**: module subagents never receive them (their tool list is `baseTools` minus `ask_user`, plus the module's own tools and `set_plan`/`update_step` — plus `submit_result` only when the run has an `expectResult`), so no module-nesting of module runs.
 - API key must never be committed or bundled into the renderer.
 - The persistent project registry only records known project names/paths — it never stores file contents; the folder on disk remains the source of truth.
 - `note:<notename>` uses the note's slugified file name (as shown in the Notes list), so the `@` picker should insert the exact list name.
-- `todo:<todotext>` uses the todo's checklist text, so the `!` picker should insert the exact text.
+- `kanban:<card title>` uses the card's title, so the `!` picker should insert the exact title.
 - The system prompt instructs the AI to link to skills it mentions as `[skill name](skill:skill name)`; the renderer renders these as clickable pills (book icon) that open **Settings → Skills** and load the skill into the editor (via `openSkillEditor` + the `skillEditRequest` store field).
 - The **Browser toolset** (12 `browser_*` tools) is an in-process MCP server + client over `InMemoryTransport`, implemented in `src/main/mcp/`. The server registers tools via the MCP SDK's `registerTool` (zod schemas); the chat session wraps them as `PTTool` via `client.callTool`. The browser is launched from `playwright-core` driving installed Chrome/Edge (no bundled Chromium). Headful by default; headless mode requires `ask_user` confirmation via the system-prompt guard and persists the preference to `ptnotes-settings.json`. Toolset is **chat-only** (never in module subagents) and toggled in Settings → Toolsets. Each enabled toolset adds tools to every chat turn — more tokens and higher chance of wrong tool selection.
 - **`browser_snapshot`** returns a structured JSON accessibility tree with `role`, `name`, and `ref` for each visible element. Hidden elements (`display:none`, `visibility:hidden`, `visibility:collapse`, `opacity:0`, `aria-hidden`, zero-size) are excluded. Interactive elements get unique `ref` strings (`e0`, `e1`, …) set as `data-ptnotes-ref` attributes on the DOM. `browser_click`/`browser_type`/`browser_select_option` accept an optional `ref` parameter for precise targeting; text-based fallback filters to visible elements to avoid clicking hidden matches.

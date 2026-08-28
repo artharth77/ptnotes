@@ -600,12 +600,13 @@ function AboutPane(): React.JSX.Element {
         </div>
       </div>
       <p className="about-description">
-        Markdown notes + todo lists + AI assistant, organized by project.
+        Write notes, track tasks, plan schedules, and chat with an AI assistant — all organized by
+        project.
       </p>
       <p className="about-stack">
-        A desktop app built with Electron and React. Notes are WYSIWYG-edited with TipTap and stored
-        as markdown, todos live in a markdown checklist, and the AI chat works with any
-        OpenAI-compatible API. Everything runs locally — your notes and data stay on this machine.
+        PTNotes keeps everything for a project in one place: write notes, track tasks on kanban
+        boards, plan schedules, and chat with an AI assistant. Everything is stored on your own
+        computer — your notes and data stay private, even offline.
       </p>
       <div className="about-runtimes">
         <div className="about-row">
@@ -1131,8 +1132,8 @@ export function SettingsDialog(): React.JSX.Element {
             <>
               <p className="hint">
                 Projects live in a root folder on this machine. You can change where all project
-                data (notes, todos, chats) is stored. Changing it moves every existing project to
-                the new location.
+                data (notes, kanban cards, chats) is stored. Changing it moves every existing
+                project to the new location.
               </p>
               <label className="form-label">
                 Project root folder
@@ -1174,8 +1175,8 @@ export function SettingsDialog(): React.JSX.Element {
             Move all project data from <code>{storage.rootDir}</code> to <code>{pendingRoot}</code>?
           </p>
           <p className="hint">
-            Every project folder, the TODO.md files, notes, chats and the project registry will be
-            moved. The current location will no longer be used.
+            Every project folder, notes, chats and the project registry will be moved. The current
+            location will no longer be used.
           </p>
           <div className="modal-actions">
             <button className="btn" onClick={() => setPendingRoot(null)} disabled={moving}>

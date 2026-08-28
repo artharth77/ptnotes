@@ -17,8 +17,8 @@ This is your first note. Everything you write here is stored as markdown in:
 ## Getting started
 
 - Click **+ New** in the **Notes** tab to create a new note.
-- Use the **Todo** tab to keep track of your tasks.
-- Open the **AI assistant** (💬 chat icon, top-right) to create or update notes and todos, or research the web and save the findings here.`
+- Use the **Kanban** tab to keep track of your tasks.
+- Open the **AI assistant** (💬 chat icon, top-right) to create or update notes and kanban cards, or research the web and save the findings here.`
 
 const manager = new MarkdownManager({
   extensions: [StarterKit, Markdown, Typography, Link, TaskList, TaskItem, TableKit]

@@ -29,7 +29,9 @@ import type {
   SkillList,
   SkillMeta,
   SkillScope,
-  Todo
+  KanbanArchive,
+  KanbanArchiveMove,
+  KanbanBoard
 } from '../shared/types'
 
 const api = {
@@ -58,20 +60,18 @@ const api = {
     reveal: (project: string, id: string): Promise<void> =>
       ipcRenderer.invoke('notes:reveal', project, id)
   },
-  todos: {
-    list: (project: string): Promise<Todo[]> => ipcRenderer.invoke('todos:list', project),
-    add: (project: string, texts: string[]): Promise<Todo[]> =>
-      ipcRenderer.invoke('todos:add', project, texts),
-    toggle: (project: string, id: string): Promise<Todo[]> =>
-      ipcRenderer.invoke('todos:toggle', project, id),
-    delete: (project: string, id: string): Promise<Todo[]> =>
-      ipcRenderer.invoke('todos:delete', project, id),
-    deleteCompleted: (project: string): Promise<Todo[]> =>
-      ipcRenderer.invoke('todos:deleteCompleted', project),
-    update: (project: string, id: string, text: string): Promise<Todo[]> =>
-      ipcRenderer.invoke('todos:update', project, id, text),
-    reorder: (project: string, orderedIds: string[]): Promise<Todo[]> =>
-      ipcRenderer.invoke('todos:reorder', project, orderedIds)
+  kanban: {
+    load: (project: string): Promise<KanbanBoard> => ipcRenderer.invoke('kanban:load', project),
+    save: (project: string, board: KanbanBoard): Promise<KanbanBoard> =>
+      ipcRenderer.invoke('kanban:save', project, board),
+    loadArchive: (project: string): Promise<KanbanArchive> =>
+      ipcRenderer.invoke('kanban:loadArchive', project),
+    archiveCard: (project: string, cardId: string): Promise<KanbanArchiveMove> =>
+      ipcRenderer.invoke('kanban:archiveCard', project, cardId),
+    restoreCard: (project: string, cardId: string): Promise<KanbanArchiveMove> =>
+      ipcRenderer.invoke('kanban:restoreCard', project, cardId),
+    deleteArchivedCard: (project: string, cardId: string): Promise<KanbanArchive> =>
+      ipcRenderer.invoke('kanban:deleteArchivedCard', project, cardId)
   },
   chat: {
     list: (project: string): Promise<ChatSessionMeta[]> => ipcRenderer.invoke('chat:list', project),
@@ -122,7 +122,8 @@ const api = {
       text: string,
       history?: ChatMessage[],
       activeNoteId?: string | null,
-      activeScheduleId?: string | null
+      activeScheduleId?: string | null,
+      activeKanbanCardId?: string | null
     ): Promise<void> =>
       ipcRenderer.invoke(
         'ai:send',
@@ -131,7 +132,8 @@ const api = {
         text,
         history,
         activeNoteId,
-        activeScheduleId
+        activeScheduleId,
+        activeKanbanCardId
       ),
     stop: (project: string): Promise<void> => ipcRenderer.invoke('ai:stop', project),
     confirmResponse: (resp: ConfirmResponse): Promise<void> =>
