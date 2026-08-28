@@ -285,20 +285,149 @@ assert.equal(r.notes.length, 1)
 assert.equal(r.notes[0].name, 'q2-ideas')
 assert.match(r.notes[0].snippet ?? '', /strawberry/)
 
-// create_todos
-r = await call('create_todos', { tasks: ['Task A', 'Task B'] })
+// create_kanban_card
+r = await call('create_kanban_card', { title: 'Task A', priority: 'high', labels: ['demo'] })
+assert.equal(r.ok, true)
+assert.equal(r.total, 1)
+r = await call('create_kanban_card', { title: 'Task B', column: 'Backlog' })
+assert.equal(r.ok, true)
 assert.equal(r.total, 2)
 
-// list_todos / toggle_todo / delete_todo
-r = await call('list_todos', {})
-assert.equal(r.todos.length, 2)
-r = await call('toggle_todo', { text: 'Task A' })
-assert.equal(r.nowDone, true)
-r = await call('delete_todo', { text: 'Task B' })
+// list_kanban_cards (grouped by column; no column arg defaults to the first column)
+r = await call('list_kanban_cards', {})
+const backlogCol = r.columns.find((c: { id: string }) => c.id === 'backlog')
+assert.equal(backlogCol.cards.length, 2)
+assert.equal(backlogCol.cards[0].title, 'Task A')
+assert.equal(backlogCol.cards[0].priority, 'high')
+assert.equal(backlogCol.cards[1].title, 'Task B')
+
+// list_kanban_cards optional filters (id / columns / priority / labels)
+const boardForFilter = await service.loadKanban('Research')
+const taskAId = boardForFilter.cards.find((c) => c.title === 'Task A')!.id
+r = await call('list_kanban_cards', { id: taskAId })
+assert.equal(
+  r.columns.reduce((n: number, c: { cards: unknown[] }) => n + c.cards.length, 0),
+  1,
+  'id filter matches a single card'
+)
+r = await call('list_kanban_cards', { columns: 'Backlog, to-do' })
+assert.equal(r.columns.length, 2, 'column filter matches by id or title')
+assert.equal(
+  r.columns.reduce((n: number, c: { cards: unknown[] }) => n + c.cards.length, 0),
+  2
+)
+r = await call('list_kanban_cards', { columns: 'Nope' })
+assert.equal(r.columns.length, 0, 'unknown column name matches nothing')
+r = await call('list_kanban_cards', { priority: 'high' })
+assert.equal(
+  r.columns.reduce((n: number, c: { cards: unknown[] }) => n + c.cards.length, 0),
+  1
+)
+r = await call('list_kanban_cards', { priority: 'any' })
+assert.equal(
+  r.columns.reduce((n: number, c: { cards: unknown[] }) => n + c.cards.length, 0),
+  2,
+  '"any" does not filter'
+)
+r = await call('list_kanban_cards', { labels: 'demo' })
+assert.equal(
+  r.columns.reduce((n: number, c: { cards: unknown[] }) => n + c.cards.length, 0),
+  1
+)
+r = await call('list_kanban_cards', { labels: 'demo, other' })
+assert.equal(
+  r.columns.reduce((n: number, c: { cards: unknown[] }) => n + c.cards.length, 0),
+  0,
+  'labels combine with AND semantics'
+)
+// text filter (case-insensitive substring on title or description)
+await call('create_kanban_card', {
+  title: 'Deploy Docs',
+  description: 'Publish the strawberry guide'
+})
+r = await call('list_kanban_cards', { text: 'deploy' })
+assert.equal(
+  r.columns.reduce((n: number, c: { cards: unknown[] }) => n + c.cards.length, 0),
+  1,
+  'text filter matches the title case-insensitively'
+)
+r = await call('list_kanban_cards', { text: 'STRAWBERRY' })
+assert.equal(
+  r.columns.reduce((n: number, c: { cards: unknown[] }) => n + c.cards.length, 0),
+  1,
+  'text filter matches the description case-insensitively'
+)
+r = await call('list_kanban_cards', { text: 'zzz-no-match' })
+assert.equal(
+  r.columns.reduce((n: number, c: { cards: unknown[] }) => n + c.cards.length, 0),
+  0,
+  'text filter without a match lists nothing'
+)
+await call('delete_kanban_card', { title: 'Deploy Docs' })
+
+// id filter returns the full (untrimmed) description
+const longDesc = 'x'.repeat(200)
+await call('create_kanban_card', { title: 'Long Desc', description: longDesc })
+const longDescId = (await service.loadKanban('Research')).cards.find(
+  (c) => c.title === 'Long Desc'
+)!.id
+r = await call('list_kanban_cards', { id: longDescId })
+assert.equal(
+  r.columns.flatMap((c: { cards: { description?: string }[] }) => c.cards)[0].description,
+  longDesc,
+  'single-card lookup keeps the full description'
+)
+r = await call('list_kanban_cards', { columns: 'Backlog' })
+const longDescEntry = r.columns
+  .flatMap((c: { cards: { title: string; description?: string }[] }) => c.cards)
+  .find((c: { title: string }) => c.title === 'Long Desc')
+assert.ok(longDescEntry?.description?.endsWith('…'), 'grouped listing trims long descriptions')
+await call('delete_kanban_card', { title: 'Long Desc' })
+
+// secret attribute values are masked as ${K_SECRET:<id>|<key>} tokens; plain values stay readable
+await call('create_kanban_card', {
+  title: 'Secret Attr',
+  attributes: { apiKey: 'sk-secret-123', env: 'prod' },
+  secretAttributes: ['apiKey']
+})
+r = await call('list_kanban_cards', { columns: 'Backlog' })
+const secretEntry = r.columns
+  .flatMap((c: { cards: { title: string; attributes?: Record<string, string> }[] }) => c.cards)
+  .find((c: { title: string }) => c.title === 'Secret Attr')
+assert.ok(secretEntry, 'Secret Attr listed')
+assert.match(
+  secretEntry.attributes.apiKey,
+  /^\$\{K_SECRET:[0-9a-f]+\|apiKey\}$/,
+  'secret value masked as a kanban secret token'
+)
+assert.equal(secretEntry.attributes.env, 'prod', 'non-secret attribute value returned plainly')
+assert.ok(!JSON.stringify(r).includes('sk-secret-123'), 'raw secret value never in tool output')
+await call('delete_kanban_card', { title: 'Secret Attr' })
+
+// update_kanban_card (matched by title, case-insensitive; only provided fields)
+r = await call('update_kanban_card', { title: 'task a', newTitle: 'Task A2', storyPoints: 3 })
 assert.equal(r.ok, true)
-r = await call('list_todos', {})
-assert.equal(r.todos.length, 1)
-assert.equal(r.todos[0].done, true)
+assert.deepEqual(r.fields, ['title', 'storyPoints'])
+r = await call('update_kanban_card', { title: 'Task A2', priority: null })
+assert.equal(r.ok, true, 'null clears the priority')
+
+// move_kanban_card
+r = await call('move_kanban_card', { title: 'Task A2', column: 'Done' })
+assert.equal(r.ok, true)
+assert.equal(r.column, 'Done')
+
+// delete_kanban_card (confirmation required)
+r = await callWith('delete_kanban_card', { title: 'Task B' }, { confirm: async () => false })
+assert.equal(r.ok, false)
+assert.equal(r.cancelled, true)
+r = await call('delete_kanban_card', { title: 'Task B' })
+assert.equal(r.ok, true)
+r = await call('list_kanban_cards', {})
+assert.equal(
+  r.columns.reduce((n: number, c: { cards: unknown[] }) => n + c.cards.length, 0),
+  1,
+  'only Task A2 remains'
+)
 
 // target another project via arg
 await service.createProject('Other')

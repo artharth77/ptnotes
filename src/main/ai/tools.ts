@@ -1,8 +1,9 @@
 import type { PTNotesService } from '../service/PTNotesService'
+import { randomBytes } from 'crypto'
 import { duckDuckGoSearch } from './search/duckduckgo'
 import { fetchWebPage } from './search/webFetch'
 import { slugify } from '@shared/slug'
-import { secretToken } from '@shared/secrets'
+import { kanbanSecretToken, secretIdFromToken, secretToken } from '@shared/secrets'
 import { readFileAsText, parseWorkbookQuery } from './reader'
 import {
   applyDateRule,
@@ -14,6 +15,7 @@ import {
   findTaskByTitle,
   rollupScheduleTasks
 } from '@shared/planner'
+import { findCardByTitle, findColumnByName } from '@shared/kanban'
 import type {
   AskAnswer,
   AskQuestion,
@@ -55,6 +57,41 @@ export interface PTTool {
 function projectOf(args: Record<string, unknown>, ctx: ToolContext): string {
   const p = args.project
   return typeof p === 'string' && p.trim() ? p.trim() : ctx.activeProject
+}
+
+/** Optional comma-separated (or array) list argument → trimmed lowercase items; null when absent/empty. */
+function csvList(value: unknown): string[] | null {
+  const raw = Array.isArray(value)
+    ? value.map((v) => String(v))
+    : typeof value === 'string'
+      ? value.split(',')
+      : []
+  const list = raw.map((s) => s.trim().toLowerCase()).filter(Boolean)
+  return list.length > 0 ? list : null
+}
+
+/** Card attribute values for AI output. Secret values are masked as `${K_SECRET:<id>|<key>}`
+ * tokens (registered in the session so later tool calls can use the value without seeing it);
+ * when no session secret store is available the id is unregistered and the token is unusable. */
+function attributesForAi(
+  card: { attributes: Record<string, string>; secretAttributes: string[] },
+  ctx: ToolContext
+): Record<string, string> | undefined {
+  const entries = Object.entries(card.attributes)
+  if (entries.length === 0) return undefined
+  const out: Record<string, string> = {}
+  for (const [key, value] of entries) {
+    if (card.secretAttributes.includes(key)) {
+      let id: string | null = null
+      if (ctx.registerSecret) {
+        id = secretIdFromToken(ctx.registerSecret(value))
+      }
+      out[key] = kanbanSecretToken(id ?? randomBytes(6).toString('hex'), key)
+    } else {
+      out[key] = value
+    }
+  }
+  return out
 }
 
 function findNote(
@@ -772,98 +809,363 @@ export const tools: PTTool[] = [
     definition: {
       type: 'function',
       function: {
-        name: 'create_todos',
-        description: 'Add one or more todo tasks to the project todo list.',
+        name: 'list_kanban_cards',
+        description:
+          'List kanban cards in a project, grouped by column, with description (truncated), priority, due date, labels, assignee, story points and attributes. Secret attribute values are masked as ${K_SECRET:<id>|<key>} tokens — pass a token unchanged in a later tool call and the real value is substituted before execution; the value is never shown to you. All filter arguments are optional — omit them to list every card.',
         parameters: {
           type: 'object',
           properties: {
-            tasks: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'Task descriptions to add'
+            id: {
+              type: 'string',
+              description: 'Filter to a single card by its id (UUID). Omit to list all cards.'
+            },
+            columns: {
+              type: 'string',
+              description:
+                'Comma-separated column names or ids to include (e.g. "To Do, done"). Omit to include all columns.'
+            },
+            priority: {
+              type: 'string',
+              enum: ['any', 'low', 'medium', 'high'],
+              description: 'Filter by priority. "any" or omitted means no priority filter.'
+            },
+            labels: {
+              type: 'string',
+              description:
+                'Comma-separated labels; only cards carrying ALL of these labels are listed. Omit to not filter by labels.'
+            },
+            text: {
+              type: 'string',
+              description:
+                'Case-insensitive substring filter on the card title or description. Omit to not filter by text.'
             }
-          },
-          required: ['tasks']
+          }
         }
       }
     },
     async execute(args, ctx) {
       const project = projectOf(args, ctx)
-      const tasks = Array.isArray(args.tasks) ? args.tasks.map(String) : [String(args.tasks ?? '')]
-      const todos = await ctx.service.addTodos(project, tasks)
-      return JSON.stringify({ ok: true, project, added: tasks, total: todos.length })
-    }
-  },
-  {
-    definition: {
-      type: 'function',
-      function: {
-        name: 'toggle_todo',
-        description: 'Toggle the completion state of a todo task (matches by task text).',
-        parameters: {
-          type: 'object',
-          properties: {
-            text: { type: 'string', description: 'Exact text of the task to toggle' }
-          },
-          required: ['text']
-        }
-      }
-    },
-    async execute(args, ctx) {
-      const project = projectOf(args, ctx)
-      const text = String(args.text ?? '').toLowerCase()
-      const todos = await ctx.service.listTodos(project)
-      const found = todos.find((t) => t.text.toLowerCase() === text)
-      if (!found) return JSON.stringify({ ok: false, error: `Todo "${args.text}" not found` })
-      await ctx.service.toggleTodo(project, found.id)
-      return JSON.stringify({ ok: true, project, toggled: args.text, nowDone: !found.done })
-    }
-  },
-  {
-    definition: {
-      type: 'function',
-      function: {
-        name: 'delete_todo',
-        description: 'Delete a todo task from the project todo list (matches by task text).',
-        parameters: {
-          type: 'object',
-          properties: {
-            text: { type: 'string', description: 'Exact text of the task to delete' }
-          },
-          required: ['text']
-        }
-      }
-    },
-    async execute(args, ctx) {
-      const project = projectOf(args, ctx)
-      const text = String(args.text ?? '').toLowerCase()
-      const todos = await ctx.service.listTodos(project)
-      const found = todos.find((t) => t.text.toLowerCase() === text)
-      if (!found) return JSON.stringify({ ok: false, error: `Todo "${args.text}" not found` })
-      await ctx.service.deleteTodo(project, found.id)
-      return JSON.stringify({ ok: true, project, deleted: args.text })
-    }
-  },
-  {
-    definition: {
-      type: 'function',
-      function: {
-        name: 'list_todos',
-        description: 'List all todo tasks in a project with their completion status.',
-        parameters: {
-          type: 'object',
-          properties: {}
-        }
-      }
-    },
-    async execute(args, ctx) {
-      const project = projectOf(args, ctx)
-      const todos = await ctx.service.listTodos(project)
+      const board = await ctx.service.loadKanban(project)
+      const idFilter = typeof args.id === 'string' && args.id.trim() ? args.id.trim() : null
+      const columnFilter = csvList(args.columns)
+      const columnIds =
+        columnFilter === null
+          ? null
+          : board.columns
+              .filter(
+                (c) => columnFilter.includes(c.id) || columnFilter.includes(c.title.toLowerCase())
+              )
+              .map((c) => c.id)
+      const priorityFilter =
+        args.priority === 'low' || args.priority === 'medium' || args.priority === 'high'
+          ? args.priority
+          : null
+      const labelFilter = csvList(args.labels)
+      const textFilter =
+        typeof args.text === 'string' && args.text.trim() ? args.text.trim().toLowerCase() : null
       return JSON.stringify({
         ok: true,
         project,
-        todos: todos.map((t) => ({ text: t.text, done: t.done }))
+        columns: board.columns
+          .filter((c) => columnIds === null || columnIds.includes(c.id))
+          .map((c) => ({
+            id: c.id,
+            title: c.title,
+            cards: board.cards
+              .filter((card) => {
+                if (card.columnId !== c.id) return false
+                if (idFilter && card.id !== idFilter) return false
+                if (priorityFilter && card.priority !== priorityFilter) return false
+                if (labelFilter) {
+                  const cardLabels = card.labels.map((l) => l.toLowerCase())
+                  if (!labelFilter.every((l) => cardLabels.includes(l))) return false
+                }
+                if (
+                  textFilter &&
+                  !card.title.toLowerCase().includes(textFilter) &&
+                  !card.description?.toLowerCase().includes(textFilter)
+                ) {
+                  return false
+                }
+                return true
+              })
+              .map((card) => ({
+                title: card.title,
+                description: card.description
+                  ? !idFilter && card.description.length > 160
+                    ? `${card.description.slice(0, 160)}…`
+                    : card.description
+                  : undefined,
+                priority: card.priority,
+                dueDate: card.dueDate,
+                labels: card.labels,
+                assignee: card.assignee || undefined,
+                storyPoints: card.storyPoints,
+                attributes: attributesForAi(card, ctx)
+              }))
+          }))
       })
+    }
+  },
+  {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'create_kanban_card',
+        description:
+          'Create a NEW kanban card in a project (only for cards that do not exist yet — to change an existing card use update_kanban_card). Defaults to the first column of the board; use the column argument to place it in another column (matched by name). The card details/body go in the description parameter.',
+        parameters: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: 'Card title' },
+            description: {
+              type: 'string',
+              description:
+                'Card description / details (markdown). This is a dedicated field of the card — never pass it via attributes.'
+            },
+            column: {
+              type: 'string',
+              description: 'Column name to place the card in (default: the first column)'
+            },
+            priority: { type: 'string', enum: ['high', 'medium', 'low'] },
+            labels: { type: 'array', items: { type: 'string' } },
+            dueDate: { type: 'string', description: 'Due date as YYYY-MM-DD' },
+            storyPoints: { type: 'number' },
+            assignee: { type: 'string' },
+            attributes: {
+              type: 'object',
+              additionalProperties: { type: 'string' },
+              description:
+                'Structured key/value metadata only (e.g. {"env": "prod"}). Never use for the card description or other free text.'
+            },
+            secretAttributes: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Optional attribute keys (from attributes) that hold secrets'
+            }
+          },
+          required: ['title']
+        }
+      }
+    },
+    async execute(args, ctx) {
+      const project = projectOf(args, ctx)
+      try {
+        const board = await ctx.service.createKanbanCard(project, {
+          title: String(args.title ?? ''),
+          description: typeof args.description === 'string' ? args.description : undefined,
+          column: typeof args.column === 'string' ? args.column : undefined,
+          priority:
+            args.priority === 'high' || args.priority === 'medium' || args.priority === 'low'
+              ? args.priority
+              : null,
+          labels: Array.isArray(args.labels) ? args.labels.map(String) : undefined,
+          dueDate: typeof args.dueDate === 'string' ? args.dueDate : null,
+          storyPoints: typeof args.storyPoints === 'number' ? args.storyPoints : null,
+          assignee: typeof args.assignee === 'string' ? args.assignee : undefined,
+          attributes:
+            args.attributes && typeof args.attributes === 'object'
+              ? Object.fromEntries(
+                  Object.entries(args.attributes as Record<string, unknown>).map(([k, v]) => [
+                    k,
+                    String(v)
+                  ])
+                )
+              : undefined,
+          secretAttributes: Array.isArray(args.secretAttributes)
+            ? args.secretAttributes.map(String)
+            : undefined
+        })
+        const card = board.cards[board.cards.length - 1]
+        return JSON.stringify({ ok: true, project, card: card.title, total: board.cards.length })
+      } catch (err) {
+        return JSON.stringify({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err)
+        })
+      }
+    }
+  },
+  {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'update_kanban_card',
+        description:
+          'Update fields of an EXISTING kanban card (matched by title, case-insensitive) — do not create a new card. Only the provided fields are changed. The card details/body is the description parameter; never store free-form text in attributes (attributes are structured key/value metadata only). Set a field to null (or empty string for assignee) to clear it. To move a card between columns, use move_kanban_card.',
+        parameters: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: 'Current title of the card to update' },
+            newTitle: { type: 'string', description: 'New title (rename the card)' },
+            description: {
+              type: 'string',
+              description:
+                'Card description / details (markdown). This is a dedicated field of the card — never pass it via attributes.'
+            },
+            priority: {
+              type: ['string', 'null'],
+              enum: ['high', 'medium', 'low', null]
+            },
+            labels: { type: 'array', items: { type: 'string' } },
+            dueDate: { type: ['string', 'null'], description: 'YYYY-MM-DD, or null to clear' },
+            storyPoints: { type: ['number', 'null'] },
+            assignee: { type: ['string', 'null'] },
+            attributes: {
+              type: 'object',
+              additionalProperties: { type: 'string' },
+              description:
+                'Structured key/value metadata only (e.g. {"env": "prod"}). Never use for the card description or other free text.'
+            },
+            secretAttributes: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Attribute keys that hold secrets'
+            }
+          },
+          required: ['title']
+        }
+      }
+    },
+    async execute(args, ctx) {
+      const project = projectOf(args, ctx)
+      const board = await ctx.service.loadKanban(project)
+      const found = findCardByTitle(board, String(args.title ?? ''))
+      if (!found) {
+        return JSON.stringify({ ok: false, error: `Kanban card "${args.title}" not found` })
+      }
+      const patch: Record<string, unknown> = {}
+      if (typeof args.newTitle === 'string') patch.title = args.newTitle
+      if (typeof args.description === 'string') patch.description = args.description
+      if (args.priority !== undefined) {
+        if (args.priority === null) {
+          patch.priority = null
+        } else if (
+          args.priority === 'high' ||
+          args.priority === 'medium' ||
+          args.priority === 'low'
+        ) {
+          patch.priority = args.priority
+        } else {
+          return JSON.stringify({
+            ok: false,
+            error: 'priority must be "high", "medium", "low" or null'
+          })
+        }
+      }
+      if (Array.isArray(args.labels)) patch.labels = args.labels.map(String)
+      if ('dueDate' in args) patch.dueDate = typeof args.dueDate === 'string' ? args.dueDate : null
+      if ('storyPoints' in args) {
+        patch.storyPoints = typeof args.storyPoints === 'number' ? args.storyPoints : null
+      }
+      if ('assignee' in args) {
+        patch.assignee = typeof args.assignee === 'string' ? args.assignee : ''
+      }
+      if (args.attributes && typeof args.attributes === 'object') {
+        patch.attributes = Object.fromEntries(
+          Object.entries(args.attributes as Record<string, unknown>).map(([k, v]) => [k, String(v)])
+        )
+      }
+      if (args.secretAttributes !== undefined) {
+        patch.secretAttributes = Array.isArray(args.secretAttributes)
+          ? args.secretAttributes.map(String)
+          : []
+      }
+      try {
+        await ctx.service.updateKanbanCard(project, found.id, patch)
+        return JSON.stringify({
+          ok: true,
+          project,
+          updated: found.title,
+          fields: Object.keys(patch)
+        })
+      } catch (err) {
+        return JSON.stringify({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err)
+        })
+      }
+    }
+  },
+  {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'move_kanban_card',
+        description:
+          'Move an existing kanban card (matched by title, case-insensitive) to another column (matched by name).',
+        parameters: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: 'Title of the card to move' },
+            column: { type: 'string', description: 'Target column name' }
+          },
+          required: ['title', 'column']
+        }
+      }
+    },
+    async execute(args, ctx) {
+      const project = projectOf(args, ctx)
+      const board = await ctx.service.loadKanban(project)
+      const found = findCardByTitle(board, String(args.title ?? ''))
+      if (!found) {
+        return JSON.stringify({ ok: false, error: `Kanban card "${args.title}" not found` })
+      }
+      const column = findColumnByName(board, String(args.column ?? ''))
+      if (!column) {
+        return JSON.stringify({ ok: false, error: `Column "${args.column}" not found` })
+      }
+      try {
+        await ctx.service.moveKanbanCard(project, found.id, column.id)
+        return JSON.stringify({ ok: true, project, moved: found.title, column: column.title })
+      } catch (err) {
+        return JSON.stringify({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err)
+        })
+      }
+    }
+  },
+  {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'delete_kanban_card',
+        description:
+          'Delete an existing kanban card (matched by title, case-insensitive). Requires user confirmation before deleting.',
+        parameters: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: 'Title of the card to delete' }
+          },
+          required: ['title']
+        }
+      }
+    },
+    async execute(args, ctx) {
+      const project = projectOf(args, ctx)
+      const board = await ctx.service.loadKanban(project)
+      const found = findCardByTitle(board, String(args.title ?? ''))
+      if (!found) {
+        return JSON.stringify({ ok: false, error: `Kanban card "${args.title}" not found` })
+      }
+      const approved = await ctx.confirm({
+        project,
+        message: `Delete kanban card "${found.title}" from "${project}"?`,
+        items: [found.title]
+      })
+      if (!approved) {
+        return JSON.stringify({ ok: false, cancelled: true, project, card: found.title })
+      }
+      try {
+        await ctx.service.deleteKanbanCard(project, found.id)
+        return JSON.stringify({ ok: true, project, deleted: found.title })
+      } catch (err) {
+        return JSON.stringify({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err)
+        })
+      }
     }
   },
   {

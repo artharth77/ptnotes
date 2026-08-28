@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import { slugify } from '@shared/slug'
 import { MdiIcon } from './MdiIcon'
-import { NOTE_LINK_ICON, PLAN_LINK_ICON, SKILL_LINK_ICON } from './contentIcons'
+import { KANBAN_LINK_ICON, NOTE_LINK_ICON, PLAN_LINK_ICON, SKILL_LINK_ICON } from './contentIcons'
 
 interface MarkdownContentProps {
   content: string
@@ -12,6 +12,7 @@ interface MarkdownContentProps {
   onOpenNote?: (noteName: string) => void
   onOpenSkill?: (skillName: string) => void
   onOpenPlan?: (planName: string) => void
+  onOpenKanban?: (cardTitle: string) => void
 }
 
 function internalNameFromHref(href: string, prefix: string): string {
@@ -31,6 +32,7 @@ function normalizeInternalLinks(md: string): string {
     )
     .replace(/\[([^\]]*)\]\(\s*(note:[^()]*?)\s*\)/g, (_m, text, dest) => `[${text}](<${dest}>)`)
     .replace(/\[([^\]]*)\]\(\s*(skill:[^()]*?)\s*\)/g, (_m, text, dest) => `[${text}](<${dest}>)`)
+    .replace(/\[([^\]]*)\]\(\s*(kanban:[^()]*?)\s*\)/g, (_m, text, dest) => `[${text}](<${dest}>)`)
     .replace(/\[([^\]]*)\]\(\s*(plan:[^()]*?)\s*\)/g, (_m, text, dest) => `[${text}](<${dest}>)`)
     .replace(
       /\[([^\]]*)\]\(\s*(schedule:[^()]*?)\s*\)/g,
@@ -43,7 +45,8 @@ export const MarkdownContent = memo(function MarkdownContent({
   enableImageZoom = false,
   onOpenNote,
   onOpenSkill,
-  onOpenPlan
+  onOpenPlan,
+  onOpenKanban
 }: MarkdownContentProps): React.JSX.Element {
   const [viewer, setViewer] = useState<{ src: string; alt: string } | null>(null)
   const [closing, setClosing] = useState(false)
@@ -83,6 +86,7 @@ export const MarkdownContent = memo(function MarkdownContent({
             url.startsWith('skill:') ||
             url.startsWith('plan:') ||
             url.startsWith('schedule:') ||
+            url.startsWith('kanban:') ||
             url.startsWith('ptfile:')
           )
             return url
@@ -157,6 +161,25 @@ export const MarkdownContent = memo(function MarkdownContent({
                 >
                   <span className="chat-note-link-icon">
                     <MdiIcon path={PLAN_LINK_ICON} size={16} />
+                  </span>
+                  {children}
+                </a>
+              )
+            }
+            if (href?.startsWith('kanban:')) {
+              const cardTitle = internalNameFromHref(href, 'kanban:')
+              return (
+                <a
+                  href="#"
+                  className="chat-note-link"
+                  title={cardTitle}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    onOpenKanban?.(cardTitle)
+                  }}
+                >
+                  <span className="chat-note-link-icon">
+                    <MdiIcon path={KANBAN_LINK_ICON} size={16} />
                   </span>
                   {children}
                 </a>

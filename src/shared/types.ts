@@ -13,13 +13,7 @@ export interface NoteMeta {
   updatedAt: number
 }
 
-export interface Todo {
-  id: string
-  text: string
-  done: boolean
-}
-
-export type Tab = 'notes' | 'todo' | 'modules' | 'planner'
+export type Tab = 'notes' | 'kanban' | 'modules' | 'planner'
 
 export interface AIProviderConfig {
   baseUrl: string
@@ -403,3 +397,14 @@ export type {
   ScheduleStatus,
   ScheduleTask
 } from './planner'
+
+export type {
+  KanbanArchive,
+  KanbanArchiveMove,
+  KanbanBoard,
+  KanbanCard,
+  KanbanCardPatch,
+  KanbanColumn,
+  KanbanPriority,
+  NewKanbanCardInput
+} from './kanban'

@@ -301,7 +301,7 @@ assert.equal(
   await service.projectFilePath('Test', 'my-report.pdf'),
   `${ROOT}/Test/files/my-report.pdf`
 )
-assert.equal(await service.projectFilePath('Test', '../TODO.md'), null, 'rejects path traversal')
+assert.equal(await service.projectFilePath('Test', '../board.json'), null, 'rejects path traversal')
 
 FAKE_TEXT = 'Hello PDF content'
 FAKE_PAGES = 2

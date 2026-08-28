@@ -72,31 +72,3 @@ export function registerChatIpc(service: PTNotesService): void {
     ): Promise<AiTraceFile | null> => service.readChatTrace(project, sessionId)
   )
 }
-
-export function registerTodoIpc(service: PTNotesService): void {
-  ipcMain.handle('todos:list', async (_e: IpcMainInvokeEvent, project: string) =>
-    service.listTodos(project)
-  )
-  ipcMain.handle('todos:add', async (_e: IpcMainInvokeEvent, project: string, texts: string[]) =>
-    service.addTodos(project, texts)
-  )
-  ipcMain.handle('todos:toggle', async (_e: IpcMainInvokeEvent, project: string, id: string) =>
-    service.toggleTodo(project, id)
-  )
-  ipcMain.handle('todos:delete', async (_e: IpcMainInvokeEvent, project: string, id: string) =>
-    service.deleteTodo(project, id)
-  )
-  ipcMain.handle('todos:deleteCompleted', async (_e: IpcMainInvokeEvent, project: string) =>
-    service.deleteCompletedTodos(project)
-  )
-  ipcMain.handle(
-    'todos:update',
-    async (_e: IpcMainInvokeEvent, project: string, id: string, text: string) =>
-      service.updateTodo(project, id, text)
-  )
-  ipcMain.handle(
-    'todos:reorder',
-    async (_e: IpcMainInvokeEvent, project: string, orderedIds: string[]) =>
-      service.reorderTodos(project, orderedIds)
-  )
-}

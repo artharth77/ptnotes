@@ -6,7 +6,7 @@ IPC, AI/chat features, module rendering, or the UI.
 
 ## Project
 
-PTNotes is a desktop app (Electron) for markdown notes, todo task lists, project schedules/planner, and an AI chat assistant, organized by **project** — each project is a folder on disk.
+PTNotes is a desktop app (Electron) for markdown notes, kanban task boards, project schedules/planner, and an AI chat assistant, organized by **project** — each project is a folder on disk.
 
 ## Stack
 
@@ -49,7 +49,7 @@ Run `npm run typecheck` and `npm run lint` after any change.
 
 - Follow existing patterns in neighboring files (store actions, IPC handler shapes, component style).
 - Project names and note/chat ids are slugified and validated before building file paths (see `validateNoteId` / `chatDir` in `PTNotesService`). Planner schedule ids use `validateScheduleId` (same guard).
-- Todo storage is a markdown checklist file (`TODO.md`, `- [ ]` / `- [x]`); the line content derives the id.
+- Kanban storage is a JSON board file (`kanban/board.json`): columns + a flat `cards[]` (array order = card order); card ids are UUIDs. A legacy `TODO.md` migrates to the board on first load (open → To Do, checked → Done) and is deleted.
 - Planner schedules are JSON in `<project>/planner/<slug>.json` with a shared `calendar.json` working-day config. The pure date/rollup engine lives in `src/shared/planner.ts` and must stay shared (main + renderer + tests) — do not duplicate the math.
 - Planner UI: the store's `scheduleContent` is the single source of truth for the editor; parents' plan fields are rolled up from children (read-only in the UI), `On Hold` is manual-only, and actual dates are never computed. The Gantt view (`GanttChart.tsx`) is a second rendering of the same tree: the view choice is component-local (session-only, resets on schedule change), and all Gantt edits must route through `editTask`/`commit` like the table view — start-edge drags keep `planEnd` fixed and recompute duration (deliberately not `applyDateRule`).
 - Planner undo/redo history lives in the store as per-schedule stacks (`plannerUndo`/`plannerRedo`). Text/number field edits are captured on focus and recorded as a single undo step when the field loses focus (blur); discrete actions (add/delete/move/status/date/columns) record immediately in `commit()`. Keyboard interception (`before-input-event`) is gated by a main-process `planner:set-edit-active` flag so it never hijacks the markdown/chat/native undo.

@@ -5,7 +5,8 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import splashUrl from '../../resources/splash.html?asset'
 import { PTNotesService } from './service/PTNotesService'
-import { registerProjectIpc, registerNoteIpc, registerTodoIpc, registerChatIpc } from './ipc'
+import { registerProjectIpc, registerNoteIpc, registerChatIpc } from './ipc'
+import { registerKanbanIpc } from './ipc/kanban'
 import { registerPlannerIpc } from './ipc/planner'
 import { registerAiIpc, createSessionRegistry } from './ipc/ai'
 import { registerFilesIpc } from './ipc/files'
@@ -326,7 +327,7 @@ app.whenReady().then(async () => {
   })
   registerProjectIpc(service)
   registerNoteIpc(service)
-  registerTodoIpc(service)
+  registerKanbanIpc(service)
   registerChatIpc(service)
   registerPlannerIpc(service)
   registerAiIpc(registry, configStore, service)

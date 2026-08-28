@@ -5,6 +5,8 @@ import type {
   ChatMessage,
   ChatSessionMeta,
   ConfirmRequest,
+  KanbanArchive,
+  KanbanBoard,
   ModuleEvent,
   ModuleRun,
   NoteMeta,
@@ -13,9 +15,18 @@ import type {
   Schedule,
   ScheduleMeta,
   Tab,
-  Todo,
   ToolCallInfo
 } from '@shared/types'
+
+function readKanbanCollapsed(project: string): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(`ptnotes:kanban-collapsed:${project}`)
+    const data = raw ? (JSON.parse(raw) as unknown) : {}
+    return data && typeof data === 'object' ? (data as Record<string, boolean>) : {}
+  } catch {
+    return {}
+  }
+}
 
 interface AppState {
   projects: Project[]
@@ -23,7 +34,14 @@ interface AppState {
   notes: NoteMeta[]
   activeNoteId: string | null
   noteContent: string
-  todos: Todo[]
+  kanban: KanbanBoard | null
+  kanbanArchive: KanbanArchive | null
+  kanbanListView: 'active' | 'archived'
+  activeKanbanCardId: string | null
+  kanbanEditingId: string | null
+  kanbanViewingId: string | null
+  kanbanCreatingColumnId: string | null
+  kanbanCollapsed: Record<string, boolean>
   projectFiles: string[]
   schedules: ScheduleMeta[]
   activeScheduleId: string | null
@@ -65,7 +83,20 @@ interface AppState {
   changeRoot: (newRoot: string) => Promise<void>
   selectProject: (name: string) => Promise<void>
   refreshNotes: () => Promise<void>
-  refreshTodos: () => Promise<void>
+  refreshKanban: () => Promise<void>
+  saveKanban: (board: KanbanBoard) => Promise<void>
+  setKanbanListView: (view: 'active' | 'archived') => void
+  archiveKanbanCard: (cardId: string) => Promise<void>
+  restoreKanbanCard: (cardId: string) => Promise<void>
+  deleteArchivedKanbanCard: (cardId: string) => Promise<void>
+  setActiveKanbanCard: (id: string | null) => void
+  openKanbanEditor: (id: string) => void
+  closeKanbanEditor: () => void
+  openKanbanViewer: (id: string) => void
+  closeKanbanViewer: () => void
+  openKanbanCreate: (columnId: string) => void
+  closeKanbanCreate: () => void
+  toggleKanbanColumn: (columnId: string) => void
   refreshFiles: () => Promise<void>
   refreshSchedules: () => Promise<void>
   loadCalendar: () => Promise<void>
@@ -127,7 +158,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   notes: [],
   activeNoteId: null,
   noteContent: '',
-  todos: [],
+  kanban: null,
+  kanbanArchive: null,
+  kanbanListView: 'active',
+  activeKanbanCardId: null,
+  kanbanEditingId: null,
+  kanbanViewingId: null,
+  kanbanCreatingColumnId: null,
+  kanbanCollapsed: {},
   projectFiles: [],
   schedules: [],
   activeScheduleId: null,
@@ -224,7 +262,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (next) {
         await get().selectProject(next)
       } else {
-        set({ activeProject: null, notes: [], todos: [], activeNoteId: null, noteContent: '' })
+        set({
+          activeProject: null,
+          notes: [],
+          kanban: null,
+          kanbanArchive: null,
+          kanbanListView: 'active',
+          activeKanbanCardId: null,
+          kanbanEditingId: null,
+          kanbanViewingId: null,
+          kanbanCreatingColumnId: null,
+          kanbanCollapsed: {},
+          activeNoteId: null,
+          noteContent: ''
+        })
       }
     }
   },
@@ -246,12 +297,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       noteContent: '',
       activeScheduleId: null,
       scheduleContent: null,
+      activeKanbanCardId: null,
+      kanbanEditingId: null,
+      kanbanViewingId: null,
+      kanbanCreatingColumnId: null,
+      kanbanListView: 'active',
       loading: true,
       moduleHistoryRunId: null
     })
     await Promise.all([
       get().refreshNotes(),
-      get().refreshTodos(),
+      get().refreshKanban(),
       get().refreshFiles(),
       get().refreshSchedules(),
       get().loadCalendar(),
@@ -277,11 +333,106 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ notes })
   },
 
-  async refreshTodos() {
+  async refreshKanban() {
     const project = get().activeProject
-    if (!project) return set({ todos: [] })
-    const todos = await window.ptnotes.todos.list(project)
-    set({ todos })
+    if (!project) return set({ kanban: null, kanbanArchive: null })
+    const [kanban, kanbanArchive] = await Promise.all([
+      window.ptnotes.kanban.load(project),
+      window.ptnotes.kanban.loadArchive(project)
+    ])
+    set({ kanban, kanbanArchive, kanbanCollapsed: readKanbanCollapsed(project) })
+  },
+
+  async saveKanban(board) {
+    const project = get().activeProject
+    if (!project) return
+    set({ kanban: board })
+    try {
+      await window.ptnotes.kanban.save(project, board)
+    } catch {
+      await get().refreshKanban()
+    }
+  },
+
+  setKanbanListView(kanbanListView) {
+    set({ kanbanListView })
+  },
+
+  async archiveKanbanCard(cardId) {
+    const project = get().activeProject
+    if (!project) return
+    try {
+      const { board, archive } = await window.ptnotes.kanban.archiveCard(project, cardId)
+      set({
+        kanban: board,
+        kanbanArchive: archive,
+        activeKanbanCardId: null,
+        kanbanEditingId: null
+      })
+    } catch {
+      await get().refreshKanban()
+    }
+  },
+
+  async restoreKanbanCard(cardId) {
+    const project = get().activeProject
+    if (!project) return
+    try {
+      const { board, archive } = await window.ptnotes.kanban.restoreCard(project, cardId)
+      set({ kanban: board, kanbanArchive: archive, kanbanViewingId: null })
+    } catch {
+      await get().refreshKanban()
+    }
+  },
+
+  async deleteArchivedKanbanCard(cardId) {
+    const project = get().activeProject
+    if (!project) return
+    try {
+      const archive = await window.ptnotes.kanban.deleteArchivedCard(project, cardId)
+      set({ kanbanArchive: archive, kanbanViewingId: null })
+    } catch {
+      await get().refreshKanban()
+    }
+  },
+
+  setActiveKanbanCard(id) {
+    set({ activeKanbanCardId: id })
+  },
+
+  openKanbanEditor(id) {
+    set({ kanbanEditingId: id, activeKanbanCardId: id })
+  },
+
+  closeKanbanEditor() {
+    set({ kanbanEditingId: null })
+  },
+
+  openKanbanViewer(id) {
+    set({ kanbanViewingId: id, kanbanEditingId: null, kanbanCreatingColumnId: null })
+  },
+
+  closeKanbanViewer() {
+    set({ kanbanViewingId: null })
+  },
+
+  openKanbanCreate(columnId) {
+    set({ kanbanCreatingColumnId: columnId, kanbanEditingId: null })
+  },
+
+  closeKanbanCreate() {
+    set({ kanbanCreatingColumnId: null })
+  },
+
+  toggleKanbanColumn(columnId) {
+    const project = get().activeProject
+    if (!project) return
+    const kanbanCollapsed = {
+      ...get().kanbanCollapsed,
+      [columnId]: !get().kanbanCollapsed[columnId]
+    }
+    localStorage.setItem(`ptnotes:kanban-collapsed:${project}`, JSON.stringify(kanbanCollapsed))
+    set({ kanbanCollapsed })
   },
 
   async refreshFiles() {

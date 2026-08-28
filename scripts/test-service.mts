@@ -71,63 +71,132 @@ await service.deleteNote('Work', 'บันทึกใหม่')
 notes = await service.listNotes('Work')
 assert.equal(notes.length, 1)
 
-// Todos
-let todos = await service.listTodos('Work')
-assert.equal(todos.length, 0)
+// Kanban
+let board = await service.loadKanban('Work')
+assert.equal(board.cards.length, 0)
+assert.equal(board.columns.length, 4, 'default columns')
 
-todos = await service.addTodos('Work', ['Buy milk', 'Pay rent', 'Buy milk'])
-assert.equal(todos.length, 3)
-assert.equal(new Set(todos.map((t) => t.id)).size, 3, 'duplicate ids are unique via occurrence')
+board = await service.createKanbanCard('Work', { title: 'Buy milk', priority: 'high' })
+assert.equal(board.cards.length, 1)
+assert.equal(board.cards[0].columnId, 'backlog', 'defaults to the first column')
+assert.equal(board.cards[0].priority, 'high')
 
-const firstMilk = todos.find((t) => t.text === 'Buy milk')!
-await service.toggleTodo('Work', firstMilk.id)
-todos = await service.listTodos('Work')
+board = await service.createKanbanCard('Work', { title: 'Pay rent', column: 'Backlog' })
+assert.equal(board.cards[1].columnId, 'backlog', 'column matched by title')
+board = await service.createKanbanCard('Work', { title: 'Buy milk' })
+assert.equal(board.cards.length, 3)
+assert.equal(new Set(board.cards.map((c) => c.id)).size, 3, 'unique card ids')
+
+const firstMilk = board.cards.find((c) => c.title === 'Buy milk')!
+await service.updateKanbanCard('Work', firstMilk.id, { priority: 'low', storyPoints: 3 })
+board = await service.loadKanban('Work')
+const milkCards = board.cards.filter((c) => c.title === 'Buy milk')
+assert.equal(milkCards.length, 2)
+assert.equal(milkCards.filter((c) => c.priority === 'low').length, 1, 'only first milk updated')
+assert.equal(milkCards.filter((c) => c.storyPoints === 3).length, 1)
+
+await service.deleteKanbanCard('Work', firstMilk.id)
+board = await service.loadKanban('Work')
+assert.equal(board.cards.length, 2)
+assert.equal(board.cards.filter((c) => c.title === 'Buy milk').length, 1)
+
+// Move a card to another column
+const rentId = board.cards.find((c) => c.title === 'Pay rent')!.id
+board = await service.moveKanbanCard('Work', rentId, 'in-progress')
+assert.equal(board.cards.find((c) => c.id === rentId)!.columnId, 'in-progress')
+
+// board.json is persisted as valid JSON
+const rawBoard = await fs.readFile(join(ROOT, 'Work', 'kanban', 'board.json'), 'utf8')
+const parsedBoard = JSON.parse(rawBoard)
+assert.equal(parsedBoard.version, 1)
+assert.match(rawBoard, /Pay rent/)
+
+// Kanban archive: archived cards move to a separate kanban/archive.json (no columns)
+const archive = await service.loadKanbanArchive('Work')
+assert.deepEqual(archive, { version: 1, cards: [] }, 'archive starts empty')
+await assert.rejects(service.archiveKanbanCard('Work', 'nope'), /not found/)
+
+const archived = await service.archiveKanbanCard('Work', rentId)
 assert.equal(
-  todos.filter((t) => t.text === 'Buy milk' && t.done).length,
-  1,
-  'only first milk toggled'
+  archived.board.cards.some((c) => c.id === rentId),
+  false,
+  'card left the board'
 )
-assert.equal(todos.filter((t) => t.text === 'Buy milk' && !t.done).length, 1)
-
-await service.deleteTodo('Work', firstMilk.id)
-todos = await service.listTodos('Work')
-assert.equal(todos.length, 2)
-assert.equal(todos.filter((t) => t.text === 'Buy milk').length, 1)
-
-// Reorder todos
-const rentId = todos.find((t) => t.text === 'Pay rent')!.id
-const milkId = todos.find((t) => t.text === 'Buy milk')!.id
-todos = await service.reorderTodos('Work', [milkId, rentId])
+assert.equal(archived.archive.cards.length, 1)
+assert.equal(archived.archive.cards[0].id, rentId)
+assert.equal(archived.archive.cards[0].columnId, 'in-progress', 'archive keeps the column id')
 assert.deepEqual(
-  todos.map((t) => t.text),
-  ['Buy milk', 'Pay rent'],
-  'reordered by provided ids'
+  await service.loadKanbanArchive('Work'),
+  archived.archive,
+  'archive persisted to disk'
 )
-const rawAfterReorder = await fs.readFile(join(ROOT, 'Work', 'TODO.md'), 'utf8')
-assert.ok(
-  rawAfterReorder.indexOf('- [ ] Buy milk') < rawAfterReorder.indexOf('- [ ] Pay rent'),
-  'TODO.md line order updated'
+await assert.rejects(
+  service.archiveKanbanCard('Work', rentId),
+  /not found/,
+  'an archived card is no longer on the board'
 )
 
-// TODO.md stays valid markdown
-const raw = await fs.readFile(join(ROOT, 'Work', 'TODO.md'), 'utf8')
-assert.match(raw, /^# Todo/m)
-assert.match(raw, /- \[ \] Pay rent/)
-assert.match(raw, /- \[ \] Buy milk/)
+const rawArchive = await fs.readFile(join(ROOT, 'Work', 'kanban', 'archive.json'), 'utf8')
+const parsedArchive = JSON.parse(rawArchive)
+assert.equal(parsedArchive.version, 1)
+assert.ok(!('columns' in parsedArchive), 'archive file defines no columns')
+assert.match(rawArchive, /Pay rent/)
 
-// Delete completed tasks
-todos = await service.addTodos('Work', ['Ship release', 'Write docs'])
-const ship = todos.find((t) => t.text === 'Ship release')!
-const payRent = todos.find((t) => t.text === 'Pay rent')!
-await service.toggleTodo('Work', ship.id)
-await service.toggleTodo('Work', payRent.id)
-todos = await service.listTodos('Work')
-assert.equal(todos.filter((t) => t.done).length, 2)
-todos = await service.deleteCompletedTodos('Work')
-assert.equal(todos.length, 2, 'completed tasks removed')
-assert.ok(!todos.some((t) => t.done), 'no completed tasks remain')
-assert.ok(todos.some((t) => t.text === 'Buy milk'))
-assert.ok(todos.some((t) => t.text === 'Write docs'))
+// restore: back to the original column when it still exists
+const back = await service.restoreKanbanCard('Work', rentId)
+assert.equal(back.archive.cards.length, 0)
+assert.equal(back.board.cards.find((c) => c.id === rentId)?.columnId, 'in-progress')
+await assert.rejects(service.restoreKanbanCard('Work', rentId), /not found/, 'cannot restore twice')
+
+// restore falls back to the first column when the original column no longer exists
+await service.archiveKanbanCard('Work', rentId)
+board = await service.loadKanban('Work')
+await service.saveKanban('Work', {
+  ...board,
+  columns: board.columns.filter((c) => c.id !== 'in-progress')
+})
+const fallback = await service.restoreKanbanCard('Work', rentId)
+assert.equal(
+  fallback.board.cards.find((c) => c.id === rentId)?.columnId,
+  'backlog',
+  'restore falls back to the first column'
+)
+
+// delete an archived card permanently
+await service.archiveKanbanCard('Work', rentId)
+await assert.rejects(service.deleteArchivedKanbanCard('Work', 'nope'), /not found/)
+const afterArchiveDelete = await service.deleteArchivedKanbanCard('Work', rentId)
+assert.equal(afterArchiveDelete.cards.length, 0)
+board = await service.loadKanban('Work')
+assert.equal(
+  board.cards.some((c) => c.id === rentId),
+  false,
+  'board untouched by archive delete'
+)
+
+// Legacy TODO.md → kanban migration (simulate a pre-kanban project: no board.json)
+await service.createProject('Migrate')
+await fs.rm(join(ROOT, 'Migrate', 'kanban', 'board.json'), { force: true })
+await fs.writeFile(
+  join(ROOT, 'Migrate', 'TODO.md'),
+  '# Todo\n\n- [ ] Legacy open\n- [x] Legacy done\n- not a task\n',
+  'utf8'
+)
+board = await service.loadKanban('Migrate')
+assert.equal(board.cards.length, 2, 'checklist lines migrated')
+assert.equal(board.cards.filter((c) => c.columnId === 'to-do').length, 1, 'open → To Do')
+assert.equal(board.cards.filter((c) => c.columnId === 'done').length, 1, 'done → Done')
+assert.equal(
+  await fs
+    .access(join(ROOT, 'Migrate', 'TODO.md'))
+    .then(() => true)
+    .catch(() => false),
+  false,
+  'TODO.md removed after migration'
+)
+board = await service.loadKanban('Migrate')
+assert.equal(board.cards.length, 2, 'no double migration')
+await service.deleteProject('Migrate')
 
 // Rename project
 await service.renameProject('Work', 'Office')
