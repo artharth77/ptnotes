@@ -403,8 +403,12 @@ export type {
   KanbanArchiveMove,
   KanbanBoard,
   KanbanCard,
+  KanbanCardComment,
   KanbanCardPatch,
   KanbanColumn,
+  KanbanColumnPatch,
+  KanbanCommentInput,
   KanbanPriority,
-  NewKanbanCardInput
+  NewKanbanCardInput,
+  NewKanbanColumnInput
 } from './kanban'

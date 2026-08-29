@@ -20,7 +20,6 @@ import {
   isKanbanFilterActive,
   isOverdue,
   matchesKanbanFilter,
-  type KanbanBoard,
   type KanbanCard,
   type KanbanCardFilter,
   type KanbanPriority
@@ -38,7 +37,9 @@ export function KanbanBoard(): React.JSX.Element {
   const setActiveKanbanCard = useAppStore((s) => s.setActiveKanbanCard)
   const openKanbanEditor = useAppStore((s) => s.openKanbanEditor)
   const openKanbanCreate = useAppStore((s) => s.openKanbanCreate)
-  const saveKanban = useAppStore((s) => s.saveKanban)
+  const moveKanbanCard = useAppStore((s) => s.moveKanbanCard)
+  const moveKanbanColumn = useAppStore((s) => s.moveKanbanColumn)
+  const deleteKanbanCard = useAppStore((s) => s.deleteKanbanCard)
   const archiveKanbanCard = useAppStore((s) => s.archiveKanbanCard)
 
   const [dragId, setDragId] = useState<string | null>(null)
@@ -68,32 +69,18 @@ export function KanbanBoard(): React.JSX.Element {
     )
   }
 
-  function commit(board: KanbanBoard): void {
-    void saveKanban(board)
-  }
-
   function moveCard(cardId: string, toColumnId: string, beforeCardId: string | null): void {
     if (!kanban) return
     const card = kanban.cards.find((c) => c.id === cardId)
     if (!card) return
-    const rest = kanban.cards.filter((c) => c.id !== cardId)
-    const moved = { ...card, columnId: toColumnId }
+    if (!kanban.columns.some((c) => c.id === toColumnId)) return
+    let index: number | undefined
     if (beforeCardId) {
-      const idx = rest.findIndex((c) => c.id === beforeCardId)
-      if (idx === -1) rest.push(moved)
-      else rest.splice(idx, 0, moved)
-    } else {
-      let lastIdx = -1
-      for (let i = rest.length - 1; i >= 0; i--) {
-        if (rest[i]!.columnId === toColumnId) {
-          lastIdx = i
-          break
-        }
-      }
-      if (lastIdx === -1) rest.push(moved)
-      else rest.splice(lastIdx + 1, 0, moved)
+      const inColumn = kanban.cards.filter((c) => c.columnId === toColumnId && c.id !== cardId)
+      const idx = inColumn.findIndex((c) => c.id === beforeCardId)
+      index = idx === -1 ? inColumn.length : idx
     }
-    commit({ ...kanban, cards: rest })
+    void moveKanbanCard(cardId, toColumnId, index)
   }
 
   function moveColumn(colId: string, overColId: string): void {
@@ -101,10 +88,7 @@ export function KanbanBoard(): React.JSX.Element {
     const from = kanban.columns.findIndex((c) => c.id === colId)
     const over = kanban.columns.findIndex((c) => c.id === overColId)
     if (from === -1 || over === -1) return
-    const columns = [...kanban.columns]
-    const [moved] = columns.splice(from, 1)
-    columns.splice(from < over ? over - 1 : over, 0, moved!)
-    commit({ ...kanban, columns })
+    void moveKanbanColumn(colId, from < over ? over - 1 : over)
   }
 
   function endDrag(): void {
@@ -128,8 +112,7 @@ export function KanbanBoard(): React.JSX.Element {
         next.delete(id)
         return next
       })
-      const latest = useAppStore.getState().kanban
-      if (latest) commit({ ...latest, cards: latest.cards.filter((c) => c.id !== id) })
+      void deleteKanbanCard(id)
     }, 200)
   }
 

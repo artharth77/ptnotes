@@ -13,14 +13,7 @@ import { useAppStore } from '../store/useAppStore'
 import { Modal } from './Modal'
 import { MdiIcon } from './MdiIcon'
 import { MarkdownContent } from './MarkdownContent'
-import {
-  newCardId,
-  newCommentId,
-  type KanbanBoard,
-  type KanbanCard,
-  type KanbanCardComment,
-  type KanbanPriority
-} from '@shared/kanban'
+import { newCommentId, type KanbanCardComment, type KanbanPriority } from '@shared/kanban'
 import { slugify } from '@shared/slug'
 
 interface AttrDraft {
@@ -41,6 +34,10 @@ function withoutComment(comments: KanbanCardComment[], id: string): KanbanCardCo
   return comments.filter((c) => c.id !== id)
 }
 
+function makeComment(text: string): KanbanCardComment {
+  return { id: newCommentId(), comment: text, commentBy: 'you', timestamp: Date.now() }
+}
+
 /** Normalize a typed attribute key to dash format (e.g. "My API Key" → "my-api-key").
  * Keeps a trailing separator while typing so the next word stays separated; invalid input clears. */
 function slugKeyInput(value: string): string {
@@ -55,7 +52,12 @@ export function KanbanCardModal(): React.JSX.Element {
   const editingId = useAppStore((s) => s.kanbanEditingId)
   const viewingId = useAppStore((s) => s.kanbanViewingId)
   const creatingColumnId = useAppStore((s) => s.kanbanCreatingColumnId)
-  const saveKanban = useAppStore((s) => s.saveKanban)
+  const createKanbanCard = useAppStore((s) => s.createKanbanCard)
+  const updateKanbanCard = useAppStore((s) => s.updateKanbanCard)
+  const deleteKanbanCard = useAppStore((s) => s.deleteKanbanCard)
+  const addKanbanComment = useAppStore((s) => s.addKanbanComment)
+  const updateKanbanComment = useAppStore((s) => s.updateKanbanComment)
+  const deleteKanbanComment = useAppStore((s) => s.deleteKanbanComment)
   const closeKanbanEditor = useAppStore((s) => s.closeKanbanEditor)
   const closeKanbanViewer = useAppStore((s) => s.closeKanbanViewer)
   const closeKanbanCreate = useAppStore((s) => s.closeKanbanCreate)
@@ -131,35 +133,35 @@ export function KanbanCardModal(): React.JSX.Element {
     setLabels((prev) => prev.filter((l) => l !== value))
   }
 
-  function persistComments(next: KanbanCardComment[]): void {
-    if (!kanban || !card) return
-    void saveKanban({
-      ...kanban,
-      cards: kanban.cards.map((c) => (c.id === card.id ? { ...c, comments: next } : c))
-    })
+  function syncCommentsFromStore(): void {
+    if (!card) return
+    const latest = useAppStore.getState().kanban?.cards.find((c) => c.id === card.id)
+    if (latest) setComments(latest.comments)
   }
 
   function addComment(): void {
     const text = newComment.trim()
     if (!text) return
-    const next: KanbanCardComment = {
-      id: newCommentId(),
-      comment: text,
-      commentBy: 'you',
-      timestamp: Date.now()
-    }
-    const nextComments = [...comments, next]
-    setComments(nextComments)
     setNewComment('')
-    persistComments(nextComments)
+    if (card) {
+      void addKanbanComment(card.id, text).then(syncCommentsFromStore)
+      return
+    }
+    setComments((prev) => [...prev, makeComment(text)])
   }
 
   function saveCommentEdit(id: string): void {
     const text = commentDraft.trim()
     if (!text) return
+    if (card) {
+      setComments((prev) => withEditedComment(prev, id, text))
+      setEditingCommentId(null)
+      setCommentDraft('')
+      void updateKanbanComment(card.id, id, text).then(syncCommentsFromStore)
+      return
+    }
     const nextComments = withEditedComment(comments, id, text)
     setComments(nextComments)
-    persistComments(nextComments)
     setEditingCommentId(null)
     setCommentDraft('')
   }
@@ -170,9 +172,15 @@ export function KanbanCardModal(): React.JSX.Element {
   }
 
   function deleteComment(id: string): void {
+    if (card) {
+      setComments((prev) => withoutComment(prev, id))
+      setConfirmCommentDelete(null)
+      if (editingCommentId === id) cancelCommentEdit()
+      void deleteKanbanComment(card.id, id).then(syncCommentsFromStore)
+      return
+    }
     const nextComments = withoutComment(comments, id)
     setComments(nextComments)
-    persistComments(nextComments)
     setConfirmCommentDelete(null)
     if (editingCommentId === id) cancelCommentEdit()
   }
@@ -216,20 +224,21 @@ export function KanbanCardModal(): React.JSX.Element {
     else closeKanbanEditor()
   }
 
-  function buildCard(): KanbanCard | null {
+  function fieldValues(): {
+    title: string
+    description: string
+    labels: string[]
+    dueDate: string | null
+    storyPoints: number | null
+    assignee: string
+    attributes: Record<string, string>
+    secretAttributes: string[]
+  } {
     const trimmed = title.trim()
-    if (!trimmed) {
-      setTitleError('Enter a card title')
-      return null
-    }
     const pts = storyPoints.trim() === '' ? null : Number.parseInt(storyPoints, 10)
     return {
-      id: card?.id ?? newCardId(),
       title: trimmed,
       description: description.trim(),
-      comments: comments.map((c) => ({ ...c, comment: c.comment.trim() })),
-      columnId,
-      priority,
       labels: labels.map((l) => l.trim()).filter(Boolean),
       dueDate: dueDate || null,
       storyPoints: Number.isFinite(pts) && (pts as number) > 0 ? (pts as number) : null,
@@ -237,26 +246,37 @@ export function KanbanCardModal(): React.JSX.Element {
       attributes: Object.fromEntries(
         attrs.filter((a) => a.key.trim()).map((a) => [a.key.trim(), a.value.trim()])
       ),
-      secretAttributes: attrs.filter((a) => a.key.trim() && a.secret).map((a) => a.key.trim()),
-      createdAt: card?.createdAt ?? Date.now(),
-      updatedAt: Date.now()
+      secretAttributes: attrs.filter((a) => a.key.trim() && a.secret).map((a) => a.key.trim())
     }
   }
 
   function save(): void {
     if (!kanban || hasDupAttrs) return
-    const next = buildCard()
-    if (!next) return
-    const nextBoard: KanbanBoard = isCreate
-      ? { ...kanban, cards: [...kanban.cards, next] }
-      : { ...kanban, cards: kanban.cards.map((c) => (c.id === next.id ? next : c)) }
-    void saveKanban(nextBoard)
+    const values = fieldValues()
+    if (!values.title) {
+      setTitleError('Enter a card title')
+      return
+    }
+    if (isCreate) {
+      void createKanbanCard({
+        ...values,
+        column: columnId,
+        priority,
+        comments: comments.map((c) => ({ ...c, comment: c.comment.trim() }))
+      })
+    } else if (card) {
+      void updateKanbanCard(card.id, {
+        ...values,
+        columnId,
+        priority
+      })
+    }
     close()
   }
 
   function remove(): void {
-    if (!kanban || !card) return
-    void saveKanban({ ...kanban, cards: kanban.cards.filter((c) => c.id !== card.id) })
+    if (!card || readOnly) return
+    void deleteKanbanCard(card.id)
     close()
   }
 

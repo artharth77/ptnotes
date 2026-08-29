@@ -23,7 +23,6 @@ import {
   formatDueDate,
   isOverdue,
   KANBAN_COLUMN_COLORS,
-  type KanbanBoard,
   type KanbanCard,
   type KanbanPriority
 } from '@shared/kanban'
@@ -47,7 +46,12 @@ export function KanbanPanel(): React.JSX.Element {
   const kanbanListView = useAppStore((s) => s.kanbanListView)
   const activeCardId = useAppStore((s) => s.activeKanbanCardId)
   const kanbanCollapsed = useAppStore((s) => s.kanbanCollapsed)
-  const saveKanban = useAppStore((s) => s.saveKanban)
+  const addKanbanColumn = useAppStore((s) => s.addKanbanColumn)
+  const updateKanbanColumn = useAppStore((s) => s.updateKanbanColumn)
+  const moveKanbanColumn = useAppStore((s) => s.moveKanbanColumn)
+  const deleteKanbanColumn = useAppStore((s) => s.deleteKanbanColumn)
+  const moveKanbanCard = useAppStore((s) => s.moveKanbanCard)
+  const deleteKanbanCard = useAppStore((s) => s.deleteKanbanCard)
   const setKanbanListView = useAppStore((s) => s.setKanbanListView)
   const archiveKanbanCard = useAppStore((s) => s.archiveKanbanCard)
   const restoreKanbanCard = useAppStore((s) => s.restoreKanbanCard)
@@ -87,10 +91,6 @@ export function KanbanPanel(): React.JSX.Element {
 
   if (!kanban) return <div className="kanban-panel" />
 
-  function commit(board: KanbanBoard): void {
-    void saveKanban(board)
-  }
-
   function openMenu(kind: 'card' | 'column' | 'archived', id: string, e: React.MouseEvent): void {
     e.preventDefault()
     e.stopPropagation()
@@ -109,19 +109,10 @@ export function KanbanPanel(): React.JSX.Element {
       setEditColumnError(`A column named "${trimmed}" already exists`)
       return
     }
-    commit({
-      ...kanban,
-      columns: kanban.columns.map((c) =>
-        c.id === editColumn.id
-          ? {
-              id: slug,
-              title: trimmed,
-              color: editColumn.color,
-              highlightOverdue: editColumn.highlightOverdue
-            }
-          : c
-      ),
-      cards: kanban.cards.map((c) => (c.columnId === editColumn.id ? { ...c, columnId: slug } : c))
+    void updateKanbanColumn(editColumn.id, {
+      title: trimmed,
+      color: editColumn.color,
+      highlightOverdue: editColumn.highlightOverdue
     })
     setEditColumn(null)
     setEditColumnError(null)
@@ -139,17 +130,10 @@ export function KanbanPanel(): React.JSX.Element {
       setColumnError(`A column named "${trimmed}" already exists`)
       return
     }
-    commit({
-      ...kanban,
-      columns: [
-        ...kanban.columns,
-        {
-          id: slug,
-          title: trimmed,
-          color: newColumnColor,
-          highlightOverdue: newColumnHighlightOverdue
-        }
-      ]
+    void addKanbanColumn({
+      title: trimmed,
+      color: newColumnColor,
+      highlightOverdue: newColumnHighlightOverdue
     })
     setAddColumnOpen(false)
     setNewColumnTitle('')
@@ -163,15 +147,9 @@ export function KanbanPanel(): React.JSX.Element {
     if (kanban.columns.length <= 4) return
     const target = kanban.columns.find((c) => c.id !== deleteColumn.id)
     if (!target) return
-    commit({
-      ...kanban,
-      columns: kanban.columns.filter((c) => c.id !== deleteColumn.id),
-      cards:
-        deleteColumnMode === 'delete'
-          ? kanban.cards.filter((c) => c.columnId !== deleteColumn.id)
-          : kanban.cards.map((c) =>
-              c.columnId === deleteColumn.id ? { ...c, columnId: target.id } : c
-            )
+    void deleteKanbanColumn(deleteColumn.id, {
+      mode: deleteColumnMode,
+      targetColumnId: target.id
     })
     setDeleteColumn(null)
   }
@@ -185,8 +163,7 @@ export function KanbanPanel(): React.JSX.Element {
         next.delete(id)
         return next
       })
-      const latest = useAppStore.getState().kanban
-      if (latest) commit({ ...latest, cards: latest.cards.filter((c) => c.id !== id) })
+      void deleteKanbanCard(id)
     }, 200)
   }
 
@@ -194,10 +171,7 @@ export function KanbanPanel(): React.JSX.Element {
     if (!kanban) return
     const card = kanban.cards.find((c) => c.id === cardId)
     if (!card || card.columnId === columnId) return
-    commit({
-      ...kanban,
-      cards: [...kanban.cards.filter((c) => c.id !== cardId), { ...card, columnId }]
-    })
+    void moveKanbanCard(cardId, columnId)
     setMenu(null)
   }
 
@@ -206,10 +180,7 @@ export function KanbanPanel(): React.JSX.Element {
     const from = kanban.columns.findIndex((c) => c.id === colId)
     const over = kanban.columns.findIndex((c) => c.id === overColId)
     if (from === -1 || over === -1) return
-    const columns = [...kanban.columns]
-    const [moved] = columns.splice(from, 1)
-    columns.splice(from < over ? over - 1 : over, 0, moved!)
-    commit({ ...kanban, columns })
+    void moveKanbanColumn(colId, from < over ? over - 1 : over)
   }
 
   const menuCard = menu?.kind === 'card' ? kanban.cards.find((c) => c.id === menu.id) : null

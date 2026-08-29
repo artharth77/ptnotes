@@ -31,7 +31,12 @@ import type {
   SkillScope,
   KanbanArchive,
   KanbanArchiveMove,
-  KanbanBoard
+  KanbanBoard,
+  KanbanCardPatch,
+  KanbanColumnPatch,
+  KanbanCommentInput,
+  NewKanbanCardInput,
+  NewKanbanColumnInput
 } from '../shared/types'
 
 const api = {
@@ -62,8 +67,48 @@ const api = {
   },
   kanban: {
     load: (project: string): Promise<KanbanBoard> => ipcRenderer.invoke('kanban:load', project),
-    save: (project: string, board: KanbanBoard): Promise<KanbanBoard> =>
-      ipcRenderer.invoke('kanban:save', project, board),
+    createCard: (project: string, input: NewKanbanCardInput): Promise<KanbanBoard> =>
+      ipcRenderer.invoke('kanban:createCard', project, input),
+    updateCard: (project: string, cardId: string, patch: KanbanCardPatch): Promise<KanbanBoard> =>
+      ipcRenderer.invoke('kanban:updateCard', project, cardId, patch),
+    moveCard: (
+      project: string,
+      cardId: string,
+      columnId: string,
+      index?: number
+    ): Promise<KanbanBoard> =>
+      ipcRenderer.invoke('kanban:moveCard', project, cardId, columnId, index),
+    deleteCard: (project: string, cardId: string): Promise<KanbanBoard> =>
+      ipcRenderer.invoke('kanban:deleteCard', project, cardId),
+    addComment: (
+      project: string,
+      cardId: string,
+      input: KanbanCommentInput
+    ): Promise<KanbanBoard> => ipcRenderer.invoke('kanban:addComment', project, cardId, input),
+    updateComment: (
+      project: string,
+      cardId: string,
+      commentId: string,
+      input: KanbanCommentInput
+    ): Promise<KanbanBoard> =>
+      ipcRenderer.invoke('kanban:updateComment', project, cardId, commentId, input),
+    deleteComment: (project: string, cardId: string, commentId: string): Promise<KanbanBoard> =>
+      ipcRenderer.invoke('kanban:deleteComment', project, cardId, commentId),
+    addColumn: (project: string, input: NewKanbanColumnInput): Promise<KanbanBoard> =>
+      ipcRenderer.invoke('kanban:addColumn', project, input),
+    updateColumn: (
+      project: string,
+      columnId: string,
+      patch: KanbanColumnPatch
+    ): Promise<KanbanBoard> => ipcRenderer.invoke('kanban:updateColumn', project, columnId, patch),
+    moveColumn: (project: string, columnId: string, toIndex: number): Promise<KanbanBoard> =>
+      ipcRenderer.invoke('kanban:moveColumn', project, columnId, toIndex),
+    deleteColumn: (
+      project: string,
+      columnId: string,
+      options: { mode: 'move' | 'delete'; targetColumnId?: string }
+    ): Promise<KanbanBoard> =>
+      ipcRenderer.invoke('kanban:deleteColumn', project, columnId, options),
     loadArchive: (project: string): Promise<KanbanArchive> =>
       ipcRenderer.invoke('kanban:loadArchive', project),
     archiveCard: (project: string, cardId: string): Promise<KanbanArchiveMove> =>
