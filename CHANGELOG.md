@@ -3,6 +3,7 @@
 ### Added
 
 - **Kanban board keyboard navigation**: when a card is focused on the board view (click it), `ArrowUp`/`ArrowDown` move focus to the previous/next card in the same column (clamped at the ends) and `ArrowLeft`/`ArrowRight` move to the nearest adjacent column that has visible cards (skipping empty columns), keeping the row index where possible (clamped to the target column's length). `Enter` opens the focused card in the editor (same as double-click). Navigation operates on the filtered (visible) card set, the focused card is kept in view by the existing scroll-into-center behavior, and handled keys are consumed so the board doesn't scroll. Keys are ignored while a modal or the card context menu is open, when focus is in an input/textarea/select/button/contenteditable (filter bar, chat, editor), or when a modifier key is held.
+- **Kanban card modal assignee autocomplete**: the Assignee field in the card create/edit dialog now shows an autocomplete dropdown fed by assignees already used on the board — it opens on focus (when any exist), filters case-insensitively as you type (an exact current match is excluded), and is keyboard navigable (`ArrowUp`/`ArrowDown` cycle with wraparound, `Enter` accepts the highlighted suggestion, `Escape` closes; mouse click works too). Selecting a suggestion fills the field; the value still persists through the modal's existing Save path, so nothing changes about when edits are written. The dropdown is not shown in the read-only archive view.
 
 ### Fixed
 

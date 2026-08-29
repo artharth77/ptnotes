@@ -78,6 +78,8 @@ export function KanbanCardModal(): React.JSX.Element {
     card?.storyPoints != null ? String(card.storyPoints) : ''
   )
   const [assignee, setAssignee] = useState(card?.assignee ?? '')
+  const [assigneeMenuOpen, setAssigneeMenuOpen] = useState(false)
+  const [assigneeActive, setAssigneeActive] = useState(0)
   const [labels, setLabels] = useState<string[]>(card?.labels ?? [])
   const [labelInput, setLabelInput] = useState('')
   const [labelMenuOpen, setLabelMenuOpen] = useState(false)
@@ -119,6 +121,15 @@ export function KanbanCardModal(): React.JSX.Element {
     .slice(0, 8)
   const createNew = q !== '' && !boardLabels.some((l) => l.toLowerCase() === q)
   const labelOptions = [...labelSuggestions, ...(createNew ? [labelInput.trim()] : [])]
+
+  const boardAssignees = Array.from(new Set(kanban.cards.map((c) => c.assignee.trim()))).filter(
+    Boolean
+  )
+  const aq = assignee.trim().toLowerCase()
+  const assigneeSuggestions = boardAssignees
+    .filter((a) => a.toLowerCase() !== aq)
+    .filter((a) => aq === '' || a.toLowerCase().includes(aq))
+    .slice(0, 8)
 
   function addLabel(raw: string): void {
     const value = raw.trim()
@@ -218,6 +229,36 @@ export function KanbanCardModal(): React.JSX.Element {
     }
   }
 
+  function chooseAssignee(value: string): void {
+    setAssignee(value)
+    setAssigneeMenuOpen(false)
+    setAssigneeActive(0)
+  }
+
+  function onAssigneeKeyDown(e: React.KeyboardEvent<HTMLInputElement>): void {
+    const options = assigneeSuggestions
+    if (e.key === 'Enter') {
+      if (assigneeMenuOpen && options.length > 0) {
+        e.preventDefault()
+        chooseAssignee(options[assigneeActive] ?? assignee)
+      }
+      return
+    }
+    if (e.key === 'Escape') {
+      setAssigneeMenuOpen(false)
+      return
+    }
+    if (assigneeMenuOpen && options.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setAssigneeActive((prev) => (prev + 1) % options.length)
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setAssigneeActive((prev) => (prev - 1 + options.length) % options.length)
+      }
+    }
+  }
+
   function close(): void {
     if (readOnly) closeKanbanViewer()
     else if (isCreate) closeKanbanCreate()
@@ -307,12 +348,38 @@ export function KanbanCardModal(): React.JSX.Element {
           </div>
           <div className="kanban-field grow1">
             <label>Assignee</label>
-            <input
-              className="text-field"
-              value={assignee}
-              onChange={(e) => setAssignee(e.target.value)}
-              placeholder="—"
-            />
+            <div className="kanban-assignee-input">
+              <input
+                className="text-field"
+                value={assignee}
+                onChange={(e) => {
+                  setAssignee(e.target.value)
+                  setAssigneeMenuOpen(true)
+                  setAssigneeActive(0)
+                }}
+                onFocus={() => setAssigneeMenuOpen(true)}
+                onBlur={() => setAssigneeMenuOpen(false)}
+                onKeyDown={onAssigneeKeyDown}
+                placeholder="—"
+              />
+              {assigneeMenuOpen && assigneeSuggestions.length > 0 && (
+                <div className="kanban-label-menu">
+                  {assigneeSuggestions.map((a, i) => (
+                    <button
+                      key={a}
+                      className={`kanban-label-option${i === assigneeActive ? ' active' : ''}`}
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        chooseAssignee(a)
+                      }}
+                      onMouseEnter={() => setAssigneeActive(i)}
+                    >
+                      {a}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 

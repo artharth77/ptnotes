@@ -1395,6 +1395,10 @@ body {
   position: relative;
 }
 
+.kanban-assignee-input {
+  position: relative;
+}
+
 .kanban-label-chips {
   display: flex;
   flex-wrap: wrap;
