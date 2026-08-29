@@ -1,3 +1,14 @@
+## [0.14.1] — 2026-08-29
+
+### Fixed
+
+- **Concurrent file-write conflicts (notes, kanban, planner)**: AI chat tools, background module runs (subagent) and the UI all mutate the same project files through read-modify-write cycles with no serialization — concurrent writers could lose updates (last writer wins) and shared fixed `.tmp` paths could make one writer's rename fail with ENOENT (leaving one tool call erroring).
+  - **Per-project serialization**: promise-chain queues in `PTNotesService` now serialize kanban board/archive, note, and planner schedule/calendar operations per project (projects stay independent). Public mutators (`saveKanban`, `saveNote`, `saveSchedule`, card/task/archive mutations, `loadKanban`'s legacy TODO.md migration) are wrapped; internal raw read/write helpers keep the locks non-reentrant.
+  - **Atomic writes**: all JSON and markdown stores now write through a unique `randomUUID()` tmp file + rename with best-effort tmp cleanup on failure (`atomicWrite`/`atomicWriteJson`) — kanban board/archive, chat threads, planner schedules/calendar, and notes (previously plain `fs.writeFile`).
+  - **Atomic AI tool mutations**: `update_note` hunks are now validated and applied against the note's current content inside the lock (`withNote`), so concurrent edits can no longer shift line targets; `create_note` is a single atomic find-or-create (`upsertNote`), eliminating duplicate `-2` notes under concurrency; `add_task`/`update_task` run inside `withSchedule` (read → mutate → write in one locked step); `set_calendar`'s re-roll of all schedules moved into a single locked `rerollSchedules` pass.
+  - **UI stays in sync with background runs**: module runs (e.g. the subagent) completing note or kanban tool calls now refresh the notes list / kanban board and reload the active note in the renderer (previously only the main chat path did), so a later UI save cannot wipe background changes.
+  - **Concurrency regression tests**: parallel `createKanbanCard`/`createNote`/`createSchedule`/`add_task`/`update_note`/`upsertNote` suites in `test-service.mts`, `test-ai.mts` and `test-planner.mts` (no lost updates, no duplicate ids, no stray tmp files).
+
 ## [0.14.0] — 2026-08-28
 
 ### Added

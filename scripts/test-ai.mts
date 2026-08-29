@@ -193,6 +193,36 @@ assert.equal(r.ok, true)
 assert.equal(r.totalLines, 1)
 assert.equal(await service.readNote('Research', 'patch-note'), 'first')
 
+// concurrency: parallel update_note calls apply serially against fresh content
+await call('create_note', { title: 'Concurrent', content: 'a\nb\nc' })
+const concurrentEdits = await Promise.all([
+  call('update_note', {
+    title: 'concurrent',
+    edits: [{ startLine: 1, endLine: 1, content: 'A' }]
+  }),
+  call('update_note', {
+    title: 'concurrent',
+    edits: [{ startLine: 3, endLine: 3, content: 'C' }]
+  })
+])
+assert.equal(
+  concurrentEdits.every((x) => (x as { ok: boolean }).ok),
+  true
+)
+assert.equal(await service.readNote('Research', 'concurrent'), 'A\nb\nC', 'both hunks landed')
+
+// concurrency: parallel create_note with the same title creates exactly one note
+const dupCreates = await Promise.all(
+  Array.from({ length: 5 }, (_, i) => call('create_note', { title: 'Dup Note', content: `v${i}` }))
+)
+assert.equal(
+  dupCreates.every((x) => (x as { ok: boolean }).ok),
+  true
+)
+const dupNames = (await service.listNotes('Research')).map((n) => n.id)
+assert.equal(dupNames.filter((n) => n === 'dup-note').length, 1, 'single dup-note file')
+assert.equal(dupNames.filter((n) => n.startsWith('dup-note-')).length, 0, 'no duplicate notes')
+
 // list_notes / read_note
 r = await call('list_notes', {})
 assert.ok(Array.isArray(r.notes) && r.notes.includes('electron-tips'))

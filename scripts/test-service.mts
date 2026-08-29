@@ -232,6 +232,91 @@ assert.deepEqual(
 )
 await service.deleteProject('Race')
 
+// Concurrent note writes: per-project locking must not lose updates or duplicate ids
+await service.createProject('NotesRace')
+await Promise.all(
+  Array.from({ length: 10 }, (_, i) => service.createNote('NotesRace', `Note ${i}`))
+)
+const raceNotes = (await service.listNotes('NotesRace')).map((n) => n.id)
+assert.equal(
+  raceNotes.filter((n) => /^note-\d+$/.test(n)).length,
+  10,
+  'all concurrent note creates persisted'
+)
+
+// withNote serializes read-modify-write cycles (both appends survive)
+const raceTarget = 'note-0'
+await Promise.all([
+  service.withNote('NotesRace', raceTarget, (raw) => `${raw}first\n`),
+  service.withNote('NotesRace', raceTarget, (raw) => `${raw}second\n`)
+])
+const appended = await service.readNote('NotesRace', raceTarget)
+assert.match(appended, /first\n/)
+assert.match(appended, /second\n/)
+
+// concurrent saveNote to one note: last write wins, file stays valid
+await Promise.all(
+  Array.from({ length: 8 }, (_, i) => service.saveNote('NotesRace', raceTarget, `body ${i}`))
+)
+assert.match(await service.readNote('NotesRace', raceTarget), /^body \d$/)
+
+// concurrent upsertNote with the same id: exactly one file, no duplicates
+await Promise.all(
+  Array.from({ length: 5 }, (_, i) => service.upsertNote('NotesRace', 'dup', `dup ${i}`))
+)
+const afterUpsert = (await service.listNotes('NotesRace')).map((n) => n.id)
+assert.equal(afterUpsert.filter((n) => n === 'dup').length, 1, 'upsert does not duplicate notes')
+
+// Planner: concurrent withSchedule mutations all persist
+await service.createProject('PlannerRace')
+await service.createSchedule('PlannerRace', 'Plan')
+await Promise.all(
+  Array.from({ length: 10 }, (_, i) =>
+    service.withSchedule('PlannerRace', 'plan', (schedule) => ({
+      save: {
+        ...schedule,
+        tasks: [
+          ...schedule.tasks,
+          {
+            id: `race-${i}`,
+            title: `Race ${i}`,
+            status: 'not-started' as const,
+            owner: '',
+            duration: 1,
+            planStart: null,
+            planEnd: null,
+            actualStart: null,
+            actualEnd: null,
+            percentComplete: 0,
+            note: '',
+            children: []
+          }
+        ],
+        updatedAt: Date.now()
+      },
+      value: i
+    }))
+  )
+)
+const racedSchedule = await service.readSchedule('PlannerRace', 'plan')
+assert.equal(racedSchedule!.tasks.length, 10, 'all concurrent withSchedule writes persisted')
+
+// no stray tmp files left behind in notes/ or planner/
+const notesFiles = await fs.readdir(join(ROOT, 'NotesRace', 'notes'))
+assert.deepEqual(
+  notesFiles.filter((f) => f.endsWith('.tmp')),
+  [],
+  'no stray tmp files in notes/'
+)
+const plannerFiles = await fs.readdir(join(ROOT, 'PlannerRace', 'planner'))
+assert.deepEqual(
+  plannerFiles.filter((f) => f.endsWith('.tmp')),
+  [],
+  'no stray tmp files in planner/'
+)
+await service.deleteProject('NotesRace')
+await service.deleteProject('PlannerRace')
+
 // Rename project
 await service.renameProject('Work', 'Office')
 assert.ok((await service.listProjects()).some((p) => p.name === 'Office'))

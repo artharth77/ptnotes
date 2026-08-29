@@ -35,7 +35,13 @@ import {
   type NewKanbanCardInput
 } from '@shared/kanban'
 import { slugify } from '@shared/slug'
-import { countTasks, defaultCalendar, normalizeCalendar, validateScheduleId } from '@shared/planner'
+import {
+  countTasks,
+  defaultCalendar,
+  normalizeCalendar,
+  rollupScheduleTasks,
+  validateScheduleId
+} from '@shared/planner'
 import { detectFileKind } from '../ai/reader'
 import type { SettingsStore } from '../settings'
 
@@ -63,6 +69,8 @@ export class PTNotesService {
   private builtinOverrides: Record<string, boolean> = {}
   private builtinOverridesLoaded = false
   private kanbanLocks = new Map<string, Promise<void>>()
+  private noteLocks = new Map<string, Promise<void>>()
+  private plannerLocks = new Map<string, Promise<void>>()
 
   constructor(rootDir?: string, builtinSkillsRoot?: string, settingsStore?: SettingsStore) {
     this.rootDir = rootDir ?? join(app.getPath('documents'), 'PTNotes')
@@ -286,16 +294,20 @@ export class PTNotesService {
       .catch(() => false)
   }
 
-  /** Atomic JSON write: unique tmp file + rename, with best-effort tmp cleanup on failure. */
-  private async atomicWriteJson(path: string, data: unknown): Promise<void> {
+  /** Atomic file write: unique tmp file + rename, with best-effort tmp cleanup on failure. */
+  private async atomicWrite(path: string, content: string): Promise<void> {
     const tmp = `${path}.${randomUUID()}.tmp`
     try {
-      await fs.writeFile(tmp, JSON.stringify(data, null, 2), 'utf8')
+      await fs.writeFile(tmp, content, 'utf8')
       await fs.rename(tmp, path)
     } catch (err) {
       await fs.unlink(tmp).catch(() => {})
       throw err
     }
+  }
+
+  private atomicWriteJson(path: string, data: unknown): Promise<void> {
+    return this.atomicWrite(path, JSON.stringify(data, null, 2))
   }
 
   // ---- Projects ----
@@ -434,26 +446,86 @@ export class PTNotesService {
     }
   }
 
+  /**
+   * Serialize per-project note operations: chat tools, module runs and the UI
+   * editor all write the same note files. Non-reentrant — wrapped bodies must
+   * use the raw writeNote, never the public saveNote.
+   */
+  private withNoteLock<T>(project: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.noteLocks.get(project) ?? Promise.resolve()
+    const run = prev.then(fn)
+    this.noteLocks.set(
+      project,
+      run.then(
+        () => undefined,
+        () => undefined
+      )
+    )
+    return run
+  }
+
   async saveNote(project: string, noteId: string, content: string): Promise<void> {
-    await fs.writeFile(this.notePath(project, noteId), content, 'utf8')
+    return this.withNoteLock(project, () => this.writeNote(project, noteId, content))
+  }
+
+  private async writeNote(project: string, noteId: string, content: string): Promise<void> {
+    await this.atomicWrite(this.notePath(project, noteId), content)
   }
 
   async createNote(project: string, title: string): Promise<NoteMeta> {
-    const base = slugify(title)
-    const id = await this.uniqueNoteId(project, base)
-    await fs.writeFile(this.notePath(project, id), `# ${id}\n\n`, 'utf8')
-    return { id, name: id, updatedAt: Date.now() }
+    return this.withNoteLock(project, async () => {
+      const base = slugify(title)
+      const id = await this.uniqueNoteId(project, base)
+      await this.atomicWrite(this.notePath(project, id), `# ${id}\n\n`)
+      return { id, name: id, updatedAt: Date.now() }
+    })
+  }
+
+  /** Write content to a note, creating the file when missing (atomic find-or-create). */
+  async upsertNote(
+    project: string,
+    noteId: string,
+    content: string
+  ): Promise<{ id: string; action: 'created' | 'updated' }> {
+    return this.withNoteLock(project, async () => {
+      const path = this.notePath(project, noteId)
+      const action = (await this.pathExists(path)) ? ('updated' as const) : ('created' as const)
+      await this.atomicWrite(path, content)
+      return { id: noteId, action }
+    })
+  }
+
+  /**
+   * Run fn with exclusive access to a note's content: fn receives the current
+   * content and returns the replacement (null = leave the note untouched).
+   */
+  async withNote(
+    project: string,
+    noteId: string,
+    fn: (raw: string) => string | null
+  ): Promise<void> {
+    return this.withNoteLock(project, async () => {
+      const path = this.notePath(project, noteId)
+      if (!(await this.pathExists(path))) throw new Error(`Note "${noteId}" not found`)
+      const raw = await fs.readFile(path, 'utf8')
+      const out = fn(raw)
+      if (out !== null && out !== raw) await this.atomicWrite(path, out)
+    })
   }
 
   async renameNote(project: string, noteId: string, newTitle: string): Promise<NoteMeta> {
-    const base = slugify(newTitle)
-    const newId = await this.uniqueNoteId(project, base, noteId)
-    await fs.rename(this.notePath(project, noteId), this.notePath(project, newId))
-    return { id: newId, name: newId, updatedAt: Date.now() }
+    return this.withNoteLock(project, async () => {
+      const base = slugify(newTitle)
+      const newId = await this.uniqueNoteId(project, base, noteId)
+      await fs.rename(this.notePath(project, noteId), this.notePath(project, newId))
+      return { id: newId, name: newId, updatedAt: Date.now() }
+    })
   }
 
   async deleteNote(project: string, noteId: string): Promise<void> {
-    await fs.unlink(this.notePath(project, noteId)).catch(() => {})
+    return this.withNoteLock(project, async () => {
+      await fs.unlink(this.notePath(project, noteId)).catch(() => {})
+    })
   }
 
   async revealNoteInFolder(project: string, noteId: string): Promise<void> {
@@ -1250,56 +1322,120 @@ export class PTNotesService {
     }
   }
 
+  /**
+   * Serialize per-project planner operations: chat tools and the UI editor both
+   * mutate the same schedule files. Non-reentrant — wrapped bodies must use the
+   * raw writeSchedule, never the public saveSchedule.
+   */
+  private withPlannerLock<T>(project: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.plannerLocks.get(project) ?? Promise.resolve()
+    const run = prev.then(fn)
+    this.plannerLocks.set(
+      project,
+      run.then(
+        () => undefined,
+        () => undefined
+      )
+    )
+    return run
+  }
+
   async saveSchedule(project: string, schedule: Schedule): Promise<void> {
+    return this.withPlannerLock(project, () => this.writeSchedule(project, schedule))
+  }
+
+  private async writeSchedule(project: string, schedule: Schedule): Promise<void> {
     if (!schedule || typeof schedule.id !== 'string') throw new Error('Invalid schedule')
     await fs.mkdir(this.plannerDir(project), { recursive: true })
     await this.atomicWriteJson(this.schedulePath(project, schedule.id), schedule)
   }
 
   async createSchedule(project: string, name: string): Promise<ScheduleMeta> {
-    const base = slugify(name) || 'untitled'
-    if (await this.scheduleIdExists(project, base)) {
-      throw new Error(`A schedule with the name "${name.trim()}" already exists`)
-    }
-    const id = base
-    const now = Date.now()
-    const display = name.trim() || base
-    const schedule: Schedule = { id, name: display, createdAt: now, updatedAt: now, tasks: [] }
-    await this.saveSchedule(project, schedule)
-    return { id, name: display, updatedAt: now, taskCount: 0 }
+    return this.withPlannerLock(project, async () => {
+      const base = slugify(name) || 'untitled'
+      if (await this.scheduleIdExists(project, base)) {
+        throw new Error(`A schedule with the name "${name.trim()}" already exists`)
+      }
+      const id = base
+      const now = Date.now()
+      const display = name.trim() || base
+      const schedule: Schedule = { id, name: display, createdAt: now, updatedAt: now, tasks: [] }
+      await this.writeSchedule(project, schedule)
+      return { id, name: display, updatedAt: now, taskCount: 0 }
+    })
+  }
+
+  /**
+   * Mutate a schedule atomically: fn receives the current schedule and returns
+   * the one to persist plus the value to surface to the caller.
+   */
+  async withSchedule<R>(
+    project: string,
+    scheduleId: string,
+    fn: (schedule: Schedule) => { save: Schedule; value: R } | Promise<{ save: Schedule; value: R }>
+  ): Promise<R> {
+    return this.withPlannerLock(project, async () => {
+      const schedule = await this.readSchedule(project, scheduleId)
+      if (!schedule) throw new Error(`Schedule "${scheduleId}" not found`)
+      const { save, value } = await fn(schedule)
+      await this.writeSchedule(project, save)
+      return value
+    })
+  }
+
+  /** Re-roll every schedule's rollups with the given calendar in one locked pass. */
+  async rerollSchedules(project: string, calendar: ProjectCalendar): Promise<number> {
+    return this.withPlannerLock(project, async () => {
+      const metas = await this.listSchedules(project)
+      let reRolled = 0
+      for (const meta of metas) {
+        const schedule = await this.readSchedule(project, meta.id)
+        if (!schedule) continue
+        await this.writeSchedule(project, {
+          ...schedule,
+          tasks: rollupScheduleTasks(schedule.tasks, calendar),
+          updatedAt: Date.now()
+        })
+        reRolled++
+      }
+      return reRolled
+    })
   }
 
   async renameSchedule(project: string, id: string, newName: string): Promise<ScheduleMeta> {
-    const schedule = await this.readSchedule(project, id)
-    if (!schedule) throw new Error(`Schedule "${id}" not found`)
-    const trimmed = newName.trim()
-    if (trimmed) schedule.name = trimmed
-    const newId = slugify(schedule.name)
-    if (newId !== id && (await this.scheduleIdExists(project, newId))) {
-      throw new Error(
-        `A schedule with the name "${schedule.name}" already exists (file ${newId}.json)`
-      )
-    }
-    schedule.id = newId
-    schedule.updatedAt = Date.now()
-    if (newId === id) {
-      await this.saveSchedule(project, schedule)
-    } else {
-      const dir = this.plannerDir(project)
-      await fs.mkdir(dir, { recursive: true })
-      await this.atomicWriteJson(this.schedulePath(project, newId), schedule)
-      await fs.unlink(this.schedulePath(project, id)).catch(() => {})
-    }
-    return {
-      id: newId,
-      name: schedule.name,
-      updatedAt: schedule.updatedAt,
-      taskCount: schedule.tasks.reduce((n, t) => n + countTasks(t), 0)
-    }
+    return this.withPlannerLock(project, async () => {
+      const schedule = await this.readSchedule(project, id)
+      if (!schedule) throw new Error(`Schedule "${id}" not found`)
+      const trimmed = newName.trim()
+      if (trimmed) schedule.name = trimmed
+      const newId = slugify(schedule.name)
+      if (newId !== id && (await this.scheduleIdExists(project, newId))) {
+        throw new Error(
+          `A schedule with the name "${schedule.name}" already exists (file ${newId}.json)`
+        )
+      }
+      schedule.id = newId
+      schedule.updatedAt = Date.now()
+      if (newId === id) {
+        await this.writeSchedule(project, schedule)
+      } else {
+        await fs.mkdir(this.plannerDir(project), { recursive: true })
+        await this.atomicWriteJson(this.schedulePath(project, newId), schedule)
+        await fs.unlink(this.schedulePath(project, id)).catch(() => {})
+      }
+      return {
+        id: newId,
+        name: schedule.name,
+        updatedAt: schedule.updatedAt,
+        taskCount: schedule.tasks.reduce((n, t) => n + countTasks(t), 0)
+      }
+    })
   }
 
   async deleteSchedule(project: string, id: string): Promise<void> {
-    await fs.unlink(this.schedulePath(project, id)).catch(() => {})
+    return this.withPlannerLock(project, async () => {
+      await fs.unlink(this.schedulePath(project, id)).catch(() => {})
+    })
   }
 
   // ---- Calendar (shared project working-day config) ----
@@ -1316,8 +1452,10 @@ export class PTNotesService {
   }
 
   async saveCalendar(project: string, calendar: ProjectCalendar): Promise<void> {
-    await fs.mkdir(this.plannerDir(project), { recursive: true })
-    await this.atomicWriteJson(this.calendarPath(project), normalizeCalendar(calendar))
+    return this.withPlannerLock(project, async () => {
+      await fs.mkdir(this.plannerDir(project), { recursive: true })
+      await this.atomicWriteJson(this.calendarPath(project), normalizeCalendar(calendar))
+    })
   }
 
   // ---- Kanban ----

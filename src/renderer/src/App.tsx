@@ -33,6 +33,8 @@ const KANBAN_TOOLS = new Set([
   'delete_kanban_card'
 ])
 
+const NOTE_TOOLS = new Set(['create_note', 'update_note', 'delete_note'])
+
 function SideTabs(): React.JSX.Element {
   const tab = useAppStore((s) => s.tab)
   const setTab = useAppStore((s) => s.setTab)
@@ -290,7 +292,6 @@ function App(): React.JSX.Element {
 
   // Handle AI stream events: update chat store, auto-refresh notes/kanban on tool calls
   useEffect(() => {
-    const NOTE_TOOLS = new Set(['create_note', 'update_note', 'delete_note'])
     const PLANNER_TOOLS = new Set([
       'list_schedules',
       'read_schedule',
@@ -424,16 +425,18 @@ function App(): React.JSX.Element {
       if (evt.type === 'output' || evt.type === 'done') {
         void state.refreshFiles()
       }
-      // Background module runs (e.g. the subagent) can mutate the kanban board;
-      // keep the UI in sync so a later board save cannot wipe their changes.
-      if (
-        evt.type === 'tool' &&
-        evt.toolCall &&
-        evt.toolCall.ok !== undefined &&
-        KANBAN_TOOLS.has(evt.toolCall.name) &&
-        evt.project === state.activeProject
-      ) {
-        void state.refreshKanban()
+      // Background module runs (e.g. the subagent) can mutate notes and the
+      // kanban board; keep the UI in sync so a later save cannot wipe changes.
+      const doneTool =
+        evt.type === 'tool' && evt.toolCall && evt.toolCall.ok !== undefined ? evt.toolCall : null
+      if (doneTool && evt.project === state.activeProject) {
+        if (KANBAN_TOOLS.has(doneTool.name)) {
+          void state.refreshKanban()
+        }
+        if (NOTE_TOOLS.has(doneTool.name)) {
+          void state.refreshNotes()
+          reloadActiveNoteIfUpdated(doneTool)
+        }
       }
     })
   }, [])
