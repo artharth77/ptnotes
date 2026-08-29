@@ -35,6 +35,16 @@ const KANBAN_TOOLS = new Set([
 
 const NOTE_TOOLS = new Set(['create_note', 'update_note', 'delete_note'])
 
+const PLANNER_TOOLS = new Set([
+  'list_schedules',
+  'read_schedule',
+  'create_schedule',
+  'update_schedule',
+  'add_task',
+  'update_task',
+  'set_calendar'
+])
+
 function SideTabs(): React.JSX.Element {
   const tab = useAppStore((s) => s.tab)
   const setTab = useAppStore((s) => s.setTab)
@@ -292,15 +302,6 @@ function App(): React.JSX.Element {
 
   // Handle AI stream events: update chat store, auto-refresh notes/kanban on tool calls
   useEffect(() => {
-    const PLANNER_TOOLS = new Set([
-      'list_schedules',
-      'read_schedule',
-      'create_schedule',
-      'update_schedule',
-      'add_task',
-      'update_task',
-      'set_calendar'
-    ])
     return window.ptnotes.ai.onStreamEvent((evt) => {
       const state = useAppStore.getState()
       const project = state.chatStreamProject
@@ -425,8 +426,9 @@ function App(): React.JSX.Element {
       if (evt.type === 'output' || evt.type === 'done') {
         void state.refreshFiles()
       }
-      // Background module runs (e.g. the subagent) can mutate notes and the
-      // kanban board; keep the UI in sync so a later save cannot wipe changes.
+      // Background module runs (e.g. the subagent) can mutate notes, the kanban
+      // board and planner schedules; keep the UI in sync so a later save cannot
+      // wipe their changes.
       const doneTool =
         evt.type === 'tool' && evt.toolCall && evt.toolCall.ok !== undefined ? evt.toolCall : null
       if (doneTool && evt.project === state.activeProject) {
@@ -436,6 +438,18 @@ function App(): React.JSX.Element {
         if (NOTE_TOOLS.has(doneTool.name)) {
           void state.refreshNotes()
           reloadActiveNoteIfUpdated(doneTool)
+        }
+        if (PLANNER_TOOLS.has(doneTool.name)) {
+          void state.refreshSchedules()
+          if (
+            (doneTool.name === 'add_task' || doneTool.name === 'update_task') &&
+            state.activeScheduleId
+          ) {
+            void state.selectSchedule(state.activeScheduleId)
+          }
+          if (doneTool.name === 'set_calendar') {
+            void state.loadCalendar()
+          }
         }
       }
     })
