@@ -198,6 +198,40 @@ board = await service.loadKanban('Migrate')
 assert.equal(board.cards.length, 2, 'no double migration')
 await service.deleteProject('Migrate')
 
+// Concurrent kanban writes: per-project locking must not lose updates
+await service.createProject('Race')
+await Promise.all(
+  Array.from({ length: 20 }, (_, i) =>
+    service.createKanbanCard('Race', { title: `Race ${i}`, column: 'Backlog' })
+  )
+)
+board = await service.loadKanban('Race')
+assert.equal(board.cards.length, 20, 'all concurrent creates persisted')
+assert.equal(new Set(board.cards.map((c) => c.title)).size, 20, 'no lost/duplicated cards')
+
+// Mixed concurrent mutations on distinct cards (create + update + move + archive)
+const [movedId, updatedId, archivedId] = board.cards.map((c) => c.id)
+await Promise.all([
+  service.moveKanbanCard('Race', movedId, 'in-progress'),
+  service.updateKanbanCard('Race', updatedId, { priority: 'high' }),
+  service.archiveKanbanCard('Race', archivedId),
+  service.createKanbanCard('Race', { title: 'Race extra' })
+])
+board = await service.loadKanban('Race')
+assert.equal(board.cards.length, 20, '19 kept + 1 extra (1 archived)')
+assert.equal(board.cards.find((c) => c.id === movedId)!.columnId, 'in-progress')
+assert.equal(board.cards.find((c) => c.id === updatedId)!.priority, 'high')
+assert.equal((await service.loadKanbanArchive('Race')).cards[0].id, archivedId)
+
+// No stray tmp files left behind by the atomic writes
+const kanbanFiles = await fs.readdir(join(ROOT, 'Race', 'kanban'))
+assert.deepEqual(
+  kanbanFiles.filter((f) => f.endsWith('.tmp')),
+  [],
+  'no stray tmp files'
+)
+await service.deleteProject('Race')
+
 // Rename project
 await service.renameProject('Work', 'Office')
 assert.ok((await service.listProjects()).some((p) => p.name === 'Office'))

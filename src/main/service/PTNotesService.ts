@@ -1,5 +1,5 @@
 import { promises as fs } from 'fs'
-import { createHash } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'path'
 import { app, shell } from 'electron'
 import type {
@@ -62,6 +62,7 @@ export class PTNotesService {
   private readonly settingsStore?: SettingsStore
   private builtinOverrides: Record<string, boolean> = {}
   private builtinOverridesLoaded = false
+  private kanbanLocks = new Map<string, Promise<void>>()
 
   constructor(rootDir?: string, builtinSkillsRoot?: string, settingsStore?: SettingsStore) {
     this.rootDir = rootDir ?? join(app.getPath('documents'), 'PTNotes')
@@ -283,6 +284,18 @@ export class PTNotesService {
       .access(path)
       .then(() => true)
       .catch(() => false)
+  }
+
+  /** Atomic JSON write: unique tmp file + rename, with best-effort tmp cleanup on failure. */
+  private async atomicWriteJson(path: string, data: unknown): Promise<void> {
+    const tmp = `${path}.${randomUUID()}.tmp`
+    try {
+      await fs.writeFile(tmp, JSON.stringify(data, null, 2), 'utf8')
+      await fs.rename(tmp, path)
+    } catch (err) {
+      await fs.unlink(tmp).catch(() => {})
+      throw err
+    }
   }
 
   // ---- Projects ----
@@ -744,10 +757,7 @@ export class PTNotesService {
 
   async writeChat(project: string, thread: ChatThread): Promise<void> {
     await fs.mkdir(this.chatDir(project), { recursive: true })
-    const path = this.chatPath(project, thread.sessionId)
-    const tmp = `${path}.tmp`
-    await fs.writeFile(tmp, JSON.stringify(thread, null, 2), 'utf8')
-    await fs.rename(tmp, path)
+    await this.atomicWriteJson(this.chatPath(project, thread.sessionId), thread)
   }
 
   async renameChat(project: string, sessionId: string, title: string): Promise<void> {
@@ -1242,12 +1252,8 @@ export class PTNotesService {
 
   async saveSchedule(project: string, schedule: Schedule): Promise<void> {
     if (!schedule || typeof schedule.id !== 'string') throw new Error('Invalid schedule')
-    const dir = this.plannerDir(project)
-    await fs.mkdir(dir, { recursive: true })
-    const path = this.schedulePath(project, schedule.id)
-    const tmp = `${path}.tmp`
-    await fs.writeFile(tmp, JSON.stringify(schedule, null, 2), 'utf8')
-    await fs.rename(tmp, path)
+    await fs.mkdir(this.plannerDir(project), { recursive: true })
+    await this.atomicWriteJson(this.schedulePath(project, schedule.id), schedule)
   }
 
   async createSchedule(project: string, name: string): Promise<ScheduleMeta> {
@@ -1281,10 +1287,7 @@ export class PTNotesService {
     } else {
       const dir = this.plannerDir(project)
       await fs.mkdir(dir, { recursive: true })
-      const path = this.schedulePath(project, newId)
-      const tmp = `${path}.tmp`
-      await fs.writeFile(tmp, JSON.stringify(schedule, null, 2), 'utf8')
-      await fs.rename(tmp, path)
+      await this.atomicWriteJson(this.schedulePath(project, newId), schedule)
       await fs.unlink(this.schedulePath(project, id)).catch(() => {})
     }
     return {
@@ -1313,18 +1316,35 @@ export class PTNotesService {
   }
 
   async saveCalendar(project: string, calendar: ProjectCalendar): Promise<void> {
-    const dir = this.plannerDir(project)
-    await fs.mkdir(dir, { recursive: true })
-    const normalized = normalizeCalendar(calendar)
-    const path = this.calendarPath(project)
-    const tmp = `${path}.tmp`
-    await fs.writeFile(tmp, JSON.stringify(normalized, null, 2), 'utf8')
-    await fs.rename(tmp, path)
+    await fs.mkdir(this.plannerDir(project), { recursive: true })
+    await this.atomicWriteJson(this.calendarPath(project), normalizeCalendar(calendar))
   }
 
   // ---- Kanban ----
 
+  /**
+   * Serialize per-project kanban operations: chat tools, module runs and the UI
+   * all mutate the same board files. Non-reentrant — wrapped bodies must use the
+   * raw readKanban/writeKanban/writeKanbanArchive, never the public methods.
+   */
+  private withKanbanLock<T>(project: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.kanbanLocks.get(project) ?? Promise.resolve()
+    const run = prev.then(fn)
+    this.kanbanLocks.set(
+      project,
+      run.then(
+        () => undefined,
+        () => undefined
+      )
+    )
+    return run
+  }
+
   async loadKanban(project: string): Promise<KanbanBoard> {
+    return this.withKanbanLock(project, () => this.readKanban(project))
+  }
+
+  private async readKanban(project: string): Promise<KanbanBoard> {
     const path = this.kanbanPath(project)
     if (await this.pathExists(path)) {
       try {
@@ -1337,7 +1357,7 @@ export class PTNotesService {
     const legacyTodoPath = join(this.projectDir(project), 'TODO.md')
     if (await this.pathExists(legacyTodoPath)) {
       const board = await this.migrateTodoFile(legacyTodoPath)
-      await this.saveKanban(project, board)
+      await this.writeKanban(project, board)
       await fs.unlink(legacyTodoPath).catch(() => {})
       return board
     }
@@ -1345,44 +1365,48 @@ export class PTNotesService {
   }
 
   async saveKanban(project: string, board: KanbanBoard): Promise<KanbanBoard> {
+    return this.withKanbanLock(project, () => this.writeKanban(project, board))
+  }
+
+  private async writeKanban(project: string, board: KanbanBoard): Promise<KanbanBoard> {
     const normalized = normalizeBoard(board)
-    const dir = this.kanbanDir(project)
-    await fs.mkdir(dir, { recursive: true })
-    const path = this.kanbanPath(project)
-    const tmp = `${path}.tmp`
-    await fs.writeFile(tmp, JSON.stringify(normalized, null, 2), 'utf8')
-    await fs.rename(tmp, path)
+    await fs.mkdir(this.kanbanDir(project), { recursive: true })
+    await this.atomicWriteJson(this.kanbanPath(project), normalized)
     return normalized
   }
 
   async createKanbanCard(project: string, input: NewKanbanCardInput): Promise<KanbanBoard> {
-    const board = await this.loadKanban(project)
-    const title = (input.title ?? '').trim()
-    if (!title) throw new Error('Card title is required')
-    const column = input.column?.trim() ? findColumnByName(board, input.column) : undefined
-    const columnId = column?.id ?? board.columns[0].id
-    if (!board.columns.some((c) => c.id === columnId)) {
-      throw new Error(`Column "${input.column}" not found`)
-    }
-    const now = Date.now()
-    const card: KanbanCard = {
-      id: newCardId(),
-      title,
-      description: (input.description ?? '').trim(),
-      comments: [],
-      columnId,
-      priority: input.priority ?? null,
-      labels: (input.labels ?? []).map((l) => l.trim()).filter(Boolean),
-      dueDate: input.dueDate ?? null,
-      storyPoints: input.storyPoints ?? null,
-      assignee: (input.assignee ?? '').trim(),
-      attributes: input.attributes ?? {},
-      secretAttributes: (input.secretAttributes ?? []).filter((k) => k in (input.attributes ?? {})),
-      createdAt: now,
-      updatedAt: now
-    }
-    board.cards.push(card)
-    return this.saveKanban(project, board)
+    return this.withKanbanLock(project, async () => {
+      const board = await this.readKanban(project)
+      const title = (input.title ?? '').trim()
+      if (!title) throw new Error('Card title is required')
+      const column = input.column?.trim() ? findColumnByName(board, input.column) : undefined
+      const columnId = column?.id ?? board.columns[0].id
+      if (!board.columns.some((c) => c.id === columnId)) {
+        throw new Error(`Column "${input.column}" not found`)
+      }
+      const now = Date.now()
+      const card: KanbanCard = {
+        id: newCardId(),
+        title,
+        description: (input.description ?? '').trim(),
+        comments: [],
+        columnId,
+        priority: input.priority ?? null,
+        labels: (input.labels ?? []).map((l) => l.trim()).filter(Boolean),
+        dueDate: input.dueDate ?? null,
+        storyPoints: input.storyPoints ?? null,
+        assignee: (input.assignee ?? '').trim(),
+        attributes: input.attributes ?? {},
+        secretAttributes: (input.secretAttributes ?? []).filter(
+          (k) => k in (input.attributes ?? {})
+        ),
+        createdAt: now,
+        updatedAt: now
+      }
+      board.cards.push(card)
+      return this.writeKanban(project, board)
+    })
   }
 
   async updateKanbanCard(
@@ -1390,34 +1414,36 @@ export class PTNotesService {
     cardId: string,
     patch: KanbanCardPatch
   ): Promise<KanbanBoard> {
-    const board = await this.loadKanban(project)
-    const card = board.cards.find((c) => c.id === cardId)
-    if (!card) throw new Error(`Card "${cardId}" not found`)
-    if (patch.title !== undefined) {
-      const title = patch.title.trim()
-      if (!title) throw new Error('Card title cannot be empty')
-      card.title = title
-    }
-    if (patch.description !== undefined) card.description = patch.description.trim()
-    if (patch.columnId !== undefined) {
-      if (!board.columns.some((c) => c.id === patch.columnId)) {
-        throw new Error(`Column "${patch.columnId}" not found`)
+    return this.withKanbanLock(project, async () => {
+      const board = await this.readKanban(project)
+      const card = board.cards.find((c) => c.id === cardId)
+      if (!card) throw new Error(`Card "${cardId}" not found`)
+      if (patch.title !== undefined) {
+        const title = patch.title.trim()
+        if (!title) throw new Error('Card title cannot be empty')
+        card.title = title
       }
-      card.columnId = patch.columnId
-    }
-    if (patch.priority !== undefined) card.priority = patch.priority
-    if (patch.labels !== undefined) {
-      card.labels = patch.labels.map((l) => l.trim()).filter(Boolean)
-    }
-    if (patch.dueDate !== undefined) card.dueDate = patch.dueDate
-    if (patch.storyPoints !== undefined) card.storyPoints = patch.storyPoints
-    if (patch.assignee !== undefined) card.assignee = patch.assignee.trim()
-    if (patch.attributes !== undefined) card.attributes = patch.attributes
-    if (patch.secretAttributes !== undefined) {
-      card.secretAttributes = patch.secretAttributes.filter((k) => k in card.attributes)
-    }
-    card.updatedAt = Date.now()
-    return this.saveKanban(project, board)
+      if (patch.description !== undefined) card.description = patch.description.trim()
+      if (patch.columnId !== undefined) {
+        if (!board.columns.some((c) => c.id === patch.columnId)) {
+          throw new Error(`Column "${patch.columnId}" not found`)
+        }
+        card.columnId = patch.columnId
+      }
+      if (patch.priority !== undefined) card.priority = patch.priority
+      if (patch.labels !== undefined) {
+        card.labels = patch.labels.map((l) => l.trim()).filter(Boolean)
+      }
+      if (patch.dueDate !== undefined) card.dueDate = patch.dueDate
+      if (patch.storyPoints !== undefined) card.storyPoints = patch.storyPoints
+      if (patch.assignee !== undefined) card.assignee = patch.assignee.trim()
+      if (patch.attributes !== undefined) card.attributes = patch.attributes
+      if (patch.secretAttributes !== undefined) {
+        card.secretAttributes = patch.secretAttributes.filter((k) => k in card.attributes)
+      }
+      card.updatedAt = Date.now()
+      return this.writeKanban(project, board)
+    })
   }
 
   async moveKanbanCard(
@@ -1426,33 +1452,38 @@ export class PTNotesService {
     columnId: string,
     index?: number
   ): Promise<KanbanBoard> {
-    const board = await this.loadKanban(project)
-    const card = board.cards.find((c) => c.id === cardId)
-    if (!card) throw new Error(`Card "${cardId}" not found`)
-    if (!board.columns.some((c) => c.id === columnId)) {
-      throw new Error(`Column "${columnId}" not found`)
-    }
-    board.cards = board.cards.filter((c) => c.id !== cardId)
-    card.columnId = columnId
-    card.updatedAt = Date.now()
-    const inColumn = board.cards.filter((c) => c.columnId === columnId)
-    const at = index === undefined ? inColumn.length : Math.max(0, Math.min(index, inColumn.length))
-    if (at >= inColumn.length) {
-      board.cards.push(card)
-    } else {
-      const anchor = inColumn[at]
-      const globalIndex = board.cards.findIndex((c) => c.id === anchor.id)
-      board.cards.splice(globalIndex, 0, card)
-    }
-    return this.saveKanban(project, board)
+    return this.withKanbanLock(project, async () => {
+      const board = await this.readKanban(project)
+      const card = board.cards.find((c) => c.id === cardId)
+      if (!card) throw new Error(`Card "${cardId}" not found`)
+      if (!board.columns.some((c) => c.id === columnId)) {
+        throw new Error(`Column "${columnId}" not found`)
+      }
+      board.cards = board.cards.filter((c) => c.id !== cardId)
+      card.columnId = columnId
+      card.updatedAt = Date.now()
+      const inColumn = board.cards.filter((c) => c.columnId === columnId)
+      const at =
+        index === undefined ? inColumn.length : Math.max(0, Math.min(index, inColumn.length))
+      if (at >= inColumn.length) {
+        board.cards.push(card)
+      } else {
+        const anchor = inColumn[at]
+        const globalIndex = board.cards.findIndex((c) => c.id === anchor.id)
+        board.cards.splice(globalIndex, 0, card)
+      }
+      return this.writeKanban(project, board)
+    })
   }
 
   async deleteKanbanCard(project: string, cardId: string): Promise<KanbanBoard> {
-    const board = await this.loadKanban(project)
-    const next = board.cards.filter((c) => c.id !== cardId)
-    if (next.length === board.cards.length) throw new Error(`Card "${cardId}" not found`)
-    board.cards = next
-    return this.saveKanban(project, board)
+    return this.withKanbanLock(project, async () => {
+      const board = await this.readKanban(project)
+      const next = board.cards.filter((c) => c.id !== cardId)
+      if (next.length === board.cards.length) throw new Error(`Card "${cardId}" not found`)
+      board.cards = next
+      return this.writeKanban(project, board)
+    })
   }
 
   async loadKanbanArchive(project: string): Promise<KanbanArchive> {
@@ -1466,59 +1497,64 @@ export class PTNotesService {
     }
   }
 
-  async saveKanbanArchive(project: string, archive: KanbanArchive): Promise<KanbanArchive> {
+  private async writeKanbanArchive(
+    project: string,
+    archive: KanbanArchive
+  ): Promise<KanbanArchive> {
     const normalized = normalizeArchive(archive)
-    const dir = this.kanbanDir(project)
-    await fs.mkdir(dir, { recursive: true })
-    const path = this.kanbanArchivePath(project)
-    const tmp = `${path}.tmp`
-    await fs.writeFile(tmp, JSON.stringify(normalized, null, 2), 'utf8')
-    await fs.rename(tmp, path)
+    await fs.mkdir(this.kanbanDir(project), { recursive: true })
+    await this.atomicWriteJson(this.kanbanArchivePath(project), normalized)
     return normalized
   }
 
   async archiveKanbanCard(project: string, cardId: string): Promise<KanbanArchiveMove> {
-    const board = await this.loadKanban(project)
-    const card = board.cards.find((c) => c.id === cardId)
-    if (!card) throw new Error(`Card "${cardId}" not found`)
-    const archive = await this.loadKanbanArchive(project)
-    if (archive.cards.some((c) => c.id === cardId)) {
-      throw new Error(`Card "${cardId}" is already archived`)
-    }
-    board.cards = board.cards.filter((c) => c.id !== cardId)
-    archive.cards.push(card)
-    await this.saveKanban(project, board)
-    await this.saveKanbanArchive(project, archive)
-    return { board, archive }
+    return this.withKanbanLock(project, async () => {
+      const board = await this.readKanban(project)
+      const card = board.cards.find((c) => c.id === cardId)
+      if (!card) throw new Error(`Card "${cardId}" not found`)
+      const archive = await this.loadKanbanArchive(project)
+      if (archive.cards.some((c) => c.id === cardId)) {
+        throw new Error(`Card "${cardId}" is already archived`)
+      }
+      board.cards = board.cards.filter((c) => c.id !== cardId)
+      archive.cards.push(card)
+      await this.writeKanban(project, board)
+      await this.writeKanbanArchive(project, archive)
+      return { board, archive }
+    })
   }
 
   async restoreKanbanCard(project: string, cardId: string): Promise<KanbanArchiveMove> {
-    const archive = await this.loadKanbanArchive(project)
-    const card = archive.cards.find((c) => c.id === cardId)
-    if (!card) throw new Error(`Archived card "${cardId}" not found`)
-    const board = await this.loadKanban(project)
-    if (board.cards.some((c) => c.id === cardId)) {
-      throw new Error(`Card "${cardId}" already exists on the board`)
-    }
-    archive.cards = archive.cards.filter((c) => c.id !== cardId)
-    if (!board.columns.some((c) => c.id === card.columnId)) {
-      card.columnId = board.columns[0].id
-    }
-    card.updatedAt = Date.now()
-    board.cards.push(card)
-    await this.saveKanban(project, board)
-    await this.saveKanbanArchive(project, archive)
-    return { board, archive }
+    return this.withKanbanLock(project, async () => {
+      const archive = await this.loadKanbanArchive(project)
+      const card = archive.cards.find((c) => c.id === cardId)
+      if (!card) throw new Error(`Archived card "${cardId}" not found`)
+      const board = await this.readKanban(project)
+      if (board.cards.some((c) => c.id === cardId)) {
+        throw new Error(`Card "${cardId}" already exists on the board`)
+      }
+      archive.cards = archive.cards.filter((c) => c.id !== cardId)
+      if (!board.columns.some((c) => c.id === card.columnId)) {
+        card.columnId = board.columns[0].id
+      }
+      card.updatedAt = Date.now()
+      board.cards.push(card)
+      await this.writeKanban(project, board)
+      await this.writeKanbanArchive(project, archive)
+      return { board, archive }
+    })
   }
 
   async deleteArchivedKanbanCard(project: string, cardId: string): Promise<KanbanArchive> {
-    const archive = await this.loadKanbanArchive(project)
-    const next = archive.cards.filter((c) => c.id !== cardId)
-    if (next.length === archive.cards.length) {
-      throw new Error(`Archived card "${cardId}" not found`)
-    }
-    archive.cards = next
-    return this.saveKanbanArchive(project, archive)
+    return this.withKanbanLock(project, async () => {
+      const archive = await this.loadKanbanArchive(project)
+      const next = archive.cards.filter((c) => c.id !== cardId)
+      if (next.length === archive.cards.length) {
+        throw new Error(`Archived card "${cardId}" not found`)
+      }
+      archive.cards = next
+      return this.writeKanbanArchive(project, archive)
+    })
   }
 
   private async migrateTodoFile(todoPath: string): Promise<KanbanBoard> {
