@@ -769,7 +769,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'delete_note',
         description:
-          'Delete one or more existing notes from a project. Requires user confirmation before deleting.',
+          'Delete one or more existing notes from a project. A confirmation dialog is shown automatically before deleting — do not ask the user first via ask_user.',
         parameters: {
           type: 'object',
           properties: {
@@ -1143,7 +1143,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'delete_kanban_card',
         description:
-          'Delete an existing kanban card (matched by title, case-insensitive). Requires user confirmation before deleting.',
+          'Delete an existing kanban card (matched by title, case-insensitive). A confirmation dialog is shown automatically before deleting — do not ask the user first via ask_user.',
         parameters: {
           type: 'object',
           properties: {
@@ -1394,7 +1394,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'delete_skill',
         description:
-          'Delete a skill (a named instruction document) for the current project (scope "project") or for all projects (scope "global"). Requires user confirmation before deleting.',
+          'Delete a skill (a named instruction document) for the current project (scope "project") or for all projects (scope "global"). A confirmation dialog is shown automatically before deleting — do not ask the user first via ask_user.',
         parameters: {
           type: 'object',
           properties: {
@@ -1451,7 +1451,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'ask_user',
         description:
-          'Ask the user for input — a choice, a detail, or confirmation — before continuing. You may include several questions in a single call; the user answers them all at once in a dialog. Each question has an id and question text, plus optional predefined options (2-6 choices; omit options for free text, set multiple true for multi-select). For sensitive free-text answers (passwords, API keys, tokens) set secret true: the user types in a masked field and you receive a ${SECRET:<id>} token instead of the value — pass the token unchanged in later browser tool calls (e.g. browser_type text) and the real value is substituted before execution. Only call this when you genuinely need input from the user.',
+          'Ask the user for input — a choice or a detail — before continuing. You may include several questions in a single call; the user answers them all at once in a dialog. Each question has an id and question text, plus optional predefined options (2-6 choices; omit options for free text, set multiple true for multi-select). For sensitive free-text answers (passwords, API keys, tokens) set secret true: the user types in a masked field and you receive a ${SECRET:<id>} token instead of the value — pass the token unchanged in later browser tool calls (e.g. browser_type text) and the real value is substituted before execution. Only call this when you genuinely need input from the user. Never use it to confirm a destructive action (delete_note, delete_kanban_card, delete_skill) — those tools show their own confirmation dialog automatically.',
         parameters: {
           type: 'object',
           properties: {
