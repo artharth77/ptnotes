@@ -924,7 +924,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'create_kanban_card',
         description:
-          'Create a NEW kanban card in a project (only for cards that do not exist yet — to change an existing card use update_kanban_card). Defaults to the first column of the board; use the column argument to place it in another column (matched by name). The card details/body go in the description parameter.',
+          'Create a NEW kanban card in a project (only for cards that do not exist yet — to change an existing card use update_kanban_card). Defaults to the first column of the board; use the column argument to place it in another column (matched by name). The card details/body go in the description parameter — always include a description when the card carries any details; a title-only card is rarely useful.',
         parameters: {
           type: 'object',
           properties: {
