@@ -2462,4 +2462,46 @@ assert.match(
   'start_module documents plan: references'
 )
 
+// turn limit: a run that exhausts maxIterations without finishing must fail
+// with a message instead of staying 'running' forever
+const loopRegistry = new ModuleRegistry()
+loopRegistry.register({
+  id: 'loopmod',
+  name: 'Loop Module',
+  summary: 'Test module with a tiny turn budget.',
+  description: 'Test module with a tiny turn budget.',
+  systemPrompt: 'Test.',
+  tools: [],
+  maxIterations: 2
+})
+const loopEventTypes: string[] = []
+const loopManager = new ModuleRunManager(
+  service,
+  configStore,
+  loopRegistry,
+  (evt) => {
+    loopEventTypes.push(evt.type)
+  },
+  makeScriptedClient([
+    { tool_calls: [step('lp0', 'set_plan', { steps: ['Step 1', 'Step 2'] })] },
+    { tool_calls: [step('lp1', 'update_step', { index: 0, status: 'running' })] }
+  ])
+)
+const loopStarted = await loopManager.start(PROJECT, 'loopmod', 'Loop', 'Never finish.')
+assert.equal(loopStarted.ok, true, 'loopmod run starts')
+const loopRunId = loopStarted.ok ? loopStarted.runId : ''
+await waitFor(async () => {
+  const runs = await loopManager.list(PROJECT)
+  return runs.some((r) => r.runId === loopRunId && (r.status === 'done' || r.status === 'failed'))
+})
+const loopRun = (await loopManager.list(PROJECT)).find((r) => r.runId === loopRunId)
+assert.ok(loopRun, 'loopmod run listed')
+assert.equal(loopRun!.status, 'failed', 'exhausting the turn budget fails the run')
+assert.match(loopRun!.error ?? '', /turn limit/, 'failure message explains the turn limit')
+assert.ok(loopEventTypes.includes('error'), 'error event broadcast')
+assert.ok(
+  (await service.listStoredModuleRuns(PROJECT)).some((s) => s.runId === loopRunId),
+  'failed run persisted'
+)
+
 console.log('MODULES TESTS PASSED')

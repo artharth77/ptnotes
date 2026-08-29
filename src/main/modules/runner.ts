@@ -274,8 +274,8 @@ export class ModuleRunner {
     this.persistChat()
 
     const client = this.clientFn(this.config)
+    const maxIterations = this.module.maxIterations ?? MAX_ITERATIONS
     try {
-      const maxIterations = this.module.maxIterations ?? MAX_ITERATIONS
       for (let iter = 0; iter < maxIterations; iter++) {
         if (this.stopped) break
         const next = await this.runTurn(client)
@@ -294,6 +294,10 @@ export class ModuleRunner {
       this.run.status = 'cancelled'
       this.touch({ type: 'status' })
       this.persistChat()
+    } else if (!this.stopped && this.run.status !== 'done' && this.run.status !== 'failed') {
+      this.fail(
+        `Reached the turn limit (${maxIterations} model turns) without finishing. Partial progress is saved — start the module again to continue.`
+      )
     }
   }
 
