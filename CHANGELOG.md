@@ -1,3 +1,16 @@
+## [0.14.2] — 2026-08-29
+
+### Added
+
+- **Kanban board keyboard navigation**: when a card is focused on the board view (click it), `ArrowUp`/`ArrowDown` move focus to the previous/next card in the same column (clamped at the ends) and `ArrowLeft`/`ArrowRight` move to the nearest adjacent column that has visible cards (skipping empty columns), keeping the row index where possible (clamped to the target column's length). `Enter` opens the focused card in the editor (same as double-click). Navigation operates on the filtered (visible) card set, the focused card is kept in view by the existing scroll-into-center behavior, and handled keys are consumed so the board doesn't scroll. Keys are ignored while a modal or the card context menu is open, when focus is in an input/textarea/select/button/contenteditable (filter bar, chat, editor), or when a modifier key is held.
+
+### Fixed
+
+- **Kanban lost updates between the UI and background runs**: the UI edited cards/comments/columns by sending the **whole board** from a stale renderer copy (`kanban:save`), so any comment, column change or card a chat tool / module run wrote between the UI's load and its next save was silently overwritten (the 0.14.1 per-project lock only serialized main-process operations — it cannot protect a stale full-board write).
+  - **Granular IPC**: `kanban:save` is removed; the renderer now issues per-operation calls — cards (`createCard`, `updateCard`, `moveCard` with in-column index, `deleteCard`), comments (`addComment`, `updateComment`, `deleteComment`) and columns (`addColumn`, `updateColumn` re-slugs + remaps the column's cards, `moveColumn`, `deleteColumn` with move/delete card mode and a ≥1-column guard) — each a locked read-modify-write in `PTNotesService` returning the updated board, which the store adopts (optimistic local update for drags/deletes, re-fetch on error).
+  - **Comments are no longer replaceable by card edits**: the card modal's field save excludes `comments` — comments only change through the comment operations — so background comments added while a card modal is open survive the modal's save; `updateKanbanCard` still accepts an explicit `comments` patch (validated) for programmatic use, and `createKanbanCard` accepts initial `comments`.
+  - **Regression tests**: 15 concurrent `addKanbanComment` on one card (no losses, unique ids), comment update/delete round-trips with server-generated ids, column add/rename/remap/move/delete (both modes), the ≥1-column guard, and a `comments` patch through `updateKanbanCard` (`test-service.mts`).
+
 ## [0.14.1] — 2026-08-29
 
 ### Fixed
