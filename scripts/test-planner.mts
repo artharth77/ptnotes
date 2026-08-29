@@ -572,4 +572,37 @@ sched2 = await service.readSchedule('Build', 'ship-it')
 assert.ok(sched2 && sched2.tasks.length === 1)
 assert.equal(sched2.tasks[0].percentComplete, 100)
 
+// concurrency: parallel add_task calls must all persist (per-project planner lock)
+r = await call('create_schedule', { name: 'Parallel' })
+assert.equal(r.ok, true)
+const parallelAdds = await Promise.all(
+  Array.from({ length: 10 }, (_, i) => call('add_task', { schedule: 'Parallel', title: `P${i}` }))
+)
+assert.equal(
+  parallelAdds.every((x) => (x as { ok: boolean }).ok),
+  true
+)
+const parallel = await service.readSchedule('Build', 'parallel')
+assert.equal(parallel!.tasks.length, 10, 'no lost updates under concurrent add_task')
+
+// concurrency: parallel update_task calls on distinct tasks all persist
+await Promise.all(
+  parallel!.tasks.map((t, i) =>
+    call('update_task', { schedule: 'Parallel', task: t.id, percentComplete: i * 10 })
+  )
+)
+const afterUpdates = await service.readSchedule('Build', 'parallel')
+assert.deepEqual(
+  afterUpdates!.tasks.map((t) => t.percentComplete).sort((a, b) => a - b),
+  [0, 10, 20, 30, 40, 50, 60, 70, 80, 90],
+  'all concurrent update_task calls persisted'
+)
+
+// concurrency: parallel create_schedule with the same name — exactly one wins
+const dupSchedules = await Promise.all([
+  call('create_schedule', { name: 'Dup' }),
+  call('create_schedule', { name: 'Dup' })
+])
+assert.equal(dupSchedules.filter((x) => (x as { ok: boolean }).ok).length, 1)
+
 console.log('planner tests passed')

@@ -327,13 +327,8 @@ export const tools: PTTool[] = [
       const content = String(args.content ?? '')
       const existing = await ctx.service.listNotes(project)
       const found = findNote(existing, title)
-      if (found) {
-        await ctx.service.saveNote(project, found.id, content)
-        return JSON.stringify({ ok: true, action: 'updated', note: found.id, project })
-      }
-      const note = await ctx.service.createNote(project, title)
-      await ctx.service.saveNote(project, note.id, content)
-      return JSON.stringify({ ok: true, action: 'created', note: note.id, project })
+      const res = await ctx.service.upsertNote(project, found?.id ?? slugify(title), content)
+      return JSON.stringify({ ok: true, action: res.action, note: res.id, project })
     }
   },
   {
@@ -399,117 +394,133 @@ export const tools: PTTool[] = [
           error: `Note "${title}" not found in project "${project}". Use create_note to create it.`
         })
       }
-      const raw = await ctx.service.readNote(project, found.id)
-      const lines = noteLines(raw)
-      const totalLines = lines.length
-      const hadTrailingNewline = raw !== '' && raw.endsWith('\n')
 
       type Hunk = { startLine: number; endLine: number; content: string }
-      const hunks: Hunk[] = []
-      for (let i = 0; i < rawEdits.length; i++) {
-        const e = (
-          typeof rawEdits[i] === 'object' && rawEdits[i] !== null ? rawEdits[i] : {}
-        ) as Record<string, unknown>
-        const startLine = lineArg(e.startLine)
-        const endLine = lineArg(e.endLine, 0)
-        if (startLine === null || endLine === null) {
-          return JSON.stringify({
-            ok: false,
-            error: `Hunk ${i + 1} needs startLine (>= 1) and endLine (>= 0) as integers.`
-          })
-        }
-        if (Number.isNaN(startLine) || Number.isNaN(endLine)) {
-          return JSON.stringify({
-            ok: false,
-            error: `Hunk ${i + 1}: startLine and endLine must be integers (startLine >= 1, endLine >= 0).`
-          })
-        }
-        if (typeof e.content !== 'string') {
-          return JSON.stringify({
-            ok: false,
-            error: `Hunk ${i + 1}: content must be a string (use "" to delete the line range).`
-          })
-        }
-        if (endLine < startLine - 1) {
-          return JSON.stringify({
-            ok: false,
-            error: `Hunk ${i + 1}: endLine (${endLine}) must be >= startLine - 1 (${startLine - 1}); use endLine = startLine - 1 to insert before line ${startLine}.`
-          })
-        }
-        if (endLine >= startLine && endLine > totalLines) {
-          return JSON.stringify({
-            ok: false,
-            totalLines,
-            error: `Hunk ${i + 1}: endLine ${endLine} is beyond the end of the note (it has ${totalLines} line(s)).`
-          })
-        }
-        if (endLine < startLine && startLine > totalLines + 1) {
-          return JSON.stringify({
-            ok: false,
-            totalLines,
-            error: `Hunk ${i + 1}: cannot insert before line ${startLine} — the note has ${totalLines} line(s); use startLine ${totalLines + 1} to append at the end.`
-          })
-        }
-        hunks.push({ startLine, endLine, content: e.content })
-      }
+      let response = ''
 
-      const isInsert = (h: Hunk): boolean => h.endLine < h.startLine
-      for (let i = 0; i < hunks.length; i++) {
-        for (let j = i + 1; j < hunks.length; j++) {
-          const a = hunks[i]
-          const b = hunks[j]
-          const aIns = isInsert(a)
-          const bIns = isInsert(b)
-          if (aIns && bIns) {
-            if (a.startLine === b.startLine) {
-              return JSON.stringify({
-                ok: false,
-                error: `Hunks ${i + 1} and ${j + 1} both insert before line ${a.startLine}.`
-              })
-            }
-            continue
-          }
-          if (aIns || bIns) {
-            const ins = aIns ? a : b
-            const rep = aIns ? b : a
-            if (rep.startLine < ins.startLine && ins.startLine <= rep.endLine) {
-              return JSON.stringify({
-                ok: false,
-                error: `Hunk ${aIns ? i + 1 : j + 1} inserts before line ${ins.startLine}, which is inside hunk ${aIns ? j + 1 : i + 1}'s range (${rep.startLine}-${rep.endLine}).`
-              })
-            }
-            continue
-          }
-          if (a.startLine <= b.endLine && b.startLine <= a.endLine) {
-            return JSON.stringify({
+      // Runs under the per-project note lock: hunks are validated and applied
+      // against the note's current content, so concurrent edits cannot shift lines.
+      await ctx.service.withNote(project, found.id, (raw) => {
+        const lines = noteLines(raw)
+        const totalLines = lines.length
+        const hadTrailingNewline = raw !== '' && raw.endsWith('\n')
+
+        const hunks: Hunk[] = []
+        for (let i = 0; i < rawEdits.length; i++) {
+          const e = (
+            typeof rawEdits[i] === 'object' && rawEdits[i] !== null ? rawEdits[i] : {}
+          ) as Record<string, unknown>
+          const startLine = lineArg(e.startLine)
+          const endLine = lineArg(e.endLine, 0)
+          if (startLine === null || endLine === null) {
+            response = JSON.stringify({
               ok: false,
-              error: `Hunks ${i + 1} and ${j + 1} overlap (lines ${a.startLine}-${a.endLine} and ${b.startLine}-${b.endLine}).`
+              error: `Hunk ${i + 1} needs startLine (>= 1) and endLine (>= 0) as integers.`
             })
+            return null
+          }
+          if (Number.isNaN(startLine) || Number.isNaN(endLine)) {
+            response = JSON.stringify({
+              ok: false,
+              error: `Hunk ${i + 1}: startLine and endLine must be integers (startLine >= 1, endLine >= 0).`
+            })
+            return null
+          }
+          if (typeof e.content !== 'string') {
+            response = JSON.stringify({
+              ok: false,
+              error: `Hunk ${i + 1}: content must be a string (use "" to delete the line range).`
+            })
+            return null
+          }
+          if (endLine < startLine - 1) {
+            response = JSON.stringify({
+              ok: false,
+              error: `Hunk ${i + 1}: endLine (${endLine}) must be >= startLine - 1 (${startLine - 1}); use endLine = startLine - 1 to insert before line ${startLine}.`
+            })
+            return null
+          }
+          if (endLine >= startLine && endLine > totalLines) {
+            response = JSON.stringify({
+              ok: false,
+              totalLines,
+              error: `Hunk ${i + 1}: endLine ${endLine} is beyond the end of the note (it has ${totalLines} line(s)).`
+            })
+            return null
+          }
+          if (endLine < startLine && startLine > totalLines + 1) {
+            response = JSON.stringify({
+              ok: false,
+              totalLines,
+              error: `Hunk ${i + 1}: cannot insert before line ${startLine} — the note has ${totalLines} line(s); use startLine ${totalLines + 1} to append at the end.`
+            })
+            return null
+          }
+          hunks.push({ startLine, endLine, content: e.content })
+        }
+
+        const isInsert = (h: Hunk): boolean => h.endLine < h.startLine
+        for (let i = 0; i < hunks.length; i++) {
+          for (let j = i + 1; j < hunks.length; j++) {
+            const a = hunks[i]
+            const b = hunks[j]
+            const aIns = isInsert(a)
+            const bIns = isInsert(b)
+            if (aIns && bIns) {
+              if (a.startLine === b.startLine) {
+                response = JSON.stringify({
+                  ok: false,
+                  error: `Hunks ${i + 1} and ${j + 1} both insert before line ${a.startLine}.`
+                })
+                return null
+              }
+              continue
+            }
+            if (aIns || bIns) {
+              const ins = aIns ? a : b
+              const rep = aIns ? b : a
+              if (rep.startLine < ins.startLine && ins.startLine <= rep.endLine) {
+                response = JSON.stringify({
+                  ok: false,
+                  error: `Hunk ${aIns ? i + 1 : j + 1} inserts before line ${ins.startLine}, which is inside hunk ${aIns ? j + 1 : i + 1}'s range (${rep.startLine}-${rep.endLine}).`
+                })
+                return null
+              }
+              continue
+            }
+            if (a.startLine <= b.endLine && b.startLine <= a.endLine) {
+              response = JSON.stringify({
+                ok: false,
+                error: `Hunks ${i + 1} and ${j + 1} overlap (lines ${a.startLine}-${a.endLine} and ${b.startLine}-${b.endLine}).`
+              })
+              return null
+            }
           }
         }
-      }
 
-      const sorted = [...hunks].sort((x, y) => y.startLine - x.startLine || y.endLine - x.endLine)
-      for (const h of sorted) {
-        const contentLines = h.content === '' ? [] : noteLines(h.content)
-        if (h.endLine >= h.startLine) {
-          lines.splice(h.startLine - 1, h.endLine - h.startLine + 1, ...contentLines)
-        } else {
-          lines.splice(h.startLine - 1, 0, ...contentLines)
+        const sorted = [...hunks].sort((x, y) => y.startLine - x.startLine || y.endLine - x.endLine)
+        for (const h of sorted) {
+          const contentLines = h.content === '' ? [] : noteLines(h.content)
+          if (h.endLine >= h.startLine) {
+            lines.splice(h.startLine - 1, h.endLine - h.startLine + 1, ...contentLines)
+          } else {
+            lines.splice(h.startLine - 1, 0, ...contentLines)
+          }
         }
-      }
 
-      let out = lines.join('\n')
-      if (out !== '' && hadTrailingNewline) out += '\n'
-      await ctx.service.saveNote(project, found.id, out)
-      return JSON.stringify({
-        ok: true,
-        action: 'updated',
-        note: found.id,
-        project,
-        edits: hunks.length,
-        totalLines: lines.length
+        let out = lines.join('\n')
+        if (out !== '' && hadTrailingNewline) out += '\n'
+        response = JSON.stringify({
+          ok: true,
+          action: 'updated',
+          note: found.id,
+          project,
+          edits: hunks.length,
+          totalLines: lines.length
+        })
+        return out
       })
+      return response
     }
   },
   {
@@ -758,7 +769,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'delete_note',
         description:
-          'Delete one or more existing notes from a project. Requires user confirmation before deleting.',
+          'Delete one or more existing notes from a project. A confirmation dialog is shown automatically before deleting — do not ask the user first via ask_user.',
         parameters: {
           type: 'object',
           properties: {
@@ -913,7 +924,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'create_kanban_card',
         description:
-          'Create a NEW kanban card in a project (only for cards that do not exist yet — to change an existing card use update_kanban_card). Defaults to the first column of the board; use the column argument to place it in another column (matched by name). The card details/body go in the description parameter.',
+          'Create a NEW kanban card in a project (only for cards that do not exist yet — to change an existing card use update_kanban_card). Defaults to the first column of the board; use the column argument to place it in another column (matched by name). The card details/body go in the description parameter — always include a description when the card carries any details; a title-only card is rarely useful.',
         parameters: {
           type: 'object',
           properties: {
@@ -1132,7 +1143,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'delete_kanban_card',
         description:
-          'Delete an existing kanban card (matched by title, case-insensitive). Requires user confirmation before deleting.',
+          'Delete an existing kanban card (matched by title, case-insensitive). A confirmation dialog is shown automatically before deleting — do not ask the user first via ask_user.',
         parameters: {
           type: 'object',
           properties: {
@@ -1383,7 +1394,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'delete_skill',
         description:
-          'Delete a skill (a named instruction document) for the current project (scope "project") or for all projects (scope "global"). Requires user confirmation before deleting.',
+          'Delete a skill (a named instruction document) for the current project (scope "project") or for all projects (scope "global"). A confirmation dialog is shown automatically before deleting — do not ask the user first via ask_user.',
         parameters: {
           type: 'object',
           properties: {
@@ -1440,7 +1451,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'ask_user',
         description:
-          'Ask the user for input — a choice, a detail, or confirmation — before continuing. You may include several questions in a single call; the user answers them all at once in a dialog. Each question has an id and question text, plus optional predefined options (2-6 choices; omit options for free text, set multiple true for multi-select). For sensitive free-text answers (passwords, API keys, tokens) set secret true: the user types in a masked field and you receive a ${SECRET:<id>} token instead of the value — pass the token unchanged in later browser tool calls (e.g. browser_type text) and the real value is substituted before execution. Only call this when you genuinely need input from the user.',
+          'Ask the user for input — a choice or a detail — before continuing. You may include several questions in a single call; the user answers them all at once in a dialog. Each question has an id and question text, plus optional predefined options (2-6 choices; omit options for free text, set multiple true for multi-select). For sensitive free-text answers (passwords, API keys, tokens) set secret true: the user types in a masked field and you receive a ${SECRET:<id>} token instead of the value — pass the token unchanged in later browser tool calls (e.g. browser_type text) and the real value is substituted before execution. Only call this when you genuinely need input from the user. Never use it to confirm a destructive action (delete_note, delete_kanban_card, delete_skill) — those tools show their own confirmation dialog automatically.',
         parameters: {
           type: 'object',
           properties: {
@@ -1750,66 +1761,72 @@ export const tools: PTTool[] = [
     async execute(args, ctx) {
       const project = projectOf(args, ctx)
       try {
-        const { schedule } = await requireSchedule(ctx, project, String(args.schedule ?? ''))
-        const calendar = await ctx.service.readCalendar(project)
+        const { meta } = await requireSchedule(ctx, project, String(args.schedule ?? ''))
+        const summary = await ctx.service.withSchedule(project, meta.id, async (schedule) => {
+          const calendar = await ctx.service.readCalendar(project)
 
-        const task = emptyTask()
-        const title = String(args.title ?? '').trim()
-        task.title = title
-        const owner = str(args.owner)
-        if (owner !== null) task.owner = owner
-        const note = str(args.note)
-        if (note !== null) task.note = note
-        const status = statusOf(args.status)
-        if (status) task.status = status
-        const percent = numOrNull(args.percentComplete)
-        if (percent !== null) task.percentComplete = clampPercent(percent)
-        const planStart = dateOrNull(args.planStart)
-        if (planStart) task.planStart = planStart
-        const planEnd = dateOrNull(args.planEnd)
-        if (planEnd) task.planEnd = planEnd
-        const duration = numOrNull(args.duration)
-        const explicitDuration = duration !== null
-        if (explicitDuration) task.duration = Math.max(1, Math.round(duration))
-        const actualStart = dateOrNull(args.actualStart)
-        if (actualStart) task.actualStart = actualStart
-        const actualEnd = dateOrNull(args.actualEnd)
-        if (actualEnd) task.actualEnd = actualEnd
+          const task = emptyTask()
+          const title = String(args.title ?? '').trim()
+          task.title = title
+          const owner = str(args.owner)
+          if (owner !== null) task.owner = owner
+          const note = str(args.note)
+          if (note !== null) task.note = note
+          const status = statusOf(args.status)
+          if (status) task.status = status
+          const percent = numOrNull(args.percentComplete)
+          if (percent !== null) task.percentComplete = clampPercent(percent)
+          const planStart = dateOrNull(args.planStart)
+          if (planStart) task.planStart = planStart
+          const planEnd = dateOrNull(args.planEnd)
+          if (planEnd) task.planEnd = planEnd
+          const duration = numOrNull(args.duration)
+          const explicitDuration = duration !== null
+          if (explicitDuration) task.duration = Math.max(1, Math.round(duration))
+          const actualStart = dateOrNull(args.actualStart)
+          if (actualStart) task.actualStart = actualStart
+          const actualEnd = dateOrNull(args.actualEnd)
+          if (actualEnd) task.actualEnd = actualEnd
 
-        const resolved = { ...task }
-        if (resolved.planStart && resolved.planEnd) {
-          resolved.duration = computeDuration(resolved.planStart, resolved.planEnd, calendar)
-        } else if (
-          explicitDuration &&
-          resolved.planStart &&
-          resolved.duration !== null &&
-          resolved.duration > 0
-        ) {
-          resolved.planEnd = computeEndDate(resolved.planStart, resolved.duration, calendar)
-        }
+          const resolved = { ...task }
+          if (resolved.planStart && resolved.planEnd) {
+            resolved.duration = computeDuration(resolved.planStart, resolved.planEnd, calendar)
+          } else if (
+            explicitDuration &&
+            resolved.planStart &&
+            resolved.duration !== null &&
+            resolved.duration > 0
+          ) {
+            resolved.planEnd = computeEndDate(resolved.planStart, resolved.duration, calendar)
+          }
 
-        let tasks: ScheduleTask[]
-        const parentArg = args.parent ? findTask(schedule.tasks, String(args.parent)) : null
-        const afterArg = args.addAfter ? findTask(schedule.tasks, String(args.addAfter)) : null
-        const afterId = afterArg?.id ?? ''
-        const parent = parentArg ?? (afterArg ? findTaskParent(schedule.tasks, afterArg.id) : null)
-        if (parent) {
-          const children = insertAfterId(parent.children, afterId, resolved)
-          tasks = updateTaskNode(schedule.tasks, parent.id, (t) => ({ ...t, children }))
-        } else {
-          tasks = insertAfterId(schedule.tasks, afterId, resolved)
-        }
-        const saved = {
-          ...schedule,
-          tasks: rollupScheduleTasks(tasks, calendar),
-          updatedAt: Date.now()
-        }
-        await ctx.service.saveSchedule(project, saved)
-        return JSON.stringify({
-          ...scheduleSummary(saved, project),
-          taskId: resolved.id,
-          parent: parent ? parent.id : null
+          let tasks: ScheduleTask[]
+          const parentArg = args.parent ? findTask(schedule.tasks, String(args.parent)) : null
+          const afterArg = args.addAfter ? findTask(schedule.tasks, String(args.addAfter)) : null
+          const afterId = afterArg?.id ?? ''
+          const parent =
+            parentArg ?? (afterArg ? findTaskParent(schedule.tasks, afterArg.id) : null)
+          if (parent) {
+            const children = insertAfterId(parent.children, afterId, resolved)
+            tasks = updateTaskNode(schedule.tasks, parent.id, (t) => ({ ...t, children }))
+          } else {
+            tasks = insertAfterId(schedule.tasks, afterId, resolved)
+          }
+          const saved = {
+            ...schedule,
+            tasks: rollupScheduleTasks(tasks, calendar),
+            updatedAt: Date.now()
+          }
+          return {
+            save: saved,
+            value: {
+              ...scheduleSummary(saved, project),
+              taskId: resolved.id,
+              parent: parent ? parent.id : null
+            }
+          }
         })
+        return JSON.stringify(summary)
       } catch (err) {
         return JSON.stringify({ ok: false, error: (err as Error).message })
       }
@@ -1864,89 +1881,92 @@ export const tools: PTTool[] = [
     async execute(args, ctx) {
       const project = projectOf(args, ctx)
       try {
-        const { schedule } = await requireSchedule(ctx, project, String(args.schedule ?? ''))
-        const target = String(args.task ?? '')
-        const task = findTask(schedule.tasks, target)
-        if (!task) {
-          return JSON.stringify({ ok: false, error: `Task "${target}" not found` })
-        }
-        if (
-          task.children.length > 0 &&
-          (args.planStart !== undefined ||
-            args.planEnd !== undefined ||
-            args.duration !== undefined)
-        ) {
-          return JSON.stringify({
-            ok: false,
-            error: `Task "${task.title}" is a parent task: plan start/end and duration are derived from its children. Update the child tasks instead.`
-          })
-        }
-        const calendar = await ctx.service.readCalendar(project)
-
-        const next = { ...task } as ScheduleTask
-        const title = str(args.title)
-        if (title !== null) next.title = title
-        const owner = str(args.owner)
-        if (owner !== null) next.owner = owner
-        const note = str(args.note)
-        if (note !== null) next.note = note
-        const status = statusOf(args.status)
-        if (status) next.status = status
-        const percent = numOrNull(args.percentComplete)
-        if (percent !== null) next.percentComplete = clampPercent(percent)
-        const planStart = dateOrNull(args.planStart)
-        if (planStart !== null) next.planStart = planStart
-        const planEnd = dateOrNull(args.planEnd)
-        if (planEnd !== null) next.planEnd = planEnd
-        const duration = numOrNull(args.duration)
-        if (duration !== null) next.duration = Math.max(1, Math.round(duration))
-        const actualStart = dateOrNull(args.actualStart)
-        if (actualStart !== null) next.actualStart = actualStart
-        const actualEnd = dateOrNull(args.actualEnd)
-        if (actualEnd !== null) next.actualEnd = actualEnd
-
-        const resolved = applyDateRule(task, next, calendar)
-
-        const parentArg = args.parent ? findTask(schedule.tasks, String(args.parent)) : null
-        const afterArg = args.addAfter ? findTask(schedule.tasks, String(args.addAfter)) : null
-        const afterId = afterArg?.id ?? ''
-        const parent =
-          parentArg ??
-          (args.parent === undefined && afterArg
-            ? findTaskParent(schedule.tasks, afterArg.id)
-            : null)
-        if (parent && (parent.id === task.id || containsTask(task, parent.id))) {
-          return JSON.stringify({
-            ok: false,
-            error: `Cannot move task "${task.title}" under itself or one of its descendants.`
-          })
-        }
-        const moveRequested = args.parent !== undefined || args.addAfter !== undefined
-
-        let tasks: ScheduleTask[]
-        if (moveRequested) {
-          tasks = removeTaskNode(schedule.tasks, task.id)
-          if (parent) {
-            const parentNode = findTask(tasks, parent.id)
-            const children = insertAfterId(parentNode!.children, afterId, resolved)
-            tasks = updateTaskNode(tasks, parentNode!.id, (t) => ({ ...t, children }))
-          } else {
-            tasks = insertAfterId(tasks, afterId, resolved)
+        const { meta } = await requireSchedule(ctx, project, String(args.schedule ?? ''))
+        const summary = await ctx.service.withSchedule(project, meta.id, async (schedule) => {
+          const target = String(args.task ?? '')
+          const task = findTask(schedule.tasks, target)
+          if (!task) {
+            throw new Error(`Task "${target}" not found`)
           }
-        } else {
-          tasks = updateTaskNode(schedule.tasks, task.id, () => resolved)
-        }
-        const saved = {
-          ...schedule,
-          tasks: rollupScheduleTasks(tasks, calendar),
-          updatedAt: Date.now()
-        }
-        await ctx.service.saveSchedule(project, saved)
-        return JSON.stringify({
-          ...scheduleSummary(saved, project),
-          updated: { id: task.id, title: resolved.title },
-          parent: parent ? parent.id : null
+          if (
+            task.children.length > 0 &&
+            (args.planStart !== undefined ||
+              args.planEnd !== undefined ||
+              args.duration !== undefined)
+          ) {
+            throw new Error(
+              `Task "${task.title}" is a parent task: plan start/end and duration are derived from its children. Update the child tasks instead.`
+            )
+          }
+          const calendar = await ctx.service.readCalendar(project)
+
+          const next = { ...task } as ScheduleTask
+          const title = str(args.title)
+          if (title !== null) next.title = title
+          const owner = str(args.owner)
+          if (owner !== null) next.owner = owner
+          const note = str(args.note)
+          if (note !== null) next.note = note
+          const status = statusOf(args.status)
+          if (status) next.status = status
+          const percent = numOrNull(args.percentComplete)
+          if (percent !== null) next.percentComplete = clampPercent(percent)
+          const planStart = dateOrNull(args.planStart)
+          if (planStart !== null) next.planStart = planStart
+          const planEnd = dateOrNull(args.planEnd)
+          if (planEnd !== null) next.planEnd = planEnd
+          const duration = numOrNull(args.duration)
+          if (duration !== null) next.duration = Math.max(1, Math.round(duration))
+          const actualStart = dateOrNull(args.actualStart)
+          if (actualStart !== null) next.actualStart = actualStart
+          const actualEnd = dateOrNull(args.actualEnd)
+          if (actualEnd !== null) next.actualEnd = actualEnd
+
+          const resolved = applyDateRule(task, next, calendar)
+
+          const parentArg = args.parent ? findTask(schedule.tasks, String(args.parent)) : null
+          const afterArg = args.addAfter ? findTask(schedule.tasks, String(args.addAfter)) : null
+          const afterId = afterArg?.id ?? ''
+          const parent =
+            parentArg ??
+            (args.parent === undefined && afterArg
+              ? findTaskParent(schedule.tasks, afterArg.id)
+              : null)
+          if (parent && (parent.id === task.id || containsTask(task, parent.id))) {
+            throw new Error(
+              `Cannot move task "${task.title}" under itself or one of its descendants.`
+            )
+          }
+          const moveRequested = args.parent !== undefined || args.addAfter !== undefined
+
+          let tasks: ScheduleTask[]
+          if (moveRequested) {
+            tasks = removeTaskNode(schedule.tasks, task.id)
+            if (parent) {
+              const parentNode = findTask(tasks, parent.id)
+              const children = insertAfterId(parentNode!.children, afterId, resolved)
+              tasks = updateTaskNode(tasks, parentNode!.id, (t) => ({ ...t, children }))
+            } else {
+              tasks = insertAfterId(tasks, afterId, resolved)
+            }
+          } else {
+            tasks = updateTaskNode(schedule.tasks, task.id, () => resolved)
+          }
+          const saved = {
+            ...schedule,
+            tasks: rollupScheduleTasks(tasks, calendar),
+            updatedAt: Date.now()
+          }
+          return {
+            save: saved,
+            value: {
+              ...scheduleSummary(saved, project),
+              updated: { id: task.id, title: resolved.title },
+              parent: parent ? parent.id : null
+            }
+          }
         })
+        return JSON.stringify(summary)
       } catch (err) {
         return JSON.stringify({ ok: false, error: (err as Error).message })
       }
@@ -2005,18 +2025,7 @@ export const tools: PTTool[] = [
       }
       calendar.holidays.sort()
       await ctx.service.saveCalendar(project, calendar)
-      const metas = await ctx.service.listSchedules(project)
-      let reRolled = 0
-      for (const meta of metas) {
-        const schedule = await ctx.service.readSchedule(project, meta.id)
-        if (!schedule) continue
-        await ctx.service.saveSchedule(project, {
-          ...schedule,
-          tasks: rollupScheduleTasks(schedule.tasks, calendar),
-          updatedAt: Date.now()
-        })
-        reRolled++
-      }
+      const reRolled = await ctx.service.rerollSchedules(project, calendar)
       return JSON.stringify({
         ok: true,
         project,

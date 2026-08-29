@@ -330,7 +330,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     const project = get().activeProject
     if (!project) return set({ notes: [] })
     const notes = await window.ptnotes.notes.list(project)
-    set({ notes })
+    const { activeNoteId } = get()
+    // The active note may have been deleted by an AI tool run or externally;
+    // drop it (and its stale editor content) so edits cannot resurrect the file.
+    if (activeNoteId && !notes.some((n) => n.id === activeNoteId)) {
+      set({ notes, activeNoteId: null, noteContent: '' })
+    } else {
+      set({ notes })
+    }
   },
 
   async refreshKanban() {
@@ -687,9 +694,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     const project = get().activeProject
     if (!project) return
     const renamed = await window.ptnotes.notes.rename(project, id, newTitle)
+    const { activeNoteId, noteContent } = get()
+    const wasActive = activeNoteId === id
     await get().refreshNotes()
-    if (get().activeNoteId === id) {
-      set({ activeNoteId: renamed.id, noteContent: get().noteContent })
+    if (wasActive) {
+      set({ activeNoteId: renamed.id, noteContent })
     }
   },
 
