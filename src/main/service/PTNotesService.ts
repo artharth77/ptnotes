@@ -25,14 +25,19 @@ import {
   defaultBoard,
   findColumnByName,
   newCardId,
+  newCommentId,
   normalizeArchive,
   normalizeBoard,
+  normalizeComments,
   type KanbanArchive,
   type KanbanArchiveMove,
   type KanbanBoard,
   type KanbanCard,
   type KanbanCardPatch,
-  type NewKanbanCardInput
+  type KanbanColumnPatch,
+  type KanbanCommentInput,
+  type NewKanbanCardInput,
+  type NewKanbanColumnInput
 } from '@shared/kanban'
 import { slugify } from '@shared/slug'
 import {
@@ -1528,7 +1533,7 @@ export class PTNotesService {
         id: newCardId(),
         title,
         description: (input.description ?? '').trim(),
-        comments: [],
+        comments: normalizeComments(input.comments ?? []),
         columnId,
         priority: input.priority ?? null,
         labels: (input.labels ?? []).map((l) => l.trim()).filter(Boolean),
@@ -1579,6 +1584,7 @@ export class PTNotesService {
       if (patch.secretAttributes !== undefined) {
         card.secretAttributes = patch.secretAttributes.filter((k) => k in card.attributes)
       }
+      if (patch.comments !== undefined) card.comments = normalizeComments(patch.comments)
       card.updatedAt = Date.now()
       return this.writeKanban(project, board)
     })
@@ -1620,6 +1626,157 @@ export class PTNotesService {
       const next = board.cards.filter((c) => c.id !== cardId)
       if (next.length === board.cards.length) throw new Error(`Card "${cardId}" not found`)
       board.cards = next
+      return this.writeKanban(project, board)
+    })
+  }
+
+  private async withKanbanCard(
+    project: string,
+    cardId: string,
+    fn: (card: KanbanCard) => void
+  ): Promise<KanbanBoard> {
+    return this.withKanbanLock(project, async () => {
+      const board = await this.readKanban(project)
+      const card = board.cards.find((c) => c.id === cardId)
+      if (!card) throw new Error(`Card "${cardId}" not found`)
+      fn(card)
+      return this.writeKanban(project, board)
+    })
+  }
+
+  async addKanbanComment(
+    project: string,
+    cardId: string,
+    input: KanbanCommentInput
+  ): Promise<KanbanBoard> {
+    return this.withKanbanCard(project, cardId, (card) => {
+      const comment = (input.comment ?? '').trim()
+      if (!comment) throw new Error('Comment text is required')
+      card.comments.push({
+        id: newCommentId(),
+        comment,
+        commentBy: input.commentBy?.trim() ? input.commentBy.trim() : 'you',
+        timestamp: Date.now()
+      })
+      card.updatedAt = Date.now()
+    })
+  }
+
+  async updateKanbanComment(
+    project: string,
+    cardId: string,
+    commentId: string,
+    input: KanbanCommentInput
+  ): Promise<KanbanBoard> {
+    return this.withKanbanCard(project, cardId, (card) => {
+      const comment = (input.comment ?? '').trim()
+      if (!comment) throw new Error('Comment text is required')
+      const target = card.comments.find((c) => c.id === commentId)
+      if (!target) throw new Error(`Comment "${commentId}" not found`)
+      target.comment = comment
+      if (input.commentBy !== undefined && input.commentBy.trim()) {
+        target.commentBy = input.commentBy.trim()
+      }
+      card.updatedAt = Date.now()
+    })
+  }
+
+  async deleteKanbanComment(
+    project: string,
+    cardId: string,
+    commentId: string
+  ): Promise<KanbanBoard> {
+    return this.withKanbanCard(project, cardId, (card) => {
+      const next = card.comments.filter((c) => c.id !== commentId)
+      if (next.length === card.comments.length) throw new Error(`Comment "${commentId}" not found`)
+      card.comments = next
+      card.updatedAt = Date.now()
+    })
+  }
+
+  async addKanbanColumn(project: string, input: NewKanbanColumnInput): Promise<KanbanBoard> {
+    return this.withKanbanLock(project, async () => {
+      const board = await this.readKanban(project)
+      const title = (input.title ?? '').trim()
+      if (!title) throw new Error('Column title is required')
+      const id = slugify(title)
+      if (board.columns.some((c) => c.id === id)) {
+        throw new Error(`Column "${title}" already exists`)
+      }
+      board.columns.push({
+        id,
+        title,
+        color: input.color ?? null,
+        highlightOverdue: input.highlightOverdue ?? true
+      })
+      return this.writeKanban(project, board)
+    })
+  }
+
+  async updateKanbanColumn(
+    project: string,
+    columnId: string,
+    patch: KanbanColumnPatch
+  ): Promise<KanbanBoard> {
+    return this.withKanbanLock(project, async () => {
+      const board = await this.readKanban(project)
+      const column = board.columns.find((c) => c.id === columnId)
+      if (!column) throw new Error(`Column "${columnId}" not found`)
+      const title = patch.title !== undefined ? patch.title.trim() : column.title
+      if (!title) throw new Error('Column title cannot be empty')
+      const id = slugify(title)
+      if (id !== columnId && board.columns.some((c) => c.id === id)) {
+        throw new Error(`Column "${title}" already exists`)
+      }
+      if (id !== columnId) {
+        for (const card of board.cards) {
+          if (card.columnId === columnId) card.columnId = id
+        }
+      }
+      column.id = id
+      column.title = title
+      if (patch.color !== undefined) column.color = patch.color
+      if (patch.highlightOverdue !== undefined) column.highlightOverdue = patch.highlightOverdue
+      return this.writeKanban(project, board)
+    })
+  }
+
+  async moveKanbanColumn(project: string, columnId: string, toIndex: number): Promise<KanbanBoard> {
+    return this.withKanbanLock(project, async () => {
+      const board = await this.readKanban(project)
+      const from = board.columns.findIndex((c) => c.id === columnId)
+      if (from === -1) throw new Error(`Column "${columnId}" not found`)
+      const [column] = board.columns.splice(from, 1)
+      const at = Math.max(0, Math.min(toIndex, board.columns.length))
+      board.columns.splice(at, 0, column)
+      return this.writeKanban(project, board)
+    })
+  }
+
+  async deleteKanbanColumn(
+    project: string,
+    columnId: string,
+    options: { mode: 'move' | 'delete'; targetColumnId?: string }
+  ): Promise<KanbanBoard> {
+    return this.withKanbanLock(project, async () => {
+      const board = await this.readKanban(project)
+      const column = board.columns.find((c) => c.id === columnId)
+      if (!column) throw new Error(`Column "${columnId}" not found`)
+      if (board.columns.length <= 1) throw new Error('A board needs at least one column')
+      const affected = board.cards.filter((c) => c.columnId === columnId)
+      if (options.mode === 'move') {
+        const target = board.columns.find((c) => c.id === options.targetColumnId)
+        if (!target || target.id === columnId) {
+          throw new Error(`Target column "${options.targetColumnId}" not found`)
+        }
+        for (const card of affected) {
+          card.columnId = target.id
+          card.updatedAt = Date.now()
+        }
+      } else {
+        board.cards = board.cards.filter((c) => c.columnId !== columnId)
+      }
+      board.columns = board.columns.filter((c) => c.id !== columnId)
       return this.writeKanban(project, board)
     })
   }

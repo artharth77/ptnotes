@@ -20,7 +20,6 @@ import {
   isKanbanFilterActive,
   isOverdue,
   matchesKanbanFilter,
-  type KanbanBoard,
   type KanbanCard,
   type KanbanCardFilter,
   type KanbanPriority
@@ -38,7 +37,9 @@ export function KanbanBoard(): React.JSX.Element {
   const setActiveKanbanCard = useAppStore((s) => s.setActiveKanbanCard)
   const openKanbanEditor = useAppStore((s) => s.openKanbanEditor)
   const openKanbanCreate = useAppStore((s) => s.openKanbanCreate)
-  const saveKanban = useAppStore((s) => s.saveKanban)
+  const moveKanbanCard = useAppStore((s) => s.moveKanbanCard)
+  const moveKanbanColumn = useAppStore((s) => s.moveKanbanColumn)
+  const deleteKanbanCard = useAppStore((s) => s.deleteKanbanCard)
   const archiveKanbanCard = useAppStore((s) => s.archiveKanbanCard)
 
   const [dragId, setDragId] = useState<string | null>(null)
@@ -60,6 +61,60 @@ export function KanbanBoard(): React.JSX.Element {
     })
   }, [activeCardId])
 
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent): void {
+      if (!activeCardId || !kanban || menu) return
+      if (e.altKey || e.ctrlKey || e.metaKey) return
+      const target = e.target as HTMLElement
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        target instanceof HTMLButtonElement ||
+        target.isContentEditable
+      ) {
+        return
+      }
+      if (document.querySelector('.modal-overlay, .module-history-backdrop') !== null) return
+      if (
+        e.key !== 'ArrowUp' &&
+        e.key !== 'ArrowDown' &&
+        e.key !== 'ArrowLeft' &&
+        e.key !== 'ArrowRight' &&
+        e.key !== 'Enter'
+      ) {
+        return
+      }
+      e.preventDefault()
+      if (e.key === 'Enter') {
+        openKanbanEditor(activeCardId)
+        return
+      }
+      const columns = kanban.columns.map((col) =>
+        kanban.cards.filter((c) => c.columnId === col.id && matchesKanbanFilter(c, filter))
+      )
+      const colIdx = columns.findIndex((cards) => cards.some((c) => c.id === activeCardId))
+      if (colIdx === -1) return
+      const rowIdx = columns[colIdx].findIndex((c) => c.id === activeCardId)
+      let next: string | null = null
+      if (e.key === 'ArrowUp') {
+        if (rowIdx > 0) next = columns[colIdx][rowIdx - 1].id
+      } else if (e.key === 'ArrowDown') {
+        if (rowIdx < columns[colIdx].length - 1) next = columns[colIdx][rowIdx + 1].id
+      } else {
+        const dir = e.key === 'ArrowRight' ? 1 : -1
+        let idx = colIdx + dir
+        while (idx >= 0 && idx < columns.length && columns[idx].length === 0) idx += dir
+        if (idx >= 0 && idx < columns.length) {
+          next = columns[idx][Math.min(rowIdx, columns[idx].length - 1)].id
+        }
+      }
+      if (next) setActiveKanbanCard(next)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [activeCardId, kanban, filter, menu, setActiveKanbanCard, openKanbanEditor])
+
   if (!kanban) {
     return (
       <div className="kanban-board">
@@ -68,32 +123,18 @@ export function KanbanBoard(): React.JSX.Element {
     )
   }
 
-  function commit(board: KanbanBoard): void {
-    void saveKanban(board)
-  }
-
   function moveCard(cardId: string, toColumnId: string, beforeCardId: string | null): void {
     if (!kanban) return
     const card = kanban.cards.find((c) => c.id === cardId)
     if (!card) return
-    const rest = kanban.cards.filter((c) => c.id !== cardId)
-    const moved = { ...card, columnId: toColumnId }
+    if (!kanban.columns.some((c) => c.id === toColumnId)) return
+    let index: number | undefined
     if (beforeCardId) {
-      const idx = rest.findIndex((c) => c.id === beforeCardId)
-      if (idx === -1) rest.push(moved)
-      else rest.splice(idx, 0, moved)
-    } else {
-      let lastIdx = -1
-      for (let i = rest.length - 1; i >= 0; i--) {
-        if (rest[i]!.columnId === toColumnId) {
-          lastIdx = i
-          break
-        }
-      }
-      if (lastIdx === -1) rest.push(moved)
-      else rest.splice(lastIdx + 1, 0, moved)
+      const inColumn = kanban.cards.filter((c) => c.columnId === toColumnId && c.id !== cardId)
+      const idx = inColumn.findIndex((c) => c.id === beforeCardId)
+      index = idx === -1 ? inColumn.length : idx
     }
-    commit({ ...kanban, cards: rest })
+    void moveKanbanCard(cardId, toColumnId, index)
   }
 
   function moveColumn(colId: string, overColId: string): void {
@@ -101,10 +142,7 @@ export function KanbanBoard(): React.JSX.Element {
     const from = kanban.columns.findIndex((c) => c.id === colId)
     const over = kanban.columns.findIndex((c) => c.id === overColId)
     if (from === -1 || over === -1) return
-    const columns = [...kanban.columns]
-    const [moved] = columns.splice(from, 1)
-    columns.splice(from < over ? over - 1 : over, 0, moved!)
-    commit({ ...kanban, columns })
+    void moveKanbanColumn(colId, from < over ? over - 1 : over)
   }
 
   function endDrag(): void {
@@ -128,8 +166,7 @@ export function KanbanBoard(): React.JSX.Element {
         next.delete(id)
         return next
       })
-      const latest = useAppStore.getState().kanban
-      if (latest) commit({ ...latest, cards: latest.cards.filter((c) => c.id !== id) })
+      void deleteKanbanCard(id)
     }, 200)
   }
 

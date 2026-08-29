@@ -80,6 +80,7 @@ export interface NewKanbanCardInput {
   assignee?: string
   attributes?: Record<string, string>
   secretAttributes?: string[]
+  comments?: KanbanCardComment[]
 }
 
 export type KanbanCardPatch = Partial<Omit<KanbanCard, 'id' | 'createdAt'>>
@@ -107,7 +108,41 @@ export function newCommentId(): string {
   return crypto.randomUUID()
 }
 
+export interface NewKanbanColumnInput {
+  title: string
+  color: string | null
+  highlightOverdue: boolean
+}
+
+export interface KanbanColumnPatch {
+  title?: string
+  color?: string | null
+  highlightOverdue?: boolean
+}
+
+export interface KanbanCommentInput {
+  comment: string
+  commentBy?: string
+}
+
 const PRIORITIES: KanbanPriority[] = ['high', 'medium', 'low']
+
+export function normalizeComments(raw: unknown): KanbanCardComment[] {
+  const comments: KanbanCardComment[] = []
+  if (!Array.isArray(raw)) return comments
+  for (const rc of raw) {
+    if (!rc || typeof rc !== 'object') continue
+    const comment = typeof rc.comment === 'string' ? rc.comment : ''
+    if (!comment.trim()) continue
+    comments.push({
+      id: typeof rc.id === 'string' && rc.id ? rc.id : newCommentId(),
+      comment,
+      commentBy: typeof rc.commentBy === 'string' && rc.commentBy.trim() ? rc.commentBy : 'you',
+      timestamp: typeof rc.timestamp === 'number' ? rc.timestamp : Date.now()
+    })
+  }
+  return comments
+}
 
 function normalizeCard(raw: Record<string, unknown>): KanbanCard | null {
   const title = typeof raw.title === 'string' ? raw.title.trim() : ''
@@ -136,25 +171,11 @@ function normalizeCard(raw: Record<string, unknown>): KanbanCard | null {
   const secretAttributes = Array.isArray(raw.secretAttributes)
     ? raw.secretAttributes.filter((k): k is string => typeof k === 'string' && k in attributes)
     : []
-  const comments: KanbanCardComment[] = []
-  if (Array.isArray(raw.comments)) {
-    for (const rc of raw.comments) {
-      if (!rc || typeof rc !== 'object') continue
-      const comment = typeof rc.comment === 'string' ? rc.comment : ''
-      if (!comment.trim()) continue
-      comments.push({
-        id: typeof rc.id === 'string' && rc.id ? rc.id : newCommentId(),
-        comment,
-        commentBy: typeof rc.commentBy === 'string' && rc.commentBy.trim() ? rc.commentBy : 'you',
-        timestamp: typeof rc.timestamp === 'number' ? rc.timestamp : Date.now()
-      })
-    }
-  }
   return {
     id: typeof raw.id === 'string' && raw.id ? raw.id : newCardId(),
     title,
     description: typeof raw.description === 'string' ? raw.description : '',
-    comments,
+    comments: normalizeComments(raw.comments),
     columnId,
     priority,
     labels,

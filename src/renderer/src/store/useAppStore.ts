@@ -7,8 +7,12 @@ import type {
   ConfirmRequest,
   KanbanArchive,
   KanbanBoard,
+  KanbanCardPatch,
+  KanbanColumnPatch,
   ModuleEvent,
   ModuleRun,
+  NewKanbanCardInput,
+  NewKanbanColumnInput,
   NoteMeta,
   Project,
   ProjectCalendar,
@@ -84,7 +88,20 @@ interface AppState {
   selectProject: (name: string) => Promise<void>
   refreshNotes: () => Promise<void>
   refreshKanban: () => Promise<void>
-  saveKanban: (board: KanbanBoard) => Promise<void>
+  createKanbanCard: (input: NewKanbanCardInput) => Promise<void>
+  updateKanbanCard: (cardId: string, patch: KanbanCardPatch) => Promise<void>
+  moveKanbanCard: (cardId: string, columnId: string, index?: number) => Promise<void>
+  deleteKanbanCard: (cardId: string) => Promise<void>
+  addKanbanComment: (cardId: string, comment: string, commentBy?: string) => Promise<void>
+  updateKanbanComment: (cardId: string, commentId: string, comment: string) => Promise<void>
+  deleteKanbanComment: (cardId: string, commentId: string) => Promise<void>
+  addKanbanColumn: (input: NewKanbanColumnInput) => Promise<void>
+  updateKanbanColumn: (columnId: string, patch: KanbanColumnPatch) => Promise<void>
+  moveKanbanColumn: (columnId: string, toIndex: number) => Promise<void>
+  deleteKanbanColumn: (
+    columnId: string,
+    options: { mode: 'move' | 'delete'; targetColumnId?: string }
+  ) => Promise<void>
   setKanbanListView: (view: 'active' | 'archived') => void
   archiveKanbanCard: (cardId: string) => Promise<void>
   restoreKanbanCard: (cardId: string) => Promise<void>
@@ -350,12 +367,181 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ kanban, kanbanArchive, kanbanCollapsed: readKanbanCollapsed(project) })
   },
 
-  async saveKanban(board) {
+  async createKanbanCard(input) {
     const project = get().activeProject
     if (!project) return
-    set({ kanban: board })
     try {
-      await window.ptnotes.kanban.save(project, board)
+      const board = await window.ptnotes.kanban.createCard(project, input)
+      set({ kanban: board })
+    } catch {
+      await get().refreshKanban()
+    }
+  },
+
+  async updateKanbanCard(cardId, patch) {
+    const project = get().activeProject
+    if (!project) return
+    try {
+      const board = await window.ptnotes.kanban.updateCard(project, cardId, patch)
+      set({ kanban: board })
+    } catch {
+      await get().refreshKanban()
+    }
+  },
+
+  async moveKanbanCard(cardId, columnId, index) {
+    const project = get().activeProject
+    if (!project) return
+    const kanban = get().kanban
+    if (kanban) {
+      const card = kanban.cards.find((c) => c.id === cardId)
+      if (card) {
+        const rest = kanban.cards.filter((c) => c.id !== cardId)
+        const moved = { ...card, columnId }
+        const inColumn = rest.filter((c) => c.columnId === columnId)
+        const at =
+          index === undefined ? inColumn.length : Math.max(0, Math.min(index, inColumn.length))
+        if (at >= inColumn.length) {
+          rest.push(moved)
+        } else {
+          const anchor = inColumn[at]
+          rest.splice(
+            rest.findIndex((c) => c.id === anchor.id),
+            0,
+            moved
+          )
+        }
+        set({ kanban: { ...kanban, cards: rest } })
+      }
+    }
+    try {
+      const board = await window.ptnotes.kanban.moveCard(project, cardId, columnId, index)
+      set({ kanban: board })
+    } catch {
+      await get().refreshKanban()
+    }
+  },
+
+  async deleteKanbanCard(cardId) {
+    const project = get().activeProject
+    if (!project) return
+    const kanban = get().kanban
+    if (kanban) set({ kanban: { ...kanban, cards: kanban.cards.filter((c) => c.id !== cardId) } })
+    try {
+      const board = await window.ptnotes.kanban.deleteCard(project, cardId)
+      set({ kanban: board })
+    } catch {
+      await get().refreshKanban()
+    }
+  },
+
+  async addKanbanComment(cardId, comment, commentBy) {
+    const project = get().activeProject
+    if (!project) return
+    try {
+      const board = await window.ptnotes.kanban.addComment(project, cardId, {
+        comment,
+        commentBy
+      })
+      set({ kanban: board })
+    } catch {
+      await get().refreshKanban()
+    }
+  },
+
+  async updateKanbanComment(cardId, commentId, comment) {
+    const project = get().activeProject
+    if (!project) return
+    try {
+      const board = await window.ptnotes.kanban.updateComment(project, cardId, commentId, {
+        comment
+      })
+      set({ kanban: board })
+    } catch {
+      await get().refreshKanban()
+    }
+  },
+
+  async deleteKanbanComment(cardId, commentId) {
+    const project = get().activeProject
+    if (!project) return
+    try {
+      const board = await window.ptnotes.kanban.deleteComment(project, cardId, commentId)
+      set({ kanban: board })
+    } catch {
+      await get().refreshKanban()
+    }
+  },
+
+  async addKanbanColumn(input) {
+    const project = get().activeProject
+    if (!project) return
+    try {
+      const board = await window.ptnotes.kanban.addColumn(project, input)
+      set({ kanban: board })
+    } catch {
+      await get().refreshKanban()
+    }
+  },
+
+  async updateKanbanColumn(columnId, patch) {
+    const project = get().activeProject
+    if (!project) return
+    try {
+      const board = await window.ptnotes.kanban.updateColumn(project, columnId, patch)
+      set({ kanban: board })
+    } catch {
+      await get().refreshKanban()
+    }
+  },
+
+  async moveKanbanColumn(columnId, toIndex) {
+    const project = get().activeProject
+    if (!project) return
+    const kanban = get().kanban
+    if (kanban) {
+      const from = kanban.columns.findIndex((c) => c.id === columnId)
+      if (from !== -1) {
+        const columns = [...kanban.columns]
+        const [moved] = columns.splice(from, 1)
+        columns.splice(Math.max(0, Math.min(toIndex, columns.length)), 0, moved!)
+        set({ kanban: { ...kanban, columns } })
+      }
+    }
+    try {
+      const board = await window.ptnotes.kanban.moveColumn(project, columnId, toIndex)
+      set({ kanban: board })
+    } catch {
+      await get().refreshKanban()
+    }
+  },
+
+  async deleteKanbanColumn(columnId, options) {
+    const project = get().activeProject
+    if (!project) return
+    const kanban = get().kanban
+    if (kanban) {
+      const next: KanbanBoard =
+        options.mode === 'delete'
+          ? {
+              ...kanban,
+              columns: kanban.columns.filter((c) => c.id !== columnId),
+              cards: kanban.cards.filter((c) => c.columnId !== columnId)
+            }
+          : {
+              ...kanban,
+              columns: kanban.columns.filter((c) => c.id !== columnId),
+              cards: kanban.cards.map((c) =>
+                c.columnId === columnId
+                  ? { ...c, columnId: options.targetColumnId ?? c.columnId }
+                  : c
+              )
+            }
+      set({ kanban: next })
+    }
+    try {
+      const board = await window.ptnotes.kanban.deleteColumn(project, columnId, options)
+      set({ kanban: board })
     } catch {
       await get().refreshKanban()
     }

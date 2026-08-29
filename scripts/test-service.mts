@@ -232,6 +232,132 @@ assert.deepEqual(
 )
 await service.deleteProject('Race')
 
+// Concurrent comment writes on one card: per-project locking must not lose comments
+await service.createProject('CommentsRace')
+const commentCard = await service.createKanbanCard('CommentsRace', { title: 'Commented' })
+const commentCardId = commentCard.cards[commentCard.cards.length - 1].id
+await Promise.all(
+  Array.from({ length: 15 }, (_, i) =>
+    service.addKanbanComment('CommentsRace', commentCardId, { comment: `c-${i}` })
+  )
+)
+board = await service.loadKanban('CommentsRace')
+const storedComments = board.cards.find((c) => c.id === commentCardId)!.comments
+assert.equal(storedComments.length, 15, 'all concurrent comments persisted')
+assert.equal(new Set(storedComments.map((c) => c.id)).size, 15, 'comment ids unique')
+assert.equal(storedComments[0].commentBy, 'you', 'default commentBy')
+
+// update + delete comments by id (server-generated ids round-trip)
+const [firstComment, secondComment] = storedComments
+board = await service.updateKanbanComment('CommentsRace', commentCardId, firstComment.id, {
+  comment: 'edited'
+})
+assert.equal(
+  board.cards.find((c) => c.id === commentCardId)!.comments.find((c) => c.id === firstComment.id)!
+    .comment,
+  'edited'
+)
+board = await service.deleteKanbanComment('CommentsRace', commentCardId, secondComment.id)
+assert.equal(
+  board.cards.find((c) => c.id === commentCardId)!.comments.length,
+  14,
+  'comment deleted'
+)
+await assert.rejects(
+  service.updateKanbanComment('CommentsRace', commentCardId, 'nope', { comment: 'x' }),
+  /not found/
+)
+await assert.rejects(
+  service.addKanbanComment('CommentsRace', commentCardId, { comment: '  ' }),
+  /required/
+)
+
+// updateKanbanCard honors a comments patch (replace whole array)
+board = await service.updateKanbanCard('CommentsRace', commentCardId, {
+  comments: [{ comment: 'patched', commentBy: 'ai' }]
+})
+const patchedComments = board.cards.find((c) => c.id === commentCardId)!.comments
+assert.equal(patchedComments.length, 1, 'comments patch replaced the array')
+assert.equal(patchedComments[0].commentBy, 'ai')
+
+// Column operations: add, rename (card remap), move, delete (move + delete modes)
+board = await service.addKanbanColumn('CommentsRace', {
+  title: 'Review',
+  color: '#3e63dd',
+  highlightOverdue: false
+})
+assert.ok(board.columns.some((c) => c.id === 'review' && c.color === '#3e63dd'))
+await assert.rejects(
+  service.addKanbanColumn('CommentsRace', { title: 'Review', color: null, highlightOverdue: true }),
+  /already exists/
+)
+
+const reviewCard = await service.createKanbanCard('CommentsRace', {
+  title: 'In Review',
+  column: 'Review'
+})
+const reviewCardId = reviewCard.cards.find((c) => c.title === 'In Review')!.id
+board = await service.updateKanbanColumn('CommentsRace', 'review', { title: 'Code Review' })
+assert.ok(board.columns.some((c) => c.id === 'code-review' && c.title === 'Code Review'))
+assert.equal(
+  board.cards.find((c) => c.id === reviewCardId)!.columnId,
+  'code-review',
+  'cards remapped on column rename'
+)
+await assert.rejects(
+  service.updateKanbanColumn('CommentsRace', 'code-review', { title: 'Backlog' }),
+  /already exists/
+)
+
+board = await service.moveKanbanColumn('CommentsRace', 'code-review', 0)
+assert.equal(board.columns[0].id, 'code-review', 'column moved to front')
+
+board = await service.deleteKanbanColumn('CommentsRace', 'code-review', {
+  mode: 'move',
+  targetColumnId: 'to-do'
+})
+assert.ok(!board.columns.some((c) => c.id === 'code-review'))
+assert.equal(
+  board.cards.find((c) => c.id === reviewCardId)!.columnId,
+  'to-do',
+  'cards moved out of deleted column'
+)
+
+const deleteMe = await service.addKanbanColumn('CommentsRace', {
+  title: 'Sandbox',
+  color: null,
+  highlightOverdue: true
+})
+const sandboxId = deleteMe.columns[deleteMe.columns.length - 1].id
+const doomed = await service.createKanbanCard('CommentsRace', {
+  title: 'Doomed',
+  column: 'Sandbox'
+})
+const deleteMeId = doomed.cards.find((c) => c.title === 'Doomed')!.id
+board = await service.deleteKanbanColumn('CommentsRace', sandboxId, {
+  mode: 'delete',
+  targetColumnId: 'backlog'
+})
+assert.ok(!board.columns.some((c) => c.id === 'review'))
+assert.ok(!board.cards.some((c) => c.id === deleteMeId), 'cards deleted with column')
+
+// a board must keep at least one column
+const soleColumn = (await service.loadKanban('CommentsRace')).columns[0].id
+for (const col of (await service.loadKanban('CommentsRace')).columns.slice(1)) {
+  await service.deleteKanbanColumn('CommentsRace', col.id, {
+    mode: 'move',
+    targetColumnId: soleColumn
+  })
+}
+await assert.rejects(
+  service.deleteKanbanColumn('CommentsRace', soleColumn, {
+    mode: 'move',
+    targetColumnId: soleColumn
+  }),
+  /at least one column/
+)
+await service.deleteProject('CommentsRace')
+
 // Concurrent note writes: per-project locking must not lose updates or duplicate ids
 await service.createProject('NotesRace')
 await Promise.all(
