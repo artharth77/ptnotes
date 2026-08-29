@@ -61,6 +61,60 @@ export function KanbanBoard(): React.JSX.Element {
     })
   }, [activeCardId])
 
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent): void {
+      if (!activeCardId || !kanban || menu) return
+      if (e.altKey || e.ctrlKey || e.metaKey) return
+      const target = e.target as HTMLElement
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        target instanceof HTMLButtonElement ||
+        target.isContentEditable
+      ) {
+        return
+      }
+      if (document.querySelector('.modal-overlay, .module-history-backdrop') !== null) return
+      if (
+        e.key !== 'ArrowUp' &&
+        e.key !== 'ArrowDown' &&
+        e.key !== 'ArrowLeft' &&
+        e.key !== 'ArrowRight' &&
+        e.key !== 'Enter'
+      ) {
+        return
+      }
+      e.preventDefault()
+      if (e.key === 'Enter') {
+        openKanbanEditor(activeCardId)
+        return
+      }
+      const columns = kanban.columns.map((col) =>
+        kanban.cards.filter((c) => c.columnId === col.id && matchesKanbanFilter(c, filter))
+      )
+      const colIdx = columns.findIndex((cards) => cards.some((c) => c.id === activeCardId))
+      if (colIdx === -1) return
+      const rowIdx = columns[colIdx].findIndex((c) => c.id === activeCardId)
+      let next: string | null = null
+      if (e.key === 'ArrowUp') {
+        if (rowIdx > 0) next = columns[colIdx][rowIdx - 1].id
+      } else if (e.key === 'ArrowDown') {
+        if (rowIdx < columns[colIdx].length - 1) next = columns[colIdx][rowIdx + 1].id
+      } else {
+        const dir = e.key === 'ArrowRight' ? 1 : -1
+        let idx = colIdx + dir
+        while (idx >= 0 && idx < columns.length && columns[idx].length === 0) idx += dir
+        if (idx >= 0 && idx < columns.length) {
+          next = columns[idx][Math.min(rowIdx, columns[idx].length - 1)].id
+        }
+      }
+      if (next) setActiveKanbanCard(next)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [activeCardId, kanban, filter, menu, setActiveKanbanCard, openKanbanEditor])
+
   if (!kanban) {
     return (
       <div className="kanban-board">
