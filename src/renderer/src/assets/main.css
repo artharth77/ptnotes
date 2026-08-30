@@ -1367,11 +1367,17 @@ body {
 }
 
 .kanban-pts {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   font-size: 11px;
   color: var(--text-dim);
 }
 
 .kanban-assignee {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   font-size: 11px;
   color: var(--text-dim);
 }
@@ -1497,6 +1503,11 @@ body {
 .kanban-label-option.create {
   color: var(--accent);
   font-weight: 600;
+}
+
+.kanban-label-option.unassigned {
+  font-style: italic;
+  color: var(--text-dim);
 }
 
 .kanban-label-new {

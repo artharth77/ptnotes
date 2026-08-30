@@ -5,6 +5,7 @@ import {
   isKanbanFilterActive,
   matchesKanbanFilter,
   emptyKanbanCardFilter,
+  KANBAN_UNASSIGNED_QUERY,
   type KanbanBoard,
   type KanbanCardFilter,
   type KanbanDueFilter,
@@ -46,10 +47,14 @@ export function KanbanFilterBar({
     Boolean
   )
   const aq = filter.assignee.trim().toLowerCase()
-  const assigneeSuggestions = boardAssignees
+  const nameSuggestions = boardAssignees
     .filter((a) => a.toLowerCase() !== aq)
     .filter((a) => aq === '' || a.toLowerCase().includes(aq))
     .slice(0, 8)
+  const assigneeOptions: { value: string; label: string; unassigned: boolean }[] = [
+    { value: KANBAN_UNASSIGNED_QUERY, label: 'Unassigned', unassigned: true },
+    ...nameSuggestions.map((a) => ({ value: a, label: a, unassigned: false }))
+  ]
 
   const boardLabels = Array.from(new Set(kanban.cards.flatMap((c) => c.labels)))
     .map((l) => l.trim())
@@ -87,11 +92,11 @@ export function KanbanFilterBar({
   }
 
   function onAssigneeKeyDown(e: React.KeyboardEvent<HTMLInputElement>): void {
-    const options = assigneeSuggestions
+    const options = assigneeOptions
     if (e.key === 'Enter') {
       if (assigneeMenuOpen && options.length > 0) {
         e.preventDefault()
-        setAssignee(options[assigneeActive] ?? filter.assignee)
+        setAssignee(options[assigneeActive]?.value ?? filter.assignee)
       }
       return
     }
@@ -159,19 +164,21 @@ export function KanbanFilterBar({
             ✕
           </button>
         )}
-        {assigneeMenuOpen && assigneeSuggestions.length > 0 && (
+        {assigneeMenuOpen && assigneeOptions.length > 0 && (
           <div className="kanban-label-menu kanban-filter-menu">
-            {assigneeSuggestions.map((a, i) => (
+            {assigneeOptions.map((o, i) => (
               <button
-                key={a}
-                className={`kanban-label-option${i === assigneeActive ? ' active' : ''}`}
+                key={o.value}
+                className={`kanban-label-option${o.unassigned ? ' unassigned' : ''}${
+                  i === assigneeActive ? ' active' : ''
+                }`}
                 onMouseDown={(e) => {
                   e.preventDefault()
-                  setAssignee(a)
+                  setAssignee(o.value)
                 }}
                 onMouseEnter={() => setAssigneeActive(i)}
               >
-                {a}
+                {o.label}
               </button>
             ))}
           </div>
