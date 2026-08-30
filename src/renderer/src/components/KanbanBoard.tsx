@@ -50,7 +50,8 @@ export function KanbanBoard(): React.JSX.Element {
   const [removingIds, setRemovingIds] = useState<Set<string>>(new Set())
   const [filter, setFilter] = useState<KanbanCardFilter>({ ...emptyKanbanCardFilter, labels: [] })
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map())
-  useFlip(cardRefs)
+  const boardRef = useRef<HTMLDivElement>(null)
+  useFlip(cardRefs, boardRef)
 
   useEffect(() => {
     if (!activeCardId) return
@@ -178,6 +179,7 @@ export function KanbanBoard(): React.JSX.Element {
       <KanbanFilterBar kanban={kanban} filter={filter} onChange={setFilter} />
       <div
         className="kanban-board"
+        ref={boardRef}
         onClick={(e) => {
           if (activeCardId && !(e.target as HTMLElement).closest('.kanban-card')) {
             setActiveKanbanCard(null)

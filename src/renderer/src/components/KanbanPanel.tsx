@@ -87,7 +87,8 @@ export function KanbanPanel(): React.JSX.Element {
   const [dragColId, setDragColId] = useState<string | null>(null)
   const [overColId, setOverColId] = useState<string | null>(null)
   const rowRefs = useRef<Map<string, HTMLDivElement>>(new Map())
-  useFlip(rowRefs)
+  const listRef = useRef<HTMLDivElement>(null)
+  useFlip(rowRefs, listRef)
 
   if (!kanban) return <div className="kanban-panel" />
 
@@ -246,7 +247,7 @@ export function KanbanPanel(): React.JSX.Element {
           )}
         </div>
       ) : (
-        <div className="list-scroll kanban-panel-scroll">
+        <div className="list-scroll kanban-panel-scroll" ref={listRef}>
           {kanban.columns.length === 0 && <div className="list-empty">No columns yet</div>}
           {kanban.columns.map((col) => {
             const cards = kanban.cards.filter((c) => c.columnId === col.id)
