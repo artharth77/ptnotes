@@ -340,6 +340,11 @@ assert.equal(
   1,
   'id filter matches a single card'
 )
+assert.equal(
+  r.columns.flatMap((c: { cards: { id?: string }[] }) => c.cards)[0]?.id,
+  taskAId,
+  'listed cards include their id'
+)
 r = await call('list_kanban_cards', { columns: 'Backlog, to-do' })
 assert.equal(r.columns.length, 2, 'column filter matches by id or title')
 assert.equal(

@@ -6,6 +6,7 @@
 
 ### Fixed
 
+- **AI: `list_kanban_cards` did not return the card id**: the tool output only carried title and fields, so the model could not verify which card a `kanban:<card id>` reference resolved to (or report a card's id). Each listed card now includes its `id`.
 - **Kanban: all cards played the move animation when focus changed after scrolling or a sidebar toggle**: with the board horizontally scrolled (or a column / the sidebar list vertically scrolled), or right after hiding/showing the left panel, changing the focused card (click, arrow keys, "jump to card") made **every** card play the 200ms FLIP move animation at once. `useFlip` measured card positions with viewport-relative `getBoundingClientRect()` on every render, so any re-render after a scroll — or after the sidebar's 250ms width transition had shifted the board — saw all cards as moved. Positions are now measured in the card's own scroll container's content space (element viewport rect − container viewport rect + accumulated scroll offsets of the container and intermediate scrollable ancestors, e.g. a column's card list), which is invariant to container scrolling and container movement; only real layout changes (drag & drop, add/remove, filtering) trigger the animation.
 
 ## [0.14.2] — 2026-08-29

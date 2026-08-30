@@ -838,7 +838,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'list_kanban_cards',
         description:
-          'List kanban cards in a project, grouped by column, with description (truncated), priority, due date, labels, assignee, story points and attributes. Secret attribute values are masked as ${K_SECRET:<id>|<key>} tokens — pass a token unchanged in a later tool call and the real value is substituted before execution; the value is never shown to you. All filter arguments are optional — omit them to list every card.',
+          'List kanban cards in a project, grouped by column. Each card includes its id, title, description (truncated), priority, due date, labels, assignee, story points and attributes. Secret attribute values are masked as ${K_SECRET:<id>|<key>} tokens — pass a token unchanged in a later tool call and the real value is substituted before execution; the value is never shown to you. All filter arguments are optional — omit them to list every card.',
         parameters: {
           type: 'object',
           properties: {
@@ -917,6 +917,7 @@ export const tools: PTTool[] = [
                 return true
               })
               .map((card) => ({
+                id: card.id,
                 title: card.title,
                 description: card.description
                   ? !idFilter && card.description.length > 160
