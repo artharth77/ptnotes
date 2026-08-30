@@ -1215,4 +1215,156 @@ const unknownEvt = (unknownEvents as { type?: string; toolCall?: { ok?: boolean 
 assert.match(unknownEvt.result, /Unknown secret reference/, 'error names the unknown token')
 assert.equal(unknownEvt.ok, false, 'unknown token tool call reported as failed')
 
+// ---- repeat guard: same tool + same args repeated → blocked with an error back to the model ----
+const repeatExecs: Record<string, unknown>[] = []
+const repeatTool: PTTool = {
+  definition: {
+    type: 'function',
+    function: {
+      name: 'repeat_probe',
+      description: 'fake probe tool',
+      parameters: { type: 'object', properties: {} }
+    }
+  },
+  execute: async (args) => {
+    repeatExecs.push(args)
+    return JSON.stringify({ ok: true, echoed: args })
+  }
+}
+
+let repeatTurn = 0
+const repeatRequests: { role: string; content?: string }[][] = []
+const repeatServer = http.createServer((req, res) => {
+  let body = ''
+  req.on('data', (d) => (body += d))
+  req.on('end', () => {
+    const parsed = JSON.parse(body)
+    repeatRequests.push(parsed.messages as { role: string; content?: string }[])
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive'
+    })
+    const call = (id: string, args: string): string =>
+      sse({
+        id: 'r',
+        object: 'chat.completion.chunk',
+        created: 1,
+        model: 't',
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id,
+                  type: 'function',
+                  function: { name: 'repeat_probe', arguments: args }
+                }
+              ]
+            },
+            finish_reason: null
+          }
+        ]
+      })
+    const finish = (reason: string): string =>
+      sse({
+        id: 'r',
+        object: 'chat.completion.chunk',
+        created: 1,
+        model: 't',
+        choices: [{ index: 0, delta: {}, finish_reason: reason }]
+      })
+    if (repeatTurn <= 5) {
+      // Turns 0-5: the identical call, over and over
+      res.write(call(`r${repeatTurn}`, JSON.stringify({ n: 1 })))
+      res.write(finish('tool_calls'))
+    } else if (repeatTurn === 6) {
+      // Turn 6: same tool, different args
+      res.write(call('r6', JSON.stringify({ n: 2 })))
+      res.write(finish('tool_calls'))
+    } else {
+      res.write(
+        sse({
+          id: 'r',
+          object: 'chat.completion.chunk',
+          created: 1,
+          model: 't',
+          choices: [
+            { index: 0, delta: { role: 'assistant', content: 'Recovered.' }, finish_reason: null }
+          ]
+        })
+      )
+      res.write(finish('stop'))
+    }
+    repeatTurn += 1
+    res.write('data: [DONE]\n\n')
+    res.end()
+  })
+})
+await new Promise<void>((r) => repeatServer.listen(0, '127.0.0.1', r))
+const repeatPort = (repeatServer.address() as { port: number }).port
+
+const repeatEvents: unknown[] = []
+const repeatSession = new ChatSession(
+  async () => ({
+    baseUrl: `http://127.0.0.1:${repeatPort}/v1`,
+    apiKey: '',
+    model: 'test-model'
+  }),
+  { service, activeProject: 'Test' },
+  (evt) => repeatEvents.push(evt),
+  async () => [repeatTool]
+)
+await repeatSession.send('probe', [], null, null)
+repeatServer.close()
+
+assert.equal(
+  repeatExecs.length,
+  5,
+  'first 4 identical calls run, 5th/6th blocked, changed args run'
+)
+assert.deepEqual(
+  repeatExecs.slice(0, 4),
+  [{ n: 1 }, { n: 1 }, { n: 1 }, { n: 1 }],
+  'identical calls executed up to the limit'
+)
+assert.deepEqual(repeatExecs[4], { n: 2 }, 'different args reset the guard and execute')
+
+const repeatDone = (
+  repeatEvents as {
+    type?: string
+    toolCall?: { ok?: boolean; result?: string }
+  }[]
+).filter((e) => e.type === 'tool' && e.toolCall?.ok !== undefined)
+const blocked = repeatDone.filter((e) => e.toolCall!.ok === false)
+assert.equal(blocked.length, 2, '5th and 6th identical calls blocked')
+blocked.forEach((e) =>
+  assert.match(
+    e.toolCall!.result ?? '',
+    /Blocked: you called repeat_probe with identical arguments/,
+    'block error sent back to the model'
+  )
+)
+assert.equal(
+  repeatDone.filter((e) => e.toolCall!.ok === true).length,
+  5,
+  '4 identical + 1 changed-args call executed'
+)
+
+const reqAtTurn6 = repeatRequests[6]!
+const lastToolAtTurn6 = [...reqAtTurn6].reverse().find((m) => m.role === 'tool')
+assert.match(
+  lastToolAtTurn6?.content ?? '',
+  /Blocked: you called repeat_probe/,
+  'blocked call returned to the model as a tool result'
+)
+
+const repeatContent = repeatEvents
+  .filter((e) => (e as { type: string }).type === 'content')
+  .map((e) => (e as { content: string }).content)
+  .join('')
+assert.match(repeatContent, /Recovered\./, 'session recovers once the model stops repeating')
+
 console.log('CHAT SESSION TEST PASSED')

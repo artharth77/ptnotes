@@ -9,7 +9,7 @@ import type {
   ChatMessage,
   ChatStreamEvent
 } from '@shared/types'
-import { tools, type PTTool, type ToolContext } from './tools'
+import { tools, toolCallKey, type PTTool, type ToolContext } from './tools'
 import { createClient } from './client'
 import type { AiTraceRecorder } from './trace'
 import { SKILLS_PREAMBLE } from './promptConstants'
@@ -34,6 +34,8 @@ export type PromptSectionProvider = () => Promise<string | null>
 const MAX_TOOL_ITERATIONS = 12
 const MAX_STREAM_RETRIES = 3
 const STREAM_RETRY_DELAY_MS = 7000
+/** Consecutive identical tool calls (same tool + same args) allowed before the call is blocked. */
+const MAX_REPEATED_TOOL_CALLS = 5
 
 function isRetryableStreamError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err)
@@ -108,6 +110,9 @@ export class ChatSession {
   private trace: AiTraceRecorder | undefined
   /** In-memory secret answers (ask_user secret questions). Dropped with the session; never persisted. */
   private secrets = new Map<string, string>()
+  /** Consecutive-repeat guard: identity of the last executed tool call and its run length. */
+  private lastCallKey: string | null = null
+  private repeatedCallCount = 0
 
   constructor(
     getConfig: () => Promise<AIProviderConfig>,
@@ -139,6 +144,8 @@ export class ChatSession {
   ): Promise<void> {
     this.stopped = false
     this.abortController = undefined
+    this.lastCallKey = null
+    this.repeatedCallCount = 0
     this.activeNoteId = activeNoteId ?? null
     this.activeScheduleId = activeScheduleId ?? null
     this.activeKanbanCardId = activeKanbanCardId ?? null
@@ -656,12 +663,27 @@ export class ChatSession {
       }
       for (const call of completed) {
         if (this.stopped) break
-        this.emitToolStatus(
-          call.id,
-          call.function.name,
-          toToolArgs(call.function.arguments),
-          'running'
-        )
+        const args = toToolArgs(call.function.arguments)
+        if (call.function.name === 'wait_modules') {
+          // Polling the same runIds until modules finish is legitimate repetition.
+          this.lastCallKey = null
+          this.repeatedCallCount = 0
+        } else {
+          const key = toolCallKey(call.function.name, args)
+          this.repeatedCallCount = key === this.lastCallKey ? this.repeatedCallCount + 1 : 1
+          this.lastCallKey = key
+          if (this.repeatedCallCount >= MAX_REPEATED_TOOL_CALLS) {
+            const result = JSON.stringify({
+              ok: false,
+              error: `Blocked: you called ${call.function.name} with identical arguments ${this.repeatedCallCount} times in a row. Repeating it will not produce a different result. Do not call it again — take a different action or answer the user directly.`
+            })
+            this.emitTool(call.id, call.function.name, args, false, result)
+            this.messages.push({ role: 'tool', tool_call_id: call.id, content: result })
+            this.traceTool(call.function.name, call.id, result, 0)
+            continue
+          }
+        }
+        this.emitToolStatus(call.id, call.function.name, args, 'running')
         const toolTs = Date.now()
         const result = await this.executeTool(call)
         this.messages.push({

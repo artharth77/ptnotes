@@ -1,5 +1,9 @@
 ## [0.14.3] — 2026-08-30
 
+### Added
+
+- **AI: repeated identical tool calls are now blocked**: when the model calls the same tool with identical arguments 5 times in a row (chat and background module runs), the call is no longer executed — the model receives a `{"ok": false, "error": "Blocked: …"}` tool result telling it to take a different action or answer directly, which breaks infinite same-call loops (previously each repeat re-executed until the turn limit, or forever in an "unlimited" chat). The identity is the tool name plus key-order-independent arguments, so retries with changed arguments still run; the counter resets on a different call and at each new user message, and `wait_modules` polling is exempt.
+
 ### Fixed
 
 - **Kanban: all cards played the move animation when focus changed after scrolling or a sidebar toggle**: with the board horizontally scrolled (or a column / the sidebar list vertically scrolled), or right after hiding/showing the left panel, changing the focused card (click, arrow keys, "jump to card") made **every** card play the 200ms FLIP move animation at once. `useFlip` measured card positions with viewport-relative `getBoundingClientRect()` on every render, so any re-render after a scroll — or after the sidebar's 250ms width transition had shifted the board — saw all cards as moved. Positions are now measured in the card's own scroll container's content space (element viewport rect − container viewport rect + accumulated scroll offsets of the container and intermediate scrollable ancestors, e.g. a column's card list), which is invariant to container scrolling and container movement; only real layout changes (drag & drop, add/remove, filtering) trigger the animation.
