@@ -311,6 +311,8 @@ export const emptyKanbanCardFilter: KanbanCardFilter = {
   due: 'any'
 }
 
+export const KANBAN_UNASSIGNED_QUERY = ':unassigned'
+
 export function isKanbanFilterActive(f: KanbanCardFilter): boolean {
   return (
     f.query.trim() !== '' ||
@@ -337,7 +339,13 @@ export function matchesKanbanFilter(
     return false
   }
   const assignee = f.assignee.trim().toLowerCase()
-  if (assignee && !card.assignee.trim().toLowerCase().includes(assignee)) return false
+  if (assignee) {
+    if (assignee === KANBAN_UNASSIGNED_QUERY) {
+      if (card.assignee.trim() !== '') return false
+    } else if (!card.assignee.trim().toLowerCase().includes(assignee)) {
+      return false
+    }
+  }
   if (f.priority !== 'any' && card.priority !== f.priority) return false
   if (f.labels.length > 0) {
     const cardLabels = card.labels.map((l) => l.toLowerCase())

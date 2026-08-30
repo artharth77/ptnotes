@@ -54,6 +54,22 @@ export interface PTTool {
   execute(args: Record<string, unknown>, ctx: ToolContext): Promise<string>
 }
 
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(',')}}`
+  }
+  return JSON.stringify(value) ?? 'null'
+}
+
+/** Stable identity of a tool call (name + args, key-order independent) for repeat detection. */
+export function toolCallKey(name: string, args: Record<string, unknown>): string {
+  return `${name}\u0000${canonicalJson(args)}`
+}
+
 function projectOf(args: Record<string, unknown>, ctx: ToolContext): string {
   const p = args.project
   return typeof p === 'string' && p.trim() ? p.trim() : ctx.activeProject

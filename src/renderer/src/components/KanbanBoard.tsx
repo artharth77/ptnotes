@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  mdiAccountCircleOutline,
   mdiArchiveArrowDownOutline,
   mdiArrowDown,
   mdiArrowUp,
@@ -7,6 +8,7 @@ import {
   mdiMinus,
   mdiPencilOutline,
   mdiPlus,
+  mdiPlusCircleOutline,
   mdiTrashCanOutline
 } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
@@ -50,7 +52,8 @@ export function KanbanBoard(): React.JSX.Element {
   const [removingIds, setRemovingIds] = useState<Set<string>>(new Set())
   const [filter, setFilter] = useState<KanbanCardFilter>({ ...emptyKanbanCardFilter, labels: [] })
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map())
-  useFlip(cardRefs)
+  const boardRef = useRef<HTMLDivElement>(null)
+  useFlip(cardRefs, boardRef)
 
   useEffect(() => {
     if (!activeCardId) return
@@ -178,6 +181,7 @@ export function KanbanBoard(): React.JSX.Element {
       <KanbanFilterBar kanban={kanban} filter={filter} onChange={setFilter} />
       <div
         className="kanban-board"
+        ref={boardRef}
         onClick={(e) => {
           if (activeCardId && !(e.target as HTMLElement).closest('.kanban-card')) {
             setActiveKanbanCard(null)
@@ -455,8 +459,18 @@ function CardView({
             {formatDueDate(card.dueDate)}
           </span>
         )}
-        {card.storyPoints != null && <span className="kanban-pts">{card.storyPoints} pts</span>}
-        {card.assignee && <span className="kanban-assignee">{card.assignee}</span>}
+        {card.storyPoints != null && (
+          <span className="kanban-pts">
+            <MdiIcon path={mdiPlusCircleOutline} size={14} />
+            {card.storyPoints} pts
+          </span>
+        )}
+        {card.assignee && (
+          <span className="kanban-assignee">
+            <MdiIcon path={mdiAccountCircleOutline} size={14} />
+            {card.assignee}
+          </span>
+        )}
       </div>
       {card.labels.length > 0 && (
         <div className="kanban-card-labels">

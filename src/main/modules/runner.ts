@@ -9,7 +9,7 @@ import type {
   ModuleStepState,
   ToolCallInfo
 } from '@shared/types'
-import { tools as baseTools, type PTTool, type ToolContext } from '../ai/tools'
+import { tools as baseTools, toolCallKey, type PTTool, type ToolContext } from '../ai/tools'
 import { createClient } from '../ai/client'
 import { isLocalEndpoint } from '../ai/chatSession'
 import { AiTraceRecorder } from '../ai/trace'
@@ -19,6 +19,8 @@ import { SKILLS_PREAMBLE } from '../ai/promptConstants'
 
 const MAX_ITERATIONS = 30
 const MAX_FINISH_HINTS = 2
+/** Consecutive identical tool calls (same tool + same args) allowed before the call is blocked. */
+const MAX_REPEATED_TOOL_CALLS = 5
 const MAX_STREAM_RETRIES = 3
 const STREAM_RETRY_DELAY_MS = 7000
 
@@ -174,6 +176,9 @@ export class ModuleRunner {
   private planned = false
   private plannedHintSent = false
   private finishHintsSent = 0
+  /** Consecutive-repeat guard: identity of the last executed tool call and its run length. */
+  private lastCallKey: string | null = null
+  private repeatedCallCount = 0
   /** Assistant turn being streamed, shown live in the history overlay until pushed. */
   private partial: { id: string; content: string } | null = null
 
@@ -546,6 +551,34 @@ export class ModuleRunner {
     for (const call of called) {
       if (this.stopped) break
       const args = toToolArgs(call.function.arguments)
+      const key = toolCallKey(call.function.name, args)
+      this.repeatedCallCount = key === this.lastCallKey ? this.repeatedCallCount + 1 : 1
+      this.lastCallKey = key
+      if (this.repeatedCallCount >= MAX_REPEATED_TOOL_CALLS) {
+        const result = JSON.stringify({
+          ok: false,
+          error: `Blocked: you called ${call.function.name} with identical arguments ${this.repeatedCallCount} times in a row. Repeating it will not produce a different result. Do not call it again — take a different action or finish the task.`
+        })
+        this.push({ role: 'tool', tool_call_id: call.id, content: result })
+        this.notifyToolEvent({
+          id: call.id,
+          name: call.function.name,
+          args,
+          ok: false,
+          result,
+          status: 'done'
+        })
+        this.notifyChat()
+        this.trace.append({
+          role: 'tool',
+          ts: Date.now(),
+          durationMs: 0,
+          name: call.function.name,
+          toolCallId: call.id,
+          content: result
+        })
+        continue
+      }
       this.notifyToolEvent({
         id: call.id,
         name: call.function.name,
