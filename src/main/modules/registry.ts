@@ -12,7 +12,8 @@ export class ModuleRegistry {
     return this.defs.get(id)
   }
 
+  /** All visible modules — hidden ones (internal plumbing, e.g. bot tasks) are excluded. */
   list(): RegisteredModule[] {
-    return [...this.defs.values()]
+    return [...this.defs.values()].filter((m) => !m.hidden)
   }
 }

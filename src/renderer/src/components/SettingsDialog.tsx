@@ -12,6 +12,7 @@ import {
 import { useAppStore } from '../store/useAppStore'
 import { Modal, TextField } from './Modal'
 import { MdiIcon } from './MdiIcon'
+import { BotsSettingsPane } from './BotsSettingsPane'
 import type {
   AboutInfo,
   AIConfig,
@@ -1121,6 +1122,12 @@ export function SettingsDialog(): React.JSX.Element {
             Skills
           </button>
           <button
+            className={category === 'bots' ? 'active' : ''}
+            onClick={() => setSettingsCategory('bots')}
+          >
+            Bots
+          </button>
+          <button
             className={category === 'about' ? 'active' : ''}
             onClick={() => setSettingsCategory('about')}
           >
@@ -1156,6 +1163,10 @@ export function SettingsDialog(): React.JSX.Element {
           ) : category === 'skills' ? (
             <>
               <SkillsPane />
+            </>
+          ) : category === 'bots' ? (
+            <>
+              <BotsSettingsPane />
             </>
           ) : category === 'about' ? (
             <>

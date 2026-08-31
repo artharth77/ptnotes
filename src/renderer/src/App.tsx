@@ -10,6 +10,8 @@ import { PlannerPanel } from './components/PlannerPanel'
 import { PlannerEditor } from './components/PlannerEditor'
 import { MarkdownEditor } from './components/MarkdownEditor'
 import { ChatDrawer } from './components/ChatDrawer'
+import { GroupChatPanel } from './components/GroupChatPanel'
+import { BotTasksPanel } from './components/BotTasksPanel'
 import { SettingsDialog } from './components/SettingsDialog'
 import { AskUserDialog } from './components/AskUserDialog'
 import { ModulePanel } from './components/ModulePanel'
@@ -278,8 +280,9 @@ function App(): React.JSX.Element {
   const tab = useAppStore((s) => s.tab)
   const chatOpen = useAppStore((s) => s.chatOpen)
   const moduleOpen = useAppStore((s) => s.moduleOpen)
+  const botsOpen = useAppStore((s) => s.botsOpen)
   const rightView = useAppStore((s) => s.rightView)
-  const rightOpen = chatOpen || moduleOpen
+  const rightOpen = chatOpen || moduleOpen || botsOpen
   const setRightView = useAppStore((s) => s.setRightView)
   const settingsOpen = useAppStore((s) => s.settingsOpen)
   const sidebarVisible = useAppStore((s) => s.sidebarVisible)
@@ -418,6 +421,13 @@ function App(): React.JSX.Element {
     })
   }, [])
 
+  // Handle bots group chat events: append messages, typing indicators
+  useEffect(() => {
+    return window.ptnotes.bots.onEvent((evt) => {
+      useAppStore.getState().applyBotGroupEvent(evt)
+    })
+  }, [])
+
   // Handle module run events: upsert run state in the store in real time
   useEffect(() => {
     return window.ptnotes.modules.onEvent((evt) => {
@@ -455,19 +465,20 @@ function App(): React.JSX.Element {
     })
   }, [])
 
-  // Global panel shortcuts: Cmd/Ctrl+Shift+C toggles chat, Cmd/Ctrl+Shift+M toggles modules
+  // Global panel shortcuts: Cmd/Ctrl+Shift+C toggles chat, Cmd/Ctrl+Shift+M toggles modules,
+  // Cmd/Ctrl+Shift+G toggles the bots group chat
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent): void {
       const mod =
         (window.electron.process.platform === 'darwin' ? e.metaKey : e.ctrlKey) && e.shiftKey
       if (!mod || e.altKey) return
       const key = e.key.toLowerCase()
-      if (key !== 'c' && key !== 'm') return
+      if (key !== 'c' && key !== 'm' && key !== 'g') return
       const modalOpen = document.querySelector('.modal-overlay, .module-history-backdrop') !== null
       if (modalOpen) return
       e.preventDefault()
-      const view = key === 'c' ? 'chat' : 'modules'
-      if (view === 'modules' && !activeProject) return
+      const view = key === 'c' ? 'chat' : key === 'm' ? 'modules' : 'bots'
+      if (view !== 'chat' && !activeProject) return
       setRightView(view)
     }
     window.addEventListener('keydown', onKeyDown)
@@ -562,6 +573,20 @@ function App(): React.JSX.Element {
                 <div className="module-drawer">
                   <ModulePanel />
                 </div>
+              )
+            ) : rightView === 'botTasks' ? (
+              moduleResizing ? (
+                <ModuleSkeleton />
+              ) : (
+                <div className="module-drawer">
+                  <BotTasksPanel />
+                </div>
+              )
+            ) : rightView === 'bots' ? (
+              chatResizing ? (
+                <ChatSkeleton />
+              ) : (
+                <GroupChatPanel />
               )
             ) : chatResizing ? (
               <ChatSkeleton />

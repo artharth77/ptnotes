@@ -1,4 +1,9 @@
-import { mdiChatProcessingOutline, mdiCogOutline, mdiPuzzleOutline } from '@mdi/js'
+import {
+  mdiAccountGroupOutline,
+  mdiChatProcessingOutline,
+  mdiCogOutline,
+  mdiPuzzleOutline
+} from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
 import { ProjectDropdown } from './ProjectDropdown'
 import { MdiIcon } from './MdiIcon'
@@ -8,11 +13,23 @@ const NO_RUNS: never[] = []
 export function TopBar(): React.JSX.Element {
   const chatOpen = useAppStore((s) => s.chatOpen)
   const moduleOpen = useAppStore((s) => s.moduleOpen)
+  const botsOpen = useAppStore((s) => s.botsOpen)
   const chatBusy = useAppStore((s) => s.chatBusy)
+  const activeProjectForBots = useAppStore((s) => s.activeProject)
+  const activeBotGroupId = useAppStore((s) =>
+    s.activeProject ? s.activeBotGroupId[s.activeProject] : null
+  )
+  const botGroupBusy = useAppStore((s) =>
+    activeBotGroupId ? (s.botGroupBusy[activeBotGroupId] ?? false) : false
+  )
+  const botsBusy = !!activeProjectForBots && botGroupBusy
   const moduleRuns = useAppStore((s) =>
     s.activeProject ? (s.moduleRuns[s.activeProject] ?? NO_RUNS) : NO_RUNS
   )
-  const modulesBusy = moduleRuns.some((r) => !['done', 'failed', 'cancelled'].includes(r.status))
+  // Bot-task runs belong to the group chat's Tasks button, never the Module button.
+  const modulesBusy = moduleRuns.some(
+    (r) => r.module.id !== 'bot-task' && !['done', 'failed', 'cancelled'].includes(r.status)
+  )
   const setRightView = useAppStore((s) => s.setRightView)
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen)
   const sidebarVisible = useAppStore((s) => s.sidebarVisible)
@@ -84,6 +101,21 @@ export function TopBar(): React.JSX.Element {
               </span>
             )}{' '}
             Chat
+          </button>
+          <button
+            className={`view-btn ${botsOpen ? 'active' : ''}`}
+            onClick={() => setRightView('bots')}
+            disabled={!activeProject}
+            title="Toggle bot group chat"
+          >
+            {botsBusy ? (
+              <span className="topbar-chat-spinner" />
+            ) : (
+              <span className="btn-icon">
+                <MdiIcon path={mdiAccountGroupOutline} size={16} />
+              </span>
+            )}{' '}
+            Groups
           </button>
           <button
             className={`view-btn ${moduleOpen ? 'active' : ''}`}

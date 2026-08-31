@@ -13,6 +13,8 @@ interface MarkdownContentProps {
   onOpenSkill?: (skillName: string) => void
   onOpenPlan?: (planName: string) => void
   onOpenKanban?: (cardTitle: string) => void
+  /** Optional per-bot color for `mention:` links (bots group chat). */
+  mentionColor?: (botId: string) => string
 }
 
 function internalNameFromHref(href: string, prefix: string): string {
@@ -46,7 +48,8 @@ export const MarkdownContent = memo(function MarkdownContent({
   onOpenNote,
   onOpenSkill,
   onOpenPlan,
-  onOpenKanban
+  onOpenKanban,
+  mentionColor
 }: MarkdownContentProps): React.JSX.Element {
   const [viewer, setViewer] = useState<{ src: string; alt: string } | null>(null)
   const [closing, setClosing] = useState(false)
@@ -87,6 +90,7 @@ export const MarkdownContent = memo(function MarkdownContent({
             url.startsWith('plan:') ||
             url.startsWith('schedule:') ||
             url.startsWith('kanban:') ||
+            url.startsWith('mention:') ||
             url.startsWith('ptfile:')
           )
             return url
@@ -127,6 +131,26 @@ export const MarkdownContent = memo(function MarkdownContent({
             return <img src={resolvedSrc} alt={alt ?? ''} {...props} />
           },
           a: ({ node: _node, href, children, ...props }) => {
+            if (href?.startsWith('mention:')) {
+              const botId = internalNameFromHref(href, 'mention:')
+              const color = mentionColor?.(botId)
+              return (
+                <span
+                  className="chat-mention"
+                  style={
+                    color
+                      ? {
+                          background: `color-mix(in srgb, ${color} 16%, transparent)`,
+                          color
+                        }
+                      : undefined
+                  }
+                  title={botId}
+                >
+                  {children}
+                </span>
+              )
+            }
             if (href?.startsWith('note:')) {
               const noteName = slugify(internalNameFromHref(href, 'note:'))
               return (

@@ -14,6 +14,10 @@ import { registerSettingsIpc } from './ipc/settings'
 import { registerSkillsIpc } from './ipc/skills'
 import { registerModulesIpc } from './ipc/modules'
 import { registerToolsetsIpc } from './ipc/toolsets'
+import { registerBotsIpc } from './ipc/bots'
+import { BotsStore } from './bots/db'
+import { GroupChatManager } from './bots/orchestrator'
+import { createBotTaskModule } from './bots/botTask'
 import { ModuleRegistry } from './modules/registry'
 import { ModuleRunManager } from './modules/runs'
 import { buildStartModuleTool, buildWaitModulesTool } from './modules/tool'
@@ -47,6 +51,9 @@ let splashWindow: BrowserWindow | null = null
 let plannerEditActive = false
 let windowStateStore: WindowStateStore
 let moduleManager: ModuleRunManager | undefined
+/** Lets the module broadcast (created before the bots system) forward bot-task events. */
+const groupChatForwarder: { current: GroupChatManager | undefined } = { current: undefined }
+let botsStoreRef: BotsStore | undefined
 
 function buildAppMenu(): Menu {
   const isMac = process.platform === 'darwin'
@@ -303,6 +310,7 @@ app.whenReady().then(async () => {
     configStore,
     moduleRegistry,
     (evt) => {
+      groupChatForwarder.current?.handleModuleEvent(evt)
       for (const win of BrowserWindow.getAllWindows()) {
         win.webContents.send('modules:event', evt)
       }
@@ -320,6 +328,24 @@ app.whenReady().then(async () => {
     ]
   }
 
+  // Bots group chat: global bot library (userData/bots.db) + per-project group chats
+  const botsStore = new BotsStore(() => service.root, app.getPath('userData'))
+  botsStoreRef = botsStore
+  moduleRegistry.register(
+    createBotTaskModule(moduleManager!, moduleRegistry, settings.disabledModules ?? [])
+  )
+  const groupChatManager = new GroupChatManager({
+    store: botsStore,
+    configStore,
+    moduleManager: moduleManager!,
+    broadcast: (evt) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        win.webContents.send('bots:event', evt)
+      }
+    }
+  })
+  groupChatForwarder.current = groupChatManager
+
   const registry = createSessionRegistry(service, configStore, toolsProvider, async () => {
     const { buildPromptSection } = await import('./mcp/toolsets')
     const current = await settingsStore.load()
@@ -332,10 +358,14 @@ app.whenReady().then(async () => {
   registerPlannerIpc(service)
   registerAiIpc(registry, configStore, service)
   registerFilesIpc(service, registry, configStore)
-  registerSettingsIpc(service, settingsStore)
+  registerSettingsIpc(service, settingsStore, (newRoot) => {
+    botsStoreRef?.setRootDir(newRoot)
+    groupChatForwarder.current?.closeAll()
+  })
   registerSkillsIpc(service)
   registerModulesIpc(moduleManager!, settingsStore, moduleRegistry)
   registerToolsetsIpc(settingsStore)
+  registerBotsIpc(botsStore, groupChatManager, moduleManager!)
 
   windowStateStore = new WindowStateStore()
   const windowState = await windowStateStore.load()
@@ -355,6 +385,8 @@ app.on('window-all-closed', () => {
 app.on('will-quit', () => {
   // Mark any in-flight module runs as cancelled before the process exits.
   void moduleManager?.cancelActive()
+  groupChatForwarder.current?.closeAll()
+  botsStoreRef?.closeAll()
   void closeBrowser()
   shutdownChartRenderer()
   shutdownDiagramRenderer()

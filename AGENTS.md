@@ -15,6 +15,7 @@ PTNotes is a desktop app (Electron) for markdown notes, kanban task boards, proj
 - TipTap v3 (markdown in/out via `@tiptap/markdown`)
 - zustand (app state)
 - `openai` npm SDK with `baseURL` override (works with OpenAI, OpenRouter, Groq, LM Studio, Ollama, etc.)
+- `node:sqlite` (built into Electron's Node 22 — zero-dependency storage for the bots system)
 - cheerio (local HTML → text parsing for `web_fetch`)
 - `isomorphic-mermaid` (in-process module diagram rendering)
 - `@antv/infographic` (in-process module infographic rendering)
@@ -26,7 +27,7 @@ PTNotes is a desktop app (Electron) for markdown notes, kanban task boards, proj
 
 ```bash
 npm run dev          # development with HMR
-npm run test         # service / AI tools / chat session / markdown tests (tsx scripts/)
+npm run test         # service / AI tools / chat session / markdown / bots tests (tsx scripts/)
 npm run typecheck    # tsc --noEmit (node + web)
 npm run lint         # eslint --cache .
 npm run format       # prettier --write .
@@ -53,6 +54,7 @@ Run `npm run typecheck` and `npm run lint` after any change.
 - Planner schedules are JSON in `<project>/planner/<slug>.json` with a shared `calendar.json` working-day config. The pure date/rollup engine lives in `src/shared/planner.ts` and must stay shared (main + renderer + tests) — do not duplicate the math.
 - Planner UI: the store's `scheduleContent` is the single source of truth for the editor; parents' plan fields are rolled up from children (read-only in the UI), `On Hold` is manual-only, and actual dates are never computed. The Gantt view (`GanttChart.tsx`) is a second rendering of the same tree: the view choice is component-local (session-only, resets on schedule change), and all Gantt edits must route through `editTask`/`commit` like the table view — start-edge drags keep `planEnd` fixed and recompute duration (deliberately not `applyDateRule`).
 - Planner undo/redo history lives in the store as per-schedule stacks (`plannerUndo`/`plannerRedo`). Text/number field edits are captured on focus and recorded as a single undo step when the field loses focus (blur); discrete actions (add/delete/move/status/date/columns) record immediately in `commit()`. Keyboard interception (`before-input-event`) is gated by a main-process `planner:set-edit-active` flag so it never hijacks the markdown/chat/native undo.
+- Bots group chat: bots are global identities (`userData/bots.db`); group chats/messages/memories/task queue are per-project SQLite (`<project>/.data/bots/groupchat.db`). The routing rules (untagged → leader, `@bot` tags, relay budget, 8-turn cap, `assign` directive parsing) live as **pure functions in `src/shared/bots.ts`** — do not duplicate them in the orchestrator. All bot chat turns are tool-less non-streamed completions; real work only happens via the hidden `bot-task` module (single-flight per bot, queue in the orchestrator), which must stay hidden from the Modules UI/`start_module` listings.
 - Use existing utilities; do not add new dependencies without checking `package.json`.
 - Do not add comments unless necessary.
 

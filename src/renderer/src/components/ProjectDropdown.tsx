@@ -18,6 +18,7 @@ export function ProjectDropdown(): React.JSX.Element {
   const [creating, setCreating] = useState(false)
   const [recreating, setRecreating] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState<string | null>(null)
   const [name, setName] = useState('')
   const ref = useRef<HTMLDivElement>(null)
 
@@ -74,10 +75,11 @@ export function ProjectDropdown(): React.JSX.Element {
     setRenaming(null)
   }
 
-  async function handleDelete(projectName: string): Promise<void> {
-    if (window.confirm(`Delete project "${projectName}" and all its notes?`)) {
-      await deleteProject(projectName)
-    }
+  async function handleDelete(): Promise<void> {
+    if (!deleting) return
+    await deleteProject(deleting)
+    setDeleting(null)
+    closeDropdown()
   }
 
   async function handleRecreate(projectName: string): Promise<void> {
@@ -141,7 +143,7 @@ export function ProjectDropdown(): React.JSX.Element {
                   title="Delete"
                   onClick={(e) => {
                     e.stopPropagation()
-                    void handleDelete(p.name)
+                    setDeleting(p.name)
                   }}
                 >
                   <MdiIcon path={mdiTrashCanOutline} size={14} />
@@ -215,6 +217,23 @@ export function ProjectDropdown(): React.JSX.Element {
             </button>
             <button className="btn primary" onClick={() => void handleRecreate(recreating)}>
               Recreate
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {deleting && (
+        <Modal title="Delete project" onClose={() => setDeleting(null)}>
+          <p className="confirm-message">
+            Delete project &quot;{deleting}&quot; and its entire folder — all notes, files, chats
+            and task history? This cannot be undone.
+          </p>
+          <div className="modal-actions">
+            <button className="btn" onClick={() => setDeleting(null)}>
+              Cancel
+            </button>
+            <button className="btn danger" onClick={() => void handleDelete()}>
+              Delete
             </button>
           </div>
         </Modal>

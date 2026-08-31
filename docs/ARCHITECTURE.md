@@ -18,13 +18,14 @@ Read the section(s) relevant to your task rather than the whole file when possib
 | [UI layout](#ui-layout)                                                 | Editor, toolbar, format helper, find & replace, top bar                  |
 | [IPC surface (window.ptnotes)](#ipc-surface-windowptnotes)              | Preload/renderer ↔ main IPC handler shapes                               |
 | [AI chat feature](#ai-chat-feature)                                     | Chat session, tools, module orchestration, trace, PDF, chat UI, settings |
+| [Bots group chat](#bots-group-chat)                                     | Bot identities, group chats, routing rules, background tasks, memories   |
 | [Notes & caveats](#notes--caveats)                                      | Behavioral constraints (tool scoping, mention semantics)                 |
 
 ---
 
 ## Project
 
-PTNotes is a desktop app (Electron) for markdown notes, kanban task boards, and an AI chat assistant, organized by **project** — each project is a folder on disk.
+PTNotes is a desktop app (Electron) for markdown notes, kanban task boards, an AI chat assistant, and multi-bot group chats, organized by **project** — each project is a folder on disk.
 
 ## Stack
 
@@ -33,6 +34,7 @@ PTNotes is a desktop app (Electron) for markdown notes, kanban task boards, and 
 - TipTap v3 (`@tiptap/react`, `@tiptap/starter-kit`, `@tiptap/markdown` for markdown in/out)
 - zustand (app state)
 - `openai` npm SDK with `baseURL` override (works with OpenAI, OpenRouter, Groq, LM Studio, Ollama, etc.)
+- `node:sqlite` (built into Electron's Node 22 — zero-dependency SQLite storage for the bots system)
 - `@modelcontextprotocol/sdk` (v1.30) in-process MCP server + client over `InMemoryTransport` for browser toolset
 - `playwright-core` (drives installed Chrome/Edge; no bundled Chromium)
 - `zod` (v4, peer dep of MCP SDK; input-schema validation for registered tools)
@@ -69,7 +71,8 @@ Run `npm run typecheck` and `npm run lint` after any change.
 | Stack               | Electron + electron-vite + React 19 + TypeScript                                                                                                                                                                                    |
 | Project selector    | Top bar: current project name dropdown + New Project button                                                                                                                                                                         |
 | Project registry    | Persistent known-project list so folders deleted externally still show (missing paths marked red)                                                                                                                                   |
-| Chat placement      | Collapsible right-side drawer, shared with the **Module** panel (top-bar toggles, one view at a time)                                                                                                                               |
+| Chat placement      | Collapsible right-side drawer, shared with the **Bots** and **Module** panels (top-bar toggles + ⌘⇧C/⌘⇧G/⌘⇧M, one view at a time)                                                                                                   |
+| Bots                | Global bot identities (userData SQLite) + per-project group chats/messages/memories/task queue (project SQLite); leader-centric routing with relay budget + turn cap; tool-less chat turns, background work via hidden `bot-task` runs; SQLite via the `node:sqlite` builtin (no install, no dependency) |
 | AI streaming        | Yes (real-time)                                                                                                                                                                                                                     |
 | Settings dialog     | Two-panel dialog: **Storage** (project root path) + **AI Settings** (profile set: active selector, per-profile base URL/API key/model with endpoint presets, global PDF toggle) + Modules + Skills + About                          |
 | Project root        | Configurable via settings; default `~/Documents/PTNotes`; changing it moves all data + registry to the new location after confirmation                                                                                              |
@@ -103,8 +106,13 @@ Run `npm run typecheck` and `npm run lint` after any change.
         ├── modules/temp/*.{png,svg,json}  (temp module/shared-tool output; deleted once the deck is built)
         ├── skills/*/SKILL.md (project skills — same OpenAI skill-guide layout (`<skill>/SKILL.md` with `name:` + `description:` front-matter) as global skills, scoped to one project)
         ├── chat/*.json         (one file per chat session: messages + timestamps)
-        └── chat/*.trace.jsonl  (one raw AI trace per chat session, JSONL: header record first, then one record per line; append-only)
+        ├── chat/*.trace.jsonl  (one raw AI trace per chat session, JSONL: header record first, then one record per line; append-only)
+        └── bots/               (bots group chat, SQLite via the `node:sqlite` builtin)
+            ├── groupchat.db       (tables: group_chats, group_messages, bot_memories, bot_task_queue; WAL)
+            └── <groupId>.trace.jsonl (per-group raw AI trace, JSONL like chat traces)
 ```
+
+- The **global bot library** lives in Electron `userData/bots.db` (SQLite, WAL; table `bots`) — bots are app-wide identities; their memories are scoped per project (rows in the project's `bot_memories` table).
 
 - On startup (and after `changeRootDir`), legacy per-project `chat/` and `modules/`
   folders found at the project root are migrated into `<project>/.data/` automatically
@@ -132,6 +140,7 @@ src/
 │   │   ├── planner.ts  # planner:list/read/save/create/rename/delete/getCalendar/saveCalendar/set-edit-active/undo-redo
 │   │   ├── chat.ts      # chat history persistence (list/read/write/delete/rename)
 │   │   ├── ai.ts        # chat session registry + ai:generateTitle (chat titles)
+│   │   ├── bots.ts      # bots:* (bot library, group chats, send/stop, task list/clear, memories, group trace)
 │   │   ├── files.ts     # files:* attach/extract/list/reveal + pdf:upload (multi-file drop: .pdf/.xlsx/.xlsm/.md/.txt)
 │   │   ├── skills.ts    # skills:list/read/save/delete (global + project)
 │   │   └── settings.ts  # settings:get / settings:chooseRoot / settings:changeRoot
@@ -139,11 +148,15 @@ src/
 │       ├── client.ts    # OpenAI-compatible client (streaming)
 │       ├── tools.ts     # tool JSON schemas + executors (bind to PTNotesService)
 │       ├── chatSession.ts   # conversation state + tool-call loop (static system prompt + skills index; active note/schedule sent as user-message context suffix)
-│       ├── config.ts    # ai-provider.json load/save (profile set + legacy migration)
+│       ├── config.ts    # ai-provider.json load/save (profile set + legacy migration) + loadResolved (per-bot profile/model override)
 │       ├── reader.ts     # readFileAsText + detectFileKind: content-based (pdf-parse for PDFs, exceljs for .xlsx/.xlsm, raw text for any text file) + MAX_PDF_CHARS truncation
 │       └── search/
 │           ├── duckduckgo.ts  # web_search (no key)
 │           └── webFetch.ts    # cheerio page extraction
+│   └── bots/
+│       ├── db.ts          # BotsStore: SQLite via node:sqlite — global bots.db + per-project groupchat.db (groups/messages/memories/task queue) + per-group trace JSONL
+│       ├── orchestrator.ts # GroupChatManager: per-group serialized turn queue, routing rules, non-streamed bot turns, assign→task handling, single-flight queue, summarization + memory extraction
+│       └── botTask.ts     # hidden internal `bot-task` module (base tools + start_module/wait_modules) that powers bot background runs
 │   └── modules/
 │       ├── registry.ts   # module registry (extensible)
 │       ├── runs.ts       # ModuleRunManager: start/list/stop + event broadcast + readChat/readTrace (live in-memory or persisted .chat.json/.trace.jsonl) + waitForRuns (multi-module waiting for the main chat)
@@ -186,11 +199,15 @@ src/
 │   │   │   ├── MarkdownEditor.tsx   # TipTap WYSIWYG + markdown sync + auto-save
 │   │   │   ├── MarkdownContent.tsx  # react-markdown chat rendering + note:/skill: link handling
 │   │   │   ├── ChatDrawer.tsx       # right drawer, streaming, mentions, history, titles
+│   │   │   ├── GroupChatPanel.tsx   # bots group chat view (roster, badges, timestamps, @bot mentions, typing indicator, group modal/history)
+│   │   │   ├── BotTasksPanel.tsx    # bot background tasks panel (Modules-panel layout filtered to bot-task runs)
+│   │   │   ├── BotsSettingsPane.tsx # Settings ▸ Bots (bot library CRUD + per-project memory viewer)
 │   │   │   ├── ModuleHistoryOverlay.tsx # read-only transcript overlay for module runs (💬 button on ModuleCard)
-│   │   │   └── SettingsDialog.tsx  # two-panel Settings (Storage + AI Settings)
+│   │   │   └── SettingsDialog.tsx  # multi-panel Settings (Storage + AI + Modules + Toolsets + Skills + Bots + About)
 │   └── ...
 └── shared/
-    ├── types.ts         # Project, NoteMeta, ChatMessage, tool types
+    ├── types.ts         # Project, NoteMeta, ChatMessage, tool types (+ re-exports bots/planner/kanban types)
+    ├── bots.ts          # bots types (BotProfile, GroupMessage, …) + PURE routing logic (tag extraction, relay policy, assign parsing, memory merge) shared by main + renderer + tests
     ├── kanban.ts        # kanban board types + pure helpers (normalize, lookups, due-date formatting) shared by main + renderer + tests
     └── planner.ts       # pure planner engine (dates, status rules, rollups) shared by main + renderer + tests
 ```
@@ -248,7 +265,8 @@ src/
 - **Skills:** `list(project)` (returns `{ global, project }` metas), `read(project, scope, name)` (full content), `save(project, scope, name, { description, content, enabled? })` (upsert → `SkillMeta`), `setEnabled(project, scope, name, enabled)` (toggle → `SkillMeta`), `move(project, scope, name, toScope)` (relocates the skill folder between scopes → `SkillMeta`), `delete(project, scope, name)` (→ boolean)
 - **PDF:** `supportsUpload` (returns the AI settings `uploadPdfEnabled` toggle — user-controlled), `upload` (raw PDF via provider Responses API `input_file` — uploads base64 through the Files API, falling back to inline `file_data`; takes `sessionId` so the upload exchange is traced into the session's trace file)
 - **Files:** `list` (`<project>/files/*` — PDF + any text file — for the chat `#` picker), `getPathForFile` (dropped file path via `webUtils`, never `File.path`), `copyToProject` (content-based: any text file + PDFs copied into `<project>/files/`; non-PDF binaries rejected), `extract` (local text → `{ text, pageCount, charCount, truncated }`; pdf-parse for `.pdf`, raw text for any text file), `reveal` (`shell.showItemInFolder`)
-- **Modules:** `list`, `listAvailable`, `setEnabled`, `start`, `startModule`, `stop`, `retry`, `reveal` (optional `filePath` to reveal a specific file of a multi-file run; defaults to the primary `outputFile`), `deleteRun`, `clearHistory`, `readChat` (per-run subagent transcript: live in-memory for active runs, persisted `<project>/.data/modules/<runId>.chat.json` otherwise), `readTrace` (per-run raw AI trace `AiTraceFile`: live from the runner for active runs, else disk). A run records **every** deliverable in `outputFiles` (one 📄 reveal pill each on the card; the first is also `outputFile`); `deleteRun`/`clearHistory` with the delete-output option removes them all. A run may also carry a `result` payload (submitted via `submit_result`) and an `expectResult` spec (from `start_module`'s `expect` argument).
+- **Modules:** `list`, `listAvailable`, `setEnabled`, `start`, `startModule`, `stop`, `retry`, `reveal` (optional `filePath` to reveal a specific file of a multi-file run; defaults to the primary `outputFile`), `deleteRun`, `clearHistory`, `readChat` (per-run subagent transcript: live in-memory for active runs, persisted `<project>/.data/modules/<runId>.chat.json` otherwise), `readTrace` (per-run raw AI trace `AiTraceFile`: live from the runner for active runs, else disk). A run records **every** deliverable in `outputFiles` (one 📄 reveal pill each on the card; the first is also `outputFile`); `deleteRun`/`clearHistory` with the delete-output option removes them all. A run may also carry a `result` payload (submitted via `submit_result`) and an `expectResult` spec (from `start_module`'s `expect` argument). Hidden `bot-task` runs never appear in `listAvailable`/Settings and are never deleted by the Modules panel's `clearHistory`; the bots surface exposes them instead (below).
+- **Bots:** `listBots`, `saveBot(input)`, `deleteBot(id)` (also drops the bot from every group roster; leader falls back to the first remaining member), `listMemories(project, botId?)`, `deleteMemory(project, botId, memoryId)`; `listGroups(project)` (also reconciles the task queue: rows left `running` by a crash are dropped), `readGroup(project, groupId) → GroupChatData` (meta + messages + summary), `createGroup(project, {title, botIds, leaderBotId})` (≥1 bot, leader must be a member), `updateGroup`, `deleteGroup`; `send(project, groupId, text)` (resolves when the whole orchestration settles), `stop(project, groupId)`; `listTasks(project) → ModuleRun[]` (bot-task runs only), `clearTaskHistory(project, deleteOutputFiles?)`, `readTrace(project, groupId)`; `onEvent(cb)` subscribing to `bots:event` (broadcast to **all windows**): `message` (persisted GroupMessage), `turn-start`/`turn-end` (typing indicator), `group-updated`, `summary`, `error`.
 
 ## AI chat feature
 
@@ -593,6 +611,42 @@ JSON in `<project>/planner/<slug>.json`; the whole feature is pure data — no m
   show a hover hint, and date-less leaf titles are dimmed.
 - All Gantt edits route through the editor's `editTask`/`commit`, so rollup, undo/redo, and
   debounce autosave behave exactly as in the table view.
+
+## Bots group chat
+
+Multi-bot group conversations with identities, roles, memories and background task execution.
+
+### Data & storage
+
+- **Bot library** (global): `BotProfile { id (slug, used in @mentions), name, role, persona, profileId?, model?, createdAt, updatedAt }` in `userData/bots.db` (SQLite via the `node:sqlite` builtin — no npm dependency, nothing for users to install). A bot optionally picks an AI profile (`profileId`) and/or a model override; resolution happens in `AIConfigStore.loadResolved` so the API key never leaves the config store (the persisted `ModuleRun` records `profileId`/`modelOverride`, never the key).
+- **Per project**: `<project>/.data/bots/groupchat.db` (WAL) with tables `group_chats` (roster JSON, `leader_bot_id`, `summary`, `summarized_up_to_seq`), `group_messages` (monotonic per-group `seq`, sender kind/bot id/name/role, `is_leader`, `task_id`), `bot_memories` (per (bot, project), capped 50), `bot_task_queue` (single-flight state). Per-group AI traces append to `<project>/.data/bots/<groupId>.trace.jsonl` (same JSONL shape as chat traces; readable in the trace viewer as kind `bots`). All of it moves with the project root (`changeRoot` closes/reopens the DBs).
+
+### Routing rules (pure in `src/shared/bots.ts`)
+
+- Untagged user message → the **leader** takes it (answer directly and/or assign by tagging). `@bot-id` in the user message → that bot responds directly (multiple tags = sequential turns).
+- Tag policies per bot turn: `free` (leader/user-initiated) — its `@` tags always trigger the tagged bots (normal assignment); `relay` (a bot tagged by another bot) — answers **without tagging back**, its tags trigger only by consuming the single per-message **relay budget** (one explicit bot→bot→bot chain); `none` (deeper turns / task reports) — tags are display-only. Hard cap: **8 bot turns per user message**. These rules are enforced by the orchestrator via `planTagTriggers`, never left to prompts alone.
+- Group members are resolved live at send time; a deleted bot drops out of the roster, and a missing leader falls back to the first remaining member.
+
+### Turn engine (`GroupChatManager` / `GroupSession` in `src/main/bots/orchestrator.ts`)
+
+- Inbound work is a **serialized per-group job queue** (user messages never interrupt an in-flight turn; each `bots:send` resolves when its whole orchestration settles). Bot turns are **non-streamed completions with no tools**; `<think>` reasoning is stripped, never stored or rendered. The system prompt is built per turn: identity/role/persona, group roster (leader badge), no-tools + tagging rules, memory section, rolling-summary section, current date.
+- **Assignments**: a bot that takes on real work ends its reply with an ```assign fenced block (JSON `{title, task}`; a plain `ASSIGN:` line is accepted as fallback) — `parseBotReply` strips the block from the visible chat message and hands `{title, task}` to the task layer. The transcript given to each bot is plain-text dialogue lines (`You: …`, `[Name (role)]: …`, `[system] …`) covering everything after the summary point.
+
+### Background tasks (hidden `bot-task` module)
+
+- `createBotTaskModule` registers `id: 'bot-task'`, `hidden: true` (excluded from `ModuleRegistry.list()` → invisible to Settings ▸ Modules, `start_module` listings and the Modules panel) with base tools + `start_module`/`wait_modules` (a task can orchestrate sub-modules) and `maxIterations: 60`. Runs are started through the normal `ModuleRunManager.start(...)` with `{ botId, groupId, profileId, modelOverride }`; the run persists as usual under `.data/modules/` and carries `expectResult` = "a concise report…".
+- **Single-flight per bot**: the orchestrator keeps the queue in `bot_task_queue`; a bot with a running task gets new assignments queued (system line "⏳ … queued task … (position N)"); on completion (`handleModuleEvent` observing terminal bot-task events, deduped) the bot posts a **result report** in the chat (an AI turn fed with the run's `result`/`summary`/`error`; fallback to the raw result on AI failure) and the next queued task starts. Rows left `running` by a crash/quit are dropped on the next `listGroups`.
+- Tasks surface in the **Bot Tasks** panel only (`rightView: 'botTasks'`, opened from the group chat header; back button returns to the chat) — same card/trace/transcript UI as Modules. The Modules panel filters `bot-task` out and `clearHistory` never deletes those runs.
+
+### Summarization & memory
+
+- After each user message's orchestration, if the un-summarized context exceeds **30k chars**, the **leader** produces (non-streamed, never displayed) a rolling summary that merges the previous one with everything except the last 6 messages; it is stored as `{summary, summarizedUpToSeq}` on the group and injected into every bot's system prompt. A `summary` event is broadcast (the UI ignores it — the full log always stays visible).
+- In the same cycle, each bot involved in the turn batch runs a memory-extraction completion (JSON array of durable facts, deduped against existing entries via `mergeMemoryEntries`, capped 50, per project). Memories are injected as "YOUR MEMORY" in the bot's system prompt and are viewable/forgettable per project in Settings ▸ Bots.
+
+### UI (`GroupChatPanel.tsx`)
+
+- Third drawer view (`rightView: 'chat' | 'bots' | 'modules' | 'botTasks'`, top-bar toggle, `⌘⇧G`): group header (title, Tasks/New/settings/trace buttons, group-history popover with open/rename/trace/delete), roster chips, message list (user bubbles right-aligned; bot messages with colored initial avatar, name, role badge, leader badge, timestamp `HH:MM` today / `MMM D, HH:MM` otherwise; system notices as centered pills), "**\<name\>** is typing…" indicator on `turn-start`, `@` mention popup fed by the group's bots in the composer, Send/Stop. `@bot-id` mentions in messages render as highlighted chips showing `@Name` (per-bot color in markdown messages via `linkifyBotMentions` → `mention:` links handled by `MarkdownContent`; translucent chips in user bubbles via `splitMentionSegments`; fenced code blocks untouched). Store slices: per-project `botGroups`/`activeBotGroupId`, per-group `botGroupMessages`/`botGroupBusy`/`botTyping`; events are applied via `applyBotGroupEvent` (message upsert by id).
+- Bot management lives in Settings ▸ Bots (`BotsSettingsPane`): library list (edit = inline form with name/role/persona/profile/model), two-step delete, and a per-project memory viewer for the selected bot.
 
 ## Notes & caveats
 

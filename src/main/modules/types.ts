@@ -23,4 +23,7 @@ export interface RegisteredModule {
   tools: PTTool[]
   /** Max model turns for the subagent loop. Defaults to 30; set higher for long-running agents. */
   maxIterations?: number
+  /** Hidden modules are internal plumbing: excluded from Settings ▸ Modules, `start_module`
+   *  listings and the Modules panel, but still startable programmatically (e.g. bot tasks). */
+  hidden?: boolean
 }

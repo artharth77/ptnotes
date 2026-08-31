@@ -1,0 +1,784 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import {
+  mdiChevronDown,
+  mdiCogOutline,
+  mdiPencil,
+  mdiPlus,
+  mdiPuzzleOutline,
+  mdiSend,
+  mdiStopCircleOutline,
+  mdiTimelineClockOutline,
+  mdiTrashCanOutline
+} from '@mdi/js'
+import { useAppStore } from '../store/useAppStore'
+import { formatGroupTimestamp, linkifyBotMentions, splitMentionSegments } from '@shared/bots'
+import type { GroupChatMeta, GroupMessage } from '@shared/bots'
+import { MarkdownContent } from './MarkdownContent'
+import { USER_MSG_COLLAPSE_LIMIT } from './chatContent'
+import { Modal } from './Modal'
+import { MdiIcon } from './MdiIcon'
+
+const BOT_HUES = [212, 152, 268, 24, 340, 188, 48, 300, 96, 0]
+
+// Stable empty-array constants: zustand v5 selectors must never return a fresh
+// reference per call, or useSyncExternalStore re-renders forever (blank screen).
+const NO_GROUPS: GroupChatMeta[] = []
+const NO_MESSAGES: GroupMessage[] = []
+const NO_RUNS: never[] = []
+
+function botColor(id: string | undefined): string {
+  if (!id) return 'var(--accent, #4a7dff)'
+  let hash = 0
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0
+  return `hsl(${BOT_HUES[hash % BOT_HUES.length]}, 58%, 46%)`
+}
+
+function botInitial(name: string): string {
+  return (name.trim()[0] ?? 'B').toUpperCase()
+}
+
+/** Right-drawer view: multi-bot group chat with a leader, @mentions and background tasks. */
+export function GroupChatPanel(): React.JSX.Element {
+  const activeProject = useAppStore((s) => s.activeProject)
+  const botProfiles = useAppStore((s) => s.botProfiles)
+  const groups = useAppStore((s) =>
+    activeProject ? (s.botGroups[activeProject] ?? NO_GROUPS) : NO_GROUPS
+  )
+  const activeGroupId = useAppStore((s) =>
+    activeProject ? (s.activeBotGroupId[activeProject] ?? null) : null
+  )
+  const activeGroup = groups.find((g) => g.groupId === activeGroupId) ?? null
+  const messages = useAppStore((s) =>
+    activeGroupId ? (s.botGroupMessages[activeGroupId] ?? NO_MESSAGES) : NO_MESSAGES
+  )
+  const busy = useAppStore((s) =>
+    activeGroupId ? (s.botGroupBusy[activeGroupId] ?? false) : false
+  )
+  const typing = useAppStore((s) => (activeGroupId ? (s.botTyping[activeGroupId] ?? null) : null))
+  const botTaskRuns = useAppStore((s) =>
+    activeProject ? (s.botTaskRuns[activeProject] ?? NO_RUNS) : NO_RUNS
+  )
+  const tasksBusy = botTaskRuns.some((r) => !['done', 'failed', 'cancelled'].includes(r.status))
+  const loadBotProfiles = useAppStore((s) => s.loadBotProfiles)
+  const loadBotGroups = useAppStore((s) => s.loadBotGroups)
+  const sendBotGroupMessage = useAppStore((s) => s.sendBotGroupMessage)
+  const stopBotGroup = useAppStore((s) => s.stopBotGroup)
+  const setRightView = useAppStore((s) => s.setRightView)
+  const notes = useAppStore((s) => s.notes)
+  const schedules = useAppStore((s) => s.schedules)
+  const kanban = useAppStore((s) => s.kanban)
+  const selectNote = useAppStore((s) => s.selectNote)
+  const selectSchedule = useAppStore((s) => s.selectSchedule)
+  const setTab = useAppStore((s) => s.setTab)
+  const setActiveKanbanCard = useAppStore((s) => s.setActiveKanbanCard)
+
+  const [input, setInput] = useState('')
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [groupModal, setGroupModal] = useState<'create' | 'edit' | null>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const [mention, setMention] = useState<{ start: number; query: string } | null>(null)
+  const [mentionIndex, setMentionIndex] = useState(0)
+
+  useEffect(() => {
+    if (activeProject) {
+      void loadBotProfiles()
+      void loadBotGroups(activeProject)
+    }
+  }, [activeProject, loadBotProfiles, loadBotGroups])
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [messages.length, typing, activeGroupId])
+
+  const groupBots = useMemo(
+    () =>
+      (activeGroup?.botIds ?? [])
+        .map((id) => botProfiles.find((b) => b.id === id))
+        .filter((b): b is (typeof botProfiles)[number] => !!b),
+    [activeGroup, botProfiles]
+  )
+
+  const mentionItems = useMemo(() => {
+    if (!mention || !activeGroup) return []
+    const q = mention.query.toLowerCase()
+    return groupBots.filter(
+      (b) => b.id.toLowerCase().includes(q) || b.name.toLowerCase().includes(q)
+    )
+  }, [mention, activeGroup, groupBots])
+
+  function updateMention(value: string, caret: number): void {
+    const upto = value.slice(0, caret)
+    const m = upto.match(/(^|[\s(])@([a-zA-Z0-9_-]*)$/)
+    if (m && activeGroup) {
+      // `start` is the index of the `@` itself (replaced on insert, like the 1:1 chat).
+      setMention({ start: caret - m[2].length - 1, query: m[2] })
+      setMentionIndex(0)
+    } else {
+      setMention(null)
+    }
+  }
+
+  function insertMention(bot: (typeof groupBots)[number]): void {
+    if (!mention) return
+    const before = input.slice(0, mention.start)
+    const after = input.slice(mention.start + 1 + mention.query.length)
+    const next = `${before}@${bot.id} ${after}`
+    setInput(next)
+    setMention(null)
+    inputRef.current?.focus()
+  }
+
+  async function send(): Promise<void> {
+    const text = input.trim()
+    if (!text || busy || !activeGroup) return
+    setInput('')
+    setMention(null)
+    await sendBotGroupMessage(text)
+    inputRef.current?.focus()
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>): void {
+    if (mentionItems.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setMentionIndex((i) => (i + 1) % mentionItems.length)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setMentionIndex((i) => (i - 1 + mentionItems.length) % mentionItems.length)
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        const bot = mentionItems[mentionIndex] ?? mentionItems[0]
+        if (bot) insertMention(bot)
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setMention(null)
+        return
+      }
+    }
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault()
+      void send()
+    }
+  }
+
+  async function openNote(noteName: string): Promise<void> {
+    if (!activeProject) return
+    const note =
+      notes.find((n) => n.id === noteName) ??
+      notes.find((n) => n.name === noteName) ??
+      notes.find((n) => n.name.includes(noteName))
+    if (!note) return
+    await selectNote(note.id)
+    setTab('notes')
+  }
+
+  async function openSchedule(planName: string): Promise<void> {
+    if (!activeProject) return
+    const plan =
+      schedules.find((s) => s.id === planName) ??
+      schedules.find((s) => s.name === planName) ??
+      schedules.find((s) => s.name.includes(planName))
+    if (!plan) return
+    await selectSchedule(plan.id)
+    setTab('planner')
+  }
+
+  function openKanbanCard(cardTitle: string): void {
+    if (!activeProject || !kanban) return
+    const q = cardTitle.trim().toLowerCase()
+    const card = kanban.cards.find((c) => c.title.toLowerCase() === q)
+    if (!card) return
+    setTab('kanban')
+    setActiveKanbanCard(card.id)
+  }
+
+  return (
+    <div className="chat-drawer gc-drawer">
+      <div className="chat-header">
+        <GroupSwitcher
+          title={activeGroup?.title ?? 'Bot group chat'}
+          open={historyOpen}
+          setOpen={setHistoryOpen}
+          groups={groups}
+          activeId={activeGroupId}
+          onNewGroup={() => setGroupModal('create')}
+        />
+        <div className="chat-header-actions">
+          <button
+            className="btn small ghost"
+            onClick={() => setRightView('botTasks')}
+            title={tasksBusy ? 'Bot background tasks — running…' : 'Bot background tasks'}
+          >
+            {tasksBusy ? (
+              <span className="topbar-chat-spinner" />
+            ) : (
+              <MdiIcon path={mdiPuzzleOutline} size={16} />
+            )}
+            Tasks
+          </button>
+          {activeGroup && (
+            <button
+              className="btn small ghost"
+              onClick={() => setGroupModal('edit')}
+              title="Group settings"
+            >
+              <MdiIcon path={mdiCogOutline} size={16} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="chat-scroll gc-scroll" ref={scrollRef}>
+        {!activeProject && <div className="list-empty">Open a project to use bot groups.</div>}
+        {activeProject && groups.length === 0 && (
+          <div className="list-empty">
+            No group chats yet.
+            <p className="module-hint">
+              Create a bot in Settings ▸ Bots, then create a group and pick a leader.
+            </p>
+            <button className="btn primary" onClick={() => setGroupModal('create')}>
+              + New group
+            </button>
+          </div>
+        )}
+        {activeProject && activeGroup && (
+          <div className="gc-roster">
+            {groupBots.map((b) => (
+              <span key={b.id} className="gc-roster-chip" title={`${b.name} (@${b.id})`}>
+                <span className="gc-avatar tiny" style={{ background: botColor(b.id) }}>
+                  {botInitial(b.name)}
+                </span>
+                {b.name}
+                {b.id === activeGroup.leaderBotId && <span className="gc-leader-star">★</span>}
+              </span>
+            ))}
+          </div>
+        )}
+        {messages.map((m) => (
+          <MessageRow
+            key={m.id}
+            msg={m}
+            leaderId={activeGroup?.leaderBotId}
+            bots={groupBots}
+            onOpenNote={(n) => void openNote(n)}
+            onOpenPlan={(p) => void openSchedule(p)}
+            onOpenKanban={(t) => openKanbanCard(t)}
+          />
+        ))}
+        {typing && (
+          <div className="gc-typing">
+            <span className="gc-avatar tiny gc-typing-avatar">{botInitial(typing)}</span>
+            <span>
+              <strong>{typing}</strong> is typing
+              <span className="gc-dots">
+                <i />
+                <i />
+                <i />
+              </span>
+            </span>
+          </div>
+        )}
+      </div>
+
+      <div className="chat-input">
+        {mentionItems.length > 0 && (
+          <div className="mention-popup">
+            {mentionItems.map((b, i) => (
+              <div
+                key={b.id}
+                className={`mention-item ${i === mentionIndex ? 'active' : ''}`}
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  insertMention(b)
+                }}
+                onMouseEnter={() => setMentionIndex(i)}
+              >
+                <span className="gc-avatar tiny" style={{ background: botColor(b.id) }}>
+                  {botInitial(b.name)}
+                </span>
+                <span className="mention-icon">@{b.id}</span>
+                {b.name}
+                {b.role ? <span className="command-badge">{b.role}</span> : null}
+              </div>
+            ))}
+          </div>
+        )}
+        <textarea
+          ref={inputRef}
+          value={input}
+          placeholder={
+            activeGroup
+              ? `Message the group… (@${activeGroup.leaderBotId} or another bot)`
+              : 'Create a group chat to start'
+          }
+          disabled={!activeGroup || busy}
+          rows={2}
+          onChange={(e) => {
+            setInput(e.target.value)
+            updateMention(e.target.value, e.target.selectionStart ?? e.target.value.length)
+          }}
+          onKeyDown={onKeyDown}
+        />
+        {busy ? (
+          <button className="btn danger" onClick={() => void stopBotGroup()}>
+            <MdiIcon path={mdiStopCircleOutline} size={16} /> Stop
+          </button>
+        ) : (
+          <button
+            className="btn primary"
+            onClick={() => void send()}
+            disabled={!input.trim() || !activeGroup}
+            title="Send"
+          >
+            <MdiIcon path={mdiSend} size={16} />
+          </button>
+        )}
+      </div>
+
+      {groupModal && activeProject && (
+        <GroupModal
+          mode={groupModal}
+          project={activeProject}
+          group={groupModal === 'edit' ? activeGroup : null}
+          profiles={botProfiles}
+          onClose={() => setGroupModal(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+function MessageRow({
+  msg,
+  leaderId,
+  bots,
+  onOpenNote,
+  onOpenPlan,
+  onOpenKanban
+}: {
+  msg: GroupMessage
+  leaderId?: string
+  bots: { id: string; name: string }[]
+  onOpenNote?: (noteName: string) => void
+  onOpenPlan?: (planName: string) => void
+  onOpenKanban?: (cardTitle: string) => void
+}): React.JSX.Element {
+  if (msg.senderKind === 'system') {
+    return (
+      <div className={`gc-system${msg.error ? ' error' : ''}`} title={formatGroupTimestamp(msg.ts)}>
+        {msg.content}
+      </div>
+    )
+  }
+  if (msg.senderKind === 'user') {
+    return (
+      <div className="chat-msg user gc-msg">
+        <div className="chat-msg-label gc-msg-meta">You · {formatGroupTimestamp(msg.ts)}</div>
+        <GroupUserBubble content={msg.content} bots={bots} />
+      </div>
+    )
+  }
+  const isLeader = msg.botId === leaderId || msg.isLeader
+  return (
+    <div className="chat-msg assistant gc-msg">
+      <div className="gc-msg-head">
+        <span className="gc-avatar" style={{ background: botColor(msg.botId) }}>
+          {botInitial(msg.senderName)}
+        </span>
+        <span className="gc-msg-name">{msg.senderName}</span>
+        {msg.role && <span className="gc-role-badge">{msg.role}</span>}
+        {isLeader && <span className="gc-leader-badge">leader</span>}
+        <span className="gc-msg-time">{formatGroupTimestamp(msg.ts)}</span>
+      </div>
+      <div className={`chat-msg-content${msg.error ? ' error' : ''}`}>
+        <MarkdownContent
+          content={linkifyBotMentions(msg.content, bots)}
+          mentionColor={mentionColor}
+          onOpenNote={onOpenNote}
+          onOpenPlan={onOpenPlan}
+          onOpenKanban={onOpenKanban}
+        />
+      </div>
+    </div>
+  )
+}
+
+/** Per-bot color for mention chips (module-level so MarkdownContent's memo stays stable). */
+const mentionColor = (botId: string): string => botColor(botId)
+
+/** User bubble with @mention chips — same collapse behavior as the 1:1 chat's UserBubble. */
+function GroupUserBubble({
+  content,
+  bots
+}: {
+  content: string
+  bots: { id: string; name: string }[]
+}): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false)
+  const long = content.length > USER_MSG_COLLAPSE_LIMIT
+  const shown = long && !expanded ? content.slice(0, USER_MSG_COLLAPSE_LIMIT) : content
+  const segments = splitMentionSegments(shown, bots)
+  return (
+    <div className="chat-msg-content user-bubble">
+      {segments.map((seg, i) =>
+        seg.type === 'text' ? (
+          seg.text
+        ) : (
+          <span key={`${seg.botId}-${i}`} className="chat-mention" title={seg.botId}>
+            @{seg.name}
+          </span>
+        )
+      )}
+      {long && (
+        <button className="chat-msg-more" onClick={() => setExpanded(!expanded)}>
+          {expanded ? 'Show less' : '… Show more'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** Header dropdown: group title + chevron; lists group chats with a "New group chat" row on top. */
+function GroupSwitcher({
+  title,
+  open,
+  setOpen,
+  groups,
+  activeId,
+  onNewGroup
+}: {
+  title: string
+  open: boolean
+  setOpen: (v: boolean) => void
+  groups: GroupChatMeta[]
+  activeId: string | null
+  onNewGroup: () => void
+}): React.JSX.Element {
+  const activeProject = useAppStore((s) => s.activeProject)
+  const openBotGroup = useAppStore((s) => s.openBotGroup)
+  const renameBotGroupLocal = useAppStore((s) => s.updateBotGroup)
+  const deleteBotGroupLocal = useAppStore((s) => s.deleteBotGroup)
+  const openTraceViewer = useAppStore((s) => s.openTraceViewer)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  const close = useCallback((): void => {
+    setOpen(false)
+    setRenamingId(null)
+    setRenameValue('')
+    setDeletingId(null)
+  }, [setOpen])
+
+  useEffect(() => {
+    if (!open) return
+    const rect = btnRef.current?.getBoundingClientRect()
+    if (rect) setPos({ top: rect.bottom + 4, left: Math.max(0, rect.left) })
+    function onDown(e: MouseEvent): void {
+      const target = e.target as HTMLElement
+      if (btnRef.current?.contains(target)) return
+      if (target.closest('.chat-history')) return
+      if (target.closest('.modal-overlay')) return
+      close()
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open, setOpen, close])
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        className="chat-header-title gc-switcher"
+        onClick={() => (open ? close() : setOpen(true))}
+        title="Group chats"
+      >
+        <span className="gc-switcher-label">{title}</span>
+        <MdiIcon path={mdiChevronDown} size={14} />
+      </button>
+      {open &&
+        pos &&
+        createPortal(
+          <>
+            <div className="chat-history-overlay" onClick={close} />
+            <div className="chat-history" style={pos}>
+              <button
+                className="chat-history-new"
+                onClick={() => {
+                  close()
+                  onNewGroup()
+                }}
+              >
+                <MdiIcon path={mdiPlus} size={14} />
+                New group chat
+              </button>
+              {groups.length === 0 && <div className="chat-history-empty">No group chats yet</div>}
+              {groups.map((g) => (
+                <div
+                  key={g.groupId}
+                  className={`chat-history-item${g.groupId === activeId ? ' active' : ''}`}
+                >
+                  {renamingId === g.groupId ? (
+                    <div className="chat-history-rename">
+                      <input
+                        autoFocus
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && activeProject) {
+                            void renameBotGroupLocal(activeProject, g.groupId, {
+                              title: renameValue.trim()
+                            })
+                            setRenamingId(null)
+                          } else if (e.key === 'Escape') {
+                            setRenamingId(null)
+                          }
+                        }}
+                      />
+                      <button
+                        className="btn small primary"
+                        onClick={() => {
+                          if (activeProject) {
+                            void renameBotGroupLocal(activeProject, g.groupId, {
+                              title: renameValue.trim()
+                            })
+                          }
+                          setRenamingId(null)
+                        }}
+                      >
+                        Save
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      className="chat-history-open"
+                      onClick={() => {
+                        if (activeProject) void openBotGroup(activeProject, g.groupId)
+                        close()
+                      }}
+                      title={`${g.title} · ${g.messageCount} message${g.messageCount === 1 ? '' : 's'}`}
+                    >
+                      <span className="chat-history-title">{g.title}</span>
+                      <span className="chat-history-meta">
+                        {g.messageCount} msg · {new Date(g.updatedAt).toLocaleDateString()}
+                      </span>
+                    </button>
+                  )}
+                  <button
+                    className="chat-history-rename-btn"
+                    title="Rename group"
+                    onClick={() => {
+                      setRenamingId(g.groupId)
+                      setRenameValue(g.title)
+                    }}
+                  >
+                    <MdiIcon path={mdiPencil} size={14} />
+                  </button>
+                  <button
+                    className="chat-history-rename-btn"
+                    title="View raw AI trace"
+                    onClick={() =>
+                      openTraceViewer({ kind: 'bots', key: g.groupId, title: g.title })
+                    }
+                  >
+                    <MdiIcon path={mdiTimelineClockOutline} size={14} />
+                  </button>
+                  <button
+                    className="chat-history-rename-btn"
+                    title="Delete group"
+                    onClick={() => setDeletingId(g.groupId)}
+                  >
+                    <MdiIcon path={mdiTrashCanOutline} size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </>,
+          document.body
+        )}
+      {deletingId && (
+        <Modal title="Delete group chat" onClose={() => setDeletingId(null)}>
+          <p className="confirm-message">
+            Delete group chat &quot;
+            {groups.find((g) => g.groupId === deletingId)?.title ?? deletingId}
+            &quot;? Its messages and background task history are removed too. This cannot be undone.
+          </p>
+          <div className="modal-actions">
+            <button className="btn" onClick={() => setDeletingId(null)}>
+              Cancel
+            </button>
+            <button
+              className="btn danger"
+              onClick={() => {
+                if (activeProject) void deleteBotGroupLocal(activeProject, deletingId)
+                setDeletingId(null)
+              }}
+            >
+              Delete
+            </button>
+          </div>
+        </Modal>
+      )}
+    </>
+  )
+}
+
+function GroupModal({
+  mode,
+  project,
+  group,
+  profiles,
+  onClose
+}: {
+  mode: 'create' | 'edit'
+  project: string
+  group: GroupChatMeta | null
+  profiles: { id: string; name: string; role: string }[]
+  onClose: () => void
+}): React.JSX.Element {
+  const createBotGroup = useAppStore((s) => s.createBotGroup)
+  const updateBotGroup = useAppStore((s) => s.updateBotGroup)
+  const deleteBotGroup = useAppStore((s) => s.deleteBotGroup)
+  const openSettings = useAppStore((s) => s.openSettings)
+  const [title, setTitle] = useState(group?.title ?? '')
+  const [botIds, setBotIds] = useState<string[]>(group?.botIds ?? [])
+  const [leaderBotId, setLeaderBotId] = useState(group?.leaderBotId ?? '')
+  const [error, setError] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  function toggleBot(id: string): void {
+    setBotIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((b) => b !== id) : [...prev, id]
+      if (!next.includes(leaderBotId)) setLeaderBotId(next[0] ?? '')
+      return next
+    })
+  }
+
+  async function save(): Promise<void> {
+    setError('')
+    if (botIds.length === 0) {
+      setError('Assign at least one bot.')
+      return
+    }
+    if (!leaderBotId) {
+      setError('Pick a group leader.')
+      return
+    }
+    setSaving(true)
+    try {
+      if (mode === 'create') {
+        await createBotGroup(project, {
+          title: title.trim() || 'Group chat',
+          botIds,
+          leaderBotId
+        })
+      } else if (group) {
+        await updateBotGroup(project, group.groupId, {
+          title: title.trim() || 'Group chat',
+          botIds,
+          leaderBotId
+        })
+      }
+      onClose()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title={mode === 'create' ? 'New group chat' : 'Group settings'} onClose={onClose}>
+      <label className="form-label">Title</label>
+      <input
+        className="form-input"
+        value={title}
+        placeholder="Group chat title"
+        onChange={(e) => setTitle(e.target.value)}
+      />
+      <label className="form-label">Bots</label>
+      {profiles.length === 0 && (
+        <div className="form-hint">
+          No bots yet —{' '}
+          <button className="inline-link" onClick={() => openSettings('bots')}>
+            create one in Settings ▸ Bots
+          </button>
+          .
+        </div>
+      )}
+      <div className="gc-bot-select">
+        {profiles.map((b) => (
+          <label key={b.id} className="gc-bot-option">
+            <input
+              type="checkbox"
+              checked={botIds.includes(b.id)}
+              onChange={() => toggleBot(b.id)}
+            />
+            <span className="gc-bot-option-name">{b.name}</span>
+            {b.role && <span className="command-badge">{b.role}</span>}
+          </label>
+        ))}
+      </div>
+      <label className="form-label">Group leader</label>
+      {botIds.length === 0 ? (
+        <div className="form-hint">Select bots first — the leader acts on untagged messages.</div>
+      ) : (
+        <div className="gc-bot-select">
+          {botIds.map((id) => {
+            const b = profiles.find((p) => p.id === id)
+            return (
+              <label key={id} className="gc-bot-option">
+                <input
+                  type="radio"
+                  name="gc-leader"
+                  checked={leaderBotId === id}
+                  onChange={() => setLeaderBotId(id)}
+                />
+                <span className="gc-bot-option-name">{b?.name ?? id}</span>
+              </label>
+            )
+          })}
+        </div>
+      )}
+      {error && <div className="form-error">{error}</div>}
+      <div className="modal-actions gc-modal-actions">
+        {mode === 'edit' && group && (
+          <button
+            className="btn danger"
+            disabled={saving}
+            onClick={() => {
+              if (!confirmDelete) {
+                setConfirmDelete(true)
+                return
+              }
+              void (async () => {
+                await deleteBotGroup(project, group.groupId)
+                onClose()
+              })()
+            }}
+          >
+            {confirmDelete ? 'Really delete?' : 'Delete group'}
+          </button>
+        )}
+        <button className="btn" onClick={onClose}>
+          Cancel
+        </button>
+        <button className="btn primary" onClick={() => void save()} disabled={saving}>
+          {saving ? 'Saving…' : mode === 'create' ? 'Create' : 'Save'}
+        </button>
+      </div>
+    </Modal>
+  )
+}

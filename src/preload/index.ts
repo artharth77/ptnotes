@@ -6,17 +6,25 @@ import type {
   AIProviderConfig,
   AiTraceFile,
   AskResponse,
+  BotGroupEvent,
+  BotMemoryEntry,
+  BotProfile,
+  BotUpsertInput,
   ChatMessage,
   ChatSessionMeta,
   ChatStreamEvent,
   ChatThread,
   ConfirmResponse,
   CreateProjectResult,
+  GroupChatData,
+  GroupChatMeta,
+  GroupPatch,
   ModuleChatMessage,
   ModuleEvent,
   ModuleRun,
   ModuleSettings,
   ModuleStartResult,
+  NewGroupInput,
   StorageSettings,
   ToolsetSettings,
   NoteMeta,
@@ -287,6 +295,43 @@ const api = {
       ipcRenderer.invoke('toolsets:setEnabled', id, enabled),
     setConfig: (id: string, key: string, value: unknown): Promise<ToolsetSettings[]> =>
       ipcRenderer.invoke('toolsets:setConfig', id, key, value)
+  },
+  bots: {
+    listBots: (): Promise<BotProfile[]> => ipcRenderer.invoke('bots:listBots'),
+    saveBot: (input: BotUpsertInput): Promise<BotProfile[]> =>
+      ipcRenderer.invoke('bots:saveBot', input),
+    deleteBot: (id: string): Promise<boolean> => ipcRenderer.invoke('bots:deleteBot', id),
+    listMemories: (project: string, botId?: string): Promise<BotMemoryEntry[]> =>
+      ipcRenderer.invoke('bots:listMemories', project, botId),
+    deleteMemory: (project: string, botId: string, memoryId: string): Promise<boolean> =>
+      ipcRenderer.invoke('bots:deleteMemory', project, botId, memoryId),
+    listGroups: (project: string): Promise<GroupChatMeta[]> =>
+      ipcRenderer.invoke('bots:listGroups', project),
+    readGroup: (project: string, groupId: string): Promise<GroupChatData | null> =>
+      ipcRenderer.invoke('bots:readGroup', project, groupId),
+    createGroup: (project: string, input: NewGroupInput): Promise<GroupChatMeta> =>
+      ipcRenderer.invoke('bots:createGroup', project, input),
+    updateGroup: (project: string, groupId: string, patch: GroupPatch): Promise<GroupChatMeta> =>
+      ipcRenderer.invoke('bots:updateGroup', project, groupId, patch),
+    deleteGroup: (project: string, groupId: string): Promise<boolean> =>
+      ipcRenderer.invoke('bots:deleteGroup', project, groupId),
+    send: (project: string, groupId: string, text: string): Promise<void> =>
+      ipcRenderer.invoke('bots:send', project, groupId, text),
+    stop: (project: string, groupId: string): Promise<void> =>
+      ipcRenderer.invoke('bots:stop', project, groupId),
+    listTasks: (project: string): Promise<ModuleRun[]> =>
+      ipcRenderer.invoke('bots:listTasks', project),
+    clearTaskHistory: (project: string, deleteOutputFiles?: boolean): Promise<number> =>
+      ipcRenderer.invoke('bots:clearTaskHistory', project, deleteOutputFiles),
+    readTrace: (project: string, groupId: string): Promise<AiTraceFile | null> =>
+      ipcRenderer.invoke('bots:readTrace', project, groupId),
+    onEvent: (callback: (event: BotGroupEvent) => void): (() => void) => {
+      const listener = (_e: unknown, event: BotGroupEvent): void => callback(event)
+      ipcRenderer.on('bots:event', listener)
+      return () => {
+        ipcRenderer.removeListener('bots:event', listener)
+      }
+    }
   }
 }
 
