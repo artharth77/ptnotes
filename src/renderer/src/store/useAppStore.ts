@@ -932,8 +932,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async loadBotGroups(project) {
     const groups = await window.ptnotes.bots.listGroups(project)
+    const persisted = localStorage.getItem(`ptnotes:activeBotGroup:${project}`)
     set((s) => {
-      const active = s.activeBotGroupId[project]
+      const active = s.activeBotGroupId[project] ?? persisted
       const activeStillExists = active && groups.some((g) => g.groupId === active)
       return {
         botGroups: { ...s.botGroups, [project]: groups },
@@ -948,6 +949,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async openBotGroup(project, groupId) {
+    localStorage.setItem(`ptnotes:activeBotGroup:${project}`, groupId)
     const data = await window.ptnotes.bots.readGroup(project, groupId, {
       limit: GROUP_CHAT_PAGE_SIZE
     })
