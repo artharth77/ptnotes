@@ -77,7 +77,6 @@ export function GroupChatPanel(): React.JSX.Element {
     activeGroupId ? (s.botGroupBusy[activeGroupId] ?? false) : false
   )
   const typing = useAppStore((s) => (activeGroupId ? (s.botTyping[activeGroupId] ?? null) : null))
-  const botsOpen = useAppStore((s) => s.botsOpen)
   const botTaskRuns = useAppStore((s) =>
     activeProject ? (s.botTaskRuns[activeProject] ?? NO_RUNS) : NO_RUNS
   )
@@ -187,15 +186,16 @@ export function GroupChatPanel(): React.JSX.Element {
     if (el && !el.disabled) el.focus()
   }
 
+  // The input is disabled until a group is loaded (async on first open), so
+  // focus it once it becomes enabled rather than only on mount.
+  const inputReady = !!activeGroup && !busy
+  const focusedRef = useRef(false)
   useEffect(() => {
-    focusInput()
-  }, [])
-
-  const prevBotsOpen = useRef(false)
-  useEffect(() => {
-    if (botsOpen && !prevBotsOpen.current) focusInput()
-    prevBotsOpen.current = botsOpen
-  }, [botsOpen])
+    if (inputReady && !focusedRef.current) {
+      focusedRef.current = true
+      focusInput()
+    }
+  }, [inputReady])
 
   const prevBusy = useRef(false)
   useEffect(() => {
