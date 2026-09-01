@@ -2984,6 +2984,10 @@ fieldset.kanban-form {
   background: var(--bg-hover);
 }
 
+.chat-history-item.focused {
+  background: var(--bg-hover);
+}
+
 .chat-history-open {
   display: flex;
   flex-direction: column;
@@ -3096,6 +3100,10 @@ fieldset.kanban-form {
 }
 
 .chat-history-new:hover {
+  background: var(--bg-hover);
+}
+
+.chat-history-new.focused {
   background: var(--bg-hover);
 }
 

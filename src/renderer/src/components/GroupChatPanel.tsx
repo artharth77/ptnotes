@@ -197,6 +197,14 @@ export function GroupChatPanel(): React.JSX.Element {
     }
   }, [inputReady])
 
+  // The panel stays mounted while collapsed, so re-focus when it re-opens.
+  const botsOpen = useAppStore((s) => s.botsOpen)
+  const prevBotsOpen = useRef(false)
+  useEffect(() => {
+    if (botsOpen && !prevBotsOpen.current) focusInput()
+    prevBotsOpen.current = botsOpen
+  }, [botsOpen])
+
   const prevBusy = useRef(false)
   useEffect(() => {
     if (prevBusy.current && !busy) focusInput()
@@ -681,12 +689,17 @@ function GroupSwitcher({
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  // Keyboard focus: 0 = "New group chat" row, 1..n = groups[i-1].
+  const [focusIndex, setFocusIndex] = useState<number | null>(null)
+  const focusIndexRef = useRef<number | null>(null)
 
   const close = useCallback((): void => {
     setOpen(false)
     setRenamingId(null)
     setRenameValue('')
     setDeletingId(null)
+    focusIndexRef.current = null
+    setFocusIndex(null)
   }, [setOpen])
 
   useEffect(() => {
@@ -704,12 +717,74 @@ function GroupSwitcher({
     return () => document.removeEventListener('mousedown', onDown)
   }, [open, setOpen, close])
 
+  useEffect(() => {
+    if (!open) return
+    const count = groups.length + 1
+    function onKey(e: KeyboardEvent): void {
+      if (renamingId || deletingId) return
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        const cur = focusIndexRef.current
+        const next =
+          cur == null
+            ? e.key === 'ArrowDown'
+              ? 0
+              : count - 1
+            : e.key === 'ArrowDown'
+              ? (cur + 1) % count
+              : (cur - 1 + count) % count
+        focusIndexRef.current = next
+        setFocusIndex(next)
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        close()
+        return
+      }
+      if (e.key === 'Enter') {
+        const cur = focusIndexRef.current
+        if (cur == null) return
+        e.preventDefault()
+        if (cur === 0) {
+          close()
+          onNewGroup()
+          return
+        }
+        const g = groups[cur - 1]
+        if (g && activeProject) void openBotGroup(activeProject, g.groupId)
+        close()
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [
+    open,
+    close,
+    renamingId,
+    deletingId,
+    groups,
+    activeId,
+    activeProject,
+    onNewGroup,
+    openBotGroup
+  ])
+
   return (
     <>
       <button
         ref={btnRef}
         className="chat-header-title gc-switcher"
-        onClick={() => (open ? close() : setOpen(true))}
+        onClick={() => {
+          if (open) {
+            close()
+            return
+          }
+          const idx = groups.findIndex((g) => g.groupId === activeId)
+          focusIndexRef.current = idx >= 0 ? idx + 1 : 0
+          setFocusIndex(focusIndexRef.current)
+          setOpen(true)
+        }}
         title="Group chats"
       >
         <span className="gc-switcher-label">{title}</span>
@@ -722,7 +797,14 @@ function GroupSwitcher({
             <div className="chat-history-overlay" onClick={close} />
             <div className="chat-history" style={pos}>
               <button
-                className="chat-history-new"
+                className={`chat-history-new${focusIndex === 0 ? ' focused' : ''}`}
+                ref={(el) => {
+                  if (el && focusIndex === 0) el.scrollIntoView({ block: 'nearest' })
+                }}
+                onMouseEnter={() => {
+                  focusIndexRef.current = 0
+                  setFocusIndex(0)
+                }}
                 onClick={() => {
                   close()
                   onNewGroup()
@@ -732,10 +814,19 @@ function GroupSwitcher({
                 New group chat
               </button>
               {groups.length === 0 && <div className="chat-history-empty">No group chats yet</div>}
-              {groups.map((g) => (
+              {groups.map((g, i) => (
                 <div
                   key={g.groupId}
-                  className={`chat-history-item${g.groupId === activeId ? ' active' : ''}`}
+                  ref={(el) => {
+                    if (el && focusIndex === i + 1) el.scrollIntoView({ block: 'nearest' })
+                  }}
+                  className={`chat-history-item${g.groupId === activeId ? ' active' : ''}${
+                    focusIndex === i + 1 ? ' focused' : ''
+                  }`}
+                  onMouseEnter={() => {
+                    focusIndexRef.current = i + 1
+                    setFocusIndex(i + 1)
+                  }}
                 >
                   {renamingId === g.groupId ? (
                     <div className="chat-history-rename">
