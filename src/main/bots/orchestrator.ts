@@ -30,6 +30,8 @@ interface TurnState {
   /** Bot→bot→bot relay budget (one explicit chain per user message). */
   relaysLeft: number
   involved: Set<string>
+  /** Set when the per-message turn cap prevented further bot turns. */
+  turnCapHit: boolean
 }
 
 interface TurnOpts {
@@ -204,14 +206,18 @@ class GroupSession {
     const state: TurnState = {
       turnsLeft: MAX_BOT_TURNS_PER_MESSAGE,
       relaysLeft: 1,
-      involved: new Set()
+      involved: new Set(),
+      turnCapHit: false
     }
 
     const memberIds = members.map((m) => m.id)
     const tags = parseBotReply(job.text ?? '', memberIds).tags
     if (tags.length > 0) {
       for (const tag of tags) {
-        if (state.turnsLeft <= 0) break
+        if (state.turnsLeft <= 0) {
+          state.turnCapHit = true
+          break
+        }
         const bot = members.find((m) => m.id === tag)
         if (!bot) continue
         state.turnsLeft--
@@ -231,6 +237,12 @@ class GroupSession {
     }
 
     await this.maybeSummarizeAndRemember([...state.involved])
+    if (state.turnCapHit) {
+      this.system(
+        `⚠️ Reached the limit of ${MAX_BOT_TURNS_PER_MESSAGE} bot turns for this message; further replies were not triggered.`,
+        { error: true }
+      )
+    }
   }
 
   private async runBotTurn(bot: BotProfile, opts: TurnOpts, state: TurnState): Promise<void> {
@@ -295,6 +307,7 @@ class GroupSession {
 
       const plan = planTagTriggers(parsed.tags, opts.tagPolicy, state.relaysLeft, state.turnsLeft)
       state.relaysLeft = plan.relaysLeft
+      if (plan.capped) state.turnCapHit = true
       for (const trigger of plan.triggers) {
         if (this.stopped) break
         const target = members.find((m) => m.id === trigger.botId)

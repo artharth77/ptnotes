@@ -7,6 +7,7 @@ import type { AIProviderConfig, ModuleEvent, ModuleRun } from '../src/shared/typ
 import type { AIConfigStore } from '../src/main/ai/config'
 import type { BotProfile } from '../src/shared/bots'
 import {
+  MAX_BOT_TURNS_PER_MESSAGE,
   extractBotTags,
   formatGroupDateLabel,
   formatGroupTimestamp,
@@ -83,6 +84,21 @@ function ok(name: string): void {
   assert.equal(planTagTriggers(['bob'], 'none', 5, 8).triggers.length, 0)
   assert.equal(planTagTriggers(['bob'], 'free', 1, 0).triggers.length, 0, 'turn cap respected')
   ok('planTagTriggers: none policy + cap')
+
+  assert.equal(planTagTriggers(['bob'], 'free', 1, 8).capped, false, 'under cap → not capped')
+  assert.equal(
+    planTagTriggers(['bob', 'carol'], 'free', 1, 1).capped,
+    true,
+    'tags > turns → capped'
+  )
+  assert.equal(planTagTriggers(['bob'], 'free', 1, 0).capped, true, 'no turns left → capped')
+  assert.equal(planTagTriggers(['bob'], 'none', 1, 0).capped, false, 'none policy never capped')
+  assert.equal(
+    planTagTriggers(['bob'], 'relay', 0, 0).capped,
+    false,
+    'relay budget takes precedence'
+  )
+  ok('planTagTriggers: capped flag')
 
   assert.match(
     formatGroupTimestamp(new Date(2026, 0, 5, 14, 30).getTime(), new Date(2026, 0, 5).getTime()),
@@ -607,6 +623,42 @@ const group = store.createGroup(PROJECT, {
   assert.equal(store.readGroup(PROJECT, g2.groupId), null)
   assert.equal(store.listMessages(PROJECT, g2.groupId).length, 0)
   ok('groups: delete cascades')
+}
+
+// H: turn cap — exactly MAX_BOT_TURNS_PER_MESSAGE turns run, then a notice is posted
+{
+  const lead = store.saveBot({ name: 'Cap Lead' })
+  const memberIds: string[] = []
+  for (let i = 0; i < 18; i++) memberIds.push(store.saveBot({ name: `Cap ${i}` }).id)
+  const capGroup = store.createGroup(PROJECT, {
+    title: 'Cap',
+    botIds: [lead.id, ...memberIds],
+    leaderBotId: lead.id
+  })
+  const leaderTags = memberIds.map((id) => `@${id}`).join(' ')
+  const replies = new Map<string, string[]>()
+  replies.set(lead.id, [leaderTags])
+  for (const id of memberIds) replies.set(id, ['ok'])
+  const m7 = new GroupChatManager({
+    store,
+    configStore,
+    moduleManager: makeStubModuleManager([]),
+    broadcast: () => {},
+    clientFactory: makeFakeClient(replies)
+  })
+  await m7.send(PROJECT, capGroup.groupId, 'go')
+  const messages = store.listMessages(PROJECT, capGroup.groupId)
+  const botTurns = messages.filter((m) => m.senderKind === 'bot')
+  assert.equal(
+    botTurns.length,
+    MAX_BOT_TURNS_PER_MESSAGE,
+    `exactly ${MAX_BOT_TURNS_PER_MESSAGE} turns run: ${botTurns.length}`
+  )
+  assert.ok(
+    messages.some((m) => m.senderKind === 'system' && m.content.includes('bot turns')),
+    'turn-cap notice posted'
+  )
+  ok('orchestration: turn cap notice')
 }
 
 console.log(`\nbots tests passed (${passed} groups)`)

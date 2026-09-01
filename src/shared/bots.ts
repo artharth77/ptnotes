@@ -127,11 +127,11 @@ export interface GroupPatch {
 // ---- Tunables (exported so tests and the orchestrator agree) ----
 
 /** Max bot turns (AI completions) triggered by a single user message — hard loop guard. */
-export const MAX_BOT_TURNS_PER_MESSAGE = 8
+export const MAX_BOT_TURNS_PER_MESSAGE = 16
 /** Bot turns deeper than this depth can never trigger further bots. */
 export const MAX_RELAY_DEPTH = 3
 /** When the un-summarized context exceeds this many chars, the leader summarizes. */
-export const SUMMARY_THRESHOLD_CHARS = 30_000
+export const SUMMARY_THRESHOLD_CHARS = 8_000
 /** Messages kept out of the summary (recent tail always sent verbatim). */
 export const SUMMARY_KEEP_RECENT = 6
 /** Max memory entries kept per bot per project. */
@@ -155,27 +155,29 @@ export interface PlannedTrigger {
  * Decide which `@bot` tags in a reply actually trigger new bot turns.
  * Pure so the routing rules are unit-testable: depth-1 (`free`) turns always trigger;
  * a `relay` turn may trigger once per user message (one explicit bot→bot→bot chain);
- * `none` turns never trigger. Never exceeds `remainingTurns`.
+ * `none` turns never trigger. Never exceeds `remainingTurns`. `capped` is true when the
+ * per-message turn cap prevented at least one tag from triggering.
  */
 export function planTagTriggers(
   tags: string[],
   tagPolicy: TagPolicy,
   relaysLeft: number,
   remainingTurns: number
-): { triggers: PlannedTrigger[]; relaysLeft: number } {
-  if (remainingTurns <= 0 || tags.length === 0) return { triggers: [], relaysLeft }
-  if (tagPolicy === 'none') return { triggers: [], relaysLeft }
+): { triggers: PlannedTrigger[]; relaysLeft: number; capped: boolean } {
+  if (tags.length === 0 || tagPolicy === 'none') return { triggers: [], relaysLeft, capped: false }
+  if (tagPolicy === 'relay' && relaysLeft <= 0) return { triggers: [], relaysLeft, capped: false }
+  if (remainingTurns <= 0) return { triggers: [], relaysLeft, capped: true }
+  const capped = tags.length > remainingTurns
   if (tagPolicy === 'relay') {
-    if (relaysLeft <= 0) return { triggers: [], relaysLeft }
     const triggers = tags
       .slice(0, remainingTurns)
       .map((botId) => ({ botId, tagPolicy: 'none' as const }))
-    return { triggers, relaysLeft: relaysLeft - 1 }
+    return { triggers, relaysLeft: relaysLeft - 1, capped }
   }
   const triggers = tags
     .slice(0, remainingTurns)
     .map((botId) => ({ botId, tagPolicy: 'relay' as const }))
-  return { triggers, relaysLeft }
+  return { triggers, relaysLeft, capped }
 }
 
 /** Extract `@bot-id` mentions that match known bot ids, unique, in order of appearance. */

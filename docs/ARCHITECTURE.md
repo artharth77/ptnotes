@@ -624,7 +624,7 @@ Multi-bot group conversations with identities, roles, memories and background ta
 ### Routing rules (pure in `src/shared/bots.ts`)
 
 - Untagged user message → the **leader** takes it (answer directly and/or assign by tagging). `@bot-id` in the user message → that bot responds directly (multiple tags = sequential turns).
-- Tag policies per bot turn: `free` (leader/user-initiated) — its `@` tags always trigger the tagged bots (normal assignment); `relay` (a bot tagged by another bot) — answers **without tagging back**, its tags trigger only by consuming the single per-message **relay budget** (one explicit bot→bot→bot chain); `none` (deeper turns / task reports) — tags are display-only. Hard cap: **8 bot turns per user message**. These rules are enforced by the orchestrator via `planTagTriggers`, never left to prompts alone.
+- Tag policies per bot turn: `free` (leader/user-initiated) — its `@` tags always trigger the tagged bots (normal assignment); `relay` (a bot tagged by another bot) — answers **without tagging back**, its tags trigger only by consuming the single per-message **relay budget** (one explicit bot→bot→bot chain); `none` (deeper turns / task reports) — tags are display-only. Hard cap: **16 bot turns per user message** — when the cap stops further replies, a system notice is posted to the group. These rules are enforced by the orchestrator via `planTagTriggers`, never left to prompts alone.
 - Group members are resolved live at send time; a deleted bot drops out of the roster, and a missing leader falls back to the first remaining member.
 
 ### Turn engine (`GroupChatManager` / `GroupSession` in `src/main/bots/orchestrator.ts`)
@@ -640,7 +640,7 @@ Multi-bot group conversations with identities, roles, memories and background ta
 
 ### Summarization & memory
 
-- After each user message's orchestration, if the un-summarized context exceeds **30k chars**, the **leader** produces (non-streamed, never displayed) a rolling summary that merges the previous one with everything except the last 6 messages; it is stored as `{summary, summarizedUpToSeq}` on the group and injected into every bot's system prompt. A `summary` event is broadcast (the UI ignores it — the full log always stays visible).
+- After each user message's orchestration, if the un-summarized context exceeds **8k chars**, the **leader** produces (non-streamed, never displayed) a rolling summary that merges the previous one with everything except the last 6 messages; it is stored as `{summary, summarizedUpToSeq}` on the group and injected into every bot's system prompt. A `summary` event is broadcast (the UI ignores it — the full log always stays visible).
 - In the same cycle, each bot involved in the turn batch runs a memory-extraction completion (JSON array of durable facts, deduped against existing entries via `mergeMemoryEntries`, capped 50, per project). Memories are injected as "YOUR MEMORY" in the bot's system prompt and are viewable/forgettable per project in Settings ▸ Bots.
 
 ### UI (`GroupChatPanel.tsx`)
