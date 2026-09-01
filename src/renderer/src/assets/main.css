@@ -2943,6 +2943,8 @@ fieldset.kanban-form {
 .chat-history {
   position: fixed;
   z-index: 95;
+  width: 320px;
+  max-width: calc(100vw - 16px);
   max-height: 280px;
   overflow-y: auto;
   background: var(--bg-elev);
