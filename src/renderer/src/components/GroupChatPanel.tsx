@@ -87,6 +87,7 @@ export function GroupChatPanel(): React.JSX.Element {
   const loadOlderBotGroupMessages = useAppStore((s) => s.loadOlderBotGroupMessages)
   const stopBotGroup = useAppStore((s) => s.stopBotGroup)
   const setRightView = useAppStore((s) => s.setRightView)
+  const openTraceViewer = useAppStore((s) => s.openTraceViewer)
   const notes = useAppStore((s) => s.notes)
   const schedules = useAppStore((s) => s.schedules)
   const kanban = useAppStore((s) => s.kanban)
@@ -388,6 +389,21 @@ export function GroupChatPanel(): React.JSX.Element {
             )}
             Tasks
           </button>
+          {activeGroup && (
+            <button
+              className="btn small ghost"
+              onClick={() =>
+                openTraceViewer({
+                  kind: 'bots',
+                  key: activeGroup.groupId,
+                  title: activeGroup.title
+                })
+              }
+              title="View raw AI trace"
+            >
+              <MdiIcon path={mdiTimelineClockOutline} size={16} />
+            </button>
+          )}
           {activeGroup && (
             <button
               className="btn small ghost"
