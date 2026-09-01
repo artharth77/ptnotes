@@ -4833,6 +4833,12 @@ fieldset.kanban-form {
   gap: 6px;
 }
 
+.trace-detail-label-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
 .icon-btn.trace-copy-btn {
   width: 20px;
   height: 20px;
@@ -4847,6 +4853,11 @@ fieldset.kanban-form {
 
 .icon-btn.trace-copy-btn.copied {
   color: var(--ok);
+}
+
+.icon-btn.trace-copy-btn.active {
+  opacity: 1;
+  color: var(--accent);
 }
 
 .trace-detail-content {

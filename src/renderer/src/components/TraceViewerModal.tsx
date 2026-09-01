@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useAppStore } from '../store/useAppStore'
 import { Modal } from './Modal'
 import { MdiIcon } from './MdiIcon'
+import { MarkdownContent } from './MarkdownContent'
 import type { AiTraceEntry, AiTraceFile, AiTraceRole } from '@shared/types'
 import { normalizeUsage } from '@shared/usage'
-import { mdiCheck, mdiContentCopy } from '@mdi/js'
+import { mdiCheck, mdiCodeTags, mdiContentCopy, mdiLanguageMarkdown } from '@mdi/js'
 
 interface TraceViewerTarget {
   kind: 'chat' | 'module' | 'bots'
@@ -336,7 +337,7 @@ function TraceDetail({ entry }: { entry: AiTraceEntry | null }): React.JSX.Eleme
             </details>
           )}
           {entry.content && (
-            <Block label="Content" copyText={entry.content}>
+            <Block label="Content" copyText={entry.content} markdown={entry.content}>
               {entry.content}
             </Block>
           )}
@@ -362,7 +363,7 @@ function TraceDetail({ entry }: { entry: AiTraceEntry | null }): React.JSX.Eleme
       {(entry.role === 'system' || entry.role === 'user') && (
         <>
           {entry.content && (
-            <Block label="Content" copyText={entry.content}>
+            <Block label="Content" copyText={entry.content} markdown={entry.content}>
               {entry.content}
             </Block>
           )}
@@ -399,22 +400,38 @@ function Block({
   label,
   children,
   mono,
-  copyText
+  copyText,
+  markdown
 }: {
   label: string
   children: ReactNode
   mono?: boolean
   copyText?: string
+  markdown?: string
 }): React.JSX.Element {
+  const [raw, setRaw] = useState(false)
   return (
     <div className="trace-detail-block">
       <div className="trace-detail-label-row">
         <div className="trace-detail-label">{label}</div>
-        {copyText != null && copyText !== '' && (
-          <CopyIconButton text={copyText} title={`Copy ${label.toLowerCase()}`} />
-        )}
+        <div className="trace-detail-label-actions">
+          {markdown != null && (
+            <button
+              className={`icon-btn trace-copy-btn${raw ? ' active' : ''}`}
+              title={raw ? 'Render as markdown' : 'Show raw markdown'}
+              onClick={() => setRaw((v) => !v)}
+            >
+              <MdiIcon path={raw ? mdiLanguageMarkdown : mdiCodeTags} size={13} />
+            </button>
+          )}
+          {copyText != null && copyText !== '' && (
+            <CopyIconButton text={copyText} title={`Copy ${label.toLowerCase()}`} />
+          )}
+        </div>
       </div>
-      <div className={`trace-detail-content${mono ? ' trace-detail-mono' : ''}`}>{children}</div>
+      <div className={`trace-detail-content${mono ? ' trace-detail-mono' : ''}`}>
+        {markdown != null && !raw ? <MarkdownContent content={markdown} /> : children}
+      </div>
     </div>
   )
 }
