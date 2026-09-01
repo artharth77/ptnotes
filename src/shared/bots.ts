@@ -22,6 +22,9 @@ export type GroupSenderKind = 'user' | 'bot' | 'system'
 /** How many group messages the UI loads per page (latest page first, then older on scroll-up). */
 export const GROUP_CHAT_PAGE_SIZE = 50
 
+/** Maximum number of bots that can be assigned to a single group chat. */
+export const MAX_GROUP_BOTS = 8
+
 /** One message in a group chat. */
 export interface GroupMessage {
   id: string

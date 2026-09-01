@@ -2,6 +2,7 @@ import Module from 'node:module'
 import { promises as fs } from 'node:fs'
 import assert from 'node:assert/strict'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import type { OpenAI } from 'openai'
 import type { AIProviderConfig, ModuleEvent, ModuleRun } from '../src/shared/types'
 import type { AIConfigStore } from '../src/main/ai/config'
@@ -12,6 +13,7 @@ import {
   formatGroupDateLabel,
   formatGroupTimestamp,
   linkifyBotMentions,
+  MAX_GROUP_BOTS,
   mergeMemoryEntries,
   parseBotReply,
   planTagTriggers,
@@ -231,6 +233,23 @@ let alice: BotProfile, bob: BotProfile
   )
   ok('groups: create + validation')
 
+  const overCap = Array.from({ length: MAX_GROUP_BOTS + 1 }, (_, i) => `cap-bot-${i}`)
+  assert.throws(() =>
+    store.createGroup(PROJECT, { title: 'x', botIds: overCap, leaderBotId: overCap[0] })
+  )
+  const atCap = store.createGroup(PROJECT, {
+    title: 'At cap',
+    botIds: overCap.slice(0, MAX_GROUP_BOTS),
+    leaderBotId: overCap[0]
+  })
+  assert.equal(atCap.botIds.length, MAX_GROUP_BOTS)
+  assert.throws(() =>
+    store.updateGroup(PROJECT, atCap.groupId, { botIds: overCap, leaderBotId: overCap[0] })
+  )
+  assert.equal(store.updateGroup(PROJECT, atCap.groupId, { title: 'Renamed' }).title, 'Renamed')
+  assert.equal(store.deleteGroup(PROJECT, atCap.groupId), true)
+  ok(`groups: max ${MAX_GROUP_BOTS} bots on create + update`)
+
   const m1 = store.appendMessage(PROJECT, group.groupId, {
     senderKind: 'user',
     senderName: 'You',
@@ -286,6 +305,25 @@ let alice: BotProfile, bob: BotProfile
   await fs.mkdir(join(ROOT, 'root', 'Other'), { recursive: true })
   assert.deepEqual(store.listGroups('Other'), [])
   ok('projects isolated')
+
+  // a deleted bot's roster id is healed on listGroups even when deleteBot couldn't scrub it
+  {
+    const ghost = store.saveBot({ name: 'Ghost' })
+    const ghostGroup = store.createGroup(PROJECT, {
+      title: 'Ghost roster',
+      botIds: ['alice', ghost.id],
+      leaderBotId: ghost.id
+    })
+    // A second store instance has no open project DBs, so deleteBot skips roster scrubbing.
+    const store2 = new BotsStore(() => join(ROOT, 'root'), join(ROOT, 'userdata'))
+    assert.equal(store2.deleteBot(ghost.id), true)
+    store2.closeAll()
+    assert.deepEqual(store.getGroup(PROJECT, ghostGroup.groupId)?.botIds, ['alice', ghost.id])
+    const healed = store.listGroups(PROJECT).find((g) => g.groupId === ghostGroup.groupId)
+    assert.deepEqual(healed?.botIds, ['alice'], 'ghost id pruned')
+    assert.equal(healed?.leaderBotId, 'alice', 'leader falls back to first remaining member')
+    ok('groups: deleted-bot roster ids reconciled on listGroups')
+  }
 }
 
 // ---- message paging (windowed history) ----
@@ -630,11 +668,24 @@ const group = store.createGroup(PROJECT, {
   const lead = store.saveBot({ name: 'Cap Lead' })
   const memberIds: string[] = []
   for (let i = 0; i < 18; i++) memberIds.push(store.saveBot({ name: `Cap ${i}` }).id)
-  const capGroup = store.createGroup(PROJECT, {
-    title: 'Cap',
-    botIds: [lead.id, ...memberIds],
-    leaderBotId: lead.id
-  })
+  // The product caps groups at MAX_GROUP_BOTS; the turn cap is a deeper loop guard, so
+  // seed an oversized group directly in the DB to exercise it.
+  const capGroupId = 'turn-cap-group'
+  const rawDb = new DatabaseSync(join(ROOT, 'root', PROJECT, '.data', 'bots', 'groupchat.db'))
+  rawDb
+    .prepare(
+      `INSERT INTO group_chats (group_id, title, bot_ids, leader_bot_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      capGroupId,
+      'Cap',
+      JSON.stringify([lead.id, ...memberIds]),
+      lead.id,
+      Date.now(),
+      Date.now()
+    )
+  rawDb.close()
   const leaderTags = memberIds.map((id) => `@${id}`).join(' ')
   const replies = new Map<string, string[]>()
   replies.set(lead.id, [leaderTags])
@@ -646,8 +697,8 @@ const group = store.createGroup(PROJECT, {
     broadcast: () => {},
     clientFactory: makeFakeClient(replies)
   })
-  await m7.send(PROJECT, capGroup.groupId, 'go')
-  const messages = store.listMessages(PROJECT, capGroup.groupId)
+  await m7.send(PROJECT, capGroupId, 'go')
+  const messages = store.listMessages(PROJECT, capGroupId)
   const botTurns = messages.filter((m) => m.senderKind === 'bot')
   assert.equal(
     botTurns.length,

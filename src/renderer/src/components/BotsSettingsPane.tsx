@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react'
 import { mdiPencil, mdiPlus, mdiTrashCanOutline } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
 import type { AIProfile } from '@shared/types'
-import type { BotMemoryEntry } from '@shared/bots'
+import type { BotMemoryEntry, GroupChatMeta } from '@shared/bots'
+import { Modal } from './Modal'
 import { MdiIcon } from './MdiIcon'
+import { friendlyError } from '../errors'
 
 interface FormState {
   id?: string
@@ -27,7 +29,10 @@ export function BotsSettingsPane(): React.JSX.Element {
   const [editing, setEditing] = useState<FormState | null>(null)
   const [memories, setMemories] = useState<BotMemoryEntry[]>([])
   const [error, setError] = useState('')
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<{
+    id: string
+    groups: GroupChatMeta[]
+  } | null>(null)
 
   useEffect(() => {
     void loadBotProfiles()
@@ -61,7 +66,33 @@ export function BotsSettingsPane(): React.JSX.Element {
       })
       setEditing(null)
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(friendlyError(e))
+    }
+  }
+
+  async function openDeleteConfirm(id: string): Promise<void> {
+    setError('')
+    setConfirmDelete({ id, groups: [] })
+    if (!activeProject) return
+    try {
+      const groups = await window.ptnotes.bots.listGroups(activeProject)
+      setConfirmDelete((cur) =>
+        cur?.id === id ? { id, groups: groups.filter((g) => g.botIds.includes(id)) } : cur
+      )
+    } catch {
+      // membership info is best-effort; deletion still works without it
+    }
+  }
+
+  async function removeBot(): Promise<void> {
+    if (!confirmDelete) return
+    const id = confirmDelete.id
+    setConfirmDelete(null)
+    setError('')
+    try {
+      await deleteBotProfile(id)
+    } catch (e) {
+      setError(friendlyError(e))
     }
   }
 
@@ -111,16 +142,8 @@ export function BotsSettingsPane(): React.JSX.Element {
               </button>
               <button
                 className="icon-btn"
-                title={confirmDeleteId === b.id ? 'Click again to delete' : 'Delete bot'}
-                onClick={() => {
-                  if (confirmDeleteId === b.id) {
-                    void deleteBotProfile(b.id)
-                    setConfirmDeleteId(null)
-                  } else {
-                    setConfirmDeleteId(b.id)
-                    setTimeout(() => setConfirmDeleteId((c) => (c === b.id ? null : c)), 3000)
-                  }
-                }}
+                title="Delete bot"
+                onClick={() => void openDeleteConfirm(b.id)}
               >
                 <MdiIcon path={mdiTrashCanOutline} size={14} />
               </button>
@@ -186,7 +209,6 @@ export function BotsSettingsPane(): React.JSX.Element {
               onChange={(e) => setEditing({ ...editing, model: e.target.value })}
             />
           </label>
-          {error && <div className="form-error">{error}</div>}
           <div className="modal-actions">
             <button className="btn" onClick={() => setEditing(null)}>
               Cancel
@@ -227,6 +249,33 @@ export function BotsSettingsPane(): React.JSX.Element {
             </div>
           )}
         </div>
+      )}
+
+      {error && <div className="form-error">{error}</div>}
+
+      {confirmDelete && (
+        <Modal title="Delete Bot" onClose={() => setConfirmDelete(null)}>
+          <p className="confirm-message">
+            Delete bot &quot;{bots.find((b) => b.id === confirmDelete.id)?.name ?? confirmDelete.id}
+            &quot;? This cannot be undone.
+          </p>
+          {confirmDelete.groups.length > 0 && (
+            <p className="hint">
+              The bot is a member of {confirmDelete.groups.length} group chat
+              {confirmDelete.groups.length === 1 ? '' : 's'} in this project (
+              {confirmDelete.groups.map((g) => `“${g.title}”`).join(', ')}) and will be removed from
+              {confirmDelete.groups.length === 1 ? ' it' : ' them'}.
+            </p>
+          )}
+          <div className="modal-actions">
+            <button className="btn" onClick={() => setConfirmDelete(null)}>
+              Cancel
+            </button>
+            <button className="btn danger" onClick={() => void removeBot()}>
+              Delete
+            </button>
+          </div>
+        </Modal>
       )}
     </>
   )

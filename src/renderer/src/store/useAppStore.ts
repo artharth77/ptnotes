@@ -927,7 +927,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async deleteBotProfile(id) {
     const ok = await window.ptnotes.bots.deleteBot(id)
-    if (ok) await get().loadBotProfiles()
+    if (ok) {
+      await get().loadBotProfiles()
+      const project = get().activeProject
+      if (project) await get().loadBotGroups(project)
+    }
   },
 
   async loadBotGroups(project) {

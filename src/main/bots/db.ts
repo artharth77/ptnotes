@@ -15,7 +15,12 @@ import type {
   GroupSenderKind,
   NewGroupInput
 } from '@shared/bots'
-import { GROUP_CHAT_PAGE_SIZE, MAX_MEMORY_ENTRIES, mergeMemoryEntries } from '@shared/bots'
+import {
+  GROUP_CHAT_PAGE_SIZE,
+  MAX_GROUP_BOTS,
+  MAX_MEMORY_ENTRIES,
+  mergeMemoryEntries
+} from '@shared/bots'
 import type { AiTraceFile } from '@shared/types'
 
 function validateId(id: string): string {
@@ -351,16 +356,50 @@ export class BotsStore {
   }
 
   listGroups(project: string): GroupChatMeta[] {
+    this.reconcileRosters(project)
     const rows = this.projectDb(project)
       .prepare('SELECT * FROM group_chats ORDER BY updated_at DESC')
       .all() as unknown as GroupRow[]
     return rows.map((r) => this.metaFromRow(project, r))
   }
 
+  /**
+   * Drop roster ids of bots that no longer exist in the global library and fall a dead
+   * leader back to the first remaining member. deleteBot can only scrub rosters of
+   * project DBs that are open at that moment; this heals the rest on first view.
+   */
+  private reconcileRosters(project: string): void {
+    const pdb = this.projectDb(project)
+    const valid = new Set(
+      (this.globalDb().prepare('SELECT id FROM bots').all() as unknown as { id: string }[]).map(
+        (r) => r.id
+      )
+    )
+    const groups = pdb.prepare('SELECT * FROM group_chats').all() as unknown as GroupRow[]
+    for (const g of groups) {
+      let botIds: string[] = []
+      try {
+        const parsed = JSON.parse(g.bot_ids) as unknown
+        if (Array.isArray(parsed)) botIds = parsed.filter((b): b is string => typeof b === 'string')
+      } catch {
+        botIds = []
+      }
+      const nextIds = botIds.filter((b) => valid.has(b))
+      const nextLeader = nextIds.includes(g.leader_bot_id) ? g.leader_bot_id : (nextIds[0] ?? '')
+      if (nextIds.length === botIds.length && nextLeader === g.leader_bot_id) continue
+      pdb
+        .prepare('UPDATE group_chats SET bot_ids = ?, leader_bot_id = ? WHERE group_id = ?')
+        .run(JSON.stringify(nextIds), nextLeader, g.group_id)
+    }
+  }
+
   createGroup(project: string, input: NewGroupInput): GroupChatMeta {
     const title = String(input.title ?? '').trim() || 'Group chat'
     const botIds = [...new Set((input.botIds ?? []).filter((b) => typeof b === 'string' && b))]
     if (botIds.length === 0) throw new Error('A group chat needs at least one bot.')
+    if (botIds.length > MAX_GROUP_BOTS) {
+      throw new Error(`A group chat can have at most ${MAX_GROUP_BOTS} bots.`)
+    }
     const leaderBotId = input.leaderBotId?.trim()
     if (!leaderBotId || !botIds.includes(leaderBotId)) {
       throw new Error('The group leader must be one of the assigned bots.')
@@ -391,6 +430,9 @@ export class BotsStore {
     if (patch.botIds !== undefined) {
       botIds = [...new Set(patch.botIds.filter((b) => typeof b === 'string' && b))]
       if (botIds.length === 0) throw new Error('A group chat needs at least one bot.')
+      if (botIds.length > MAX_GROUP_BOTS) {
+        throw new Error(`A group chat can have at most ${MAX_GROUP_BOTS} bots.`)
+      }
     }
     let leaderBotId = current.leaderBotId
     if (patch.leaderBotId !== undefined) {

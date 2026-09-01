@@ -18,6 +18,7 @@ import {
   formatGroupTimestamp,
   GROUP_CHAT_PAGE_SIZE,
   linkifyBotMentions,
+  MAX_GROUP_BOTS,
   resolveKanbanCardNames,
   splitMentionSegments
 } from '@shared/bots'
@@ -967,7 +968,11 @@ function GroupModal({
   const deleteBotGroup = useAppStore((s) => s.deleteBotGroup)
   const openSettings = useAppStore((s) => s.openSettings)
   const [title, setTitle] = useState(group?.title ?? '')
-  const [botIds, setBotIds] = useState<string[]>(group?.botIds ?? [])
+  // Existing rosters can contain ids of since-deleted bots (deleteBot only scrubs open
+  // project DBs); don't resurrect them — saving would re-persist the ghosts.
+  const [botIds, setBotIds] = useState<string[]>(() =>
+    (group?.botIds ?? []).filter((id) => profiles.some((p) => p.id === id))
+  )
   const [leaderBotId, setLeaderBotId] = useState(group?.leaderBotId ?? '')
   const [error, setError] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -975,6 +980,7 @@ function GroupModal({
 
   function toggleBot(id: string): void {
     setBotIds((prev) => {
+      if (!prev.includes(id) && prev.length >= MAX_GROUP_BOTS) return prev
       const next = prev.includes(id) ? prev.filter((b) => b !== id) : [...prev, id]
       if (!next.includes(leaderBotId)) setLeaderBotId(next[0] ?? '')
       return next
@@ -985,6 +991,10 @@ function GroupModal({
     setError('')
     if (botIds.length === 0) {
       setError('Assign at least one bot.')
+      return
+    }
+    if (botIds.length > MAX_GROUP_BOTS) {
+      setError(`A group chat can have at most ${MAX_GROUP_BOTS} bots.`)
       return
     }
     if (!leaderBotId) {
@@ -1039,6 +1049,7 @@ function GroupModal({
             <input
               type="checkbox"
               checked={botIds.includes(b.id)}
+              disabled={botIds.length >= MAX_GROUP_BOTS && !botIds.includes(b.id)}
               onChange={() => toggleBot(b.id)}
             />
             <span className="gc-bot-option-name">{b.name}</span>
@@ -1046,6 +1057,11 @@ function GroupModal({
           </label>
         ))}
       </div>
+      {botIds.length >= MAX_GROUP_BOTS && (
+        <div className="form-hint">
+          Group is full — at most {MAX_GROUP_BOTS} bots per group chat.
+        </div>
+      )}
       <label className="form-label">Group leader</label>
       {botIds.length === 0 ? (
         <div className="form-hint">Select bots first — the leader acts on untagged messages.</div>
