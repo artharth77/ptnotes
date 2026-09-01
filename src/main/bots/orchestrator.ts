@@ -260,6 +260,7 @@ class GroupSession {
       const userContent = `${transcript}\n\n---\nRespond now as @${bot.id} (${bot.name}). ${turnNote}`
 
       const trace = await this.traceRecorder()
+      trace.append({ role: 'system', ts: Date.now(), content: sys })
       trace.append({ role: 'user', ts: Date.now(), content: `(turn for @${bot.id}) ${turnNote}` })
       const started = Date.now()
       const completion = await client.chat.completions.create(
@@ -426,6 +427,10 @@ Result:
 ${resultText}
 
 Post your result report to the group now.`
+      const trace = await this.traceRecorder()
+      trace.append({ role: 'system', ts: Date.now(), content: sys })
+      trace.append({ role: 'user', ts: Date.now(), content: user })
+      const started = Date.now()
       const completion = await client.chat.completions.create(
         {
           model: cfg.model,
@@ -438,6 +443,14 @@ Post your result report to the group now.`
         { signal: this.abort().signal }
       )
       const raw = completion.choices[0]?.message?.content ?? ''
+      trace.append({
+        role: 'assistant',
+        ts: Date.now(),
+        durationMs: Date.now() - started,
+        content: raw,
+        model: cfg.model
+      })
+      await trace.flush()
       const parsed = parseBotReply(
         raw,
         members.map((m) => m.id)

@@ -576,9 +576,22 @@ const group = store.createGroup(PROJECT, {
 {
   const trace = await store.readGroupTrace(PROJECT, group.groupId)
   assert.ok(trace, 'trace exists')
-  const entries = (trace as { entries: unknown[] }).entries
+  const entries = (trace as { entries: { role?: string; content?: string }[] }).entries
   assert.ok(entries.length > 0, 'trace has entries')
-  ok('trace: JSONL written')
+  const sysContents = entries.filter((e) => e.role === 'system').map((e) => e.content ?? '')
+  assert.ok(
+    sysContents.some((c) => c.includes('You are Alice')),
+    'leader system prompt traced'
+  )
+  assert.ok(
+    sysContents.some((c) => c.includes('You are Bob')),
+    'member system prompt traced'
+  )
+  assert.ok(
+    entries.some((e) => e.role === 'assistant' && e.content?.includes('note:market.md')),
+    'task report turn traced'
+  )
+  ok('trace: JSONL written (system + assistant)')
 }
 
 // G: group delete removes messages
