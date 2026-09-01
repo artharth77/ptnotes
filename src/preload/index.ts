@@ -18,6 +18,7 @@ import type {
   CreateProjectResult,
   GroupChatData,
   GroupChatMeta,
+  GroupMessagePageOpts,
   GroupPatch,
   ModuleChatMessage,
   ModuleEvent,
@@ -307,8 +308,12 @@ const api = {
       ipcRenderer.invoke('bots:deleteMemory', project, botId, memoryId),
     listGroups: (project: string): Promise<GroupChatMeta[]> =>
       ipcRenderer.invoke('bots:listGroups', project),
-    readGroup: (project: string, groupId: string): Promise<GroupChatData | null> =>
-      ipcRenderer.invoke('bots:readGroup', project, groupId),
+    readGroup: (
+      project: string,
+      groupId: string,
+      opts?: GroupMessagePageOpts
+    ): Promise<GroupChatData | null> =>
+      ipcRenderer.invoke('bots:readGroup', project, groupId, opts),
     createGroup: (project: string, input: NewGroupInput): Promise<GroupChatMeta> =>
       ipcRenderer.invoke('bots:createGroup', project, input),
     updateGroup: (project: string, groupId: string, patch: GroupPatch): Promise<GroupChatMeta> =>

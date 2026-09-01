@@ -4,7 +4,13 @@ import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import { slugify } from '@shared/slug'
 import { MdiIcon } from './MdiIcon'
-import { KANBAN_LINK_ICON, NOTE_LINK_ICON, PLAN_LINK_ICON, SKILL_LINK_ICON } from './contentIcons'
+import {
+  fileTypeIcon,
+  KANBAN_LINK_ICON,
+  NOTE_LINK_ICON,
+  PLAN_LINK_ICON,
+  SKILL_LINK_ICON
+} from './contentIcons'
 
 interface MarkdownContentProps {
   content: string
@@ -13,6 +19,8 @@ interface MarkdownContentProps {
   onOpenSkill?: (skillName: string) => void
   onOpenPlan?: (planName: string) => void
   onOpenKanban?: (cardTitle: string) => void
+  /** Open a project file referenced by a `file:` link (e.g. reveal it in the OS file manager). */
+  onOpenFile?: (fileName: string) => void
   /** Optional per-bot color for `mention:` links (bots group chat). */
   mentionColor?: (botId: string) => string
 }
@@ -35,6 +43,7 @@ function normalizeInternalLinks(md: string): string {
     .replace(/\[([^\]]*)\]\(\s*(note:[^()]*?)\s*\)/g, (_m, text, dest) => `[${text}](<${dest}>)`)
     .replace(/\[([^\]]*)\]\(\s*(skill:[^()]*?)\s*\)/g, (_m, text, dest) => `[${text}](<${dest}>)`)
     .replace(/\[([^\]]*)\]\(\s*(kanban:[^()]*?)\s*\)/g, (_m, text, dest) => `[${text}](<${dest}>)`)
+    .replace(/\[([^\]]*)\]\(\s*(file:[^()]*?)\s*\)/g, (_m, text, dest) => `[${text}](<${dest}>)`)
     .replace(/\[([^\]]*)\]\(\s*(plan:[^()]*?)\s*\)/g, (_m, text, dest) => `[${text}](<${dest}>)`)
     .replace(
       /\[([^\]]*)\]\(\s*(schedule:[^()]*?)\s*\)/g,
@@ -49,6 +58,7 @@ export const MarkdownContent = memo(function MarkdownContent({
   onOpenSkill,
   onOpenPlan,
   onOpenKanban,
+  onOpenFile,
   mentionColor
 }: MarkdownContentProps): React.JSX.Element {
   const [viewer, setViewer] = useState<{ src: string; alt: string } | null>(null)
@@ -91,7 +101,8 @@ export const MarkdownContent = memo(function MarkdownContent({
             url.startsWith('schedule:') ||
             url.startsWith('kanban:') ||
             url.startsWith('mention:') ||
-            url.startsWith('ptfile:')
+            url.startsWith('ptfile:') ||
+            url.startsWith('file:')
           )
             return url
           // Handle Windows paths like C:\path\to\file and convert to C:/path/to/file
@@ -204,6 +215,25 @@ export const MarkdownContent = memo(function MarkdownContent({
                 >
                   <span className="chat-note-link-icon">
                     <MdiIcon path={KANBAN_LINK_ICON} size={16} />
+                  </span>
+                  {children}
+                </a>
+              )
+            }
+            if (href?.startsWith('file:')) {
+              const fileName = internalNameFromHref(href, 'file:')
+              return (
+                <a
+                  href="#"
+                  className="chat-note-link"
+                  title={fileName}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    onOpenFile?.(fileName)
+                  }}
+                >
+                  <span className="chat-note-link-icon">
+                    <MdiIcon path={fileTypeIcon(fileName)} size={16} />
                   </span>
                   {children}
                 </a>

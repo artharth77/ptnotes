@@ -19,6 +19,9 @@ export interface BotProfile {
 
 export type GroupSenderKind = 'user' | 'bot' | 'system'
 
+/** How many group messages the UI loads per page (latest page first, then older on scroll-up). */
+export const GROUP_CHAT_PAGE_SIZE = 50
+
 /** One message in a group chat. */
 export interface GroupMessage {
   id: string
@@ -54,6 +57,18 @@ export interface GroupChatData extends GroupChatMeta {
   summary?: string
   /** All messages with seq <= this are represented by the summary. */
   summarizedUpToSeq?: number
+  /** Set only when reading a page: whether older messages remain above the returned window. */
+  hasMore?: boolean
+  /** Set only when reading a page: seq of the oldest message in the returned window (cursor for loading older). */
+  oldestSeq?: number
+}
+
+/** Optional paging for reading a group's messages (cursor on the monotonic per-group `seq`). */
+export interface GroupMessagePageOpts {
+  /** Max messages to return (latest page, or older than `beforeSeq`). */
+  limit?: number
+  /** Only return messages with `seq < beforeSeq` (load a page of older messages). */
+  beforeSeq?: number
 }
 
 /** A durable fact a bot remembers across group chats, scoped to one project. */
@@ -255,6 +270,21 @@ export function formatGroupTimestamp(ts: number, now = Date.now()): string {
   return `${date}, ${time}`
 }
 
+/** Date separator label: Today / Yesterday / "Mmm D" (this year) / "Mmm D YYYY". */
+export function formatGroupDateLabel(ts: number, now = Date.now()): string {
+  const d = new Date(ts)
+  const today = new Date(now)
+  const days = Math.round(
+    (new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime() -
+      new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()) /
+      86_400_000
+  )
+  if (days === 0) return 'Today'
+  if (days === 1) return 'Yesterday'
+  const date = d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+  return d.getFullYear() === today.getFullYear() ? date : `${date} ${d.getFullYear()}`
+}
+
 /** Merge extracted memory facts with existing entries, keeping the newest `cap`. */
 export function mergeMemoryEntries(
   existing: string[],
@@ -324,4 +354,20 @@ export function linkifyBotMentions(content: string, bots: { id: string; name: st
             .join('')
     )
     .join('')
+}
+
+/**
+ * Replace `kanban:<card id>` tokens with `kanban:<card title>` for display (the
+ * mention popup inserts card ids). Unknown ids and non-token text stay as-is.
+ */
+export function resolveKanbanCardNames(
+  content: string,
+  cards: { id: string; title: string }[]
+): string {
+  if (!content || !content.includes('kanban:') || cards.length === 0) return content
+  const byId = new Map(cards.map((c) => [c.id.toLowerCase(), c.title]))
+  return content.replace(/(^|[\s(])kanban:(\S+)/g, (m, pre: string, raw: string) => {
+    const title = byId.get(raw.toLowerCase())
+    return title ? `${pre}kanban:${title}` : m
+  })
 }

@@ -85,6 +85,7 @@ Guidelines:
 - Whenever you mention an existing kanban card from the project's board by its title in your reply, always link to it: [card title](kanban:card title). Do NOT link tasks that belong to a schedule/plan — plan tasks have no link, so just mention their text plainly.
 - Whenever you mention an existing skill by name in your reply, always link to it: [skill name](skill:skill name). The link opens the skill's editor, so never return a bare skill name without a link.
 - Whenever you mention an existing schedule/plan by name in your reply, always link to it: [plan name](plan:plan name) or [plan name](schedule:plan name). The link opens the schedule, so never return a bare plan name without a link.
+- Whenever you mention an existing project file by its file name in your reply, always link to it: [file name](file:file name). The link reveals the file in the file manager, so never return a bare file name without a link.
 - When referencing an image file by its full path (e.g. a screenshot or diagram output), use a markdown image tag: ![name](full/path/to/image.png). Replace any space characters (\` \`) in the file path with \`%20\`. This renders the image inline in the chat. 
 - Keep replies short and actionable.
 ${skillsSection}${extra}Current date: ${currentDate}.`

@@ -415,6 +415,7 @@ export type {
   GroupChatData,
   GroupChatMeta,
   GroupMessage,
+  GroupMessagePageOpts,
   GroupPatch,
   GroupSenderKind,
   NewGroupInput,

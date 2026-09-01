@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { rollupScheduleTasks } from '@shared/planner'
+import { GROUP_CHAT_PAGE_SIZE } from '@shared/bots'
 import type {
   BotGroupEvent,
   BotProfile,
@@ -9,6 +10,13 @@ import type {
   GroupPatch,
   NewGroupInput
 } from '@shared/bots'
+
+/** Loaded-window bookkeeping for a paged group chat (the store holds only the loaded slice). */
+interface BotGroupWindow {
+  hasMore: boolean
+  oldestSeq: number | null
+  total: number
+}
 import type {
   AskRequest,
   ChatMessage,
@@ -72,6 +80,7 @@ interface AppState {
   botGroups: Record<string, GroupChatMeta[]>
   activeBotGroupId: Record<string, string | null>
   botGroupMessages: Record<string, GroupMessage[]>
+  botGroupWindowMeta: Record<string, BotGroupWindow>
   botGroupBusy: Record<string, boolean>
   /** Bot currently composing, per group id. */
   botTyping: Record<string, string | null>
@@ -160,6 +169,7 @@ interface AppState {
   deleteBotProfile: (id: string) => Promise<void>
   loadBotGroups: (project: string) => Promise<void>
   openBotGroup: (project: string, groupId: string) => Promise<void>
+  loadOlderBotGroupMessages: (project: string, groupId: string) => Promise<void>
   createBotGroup: (project: string, input: NewGroupInput) => Promise<GroupChatMeta>
   updateBotGroup: (project: string, groupId: string, patch: GroupPatch) => Promise<void>
   deleteBotGroup: (project: string, groupId: string) => Promise<void>
@@ -233,6 +243,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   botGroups: {},
   activeBotGroupId: {},
   botGroupMessages: {},
+  botGroupWindowMeta: {},
   botGroupBusy: {},
   botTyping: {},
   botTaskRuns: {},
@@ -937,12 +948,23 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async openBotGroup(project, groupId) {
-    const data = await window.ptnotes.bots.readGroup(project, groupId)
+    const data = await window.ptnotes.bots.readGroup(project, groupId, {
+      limit: GROUP_CHAT_PAGE_SIZE
+    })
+    const total = data?.messageCount ?? 0
     set((s) => ({
       activeBotGroupId: { ...s.activeBotGroupId, [project]: groupId },
       botGroupMessages: {
         ...s.botGroupMessages,
         [groupId]: data?.messages ?? []
+      },
+      botGroupWindowMeta: {
+        ...s.botGroupWindowMeta,
+        [groupId]: {
+          hasMore: data?.hasMore ?? false,
+          oldestSeq: data?.oldestSeq ?? null,
+          total
+        }
       },
       botGroups: s.botGroups[project]
         ? {
@@ -951,7 +973,7 @@ export const useAppStore = create<AppState>((set, get) => ({
               g.groupId === groupId && data
                 ? {
                     ...g,
-                    messageCount: data.messages.length,
+                    messageCount: total,
                     leaderBotId: data.leaderBotId,
                     botIds: data.botIds,
                     title: data.title
@@ -960,6 +982,38 @@ export const useAppStore = create<AppState>((set, get) => ({
             )
           }
         : s.botGroups
+    }))
+  },
+
+  async loadOlderBotGroupMessages(project, groupId) {
+    const win = get().botGroupWindowMeta[groupId]
+    if (!win || !win.hasMore || win.oldestSeq === null) return
+    const data = await window.ptnotes.bots.readGroup(project, groupId, {
+      limit: GROUP_CHAT_PAGE_SIZE,
+      beforeSeq: win.oldestSeq
+    })
+    if (!data || data.messages.length === 0) {
+      set((s) => ({
+        botGroupWindowMeta: {
+          ...s.botGroupWindowMeta,
+          [groupId]: { ...win, hasMore: false }
+        }
+      }))
+      return
+    }
+    set((s) => ({
+      botGroupMessages: {
+        ...s.botGroupMessages,
+        [groupId]: [...data.messages, ...(s.botGroupMessages[groupId] ?? [])]
+      },
+      botGroupWindowMeta: {
+        ...s.botGroupWindowMeta,
+        [groupId]: {
+          hasMore: data.hasMore ?? false,
+          oldestSeq: data.oldestSeq ?? win.oldestSeq,
+          total: win.total
+        }
+      }
     }))
   },
 
@@ -981,6 +1035,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((s) => {
       const messages = { ...s.botGroupMessages }
       delete messages[groupId]
+      const windows = { ...s.botGroupWindowMeta }
+      delete windows[groupId]
       const groups = (s.botGroups[project] ?? []).filter((g) => g.groupId !== groupId)
       return {
         botGroups: { ...s.botGroups, [project]: groups },
@@ -991,7 +1047,8 @@ export const useAppStore = create<AppState>((set, get) => ({
               ? (groups[0]?.groupId ?? null)
               : s.activeBotGroupId[project]
         },
-        botGroupMessages: messages
+        botGroupMessages: messages,
+        botGroupWindowMeta: windows
       }
     })
     const current = get().activeBotGroupId[project]
@@ -1044,19 +1101,24 @@ export const useAppStore = create<AppState>((set, get) => ({
       set((s) => {
         const list = s.botGroupMessages[evt.groupId] ?? []
         const idx = list.findIndex((m) => m.id === evt.message.id)
-        const next =
-          idx === -1 ? [...list, evt.message] : list.map((m, i) => (i === idx ? evt.message : m))
+        const isNew = idx === -1
+        const next = isNew
+          ? [...list, evt.message]
+          : list.map((m, i) => (i === idx ? evt.message : m))
         const typing =
           evt.message.senderKind === 'bot' ? { ...s.botTyping, [evt.groupId]: null } : s.botTyping
+        const win = s.botGroupWindowMeta[evt.groupId]
+        const total = (win?.total ?? list.length) + (isNew ? 1 : 0)
         return {
           botGroupMessages: { ...s.botGroupMessages, [evt.groupId]: next },
+          botGroupWindowMeta: win
+            ? { ...s.botGroupWindowMeta, [evt.groupId]: { ...win, total } }
+            : s.botGroupWindowMeta,
           botTyping: typing,
           botGroups: {
             ...s.botGroups,
             [evt.project]: (s.botGroups[evt.project] ?? []).map((g) =>
-              g.groupId === evt.groupId
-                ? { ...g, messageCount: next.length, updatedAt: Date.now() }
-                : g
+              g.groupId === evt.groupId ? { ...g, messageCount: total, updatedAt: Date.now() } : g
             )
           }
         }

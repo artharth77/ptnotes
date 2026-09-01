@@ -10,11 +10,12 @@ import type {
   GroupChatData,
   GroupChatMeta,
   GroupMessage,
+  GroupMessagePageOpts,
   GroupPatch,
   GroupSenderKind,
   NewGroupInput
 } from '@shared/bots'
-import { MAX_MEMORY_ENTRIES, mergeMemoryEntries } from '@shared/bots'
+import { GROUP_CHAT_PAGE_SIZE, MAX_MEMORY_ENTRIES, mergeMemoryEntries } from '@shared/bots'
 import type { AiTraceFile } from '@shared/types'
 
 function validateId(id: string): string {
@@ -417,18 +418,27 @@ export class BotsStore {
     return info.changes > 0
   }
 
-  readGroup(project: string, groupId: string): GroupChatData | null {
+  readGroup(project: string, groupId: string, opts?: GroupMessagePageOpts): GroupChatData | null {
     const meta = this.getGroup(project, groupId)
     if (!meta) return null
     const row = this.projectDb(project)
       .prepare('SELECT summary, summarized_up_to_seq FROM group_chats WHERE group_id = ?')
       .get(groupId) as unknown as { summary: string | null; summarized_up_to_seq: number | null }
-    const messages = this.listMessages(project, groupId)
-    return {
+    const base = {
       ...meta,
-      messages,
       ...(row.summary ? { summary: row.summary } : {}),
       ...(row.summarized_up_to_seq ? { summarizedUpToSeq: row.summarized_up_to_seq } : {})
+    }
+    const paged = opts && (opts.limit !== undefined || opts.beforeSeq !== undefined)
+    if (!paged) {
+      return { ...base, messages: this.listMessages(project, groupId) }
+    }
+    const page = this.listMessagePage(project, groupId, opts)
+    return {
+      ...base,
+      messages: page.messages,
+      hasMore: page.hasMore,
+      oldestSeq: page.oldestSeq ?? undefined
     }
   }
 
@@ -437,6 +447,30 @@ export class BotsStore {
       .prepare('SELECT * FROM group_messages WHERE group_id = ? ORDER BY seq ASC')
       .all(validateId(groupId)) as unknown as MessageRow[]
     return rows.map(rowToMessage)
+  }
+
+  private listMessagePage(
+    project: string,
+    groupId: string,
+    opts: GroupMessagePageOpts
+  ): { messages: GroupMessage[]; hasMore: boolean; oldestSeq: number | null } {
+    const limit = Math.max(1, Math.floor(opts.limit ?? GROUP_CHAT_PAGE_SIZE))
+    const where = ['group_id = ?']
+    const params: (string | number)[] = [validateId(groupId)]
+    if (opts.beforeSeq !== undefined) {
+      where.push('seq < ?')
+      params.push(opts.beforeSeq)
+    }
+    // Fetch one extra row to detect whether older messages remain (gap-safe, single query).
+    const rows = this.projectDb(project)
+      .prepare(
+        `SELECT * FROM group_messages WHERE ${where.join(' AND ')} ORDER BY seq DESC LIMIT ?`
+      )
+      .all(...params, limit + 1) as unknown as MessageRow[]
+    const hasMore = rows.length > limit
+    const kept = (hasMore ? rows.slice(0, limit) : rows).reverse()
+    const messages = kept.map(rowToMessage)
+    return { messages, hasMore, oldestSeq: messages.length > 0 ? messages[0].seq : null }
   }
 
   appendMessage(

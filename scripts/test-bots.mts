@@ -8,11 +8,13 @@ import type { AIConfigStore } from '../src/main/ai/config'
 import type { BotProfile } from '../src/shared/bots'
 import {
   extractBotTags,
+  formatGroupDateLabel,
   formatGroupTimestamp,
   linkifyBotMentions,
   mergeMemoryEntries,
   parseBotReply,
   planTagTriggers,
+  resolveKanbanCardNames,
   splitMentionSegments
 } from '../src/shared/bots'
 
@@ -95,6 +97,28 @@ function ok(name: string): void {
   )
   ok('formatGroupTimestamp: same-day vs other-day')
 
+  assert.equal(
+    formatGroupDateLabel(new Date(2026, 0, 5, 14, 30).getTime(), new Date(2026, 0, 5).getTime()),
+    'Today'
+  )
+  assert.equal(
+    formatGroupDateLabel(new Date(2026, 0, 5, 23, 59).getTime(), new Date(2026, 0, 6).getTime()),
+    'Yesterday'
+  )
+  assert.equal(
+    formatGroupDateLabel(new Date(2026, 0, 4).getTime(), new Date(2026, 0, 6).getTime()),
+    'Jan 4'
+  )
+  assert.equal(
+    formatGroupDateLabel(new Date(2025, 11, 31).getTime(), new Date(2026, 0, 2).getTime()),
+    'Dec 31 2025'
+  )
+  assert.match(
+    formatGroupDateLabel(new Date(2026, 8, 1).getTime(), new Date(2027, 8, 1).getTime()),
+    / 2026$/
+  )
+  ok('formatGroupDateLabel: today/yesterday/Mmm D/Mmm D YYYY')
+
   assert.deepEqual(mergeMemoryEntries(['a', 'b'], ['b', 'c', ' '], 50), ['a', 'b', 'c'])
   assert.equal(
     mergeMemoryEntries(
@@ -132,6 +156,25 @@ function ok(name: string): void {
   const brackety = linkifyBotMentions('hi @bob', [{ id: 'bob', name: 'Bo[b]' }])
   assert.ok(brackety.includes('[@Bo\\[b\\]](mention:bob)'), brackety)
   ok('linkifyBotMentions: markdown links + fence + label escaping')
+
+  const cards = [
+    { id: '550e8400-e29b-41d4-a716-446655440000', title: 'Launch Plan' },
+    { id: 'abc123', title: 'Do $& things' }
+  ]
+  assert.equal(
+    resolveKanbanCardNames('check kanban:550e8400-e29b-41d4-a716-446655440000 today', cards),
+    'check kanban:Launch Plan today'
+  )
+  assert.equal(
+    resolveKanbanCardNames('kanban:550e8400-e29b-41d4-a716-446655440000 and kanban:abc123', cards),
+    'kanban:Launch Plan and kanban:Do $& things'
+  )
+  assert.equal(resolveKanbanCardNames('kanban:ABC123', cards), 'kanban:Do $& things')
+  assert.equal(resolveKanbanCardNames('kanban:unknown-id', cards), 'kanban:unknown-id')
+  assert.equal(resolveKanbanCardNames('xkanban:abc123', cards), 'xkanban:abc123')
+  assert.equal(resolveKanbanCardNames('no tokens', cards), 'no tokens')
+  assert.equal(resolveKanbanCardNames('kanban:abc123', []), 'kanban:abc123')
+  ok('resolveKanbanCardNames: id → kanban:<title>, unknowns untouched')
 }
 
 // ---- BotsStore (SQLite) ----
@@ -227,6 +270,53 @@ let alice: BotProfile, bob: BotProfile
   await fs.mkdir(join(ROOT, 'root', 'Other'), { recursive: true })
   assert.deepEqual(store.listGroups('Other'), [])
   ok('projects isolated')
+}
+
+// ---- message paging (windowed history) ----
+{
+  const g = store.createGroup(PROJECT, { title: 'Paged', botIds: ['alice'], leaderBotId: 'alice' })
+  const TOTAL = 250
+  for (let i = 1; i <= TOTAL; i++) {
+    store.appendMessage(PROJECT, g.groupId, {
+      senderKind: 'user',
+      senderName: 'You',
+      content: `msg-${i}`,
+      ts: Date.now()
+    })
+  }
+  const full = store.readGroup(PROJECT, g.groupId)
+  assert.equal(full?.messages.length, TOTAL, 'no opts → full history')
+  assert.equal(full?.hasMore, undefined, 'no opts → no paging fields')
+  assert.equal(full?.oldestSeq, undefined)
+
+  const page1 = store.readGroup(PROJECT, g.groupId, { limit: 100 })
+  assert.equal(page1?.messages.length, 100)
+  assert.deepEqual(
+    page1?.messages.map((m) => m.seq),
+    Array.from({ length: 100 }, (_, i) => TOTAL - 99 + i),
+    'latest 100 in ASC order'
+  )
+  assert.equal(page1?.hasMore, true)
+  assert.equal(page1?.oldestSeq, TOTAL - 99)
+  assert.equal(page1?.messageCount, TOTAL, 'meta count stays the true total')
+
+  const page2 = store.readGroup(PROJECT, g.groupId, { limit: 100, beforeSeq: page1!.oldestSeq! })
+  assert.deepEqual(
+    page2?.messages.map((m) => m.seq),
+    Array.from({ length: 100 }, (_, i) => TOTAL - 199 + i)
+  )
+  assert.equal(page2?.hasMore, true)
+  assert.equal(page2?.oldestSeq, TOTAL - 199)
+
+  const page3 = store.readGroup(PROJECT, g.groupId, { limit: 100, beforeSeq: page2!.oldestSeq! })
+  assert.equal(page3?.messages.length, 50)
+  assert.deepEqual(
+    page3?.messages.map((m) => m.seq),
+    Array.from({ length: 50 }, (_, i) => i + 1)
+  )
+  assert.equal(page3?.hasMore, false)
+  assert.equal(page3?.oldestSeq, 1)
+  ok('messages: paged read (latest page, beforeSeq cursor, hasMore)')
 }
 
 // ---- GroupChatManager orchestration (fake AI) ----

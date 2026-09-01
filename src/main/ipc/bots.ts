@@ -6,6 +6,7 @@ import type {
   BotUpsertInput,
   GroupChatData,
   GroupChatMeta,
+  GroupMessagePageOpts,
   GroupPatch,
   NewGroupInput
 } from '@shared/bots'
@@ -57,8 +58,9 @@ export function registerBotsIpc(
     async (
       _e: IpcMainInvokeEvent,
       project: string,
-      groupId: string
-    ): Promise<GroupChatData | null> => store.readGroup(project, groupId)
+      groupId: string,
+      opts?: GroupMessagePageOpts
+    ): Promise<GroupChatData | null> => store.readGroup(project, groupId, opts)
   )
 
   ipcMain.handle(

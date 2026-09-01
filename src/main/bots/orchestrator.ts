@@ -20,6 +20,8 @@ export type BotGroupBroadcaster = (evt: BotGroupEvent) => void
 const BOT_TASK_EXPECT =
   'A concise report: what you did, the outcome, and the paths of any notes/files/cards you created.'
 
+const LINK_RULE = `- Whenever you mention an existing note, project file, plan/schedule or kanban card in your reply, always link to it: [note name](note:note name), [file name](file:file name), [plan name](plan:plan name), [card title](kanban:card title). The link opens the item in the app. Only link items that actually exist in this project (from the conversation or your task results) — never invent names.`
+
 const TERMINAL_STATUSES = new Set(['done', 'failed', 'cancelled'])
 
 interface TurnState {
@@ -416,7 +418,8 @@ Group members:
 ${roster}
 The user appears as "You".
 
-You have no tools. Your background task just completed and you are posting the result report to the group. Do NOT declare new work, do NOT use \`\`\`assign blocks, do NOT mention other bots. Keep it concise (a few sentences or a short list).`
+You have no tools. Your background task just completed and you are posting the result report to the group. Do NOT declare new work, do NOT use \`\`\`assign blocks, do NOT mention other bots. Keep it concise (a few sentences or a short list).
+${LINK_RULE}`
       const user = `Your background task "${run.title}" ${statusText}.
 Requested by: ${item?.requestedBy ?? 'the group'}
 Result:
@@ -639,6 +642,7 @@ RULES:
 The block is removed from the chat; a background run starts for you. If a task is already running for you, the new one is queued automatically — say it is queued in your reply.
 - To ask another member a question or hand them a task, @mention them. Members you @mention will respond.
 - If you were brought in by another bot, answer directly WITHOUT mentioning other bots, unless the person who tagged you explicitly asked you to involve someone else. Never mention the bot who tagged you back.
+${LINK_RULE}
 - Keep replies concise and match the user's language.
 
 ${memorySection}

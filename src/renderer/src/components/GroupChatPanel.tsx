@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   mdiChevronDown,
   mdiCogOutline,
+  mdiFileOutline,
   mdiPencil,
   mdiPlus,
   mdiPuzzleOutline,
@@ -12,12 +13,20 @@ import {
   mdiTrashCanOutline
 } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
-import { formatGroupTimestamp, linkifyBotMentions, splitMentionSegments } from '@shared/bots'
+import {
+  formatGroupDateLabel,
+  formatGroupTimestamp,
+  GROUP_CHAT_PAGE_SIZE,
+  linkifyBotMentions,
+  resolveKanbanCardNames,
+  splitMentionSegments
+} from '@shared/bots'
 import type { GroupChatMeta, GroupMessage } from '@shared/bots'
 import { MarkdownContent } from './MarkdownContent'
 import { USER_MSG_COLLAPSE_LIMIT } from './chatContent'
 import { Modal } from './Modal'
 import { MdiIcon } from './MdiIcon'
+import { KANBAN_LINK_ICON, NOTE_LINK_ICON } from './contentIcons'
 
 const BOT_HUES = [212, 152, 268, 24, 340, 188, 48, 300, 96, 0]
 
@@ -38,6 +47,13 @@ function botInitial(name: string): string {
   return (name.trim()[0] ?? 'B').toUpperCase()
 }
 
+/** A row in the group-chat mention popup: a group bot, a note, a kanban card or a project file. */
+type MentionItem =
+  | { kind: 'bot'; id: string; name: string; role?: string }
+  | { kind: 'note'; id: string; name: string }
+  | { kind: 'kanban'; id: string; name: string }
+  | { kind: 'file'; id: string; name: string }
+
 /** Right-drawer view: multi-bot group chat with a leader, @mentions and background tasks. */
 export function GroupChatPanel(): React.JSX.Element {
   const activeProject = useAppStore((s) => s.activeProject)
@@ -52,10 +68,16 @@ export function GroupChatPanel(): React.JSX.Element {
   const messages = useAppStore((s) =>
     activeGroupId ? (s.botGroupMessages[activeGroupId] ?? NO_MESSAGES) : NO_MESSAGES
   )
+  const windowMeta = useAppStore((s) =>
+    activeGroupId ? s.botGroupWindowMeta[activeGroupId] : undefined
+  )
+  const hasMore = windowMeta?.hasMore ?? false
+  const total = windowMeta?.total ?? messages.length
   const busy = useAppStore((s) =>
     activeGroupId ? (s.botGroupBusy[activeGroupId] ?? false) : false
   )
   const typing = useAppStore((s) => (activeGroupId ? (s.botTyping[activeGroupId] ?? null) : null))
+  const botsOpen = useAppStore((s) => s.botsOpen)
   const botTaskRuns = useAppStore((s) =>
     activeProject ? (s.botTaskRuns[activeProject] ?? NO_RUNS) : NO_RUNS
   )
@@ -63,11 +85,14 @@ export function GroupChatPanel(): React.JSX.Element {
   const loadBotProfiles = useAppStore((s) => s.loadBotProfiles)
   const loadBotGroups = useAppStore((s) => s.loadBotGroups)
   const sendBotGroupMessage = useAppStore((s) => s.sendBotGroupMessage)
+  const loadOlderBotGroupMessages = useAppStore((s) => s.loadOlderBotGroupMessages)
   const stopBotGroup = useAppStore((s) => s.stopBotGroup)
   const setRightView = useAppStore((s) => s.setRightView)
   const notes = useAppStore((s) => s.notes)
   const schedules = useAppStore((s) => s.schedules)
   const kanban = useAppStore((s) => s.kanban)
+  const projectFiles = useAppStore((s) => s.projectFiles)
+  const refreshFiles = useAppStore((s) => s.refreshFiles)
   const selectNote = useAppStore((s) => s.selectNote)
   const selectSchedule = useAppStore((s) => s.selectSchedule)
   const setTab = useAppStore((s) => s.setTab)
@@ -78,7 +103,17 @@ export function GroupChatPanel(): React.JSX.Element {
   const [groupModal, setGroupModal] = useState<'create' | 'edit' | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
-  const [mention, setMention] = useState<{ start: number; query: string } | null>(null)
+  const nearBottomRef = useRef(true)
+  const loadingOlderRef = useRef(false)
+  const prependAnchorRef = useRef<string | null>(null)
+  const prevScrollRef = useRef<{ height: number; top: number } | null>(null)
+  const prevGroupRef = useRef<string | null>(null)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const [mention, setMention] = useState<{
+    kind: 'at' | 'kanban' | 'file'
+    start: number
+    query: string
+  } | null>(null)
   const [mentionIndex, setMentionIndex] = useState(0)
 
   useEffect(() => {
@@ -88,10 +123,85 @@ export function GroupChatPanel(): React.JSX.Element {
     }
   }, [activeProject, loadBotProfiles, loadBotGroups])
 
-  useEffect(() => {
+  // Scroll management: jump to bottom on group switch / first load, follow new
+  // messages only while near the bottom, and keep the viewport anchored when
+  // older messages are prepended by load-older.
+  useLayoutEffect(() => {
     const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [messages.length, typing, activeGroupId])
+    if (!el) return
+    const prevGroup = prevGroupRef.current
+    prevGroupRef.current = activeGroupId
+    if (prevGroup !== activeGroupId) {
+      prependAnchorRef.current = null
+      prevScrollRef.current = null
+      nearBottomRef.current = true
+      el.scrollTop = el.scrollHeight
+      return
+    }
+    const anchor = prependAnchorRef.current
+    if (anchor !== null) {
+      prependAnchorRef.current = null
+      const prev = prevScrollRef.current
+      prevScrollRef.current = null
+      if (messages[0]?.id !== anchor && prev) {
+        el.scrollTop = el.scrollHeight - prev.height + prev.top
+        return
+      }
+    }
+    if (nearBottomRef.current) el.scrollTop = el.scrollHeight
+  }, [messages, activeGroupId])
+
+  // Follow the typing indicator only while the user is at the bottom.
+  useEffect(() => {
+    if (!typing) return
+    const el = scrollRef.current
+    if (el && nearBottomRef.current) el.scrollTop = el.scrollHeight
+  }, [typing])
+
+  function triggerLoadOlder(): void {
+    const el = scrollRef.current
+    if (!el || !activeProject || !activeGroupId || !hasMore || loadingOlderRef.current) return
+    loadingOlderRef.current = true
+    setLoadingOlder(true)
+    prependAnchorRef.current = messages[0]?.id ?? null
+    prevScrollRef.current = { height: el.scrollHeight, top: el.scrollTop }
+    void loadOlderBotGroupMessages(activeProject, activeGroupId)
+      .catch(() => {
+        prependAnchorRef.current = null
+        prevScrollRef.current = null
+      })
+      .finally(() => {
+        loadingOlderRef.current = false
+        setLoadingOlder(false)
+      })
+  }
+
+  function onScroll(e: React.UIEvent<HTMLDivElement>): void {
+    const el = e.currentTarget
+    nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    if (el.scrollTop < 80) triggerLoadOlder()
+  }
+
+  function focusInput(): void {
+    const el = inputRef.current
+    if (el && !el.disabled) el.focus()
+  }
+
+  useEffect(() => {
+    focusInput()
+  }, [])
+
+  const prevBotsOpen = useRef(false)
+  useEffect(() => {
+    if (botsOpen && !prevBotsOpen.current) focusInput()
+    prevBotsOpen.current = botsOpen
+  }, [botsOpen])
+
+  const prevBusy = useRef(false)
+  useEffect(() => {
+    if (prevBusy.current && !busy) focusInput()
+    prevBusy.current = busy
+  }, [busy])
 
   const groupBots = useMemo(
     () =>
@@ -101,31 +211,65 @@ export function GroupChatPanel(): React.JSX.Element {
     [activeGroup, botProfiles]
   )
 
-  const mentionItems = useMemo(() => {
+  const mentionItems = useMemo<MentionItem[]>(() => {
     if (!mention || !activeGroup) return []
     const q = mention.query.toLowerCase()
-    return groupBots.filter(
-      (b) => b.id.toLowerCase().includes(q) || b.name.toLowerCase().includes(q)
-    )
-  }, [mention, activeGroup, groupBots])
+    if (mention.kind === 'kanban') {
+      return (kanban?.cards ?? [])
+        .filter((c) => c.title.toLowerCase().includes(q))
+        .map((c) => ({ kind: 'kanban', id: c.id, name: c.title }))
+    }
+    if (mention.kind === 'file') {
+      return projectFiles
+        .filter((f) => f.toLowerCase().includes(q))
+        .map((f) => ({ kind: 'file', id: f, name: f }))
+    }
+    const bots: MentionItem[] = groupBots
+      .filter((b) => b.id.toLowerCase().includes(q) || b.name.toLowerCase().includes(q))
+      .map((b) => ({ kind: 'bot', id: b.id, name: b.name, role: b.role }))
+    const noteItems: MentionItem[] = notes
+      .filter((n) => n.name.toLowerCase().includes(q))
+      .map((n) => ({ kind: 'note', id: n.id, name: n.name }))
+    return [...bots, ...noteItems]
+  }, [mention, activeGroup, groupBots, notes, kanban, projectFiles])
 
   function updateMention(value: string, caret: number): void {
-    const upto = value.slice(0, caret)
-    const m = upto.match(/(^|[\s(])@([a-zA-Z0-9_-]*)$/)
-    if (m && activeGroup) {
-      // `start` is the index of the `@` itself (replaced on insert, like the 1:1 chat).
-      setMention({ start: caret - m[2].length - 1, query: m[2] })
-      setMentionIndex(0)
-    } else {
+    const before = value.slice(0, caret)
+    const last = Math.max(before.lastIndexOf('@'), before.lastIndexOf('!'), before.lastIndexOf('#'))
+    if (last === -1 || !activeGroup) {
       setMention(null)
+      return
     }
+    const token = before.slice(last + 1)
+    if (token.includes(' ')) {
+      setMention(null)
+      return
+    }
+    const ch = before[last]
+    if (ch === '@') setMention({ kind: 'at', start: last, query: token })
+    else if (ch === '!') setMention({ kind: 'kanban', start: last, query: token })
+    else {
+      if (!mention || mention.kind !== 'file' || mention.start !== last) {
+        void refreshFiles()
+      }
+      setMention({ kind: 'file', start: last, query: token })
+    }
+    setMentionIndex(0)
   }
 
-  function insertMention(bot: (typeof groupBots)[number]): void {
+  function insertMention(item: MentionItem): void {
     if (!mention) return
     const before = input.slice(0, mention.start)
     const after = input.slice(mention.start + 1 + mention.query.length)
-    const next = `${before}@${bot.id} ${after}`
+    const token =
+      item.kind === 'bot'
+        ? `@${item.id} `
+        : item.kind === 'note'
+          ? `note:${item.name} `
+          : item.kind === 'kanban'
+            ? `kanban:${item.id} `
+            : `file:${item.name} `
+    const next = `${before}${token}${after}`
     setInput(next)
     setMention(null)
     inputRef.current?.focus()
@@ -154,8 +298,8 @@ export function GroupChatPanel(): React.JSX.Element {
       }
       if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault()
-        const bot = mentionItems[mentionIndex] ?? mentionItems[0]
-        if (bot) insertMention(bot)
+        const item = mentionItems[mentionIndex] ?? mentionItems[0]
+        if (item) insertMention(item)
         return
       }
       if (e.key === 'Escape') {
@@ -192,13 +336,24 @@ export function GroupChatPanel(): React.JSX.Element {
     setTab('planner')
   }
 
-  function openKanbanCard(cardTitle: string): void {
+  function openKanbanCard(ref: string): void {
     if (!activeProject || !kanban) return
-    const q = cardTitle.trim().toLowerCase()
-    const card = kanban.cards.find((c) => c.title.toLowerCase() === q)
+    const q = ref.trim().toLowerCase()
+    const card =
+      kanban.cards.find((c) => c.id.toLowerCase() === q) ??
+      kanban.cards.find((c) => c.title.toLowerCase() === q) ??
+      kanban.cards.find((c) => {
+        const t = c.title.toLowerCase()
+        return t.includes(q) || q.includes(t)
+      })
     if (!card) return
     setTab('kanban')
     setActiveKanbanCard(card.id)
+  }
+
+  function openFile(fileName: string): void {
+    if (!activeProject) return
+    void window.ptnotes.files.revealByName(activeProject, fileName)
   }
 
   return (
@@ -237,7 +392,7 @@ export function GroupChatPanel(): React.JSX.Element {
         </div>
       </div>
 
-      <div className="chat-scroll gc-scroll" ref={scrollRef}>
+      <div className="chat-scroll gc-scroll" ref={scrollRef} onScroll={onScroll}>
         {!activeProject && <div className="list-empty">Open a project to use bot groups.</div>}
         {activeProject && groups.length === 0 && (
           <div className="list-empty">
@@ -263,16 +418,39 @@ export function GroupChatPanel(): React.JSX.Element {
             ))}
           </div>
         )}
-        {messages.map((m) => (
-          <MessageRow
-            key={m.id}
-            msg={m}
-            leaderId={activeGroup?.leaderBotId}
-            bots={groupBots}
-            onOpenNote={(n) => void openNote(n)}
-            onOpenPlan={(p) => void openSchedule(p)}
-            onOpenKanban={(t) => openKanbanCard(t)}
-          />
+        {activeProject &&
+          activeGroup &&
+          messages.length > 0 &&
+          (hasMore || loadingOlder ? (
+            <button className="gc-load-older" disabled={loadingOlder} onClick={triggerLoadOlder}>
+              {loadingOlder
+                ? 'Loading earlier messages…'
+                : `Load earlier messages (${total - messages.length} older)`}
+            </button>
+          ) : (
+            total > GROUP_CHAT_PAGE_SIZE && (
+              <div className="gc-history-start">Beginning of chat</div>
+            )
+          ))}
+        {messages.map((m, i) => (
+          <Fragment key={m.id}>
+            {(i === 0 ||
+              new Date(messages[i - 1].ts).toDateString() !== new Date(m.ts).toDateString()) && (
+              <div className="gc-date-divider">
+                <span>{formatGroupDateLabel(m.ts)}</span>
+              </div>
+            )}
+            <MessageRow
+              msg={m}
+              leaderId={activeGroup?.leaderBotId}
+              bots={groupBots}
+              kanbanCards={kanban?.cards ?? []}
+              onOpenNote={(n) => void openNote(n)}
+              onOpenPlan={(p) => void openSchedule(p)}
+              onOpenKanban={(t) => openKanbanCard(t)}
+              onOpenFile={openFile}
+            />
+          </Fragment>
         ))}
         {typing && (
           <div className="gc-typing">
@@ -292,22 +470,45 @@ export function GroupChatPanel(): React.JSX.Element {
       <div className="chat-input">
         {mentionItems.length > 0 && (
           <div className="mention-popup">
-            {mentionItems.map((b, i) => (
+            {mentionItems.map((item, i) => (
               <div
-                key={b.id}
+                key={`${item.kind}:${item.id}`}
+                ref={(el) => {
+                  if (el && i === mentionIndex) el.scrollIntoView({ block: 'nearest' })
+                }}
                 className={`mention-item ${i === mentionIndex ? 'active' : ''}`}
                 onMouseDown={(e) => {
                   e.preventDefault()
-                  insertMention(b)
+                  insertMention(item)
                 }}
                 onMouseEnter={() => setMentionIndex(i)}
               >
-                <span className="gc-avatar tiny" style={{ background: botColor(b.id) }}>
-                  {botInitial(b.name)}
-                </span>
-                <span className="mention-icon">@{b.id}</span>
-                {b.name}
-                {b.role ? <span className="command-badge">{b.role}</span> : null}
+                {item.kind === 'bot' ? (
+                  <>
+                    <span className="gc-avatar tiny" style={{ background: botColor(item.id) }}>
+                      {botInitial(item.name)}
+                    </span>
+                    <span className="mention-icon">@{item.id}</span>
+                    {item.name}
+                    {item.role ? <span className="command-badge">{item.role}</span> : null}
+                  </>
+                ) : (
+                  <>
+                    <span className="mention-icon">
+                      <MdiIcon
+                        path={
+                          item.kind === 'kanban'
+                            ? KANBAN_LINK_ICON
+                            : item.kind === 'file'
+                              ? mdiFileOutline
+                              : NOTE_LINK_ICON
+                        }
+                        size={16}
+                      />
+                    </span>
+                    {item.name}
+                  </>
+                )}
               </div>
             ))}
           </div>
@@ -317,7 +518,7 @@ export function GroupChatPanel(): React.JSX.Element {
           value={input}
           placeholder={
             activeGroup
-              ? `Message the group… (@${activeGroup.leaderBotId} or another bot)`
+              ? 'Message the group… (@ bot or note, ! kanban card, # file)'
               : 'Create a group chat to start'
           }
           disabled={!activeGroup || busy}
@@ -361,16 +562,20 @@ function MessageRow({
   msg,
   leaderId,
   bots,
+  kanbanCards,
   onOpenNote,
   onOpenPlan,
-  onOpenKanban
+  onOpenKanban,
+  onOpenFile
 }: {
   msg: GroupMessage
   leaderId?: string
   bots: { id: string; name: string }[]
+  kanbanCards: { id: string; title: string }[]
   onOpenNote?: (noteName: string) => void
   onOpenPlan?: (planName: string) => void
   onOpenKanban?: (cardTitle: string) => void
+  onOpenFile?: (fileName: string) => void
 }): React.JSX.Element {
   if (msg.senderKind === 'system') {
     return (
@@ -383,7 +588,7 @@ function MessageRow({
     return (
       <div className="chat-msg user gc-msg">
         <div className="chat-msg-label gc-msg-meta">You · {formatGroupTimestamp(msg.ts)}</div>
-        <GroupUserBubble content={msg.content} bots={bots} />
+        <GroupUserBubble content={msg.content} bots={bots} kanbanCards={kanbanCards} />
       </div>
     )
   }
@@ -406,6 +611,7 @@ function MessageRow({
           onOpenNote={onOpenNote}
           onOpenPlan={onOpenPlan}
           onOpenKanban={onOpenKanban}
+          onOpenFile={onOpenFile}
         />
       </div>
     </div>
@@ -418,15 +624,17 @@ const mentionColor = (botId: string): string => botColor(botId)
 /** User bubble with @mention chips — same collapse behavior as the 1:1 chat's UserBubble. */
 function GroupUserBubble({
   content,
-  bots
+  bots,
+  kanbanCards
 }: {
   content: string
   bots: { id: string; name: string }[]
+  kanbanCards: { id: string; title: string }[]
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(false)
   const long = content.length > USER_MSG_COLLAPSE_LIMIT
   const shown = long && !expanded ? content.slice(0, USER_MSG_COLLAPSE_LIMIT) : content
-  const segments = splitMentionSegments(shown, bots)
+  const segments = splitMentionSegments(resolveKanbanCardNames(shown, kanbanCards), bots)
   return (
     <div className="chat-msg-content user-bubble">
       {segments.map((seg, i) =>
