@@ -1,6 +1,6 @@
 {
   "name": "ptnotes",
-  "version": "0.14.3",
+  "version": "0.15.0",
   "description": "Write notes, track tasks, plan schedules, and chat with an AI assistant — all organized by project",
   "main": "./out/main/index.js",
   "author": "",
@@ -18,7 +18,7 @@
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "electron-vite build && electron-builder --mac",
     "build:linux": "electron-vite build && electron-builder --linux",
-    "test": "tsx --tsconfig tsconfig.node.json scripts/test-service.mts && tsx --tsconfig tsconfig.node.json scripts/test-ai.mts && tsx --tsconfig tsconfig.node.json scripts/test-config.mts && tsx --tsconfig tsconfig.node.json scripts/test-chat.mts && tsx --tsconfig tsconfig.node.json scripts/test-ask.mts && tsx --tsconfig tsconfig.node.json scripts/test-slash.mts && tsx --tsconfig tsconfig.node.json scripts/test-markdown.mts && tsx --tsconfig tsconfig.node.json scripts/test-pdf.mts && tsx --tsconfig tsconfig.node.json scripts/test-modules.mts && tsx --tsconfig tsconfig.node.json scripts/test-docx.mts && tsx --tsconfig tsconfig.node.json scripts/test-planner.mts && tsx --tsconfig tsconfig.node.json scripts/test-kanban.mts && tsx --tsconfig tsconfig.node.json scripts/test-find.mts && tsx --tsconfig tsconfig.node.json scripts/test-mcp.mts"
+    "test": "tsx --tsconfig tsconfig.node.json scripts/test-service.mts && tsx --tsconfig tsconfig.node.json scripts/test-ai.mts && tsx --tsconfig tsconfig.node.json scripts/test-config.mts && tsx --tsconfig tsconfig.node.json scripts/test-chat.mts && tsx --tsconfig tsconfig.node.json scripts/test-ask.mts && tsx --tsconfig tsconfig.node.json scripts/test-slash.mts && tsx --tsconfig tsconfig.node.json scripts/test-markdown.mts && tsx --tsconfig tsconfig.node.json scripts/test-pdf.mts && tsx --tsconfig tsconfig.node.json scripts/test-modules.mts && tsx --tsconfig tsconfig.node.json scripts/test-docx.mts && tsx --tsconfig tsconfig.node.json scripts/test-planner.mts && tsx --tsconfig tsconfig.node.json scripts/test-kanban.mts && tsx --tsconfig tsconfig.node.json scripts/test-bots.mts && tsx --tsconfig tsconfig.node.json scripts/test-find.mts && tsx --tsconfig tsconfig.node.json scripts/test-mcp.mts"
   },
   "dependencies": {
     "@antv/infographic": "^0.2.19",

@@ -1,3 +1,16 @@
+## [0.15.0] — 2026-08-31
+
+### Added
+
+- **Bots group chat**: multi-bot group conversations with identities, roles and memories.
+  - **Bot library** (Settings ▸ Bots): global bot profiles — name, role, persona/standing instructions, optional AI-provider profile pick and per-bot model override (falls back to the active profile). Stored in a SQLite database (`node:sqlite` builtin — no dependency, nothing for users to install) at `userData/bots.db`.
+  - **Group chats** (new **Bots** drawer view, `⌘⇧G`): create a group per project with a title, ≥1 bot and a designated **group leader**; group list/history popover with open/rename/trace/delete. Persisted in `<project>/.data/bots/groupchat.db` (groups, messages, memories, task queue) so it follows the project root.
+  - **Routing engine** (enforced in code, `src/shared/bots.ts` + `src/main/bots/orchestrator.ts`): an untagged user message goes to the **leader**, who answers and/or assigns work by `@`-tagging bots; `@bot-id` in the user message routes to that bot directly; bots can tag other bots to ask/hand over work. Loop protection: a bot tagged by another bot answers **without tagging back** unless the tagger explicitly requested a relay — a single bot→bot→bot relay chain per user message (relay budget), deep turns are display-only, and a hard cap of 8 bot turns per user message.
+  - **No tools in chat, full replies**: bot turns are plain non-streamed completions (reasoning/thinking is stripped, never rendered); while a bot composes, the panel shows "**\<name\>** is typing…" with animated dots; every message carries a timestamp (time for today, date+time otherwise). Task start/queued/failed notices appear as compact system lines.
+  - **Background tasks**: when a bot takes on real work it ends its reply with an ```assign block (parsed out of the chat); the task runs as a hidden `bot-task` module run (base tools + `start_module`/`wait_modules`, so it can spawn sub-modules) with `submit_result` expected, titled "**\<bot name\> Task**" in the tasks panel. **Single-flight per bot**: one running task, further assignments queue and the bot acknowledges "queued"; on completion the bot posts a result report in the chat and pulls the next queued task. Runs live in the dedicated **Bot Tasks** panel (opened from the group chat header; same card/trace/transcript UI as Modules — hidden from the Modules panel, Settings ▸ Modules and `start_module` listings, and never deleted by the Modules panel's clear-all).
+  - **Long chats**: when the un-summarized context exceeds ~8k chars the **leader** (background, never shown in the chat box) produces a rolling summary that replaces older messages in the bot system prompts; the last 6 messages always stay verbatim, the full log stays visible, and in the same cycle each involved bot extracts durable facts into its **per-project memory** (capped at 50 entries, viewable/forgettable in Settings ▸ Bots) that is injected into its future turns.
+  - **Raw AI trace** per group (`<groupId>.trace.jsonl` in the bots dir) viewable via the existing trace viewer (history popover + header button).
+
 ## [0.14.3] — 2026-08-30
 
 ### Added

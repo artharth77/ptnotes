@@ -97,6 +97,22 @@ export class AIConfigStore {
     }
   }
 
+  /**
+   * Resolve a specific profile (falls back to the active one) with an optional model
+   * override — used by per-bot model overrides. The API key never leaves this class.
+   */
+  async loadResolved(profileId?: string, modelOverride?: string): Promise<AIProviderConfig> {
+    const disk = await this.read()
+    const profile =
+      (profileId && disk.profiles.find((p) => p.id === profileId)) || this.activeProfile(disk)
+    return {
+      baseUrl: profile?.baseUrl ?? DEFAULT_PROFILE.baseUrl,
+      apiKey: profile?.apiKey ?? '',
+      model: modelOverride?.trim() || profile?.model || '',
+      uploadPdfEnabled: disk.uploadPdfEnabled
+    }
+  }
+
   /** The full profile set + global toggle for the settings UI. */
   async getAll(): Promise<AIConfig> {
     const disk = await this.read()

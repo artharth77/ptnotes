@@ -72,7 +72,14 @@ export class ModuleRunManager {
     moduleId: string,
     title: string,
     prompt: string,
-    expectResult?: string
+    expectResult?: string,
+    botOpts?: {
+      botId?: string
+      groupId?: string
+      profileId?: string
+      modelOverride?: string
+      displayName?: string
+    }
   ): Promise<ModuleStartResult> {
     const def = this.registry.get(moduleId)
     if (!def) {
@@ -97,7 +104,11 @@ export class ModuleRunManager {
     }
     const cleanExpect = String(expectResult ?? '').trim()
 
-    const cfg: AIProviderConfig = await this.configStore.load()
+    // Bot tasks may run with a per-bot profile/model override; the key never leaves the store.
+    const cfg: AIProviderConfig =
+      botOpts?.profileId || botOpts?.modelOverride
+        ? await this.configStore.loadResolved(botOpts.profileId, botOpts.modelOverride)
+        : await this.configStore.load()
     if (!cfg.model) {
       return {
         ok: false,
@@ -109,7 +120,11 @@ export class ModuleRunManager {
     }
 
     const runId = randomUUID()
-    const moduleInfo: ModuleInfo = { id: def.id, name: def.name, description: def.summary }
+    const moduleInfo: ModuleInfo = {
+      id: def.id,
+      name: botOpts?.displayName?.trim() || def.name,
+      description: def.summary
+    }
     const now = Date.now()
     const run: ModuleRun = {
       runId,
@@ -121,7 +136,11 @@ export class ModuleRunManager {
       steps: [],
       createdAt: now,
       updatedAt: now,
-      ...(cleanExpect ? { expectResult: cleanExpect } : {})
+      ...(cleanExpect ? { expectResult: cleanExpect } : {}),
+      ...(botOpts?.botId ? { botId: botOpts.botId } : {}),
+      ...(botOpts?.groupId ? { groupId: botOpts.groupId } : {}),
+      ...(botOpts?.profileId ? { profileId: botOpts.profileId } : {}),
+      ...(botOpts?.modelOverride ? { modelOverride: botOpts.modelOverride } : {})
     }
 
     await this.service.writeModulePrompt(project, runId, {
@@ -138,7 +157,10 @@ export class ModuleRunManager {
       activeProject: project,
       module: def,
       run,
-      getConfig: () => this.configStore.load(),
+      getConfig:
+        botOpts?.profileId || botOpts?.modelOverride
+          ? () => Promise.resolve(cfg)
+          : () => this.configStore.load(),
       createClientFn: this.clientFn,
       notify: (snapshot, evt) => this.handleUpdate(snapshot, evt)
     })
@@ -197,7 +219,10 @@ export class ModuleRunManager {
         }
       }
     }
-    const cfg: AIProviderConfig = await this.configStore.load()
+    const cfg: AIProviderConfig = await this.configStore.loadResolved(
+      run.profileId,
+      run.modelOverride
+    )
     if (!cfg.model) {
       return {
         ok: false,
@@ -232,7 +257,7 @@ export class ModuleRunManager {
       activeProject: project,
       module: def,
       run,
-      getConfig: () => this.configStore.load(),
+      getConfig: () => Promise.resolve(cfg),
       createClientFn: this.clientFn,
       notify: (snapshot, evt) => this.handleUpdate(snapshot, evt)
     })
@@ -260,6 +285,10 @@ export class ModuleRunManager {
       } else {
         running.add(run.runId)
       }
+    }
+    // Hidden bot-task runs are managed by the Bot Tasks panel — never deleted here.
+    for (const stored of await this.service.listStoredModuleRuns(project)) {
+      if (stored.module.id === 'bot-task') running.add(stored.runId)
     }
     return this.service.clearModuleHistoryRuns(project, [...running], deleteOutputFiles)
   }

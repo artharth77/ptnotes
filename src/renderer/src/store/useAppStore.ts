@@ -1,5 +1,22 @@
 import { create } from 'zustand'
 import { rollupScheduleTasks } from '@shared/planner'
+import { GROUP_CHAT_PAGE_SIZE } from '@shared/bots'
+import type {
+  BotGroupEvent,
+  BotProfile,
+  BotUpsertInput,
+  GroupChatMeta,
+  GroupMessage,
+  GroupPatch,
+  NewGroupInput
+} from '@shared/bots'
+
+/** Loaded-window bookkeeping for a paged group chat (the store holds only the loaded slice). */
+interface BotGroupWindow {
+  hasMore: boolean
+  oldestSeq: number | null
+  total: number
+}
 import type {
   AskRequest,
   ChatMessage,
@@ -56,7 +73,18 @@ interface AppState {
   tab: Tab
   chatOpen: boolean
   moduleOpen: boolean
-  rightView: 'chat' | 'modules'
+  botsOpen: boolean
+  rightView: 'chat' | 'bots' | 'modules' | 'botTasks'
+  // ---- Bots group chat ----
+  botProfiles: BotProfile[]
+  botGroups: Record<string, GroupChatMeta[]>
+  activeBotGroupId: Record<string, string | null>
+  botGroupMessages: Record<string, GroupMessage[]>
+  botGroupWindowMeta: Record<string, BotGroupWindow>
+  botGroupBusy: Record<string, boolean>
+  /** Bot currently composing, per group id. */
+  botTyping: Record<string, string | null>
+  botTaskRuns: Record<string, ModuleRun[]>
   chatMessages: Record<string, ChatMessage[]>
   chatSessionIds: Record<string, string>
   chatSessions: Record<string, ChatSessionMeta[]>
@@ -65,14 +93,14 @@ interface AppState {
   /** Live subagent tool-call lifecycle per run id (transient; never persisted). */
   moduleToolCalls: Record<string, ToolCallInfo[]>
   moduleHistoryRunId: string | null
-  traceViewer: { kind: 'chat' | 'module'; key: string; title: string } | null
+  traceViewer: { kind: 'chat' | 'module' | 'bots'; key: string; title: string } | null
   chatBusy: boolean
   chatStreamProject: string | null
   chatWaitRuns: string[]
   confirmRequest: ConfirmRequest | null
   askRequest: AskRequest | null
   settingsOpen: boolean
-  settingsCategory: 'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets'
+  settingsCategory: 'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets' | 'bots'
   skillEditRequest: string | null
   sidebarVisible: boolean
   formatHelperEnabled: boolean
@@ -133,8 +161,22 @@ interface AppState {
   loadModules: (project: string) => Promise<void>
   applyModuleEvent: (evt: ModuleEvent) => void
   setModuleHistoryRunId: (runId: string | null) => void
-  openTraceViewer: (v: { kind: 'chat' | 'module'; key: string; title: string }) => void
+  openTraceViewer: (v: { kind: 'chat' | 'module' | 'bots'; key: string; title: string }) => void
   closeTraceViewer: () => void
+  // ---- Bots group chat ----
+  loadBotProfiles: () => Promise<void>
+  saveBotProfile: (input: BotUpsertInput) => Promise<void>
+  deleteBotProfile: (id: string) => Promise<void>
+  loadBotGroups: (project: string) => Promise<void>
+  openBotGroup: (project: string, groupId: string) => Promise<void>
+  loadOlderBotGroupMessages: (project: string, groupId: string) => Promise<void>
+  createBotGroup: (project: string, input: NewGroupInput) => Promise<GroupChatMeta>
+  updateBotGroup: (project: string, groupId: string, patch: GroupPatch) => Promise<void>
+  deleteBotGroup: (project: string, groupId: string) => Promise<void>
+  sendBotGroupMessage: (text: string) => Promise<void>
+  stopBotGroup: () => Promise<void>
+  applyBotGroupEvent: (evt: BotGroupEvent) => void
+  loadBotTasks: (project: string) => Promise<void>
   selectNote: (id: string) => Promise<void>
   saveNote: (content: string) => Promise<void>
   createNote: (title: string) => Promise<void>
@@ -142,7 +184,7 @@ interface AppState {
   deleteNote: (id: string) => Promise<void>
   setTab: (tab: Tab) => void
   setChatOpen: (open: boolean) => void
-  setRightView: (view: 'chat' | 'modules') => void
+  setRightView: (view: 'chat' | 'bots' | 'modules' | 'botTasks') => void
   appendChatMessage: (project: string, msg: ChatMessage) => void
   updateLastAssistantMessage: (project: string, updater: (msg: ChatMessage) => ChatMessage) => void
   clearChatMessages: (project: string) => void
@@ -153,9 +195,11 @@ interface AppState {
   setAskRequest: (req: AskRequest | null) => void
   setSettingsOpen: (open: boolean) => void
   setSettingsCategory: (
-    category: 'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets'
+    category: 'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets' | 'bots'
   ) => void
-  openSettings: (category?: 'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets') => void
+  openSettings: (
+    category?: 'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets' | 'bots'
+  ) => void
   openSkillEditor: (name: string) => void
   clearSkillEditRequest: () => void
   setSidebarVisible: (visible: boolean) => void
@@ -193,7 +237,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   tab: 'notes',
   chatOpen: false,
   moduleOpen: false,
+  botsOpen: false,
   rightView: 'chat',
+  botProfiles: [],
+  botGroups: {},
+  activeBotGroupId: {},
+  botGroupMessages: {},
+  botGroupWindowMeta: {},
+  botGroupBusy: {},
+  botTyping: {},
+  botTaskRuns: {},
   chatMessages: {},
   chatSessionIds: {},
   chatSessions: {},
@@ -833,17 +886,274 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((s) => {
       const list = s.moduleRuns[evt.project] ?? []
       const idx = list.findIndex((r) => r.runId === evt.runId)
+      let moduleRuns: Record<string, ModuleRun[]>
       if (idx === -1) {
-        return { moduleRuns: { ...s.moduleRuns, [evt.project]: [evt.run, ...list] } }
+        moduleRuns = { ...s.moduleRuns, [evt.project]: [evt.run, ...list] }
+      } else {
+        const next = [...list]
+        next[idx] = evt.run
+        moduleRuns = { ...s.moduleRuns, [evt.project]: next }
       }
-      const next = [...list]
-      next[idx] = evt.run
-      return { moduleRuns: { ...s.moduleRuns, [evt.project]: next } }
+      // Bot-task runs are surfaced in the dedicated Bot Tasks panel, not the Modules panel.
+      let botTaskRuns = s.botTaskRuns
+      if (evt.run.module.id === 'bot-task') {
+        const tasks = s.botTaskRuns[evt.project] ?? []
+        const tIdx = tasks.findIndex((r) => r.runId === evt.runId)
+        botTaskRuns = {
+          ...s.botTaskRuns,
+          [evt.project]:
+            tIdx === -1 ? [evt.run, ...tasks] : tasks.map((r, i) => (i === tIdx ? evt.run : r))
+        }
+      }
+      return { moduleRuns, botTaskRuns }
     })
   },
 
   setModuleHistoryRunId(moduleHistoryRunId) {
     set({ moduleHistoryRunId })
+  },
+
+  // ---- Bots group chat ----
+
+  async loadBotProfiles() {
+    const botProfiles = await window.ptnotes.bots.listBots()
+    set({ botProfiles })
+  },
+
+  async saveBotProfile(input) {
+    const botProfiles = await window.ptnotes.bots.saveBot(input)
+    set({ botProfiles })
+  },
+
+  async deleteBotProfile(id) {
+    const ok = await window.ptnotes.bots.deleteBot(id)
+    if (ok) {
+      await get().loadBotProfiles()
+      const project = get().activeProject
+      if (project) await get().loadBotGroups(project)
+    }
+  },
+
+  async loadBotGroups(project) {
+    const groups = await window.ptnotes.bots.listGroups(project)
+    const persisted = localStorage.getItem(`ptnotes:activeBotGroup:${project}`)
+    set((s) => {
+      const active = s.activeBotGroupId[project] ?? persisted
+      const activeStillExists = active && groups.some((g) => g.groupId === active)
+      return {
+        botGroups: { ...s.botGroups, [project]: groups },
+        activeBotGroupId: {
+          ...s.activeBotGroupId,
+          [project]: activeStillExists ? active : (groups[0]?.groupId ?? null)
+        }
+      }
+    })
+    const current = get().activeBotGroupId[project]
+    if (current) await get().openBotGroup(project, current)
+  },
+
+  async openBotGroup(project, groupId) {
+    localStorage.setItem(`ptnotes:activeBotGroup:${project}`, groupId)
+    const data = await window.ptnotes.bots.readGroup(project, groupId, {
+      limit: GROUP_CHAT_PAGE_SIZE
+    })
+    const total = data?.messageCount ?? 0
+    set((s) => ({
+      activeBotGroupId: { ...s.activeBotGroupId, [project]: groupId },
+      botGroupMessages: {
+        ...s.botGroupMessages,
+        [groupId]: data?.messages ?? []
+      },
+      botGroupWindowMeta: {
+        ...s.botGroupWindowMeta,
+        [groupId]: {
+          hasMore: data?.hasMore ?? false,
+          oldestSeq: data?.oldestSeq ?? null,
+          total
+        }
+      },
+      botGroups: s.botGroups[project]
+        ? {
+            ...s.botGroups,
+            [project]: s.botGroups[project].map((g) =>
+              g.groupId === groupId && data
+                ? {
+                    ...g,
+                    messageCount: total,
+                    leaderBotId: data.leaderBotId,
+                    botIds: data.botIds,
+                    title: data.title
+                  }
+                : g
+            )
+          }
+        : s.botGroups
+    }))
+  },
+
+  async loadOlderBotGroupMessages(project, groupId) {
+    const win = get().botGroupWindowMeta[groupId]
+    if (!win || !win.hasMore || win.oldestSeq === null) return
+    const data = await window.ptnotes.bots.readGroup(project, groupId, {
+      limit: GROUP_CHAT_PAGE_SIZE,
+      beforeSeq: win.oldestSeq
+    })
+    if (!data || data.messages.length === 0) {
+      set((s) => ({
+        botGroupWindowMeta: {
+          ...s.botGroupWindowMeta,
+          [groupId]: { ...win, hasMore: false }
+        }
+      }))
+      return
+    }
+    set((s) => ({
+      botGroupMessages: {
+        ...s.botGroupMessages,
+        [groupId]: [...data.messages, ...(s.botGroupMessages[groupId] ?? [])]
+      },
+      botGroupWindowMeta: {
+        ...s.botGroupWindowMeta,
+        [groupId]: {
+          hasMore: data.hasMore ?? false,
+          oldestSeq: data.oldestSeq ?? win.oldestSeq,
+          total: win.total
+        }
+      }
+    }))
+  },
+
+  async createBotGroup(project, input) {
+    const group = await window.ptnotes.bots.createGroup(project, input)
+    await get().loadBotGroups(project)
+    await get().openBotGroup(project, group.groupId)
+    return group
+  },
+
+  async updateBotGroup(project, groupId, patch) {
+    await window.ptnotes.bots.updateGroup(project, groupId, patch)
+    await get().loadBotGroups(project)
+    await get().openBotGroup(project, groupId)
+  },
+
+  async deleteBotGroup(project, groupId) {
+    await window.ptnotes.bots.deleteGroup(project, groupId)
+    set((s) => {
+      const messages = { ...s.botGroupMessages }
+      delete messages[groupId]
+      const windows = { ...s.botGroupWindowMeta }
+      delete windows[groupId]
+      const groups = (s.botGroups[project] ?? []).filter((g) => g.groupId !== groupId)
+      return {
+        botGroups: { ...s.botGroups, [project]: groups },
+        activeBotGroupId: {
+          ...s.activeBotGroupId,
+          [project]:
+            s.activeBotGroupId[project] === groupId
+              ? (groups[0]?.groupId ?? null)
+              : s.activeBotGroupId[project]
+        },
+        botGroupMessages: messages,
+        botGroupWindowMeta: windows
+      }
+    })
+    const current = get().activeBotGroupId[project]
+    if (current) await get().openBotGroup(project, current)
+  },
+
+  async sendBotGroupMessage(text) {
+    const project = get().activeProject
+    const groupId = project ? get().activeBotGroupId[project] : null
+    if (!project || !groupId || !text.trim()) return
+    set((s) => ({ botGroupBusy: { ...s.botGroupBusy, [groupId]: true } }))
+    try {
+      await window.ptnotes.bots.send(project, groupId, text.trim())
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      set((s) => ({
+        botGroupMessages: {
+          ...s.botGroupMessages,
+          [groupId]: [
+            ...(s.botGroupMessages[groupId] ?? []),
+            {
+              id: crypto.randomUUID(),
+              seq: Number.MAX_SAFE_INTEGER,
+              senderKind: 'system',
+              senderName: 'System',
+              content: `⚠️ ${message}`,
+              ts: Date.now(),
+              error: true
+            }
+          ]
+        }
+      }))
+    } finally {
+      set((s) => ({
+        botGroupBusy: { ...s.botGroupBusy, [groupId]: false },
+        botTyping: { ...s.botTyping, [groupId]: null }
+      }))
+    }
+  },
+
+  async stopBotGroup() {
+    const project = get().activeProject
+    const groupId = project ? get().activeBotGroupId[project] : null
+    if (!project || !groupId) return
+    await window.ptnotes.bots.stop(project, groupId)
+  },
+
+  applyBotGroupEvent(evt) {
+    if (evt.type === 'message') {
+      set((s) => {
+        const list = s.botGroupMessages[evt.groupId] ?? []
+        const idx = list.findIndex((m) => m.id === evt.message.id)
+        const isNew = idx === -1
+        const next = isNew
+          ? [...list, evt.message]
+          : list.map((m, i) => (i === idx ? evt.message : m))
+        const typing =
+          evt.message.senderKind === 'bot' ? { ...s.botTyping, [evt.groupId]: null } : s.botTyping
+        const win = s.botGroupWindowMeta[evt.groupId]
+        const total = (win?.total ?? list.length) + (isNew ? 1 : 0)
+        return {
+          botGroupMessages: { ...s.botGroupMessages, [evt.groupId]: next },
+          botGroupWindowMeta: win
+            ? { ...s.botGroupWindowMeta, [evt.groupId]: { ...win, total } }
+            : s.botGroupWindowMeta,
+          botTyping: typing,
+          botGroups: {
+            ...s.botGroups,
+            [evt.project]: (s.botGroups[evt.project] ?? []).map((g) =>
+              g.groupId === evt.groupId ? { ...g, messageCount: total, updatedAt: Date.now() } : g
+            )
+          }
+        }
+      })
+      return
+    }
+    if (evt.type === 'turn-start') {
+      set((s) => ({ botTyping: { ...s.botTyping, [evt.groupId]: evt.botName } }))
+      return
+    }
+    if (evt.type === 'turn-end') {
+      set((s) => ({ botTyping: { ...s.botTyping, [evt.groupId]: null } }))
+      return
+    }
+    if (evt.type === 'group-updated') {
+      set((s) => ({
+        botGroups: {
+          ...s.botGroups,
+          [evt.project]: (s.botGroups[evt.project] ?? []).map((g) =>
+            g.groupId === evt.group.groupId ? evt.group : g
+          )
+        }
+      }))
+    }
+  },
+
+  async loadBotTasks(project) {
+    const tasks = await window.ptnotes.bots.listTasks(project)
+    set((s) => ({ botTaskRuns: { ...s.botTaskRuns, [project]: tasks } }))
   },
 
   openTraceViewer(traceViewer) {
@@ -908,15 +1218,16 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setRightView(view) {
     set((s) => {
-      const openFor = view === 'chat' ? s.chatOpen : s.moduleOpen
+      const openFor = view === 'chat' ? s.chatOpen : view === 'modules' ? s.moduleOpen : s.botsOpen
       const sameView = s.rightView === view
       if (sameView && openFor) {
-        return { chatOpen: false, moduleOpen: false }
+        return { chatOpen: false, moduleOpen: false, botsOpen: false }
       }
       return {
         rightView: view,
         chatOpen: view === 'chat',
-        moduleOpen: view === 'modules'
+        moduleOpen: view === 'modules',
+        botsOpen: view === 'bots' || view === 'botTasks'
       }
     })
   },

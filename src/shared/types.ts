@@ -284,6 +284,14 @@ export interface ModuleRun {
   result?: string
   /** What the main chat asked the module to return, set via the `expect` argument of `start_module`. */
   expectResult?: string
+  /** Set on hidden `bot-task` runs: the group-chat bot that owns this background task. */
+  botId?: string
+  /** Group chat the task was assigned from (hidden `bot-task` runs only). */
+  groupId?: string
+  /** AI provider profile id the task runs with (resolved per-bot override; never the API key). */
+  profileId?: string
+  /** Per-bot model override applied on top of the profile (empty → profile model). */
+  modelOverride?: string
 }
 
 /** A message in a module run's subagent conversation transcript (read-only history). */
@@ -397,6 +405,22 @@ export type {
   ScheduleStatus,
   ScheduleTask
 } from './planner'
+
+export type {
+  BotGroupEvent,
+  BotMemoryEntry,
+  BotProfile,
+  BotTaskQueueItem,
+  BotUpsertInput,
+  GroupChatData,
+  GroupChatMeta,
+  GroupMessage,
+  GroupMessagePageOpts,
+  GroupPatch,
+  GroupSenderKind,
+  NewGroupInput,
+  TagPolicy
+} from './bots'
 
 export type {
   KanbanArchive,

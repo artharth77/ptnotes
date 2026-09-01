@@ -52,8 +52,9 @@ export function ModulePanel(): React.JSX.Element {
     setMenuOpen(true)
   }
 
-  const activeRuns = runs.filter((r) => !['done', 'failed', 'cancelled'].includes(r.status))
-  const doneRuns = runs.filter((r) => ['done', 'failed', 'cancelled'].includes(r.status))
+  const visibleRuns = runs.filter((r) => r.module.id !== 'bot-task')
+  const activeRuns = visibleRuns.filter((r) => !['done', 'failed', 'cancelled'].includes(r.status))
+  const doneRuns = visibleRuns.filter((r) => ['done', 'failed', 'cancelled'].includes(r.status))
 
   async function clearHistory(): Promise<void> {
     if (!activeProject) return

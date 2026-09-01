@@ -30,7 +30,11 @@ function loadDependencies(): string[] {
   }
 }
 
-export function registerSettingsIpc(service: PTNotesService, store: SettingsStore): void {
+export function registerSettingsIpc(
+  service: PTNotesService,
+  store: SettingsStore,
+  onRootChanged?: (newRoot: string) => void
+): void {
   ipcMain.handle('settings:get', async (): Promise<StorageSettings> => store.load())
 
   ipcMain.handle('settings:getAbout', async (): Promise<AboutInfo> => ({
@@ -62,6 +66,7 @@ export function registerSettingsIpc(service: PTNotesService, store: SettingsStor
     'settings:changeRoot',
     async (_e: IpcMainInvokeEvent, newRoot: string): Promise<StorageSettings> => {
       await service.changeRootDir(newRoot)
+      onRootChanged?.(service.root)
       return store.save({ rootDir: service.root })
     }
   )

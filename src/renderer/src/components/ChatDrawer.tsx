@@ -983,13 +983,24 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     setTab('planner')
   }
 
-  function openKanbanCard(cardTitle: string): void {
+  function openKanbanCard(ref: string): void {
     if (!activeProject || !kanban) return
-    const q = cardTitle.trim().toLowerCase()
-    const card = kanban.cards.find((c) => c.title.toLowerCase() === q)
+    const q = ref.trim().toLowerCase()
+    const card =
+      kanban.cards.find((c) => c.id.toLowerCase() === q) ??
+      kanban.cards.find((c) => c.title.toLowerCase() === q) ??
+      kanban.cards.find((c) => {
+        const t = c.title.toLowerCase()
+        return t.includes(q) || q.includes(t)
+      })
     if (!card) return
     setTab('kanban')
     setActiveKanbanCard(card.id)
+  }
+
+  function openFile(fileName: string): void {
+    if (!activeProject) return
+    void window.ptnotes.files.revealByName(activeProject, fileName)
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>): void {
@@ -1367,6 +1378,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                           onOpenSkill={(n) => openSkillEditor(n)}
                           onOpenPlan={(n) => void openSchedule(n)}
                           onOpenKanban={(t) => openKanbanCard(t)}
+                          onOpenFile={openFile}
                         />
                       </div>
                     )
@@ -1571,6 +1583,9 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
             {slashItems.map((c, i) => (
               <div
                 key={c.name}
+                ref={(el) => {
+                  if (el && i === slashIndex) el.scrollIntoView({ block: 'nearest' })
+                }}
                 className={`command-item ${i === slashIndex ? 'active' : ''}`}
                 onMouseDown={(e) => {
                   e.preventDefault()
@@ -1595,6 +1610,9 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
             {mentionItems.map((item, i) => (
               <div
                 key={typeof item === 'string' ? item : 'name' in item ? item.name : item.title}
+                ref={(el) => {
+                  if (el && i === mentionIndex) el.scrollIntoView({ block: 'nearest' })
+                }}
                 className={`mention-item ${i === mentionIndex ? 'active' : ''}`}
                 onMouseDown={(e) => {
                   e.preventDefault()
