@@ -1,5 +1,7 @@
 // ---- Bots group chat (shared between main, renderer and tests) ----
 
+import type { AskAnswer, AskQuestion } from './types'
+
 /** A bot identity. Global (app-wide); memories are scoped per project. */
 export interface BotProfile {
   /** Slug id used in @mentions (unique across the bot library). */
@@ -19,7 +21,55 @@ export interface BotProfile {
   updatedAt: number
 }
 
-export type GroupSenderKind = 'user' | 'bot' | 'system'
+export type GroupSenderKind = 'user' | 'bot' | 'system' | 'ask'
+
+/**
+ * Interactive `ask_user` payload, stored as the JSON `content` of a message with
+ * `senderKind: 'ask'`. No DB schema change — the payload lives in the message body.
+ */
+export interface GroupAskPayload {
+  questions: AskQuestion[]
+  status: 'pending' | 'answered' | 'cancelled'
+  /** Set once resolved; answers to `secret` questions are masked. */
+  answers?: AskAnswer[]
+}
+
+/** Safe parse of an ask message's content; null for anything that is not an ask payload. */
+export function parseGroupAsk(content: string): GroupAskPayload | null {
+  try {
+    const parsed = JSON.parse(content) as unknown
+    if (!parsed || typeof parsed !== 'object') return null
+    const p = parsed as { questions?: unknown; status?: unknown; answers?: unknown }
+    if (!Array.isArray(p.questions) || p.questions.length === 0) return null
+    if (p.status !== 'pending' && p.status !== 'answered' && p.status !== 'cancelled') return null
+    if (p.answers !== undefined && !Array.isArray(p.answers)) return null
+    return {
+      questions: p.questions as AskQuestion[],
+      status: p.status,
+      ...(Array.isArray(p.answers) ? { answers: p.answers as AskAnswer[] } : {})
+    }
+  } catch {
+    return null
+  }
+}
+
+/** One transcript line for an ask message (bot prompts, summaries, memory extraction). */
+export function formatAskTranscriptLine(m: GroupMessage): string {
+  const ask = parseGroupAsk(m.content)
+  if (!ask || ask.status === 'pending') {
+    return `[${m.senderName}] asked the user a question (waiting for the answer).`
+  }
+  if (ask.status === 'cancelled') {
+    return `[${m.senderName}] asked the user a question; the user dismissed it.`
+  }
+  const pairs = (ask.answers ?? [])
+    .map((a) => {
+      const q = ask.questions.find((x) => x.id === a.id)
+      return `${q?.question ?? a.id}: ${a.answer}`
+    })
+    .join(', ')
+  return `[${m.senderName}] asked the user a question; user answer: ${pairs}`
+}
 
 /** How many group messages the UI loads per page (latest page first, then older on scroll-up). */
 export const GROUP_CHAT_PAGE_SIZE = 50

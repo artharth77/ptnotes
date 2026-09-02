@@ -7,6 +7,7 @@ import type {
   BotProfile,
   BotTaskQueueItem,
   BotUpsertInput,
+  GroupAskPayload,
   GroupChatData,
   GroupChatMeta,
   GroupMessage,
@@ -19,9 +20,10 @@ import {
   GROUP_CHAT_PAGE_SIZE,
   MAX_GROUP_BOTS,
   MAX_MEMORY_ENTRIES,
-  mergeMemoryEntries
+  mergeMemoryEntries,
+  parseGroupAsk
 } from '@shared/bots'
-import type { AiTraceFile } from '@shared/types'
+import type { AiTraceFile, AskAnswer } from '@shared/types'
 
 function validateId(id: string): string {
   if (!id || id === '.' || id === '..' || id.includes('/') || id.includes('\\')) {
@@ -584,6 +586,65 @@ export class BotsStore {
     )
     db.prepare('UPDATE group_chats SET updated_at = ? WHERE group_id = ?').run(Date.now(), groupId)
     return full
+  }
+
+  getMessage(project: string, groupId: string, messageId: string): GroupMessage | null {
+    const row = this.projectDb(project)
+      .prepare('SELECT * FROM group_messages WHERE group_id = ? AND id = ?')
+      .get(validateId(groupId), messageId) as unknown as MessageRow | undefined
+    return row ? rowToMessage(row) : null
+  }
+
+  /**
+   * Transition an ask message (status answered/cancelled + optional answers) by
+   * merging the patch into its JSON payload. Returns null for unknown ids or
+   * messages whose content is not an ask payload (idempotent, broadcast-safe).
+   */
+  updateAskMessage(
+    project: string,
+    groupId: string,
+    messageId: string,
+    patch: { status: GroupAskPayload['status']; answers?: AskAnswer[] }
+  ): GroupMessage | null {
+    const msg = this.getMessage(project, groupId, messageId)
+    if (!msg) return null
+    const ask = parseGroupAsk(msg.content)
+    if (!ask) return null
+    const next: GroupAskPayload = {
+      ...ask,
+      status: patch.status,
+      ...(patch.answers ? { answers: patch.answers } : {})
+    }
+    const content = JSON.stringify(next)
+    this.projectDb(project)
+      .prepare('UPDATE group_messages SET content = ? WHERE id = ?')
+      .run(content, messageId)
+    return { ...msg, content }
+  }
+
+  /**
+   * Crash recovery: cancel every `pending` ask message whose id is not in
+   * `keepIds` (live pending asks; the in-memory registry dies with the app).
+   * Returns the updated messages with their group ids for broadcasting.
+   */
+  reconcileAsks(
+    project: string,
+    keepIds: Set<string>
+  ): { groupId: string; message: GroupMessage }[] {
+    const db = this.projectDb(project)
+    const rows = db
+      .prepare("SELECT * FROM group_messages WHERE sender_kind = 'ask' ORDER BY seq ASC")
+      .all() as unknown as MessageRow[]
+    const updated: { groupId: string; message: GroupMessage }[] = []
+    for (const row of rows) {
+      const msg = rowToMessage(row)
+      const ask = parseGroupAsk(msg.content)
+      if (!ask || ask.status !== 'pending' || keepIds.has(msg.id)) continue
+      const content = JSON.stringify({ ...ask, status: 'cancelled' } satisfies GroupAskPayload)
+      db.prepare('UPDATE group_messages SET content = ? WHERE id = ?').run(content, msg.id)
+      updated.push({ groupId: row.group_id, message: { ...msg, content } })
+    }
+    return updated
   }
 
   setSummary(project: string, groupId: string, summary: string, upToSeq: number): void {

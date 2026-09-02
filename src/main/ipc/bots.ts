@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import type { IpcMainInvokeEvent } from 'electron'
-import type { AiTraceFile, ModuleRun } from '@shared/types'
+import type { AiTraceFile, AskAnswer, ModuleRun } from '@shared/types'
 import type {
   BotProfile,
   BotUpsertInput,
@@ -49,6 +49,7 @@ export function registerBotsIpc(
     async (_e: IpcMainInvokeEvent, project: string): Promise<GroupChatMeta[]> => {
       // Drop task-queue rows left running by a previous crash/quit before showing anything.
       store.reconcileQueue(project)
+      manager.reconcileAsks(project)
       return store.listGroups(project)
     }
   )
@@ -83,6 +84,7 @@ export function registerBotsIpc(
     'bots:deleteGroup',
     async (_e: IpcMainInvokeEvent, project: string, groupId: string): Promise<boolean> => {
       manager.stop(project, groupId)
+      manager.cancelAsksForGroup(project, groupId)
       return store.deleteGroup(project, groupId)
     }
   )
@@ -91,6 +93,18 @@ export function registerBotsIpc(
     'bots:clearGroupMessages',
     async (_e: IpcMainInvokeEvent, project: string, groupId: string): Promise<void> =>
       manager.clearGroupHistory(project, groupId)
+  )
+
+  ipcMain.handle(
+    'bots:askResponse',
+    async (
+      _e: IpcMainInvokeEvent,
+      project: string,
+      groupId: string,
+      messageId: string,
+      answers: AskAnswer[],
+      cancelled: boolean
+    ): Promise<boolean> => manager.resolveBotAsk(project, groupId, messageId, answers, cancelled)
   )
 
   // ---- orchestration ----

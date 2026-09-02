@@ -5,6 +5,7 @@ import type {
   AIConfig,
   AIProviderConfig,
   AiTraceFile,
+  AskAnswer,
   AskResponse,
   BotGroupEvent,
   BotMemoryEntry,
@@ -326,6 +327,14 @@ const api = {
       ipcRenderer.invoke('bots:send', project, groupId, text),
     stop: (project: string, groupId: string): Promise<void> =>
       ipcRenderer.invoke('bots:stop', project, groupId),
+    askResponse: (
+      project: string,
+      groupId: string,
+      messageId: string,
+      answers: AskAnswer[],
+      cancelled: boolean
+    ): Promise<boolean> =>
+      ipcRenderer.invoke('bots:askResponse', project, groupId, messageId, answers, cancelled),
     listTasks: (project: string): Promise<ModuleRun[]> =>
       ipcRenderer.invoke('bots:listTasks', project),
     clearTaskHistory: (project: string, deleteOutputFiles?: boolean): Promise<number> =>

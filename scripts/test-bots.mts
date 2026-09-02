@@ -4,18 +4,26 @@ import assert from 'node:assert/strict'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import type { OpenAI } from 'openai'
-import type { AIProviderConfig, ModuleEvent, ModuleRun } from '../src/shared/types'
+import type {
+  AIProviderConfig,
+  AskAnswer,
+  AskQuestion,
+  ModuleEvent,
+  ModuleRun
+} from '../src/shared/types'
 import type { AIConfigStore } from '../src/main/ai/config'
 import type { BotProfile } from '../src/shared/bots'
 import {
   MAX_BOT_TURNS_PER_MESSAGE,
   extractBotTags,
+  formatAskTranscriptLine,
   formatGroupDateLabel,
   formatGroupTimestamp,
   linkifyBotMentions,
   MAX_GROUP_BOTS,
   mergeMemoryEntries,
   parseBotReply,
+  parseGroupAsk,
   planTagTriggers,
   resolveKanbanCardNames,
   splitMentionSegments
@@ -193,6 +201,72 @@ function ok(name: string): void {
   assert.equal(resolveKanbanCardNames('no tokens', cards), 'no tokens')
   assert.equal(resolveKanbanCardNames('kanban:abc123', []), 'kanban:abc123')
   ok('resolveKanbanCardNames: id → kanban:<title>, unknowns untouched')
+
+  // parseGroupAsk: valid / malformed / wrong shape
+  const validAsk = JSON.stringify({
+    questions: [{ id: 'q1', question: 'Proceed?' }],
+    status: 'pending'
+  })
+  const validPayload = parseGroupAsk(validAsk)
+  assert.equal(validPayload?.status, 'pending')
+  assert.equal(validPayload?.questions.length, 1)
+  assert.equal(validPayload?.answers, undefined)
+  assert.equal(parseGroupAsk('not json'), null)
+  assert.equal(parseGroupAsk(''), null)
+  assert.equal(parseGroupAsk('{}'), null)
+  assert.equal(parseGroupAsk('[]'), null)
+  assert.equal(parseGroupAsk(JSON.stringify({ questions: [], status: 'pending' })), null)
+  assert.equal(
+    parseGroupAsk(JSON.stringify({ questions: [{ id: 'q', question: 'x' }], status: 'bogus' })),
+    null
+  )
+  assert.equal(
+    parseGroupAsk(
+      JSON.stringify({
+        questions: [{ id: 'q', question: 'x' }],
+        status: 'pending',
+        answers: 'nope'
+      })
+    ),
+    null
+  )
+  ok('parseGroupAsk: valid / malformed / wrong shape')
+
+  // formatAskTranscriptLine: pending / answered / cancelled
+  const askMsgBase = {
+    id: 'm-ask',
+    seq: 1,
+    senderKind: 'ask' as const,
+    botId: 'bob',
+    senderName: 'Bob',
+    ts: 0
+  }
+  assert.match(
+    formatAskTranscriptLine({ ...askMsgBase, content: validAsk }),
+    /\[Bob\] asked the user a question \(waiting for the answer\)/
+  )
+  assert.match(
+    formatAskTranscriptLine({
+      ...askMsgBase,
+      content: JSON.stringify({
+        questions: [{ id: 'q1', question: 'Proceed?' }],
+        status: 'answered',
+        answers: [{ id: 'q1', answer: 'Yes, go ahead' }]
+      })
+    }),
+    /user answer: Proceed\?: Yes, go ahead/
+  )
+  assert.match(
+    formatAskTranscriptLine({
+      ...askMsgBase,
+      content: JSON.stringify({
+        questions: [{ id: 'q1', question: 'Proceed?' }],
+        status: 'cancelled'
+      })
+    }),
+    /the user dismissed it/
+  )
+  ok('formatAskTranscriptLine: pending / answered / cancelled')
 }
 
 // ---- BotsStore (SQLite) ----
@@ -408,6 +482,97 @@ let alice: BotProfile, bob: BotProfile
   assert.equal(page3?.hasMore, false)
   assert.equal(page3?.oldestSeq, 1)
   ok('messages: paged read (latest page, beforeSeq cursor, hasMore)')
+}
+
+// ---- ask messages (bot-task ask_user payloads) ----
+{
+  const g = store.createGroup(PROJECT, {
+    title: 'Ask store',
+    botIds: ['alice'],
+    leaderBotId: 'alice'
+  })
+  const ask = (status: string, extra = {}): string =>
+    JSON.stringify({
+      questions: [{ id: 'q1', question: 'Proceed?' }],
+      status,
+      ...extra
+    })
+  const kept = store.appendMessage(PROJECT, g.groupId, {
+    senderKind: 'ask',
+    botId: 'alice',
+    senderName: 'Alice',
+    content: ask('pending'),
+    ts: Date.now()
+  })
+  const stale = store.appendMessage(PROJECT, g.groupId, {
+    senderKind: 'ask',
+    botId: 'alice',
+    senderName: 'Alice',
+    content: ask('pending'),
+    ts: Date.now()
+  })
+  const done = store.appendMessage(PROJECT, g.groupId, {
+    senderKind: 'ask',
+    botId: 'alice',
+    senderName: 'Alice',
+    content: ask('answered', { answers: [{ id: 'q1', answer: 'Yes' }] }),
+    ts: Date.now()
+  })
+  const transitional = store.appendMessage(PROJECT, g.groupId, {
+    senderKind: 'ask',
+    botId: 'alice',
+    senderName: 'Alice',
+    content: ask('pending'),
+    ts: Date.now()
+  })
+
+  // updateAskMessage transitions
+  const answered = store.updateAskMessage(PROJECT, g.groupId, transitional.id, {
+    status: 'answered',
+    answers: [{ id: 'q1', answer: 'Blue' }]
+  })
+  assert.equal(parseGroupAsk(answered!.content)?.status, 'answered')
+  assert.deepEqual(parseGroupAsk(answered!.content)?.answers, [{ id: 'q1', answer: 'Blue' }])
+  const cancelledBack = store.updateAskMessage(PROJECT, g.groupId, transitional.id, {
+    status: 'cancelled'
+  })
+  assert.equal(parseGroupAsk(cancelledBack!.content)?.status, 'cancelled')
+  assert.equal(store.updateAskMessage(PROJECT, g.groupId, 'nope', { status: 'cancelled' }), null)
+  const plain = store.appendMessage(PROJECT, g.groupId, {
+    senderKind: 'bot',
+    botId: 'alice',
+    senderName: 'Alice',
+    content: 'not an ask',
+    ts: Date.now()
+  })
+  assert.equal(store.updateAskMessage(PROJECT, g.groupId, plain.id, { status: 'cancelled' }), null)
+  ok('updateAskMessage: transitions + null for unknown/non-ask ids')
+
+  // reconcileAsks cancels pending asks not in keepIds, keeps active/answered ones
+  const updated = store.reconcileAsks(PROJECT, new Set([kept.id]))
+  assert.deepEqual(
+    updated.map((u) => u.message.id),
+    [stale.id],
+    'only the stale pending ask'
+  )
+  assert.equal(updated[0].groupId, g.groupId)
+  assert.equal(parseGroupAsk(updated[0].message.content)?.status, 'cancelled')
+  assert.equal(
+    parseGroupAsk(store.getMessage(PROJECT, g.groupId, kept.id)!.content)?.status,
+    'pending',
+    'active ask kept'
+  )
+  assert.equal(
+    parseGroupAsk(store.getMessage(PROJECT, g.groupId, done.id)!.content)?.status,
+    'answered',
+    'answered ask untouched'
+  )
+  assert.equal(
+    parseGroupAsk(store.getMessage(PROJECT, g.groupId, transitional.id)!.content)?.status,
+    'cancelled',
+    'resolved ask untouched by reconcile'
+  )
+  ok('reconcileAsks: cancels pending asks not in keepIds')
 }
 
 // ---- GroupChatManager orchestration (fake AI) ----
@@ -884,6 +1049,214 @@ const group = store.createGroup(PROJECT, {
     'turn-cap notice posted'
   )
   ok('orchestration: turn cap notice')
+}
+
+// ---- ask_user bridge (bot tasks) ----
+
+interface AskFn {
+  (
+    run: ModuleRun,
+    req: { project: string; questions: AskQuestion[] }
+  ): Promise<{ answers: AskAnswer[]; cancelled?: boolean }>
+}
+
+/** Module-manager stub whose `start` fires the orchestrator's ask bridge and stores the promise. */
+function makeAskModuleManager(
+  startCalls: StartCall[],
+  asks: { runId: string; promise: Promise<{ answers: AskAnswer[]; cancelled?: boolean }> }[],
+  req: { project: string; questions: AskQuestion[] }
+): never {
+  return {
+    start: async (
+      _project: string,
+      _moduleId: string,
+      title: string,
+      prompt: string,
+      expect?: string,
+      opts?: { botId?: string; ask?: AskFn }
+    ) => {
+      startCalls.push({ title, prompt, expect, botId: opts?.botId })
+      if (opts?.ask) {
+        const runId = `run-ask-${asks.length + 1}`
+        const fakeRun: ModuleRun = {
+          runId,
+          module: { id: 'bot-task', name: 'Bob Task', description: '' },
+          project: PROJECT,
+          title,
+          prompt,
+          status: 'running',
+          steps: [],
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          botId: opts.botId,
+          groupId: group.groupId
+        }
+        const promise = opts.ask(fakeRun, req)
+        promise.catch(() => {}) // rejections are asserted explicitly; never unhandled
+        asks.push({ runId, promise })
+      }
+      return {
+        ok: true as const,
+        runId: `run-ask-${asks.length}`,
+        module: { id: 'bot-task', name: 'Bot Task', description: '' },
+        title
+      }
+    },
+    list: async () => [],
+    stop: () => {}
+  } as never
+}
+
+const assignReply = 'I need details.\n```assign\n{"title":"Ask task","task":"p"}\n```'
+
+// I: ask bridge — question + interactive ask message posted, resolveBotAsk unblocks the run
+{
+  const startCalls: StartCall[] = []
+  const asks: { runId: string; promise: Promise<{ answers: AskAnswer[]; cancelled?: boolean }> }[] =
+    []
+  const m8 = new GroupChatManager({
+    store,
+    configStore,
+    moduleManager: makeAskModuleManager(startCalls, asks, {
+      project: PROJECT,
+      questions: [{ id: 'color', question: 'Pick a color', options: ['Red', 'Blue'] }]
+    }),
+    broadcast: () => {},
+    clientFactory: makeFakeClient(new Map([['alice', [assignReply]]]))
+  })
+  await m8.send(PROJECT, group.groupId, 'Do the ask task')
+  const messages = store.listMessages(PROJECT, group.groupId)
+  const askMsg = [...messages].reverse().find((m) => m.senderKind === 'ask')
+  assert.ok(askMsg, 'interactive ask message posted')
+  assert.equal(askMsg.botId, 'alice', 'ask attributed to the task owner bot')
+  assert.equal(askMsg.taskId, asks[0].runId, 'ask message references the run')
+  const payload = parseGroupAsk(askMsg.content)
+  assert.equal(payload?.status, 'pending')
+  assert.deepEqual(
+    payload?.questions.map((q) => q.id),
+    ['color']
+  )
+  const qMsg = messages.find(
+    (m) => m.senderKind === 'bot' && m.content.includes('I need your input to continue')
+  )
+  assert.ok(qMsg, 'question text posted as a bot message')
+  assert.equal(
+    m8.resolveBotAsk(PROJECT, group.groupId, 'unknown-id', [], false),
+    false,
+    'unknown ask id → false'
+  )
+  assert.equal(
+    m8.resolveBotAsk(PROJECT, group.groupId, askMsg.id, [{ id: 'color', answer: 'Blue' }], false),
+    true
+  )
+  assert.deepEqual(await asks[0].promise, { answers: [{ id: 'color', answer: 'Blue' }] })
+  const stored = store.getMessage(PROJECT, group.groupId, askMsg.id)
+  assert.equal(parseGroupAsk(stored!.content)?.status, 'answered')
+  assert.deepEqual(parseGroupAsk(stored!.content)?.answers, [{ id: 'color', answer: 'Blue' }])
+  assert.equal(
+    m8.resolveBotAsk(PROJECT, group.groupId, askMsg.id, [], false),
+    false,
+    'double resolve → false'
+  )
+  ok('orchestration: ask_user surfaces in chat + resolveBotAsk unblocks the run')
+}
+
+// J: secret questions rejected up-front (no message posted, immediate error)
+{
+  const startCalls: StartCall[] = []
+  const asks: { runId: string; promise: Promise<{ answers: AskAnswer[]; cancelled?: boolean }> }[] =
+    []
+  // drain leftover running tasks so the single-flight check lets alice start a new one
+  for (const q of store.listQueue(PROJECT)) {
+    if (q.botId === 'alice') store.finishTask(PROJECT, q.queueId)
+  }
+  const g = store.createGroup(PROJECT, {
+    title: 'Ask secret',
+    botIds: ['alice'],
+    leaderBotId: 'alice'
+  })
+  const m9 = new GroupChatManager({
+    store,
+    configStore,
+    moduleManager: makeAskModuleManager(startCalls, asks, {
+      project: PROJECT,
+      questions: [{ id: 'pw', question: 'Type the password', secret: true }]
+    }),
+    broadcast: () => {},
+    clientFactory: makeFakeClient(new Map([['alice', [assignReply]]]))
+  })
+  await m9.send(PROJECT, g.groupId, 'go')
+  assert.equal(asks.length, 1, 'the stub fired the ask bridge')
+  await assert.rejects(asks[0].promise, /secret/i)
+  const askMsgs = store.listMessages(PROJECT, g.groupId).filter((m) => m.senderKind === 'ask')
+  assert.equal(askMsgs.length, 0, 'no ask message posted for a secret ask')
+  ok('orchestration: secret questions rejected up-front')
+}
+
+// K: clearGroupHistory cancels a pending ask
+{
+  const startCalls: StartCall[] = []
+  const asks: { runId: string; promise: Promise<{ answers: AskAnswer[]; cancelled?: boolean }> }[] =
+    []
+  // drain leftover running tasks so the single-flight check lets alice start a new one
+  for (const q of store.listQueue(PROJECT)) {
+    if (q.botId === 'alice') store.finishTask(PROJECT, q.queueId)
+  }
+  const g = store.createGroup(PROJECT, {
+    title: 'Ask clear',
+    botIds: ['alice'],
+    leaderBotId: 'alice'
+  })
+  const m10 = new GroupChatManager({
+    store,
+    configStore,
+    moduleManager: makeAskModuleManager(startCalls, asks, {
+      project: PROJECT,
+      questions: [{ id: 'q1', question: 'Proceed?' }]
+    }),
+    broadcast: () => {},
+    clientFactory: makeFakeClient(new Map([['alice', [assignReply]]]))
+  })
+  await m10.send(PROJECT, g.groupId, 'go')
+  assert.equal(asks.length, 1)
+  await m10.clearGroupHistory(PROJECT, g.groupId)
+  assert.deepEqual(await asks[0].promise, { answers: [], cancelled: true })
+  assert.equal(store.listMessages(PROJECT, g.groupId).length, 0, 'messages cleared')
+  ok('orchestration: clear history cancels a pending ask')
+}
+
+// L: closeAll cancels pending asks and marks the message cancelled
+{
+  const startCalls: StartCall[] = []
+  const asks: { runId: string; promise: Promise<{ answers: AskAnswer[]; cancelled?: boolean }> }[] =
+    []
+  // drain leftover running tasks so the single-flight check lets alice start a new one
+  for (const q of store.listQueue(PROJECT)) {
+    if (q.botId === 'alice') store.finishTask(PROJECT, q.queueId)
+  }
+  const g = store.createGroup(PROJECT, {
+    title: 'Ask close',
+    botIds: ['alice'],
+    leaderBotId: 'alice'
+  })
+  const m11 = new GroupChatManager({
+    store,
+    configStore,
+    moduleManager: makeAskModuleManager(startCalls, asks, {
+      project: PROJECT,
+      questions: [{ id: 'q1', question: 'Proceed?' }]
+    }),
+    broadcast: () => {},
+    clientFactory: makeFakeClient(new Map([['alice', [assignReply]]]))
+  })
+  await m11.send(PROJECT, g.groupId, 'go')
+  const askMsg = store.listMessages(PROJECT, g.groupId).find((m) => m.senderKind === 'ask')
+  assert.ok(askMsg)
+  m11.closeAll()
+  assert.deepEqual(await asks[0].promise, { answers: [], cancelled: true })
+  const stored = store.getMessage(PROJECT, g.groupId, askMsg.id)
+  assert.equal(parseGroupAsk(stored!.content)?.status, 'cancelled', 'message marked cancelled')
+  ok('orchestration: closeAll cancels pending asks')
 }
 
 console.log(`\nbots tests passed (${passed} groups)`)

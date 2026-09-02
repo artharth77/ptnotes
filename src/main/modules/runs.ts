@@ -17,7 +17,7 @@ import type { SettingsStore } from '../settings'
 import { isLocalEndpoint } from '../ai/chatSession'
 import { ModuleRegistry } from './registry'
 import { ModuleRunner } from './runner'
-import type { ModuleNotifyEvent } from './runner'
+import type { BotAskHandler, ModuleNotifyEvent } from './runner'
 
 export type ModuleEventBroadcaster = (evt: ModuleEvent) => void
 
@@ -79,6 +79,8 @@ export class ModuleRunManager {
       profileId?: string
       modelOverride?: string
       displayName?: string
+      /** ask_user bridge for bot-task runs (a function only — never persisted/broadcast). */
+      ask?: BotAskHandler
     }
   ): Promise<ModuleStartResult> {
     const def = this.registry.get(moduleId)
@@ -162,7 +164,8 @@ export class ModuleRunManager {
           ? () => Promise.resolve(cfg)
           : () => this.configStore.load(),
       createClientFn: this.clientFn,
-      notify: (snapshot, evt) => this.handleUpdate(snapshot, evt)
+      notify: (snapshot, evt) => this.handleUpdate(snapshot, evt),
+      ...(botOpts?.ask ? { ask: botOpts.ask } : {})
     })
     this.active.set(runId, runner)
 

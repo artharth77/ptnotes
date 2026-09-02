@@ -1,9 +1,23 @@
-import type { AIProviderConfig, ModuleEvent, ModuleRun } from '@shared/types'
-import type { BotGroupEvent, BotProfile, GroupChatData, GroupMessage } from '@shared/bots'
+import type {
+  AIProviderConfig,
+  AskAnswer,
+  AskQuestion,
+  AskRequest,
+  ModuleEvent,
+  ModuleRun
+} from '@shared/types'
+import type {
+  BotGroupEvent,
+  BotProfile,
+  GroupAskPayload,
+  GroupChatData,
+  GroupMessage
+} from '@shared/bots'
 import {
   MAX_BOT_TURNS_PER_MESSAGE,
   SUMMARY_KEEP_RECENT,
   SUMMARY_THRESHOLD_CHARS,
+  formatAskTranscriptLine,
   parseBotReply,
   planTagTriggers,
   type TagPolicy
@@ -12,6 +26,7 @@ import { createClient } from '../ai/client'
 import { AiTraceRecorder } from '../ai/trace'
 import type { AIConfigStore } from '../ai/config'
 import type { ModuleRunManager } from '../modules/runs'
+import type { AskResult } from '../modules/runner'
 import type { BotsStore } from './db'
 import type OpenAI from 'openai'
 
@@ -58,11 +73,38 @@ interface SessionDeps {
   clientFactory?: (cfg: AIProviderConfig) => OpenAI
 }
 
+/** A pending ask_user: the promise the bot-task run is blocked on, keyed by message id. */
+interface PendingAsk {
+  project: string
+  groupId: string
+  runId: string
+  questions: AskQuestion[]
+  resolve: (res: AskResult) => void
+}
+
+/** Session deps: the manager's deps plus the ask bridge it injects itself. */
+interface SessionDepsWithAsk extends SessionDeps {
+  askBotUser: (
+    project: string,
+    groupId: string,
+    run: ModuleRun,
+    req: Omit<AskRequest, 'id'>
+  ) => Promise<AskResult>
+}
+
 export class GroupChatManager {
   private readonly sessions = new Map<string, GroupSession>()
   private readonly reportedRuns = new Set<string>()
+  /** Live pending asks keyed by their ask message id (several may wait at once). */
+  private readonly pendingAsks = new Map<string, PendingAsk>()
+  private readonly sessionDeps: SessionDepsWithAsk
 
-  constructor(private readonly deps: SessionDeps) {}
+  constructor(private readonly deps: SessionDeps) {
+    this.sessionDeps = {
+      ...deps,
+      askBotUser: (project, groupId, run, req) => this.handleBotAsk(project, groupId, run, req)
+    }
+  }
 
   static key(project: string, groupId: string): string {
     return `${project}::${groupId}`
@@ -91,6 +133,9 @@ export class GroupChatManager {
       this.reportedRuns.add(run.runId)
       this.deps.moduleManager.stop(run.runId)
     }
+    // Runs cancelled above never reach the terminal-event ask cleanup (their runIds
+    // are in reportedRuns), so cancel this group's pending asks directly.
+    this.cancelAsksForGroup(project, groupId)
     await this.deps.store.clearGroupMessages(project, groupId)
   }
 
@@ -98,6 +143,9 @@ export class GroupChatManager {
   closeAll(): void {
     for (const s of this.sessions.values()) s.stop()
     this.sessions.clear()
+    for (const [messageId, entry] of [...this.pendingAsks]) {
+      this.cancelAskEntry(entry.project, entry.groupId, messageId, entry)
+    }
   }
 
   /**
@@ -109,6 +157,9 @@ export class GroupChatManager {
     if (!run.botId || !run.groupId) return
     if (!TERMINAL_STATUSES.has(run.status)) return
     if (evt.type !== 'done' && evt.type !== 'error' && evt.type !== 'status') return
+    // A terminal run cannot still be waiting on an ask — cancel it before the
+    // report bookkeeping (which may suppress this run entirely).
+    this.cancelAsksForRun(run.project, run.runId)
     if (this.reportedRuns.has(run.runId)) return
     this.reportedRuns.add(run.runId)
     if (this.reportedRuns.size > 1000) this.reportedRuns.clear()
@@ -116,11 +167,151 @@ export class GroupChatManager {
     session.enqueueTaskReport(run)
   }
 
+  // ---- ask_user bridge (bot tasks) ----
+
+  /**
+   * Surface a bot task's `ask_user` call in the group chat: post the question as a
+   * bot message plus an interactive ask message, then wait (no timeout) for the
+   * user's answer via `bots:askResponse`.
+   */
+  private async handleBotAsk(
+    project: string,
+    groupId: string,
+    run: ModuleRun,
+    req: Omit<AskRequest, 'id'>
+  ): Promise<AskResult> {
+    if (req.questions.some((q) => q.secret)) {
+      throw new Error('ask_user secret questions are not supported in bot tasks.')
+    }
+    const bot = run.botId ? this.deps.store.getBot(run.botId) : null
+    const botName = bot?.name ?? run.module.name
+    const group = this.deps.store.readGroup(project, groupId)
+    if (!group) throw new Error('Group chat not found.')
+    const isLeader = !!bot && bot.id === group.leaderBotId
+
+    const questionText = `❓ I need your input to continue:\n${req.questions
+      .map((q, i) => {
+        const opts = q.options?.length ? `\n   - ${q.options.join('\n   - ')}` : ''
+        return `${i + 1}. **${q.question}**${opts}`
+      })
+      .join('\n')}`
+    const questionMsg = this.deps.store.appendMessage(project, groupId, {
+      senderKind: 'bot',
+      ...(bot ? { botId: bot.id } : {}),
+      senderName: botName,
+      ...(bot?.role ? { role: bot.role } : {}),
+      ...(isLeader ? { isLeader: true } : {}),
+      content: questionText,
+      ts: Date.now(),
+      taskId: run.runId
+    })
+    this.deps.broadcast({
+      type: 'message',
+      project,
+      groupId,
+      message: questionMsg
+    })
+
+    const askMsg = this.deps.store.appendMessage(project, groupId, {
+      senderKind: 'ask',
+      ...(bot ? { botId: bot.id } : {}),
+      senderName: botName,
+      ...(bot?.role ? { role: bot.role } : {}),
+      ...(isLeader ? { isLeader: true } : {}),
+      content: JSON.stringify({
+        questions: req.questions,
+        status: 'pending'
+      } satisfies GroupAskPayload),
+      ts: Date.now(),
+      taskId: run.runId
+    })
+
+    return await new Promise<AskResult>((resolve) => {
+      this.pendingAsks.set(askMsg.id, {
+        project,
+        groupId,
+        runId: run.runId,
+        questions: req.questions,
+        resolve
+      })
+    })
+  }
+
+  /** Resolve a pending ask from the renderer (`bots:askResponse`). Unknown id → false. */
+  resolveBotAsk(
+    project: string,
+    groupId: string,
+    messageId: string,
+    answers: AskAnswer[],
+    cancelled: boolean
+  ): boolean {
+    const entry = this.pendingAsks.get(messageId)
+    if (!entry) return false
+    this.pendingAsks.delete(messageId)
+    // Persisted payload masks secret answers (defense-in-depth; secret asks are
+    // rejected up-front, so this only guards against legacy pending rows).
+    const secretIds = new Set(entry.questions.filter((q) => q.secret).map((q) => q.id))
+    const persisted = answers.map((a) => (secretIds.has(a.id) ? { ...a, answer: '••••••' } : a))
+    const msg = this.deps.store.updateAskMessage(project, groupId, messageId, {
+      status: cancelled ? 'cancelled' : 'answered',
+      ...(cancelled ? {} : { answers: persisted })
+    })
+    if (msg) {
+      this.deps.broadcast({ type: 'message', project, groupId, message: msg })
+    }
+    entry.resolve({ answers, ...(cancelled ? { cancelled: true } : {}) })
+    return true
+  }
+
+  /** Cancel every pending ask of a group (delete-group path; rows are removed anyway). */
+  cancelAsksForGroup(project: string, groupId: string): void {
+    for (const [messageId, entry] of [...this.pendingAsks]) {
+      if (entry.project !== project || entry.groupId !== groupId) continue
+      this.cancelAskEntry(project, groupId, messageId, entry)
+    }
+  }
+
+  /** Cancel pending asks that belong to one run (stop / terminal status). */
+  private cancelAsksForRun(project: string, runId: string): void {
+    for (const [messageId, entry] of [...this.pendingAsks]) {
+      if (entry.project !== project || entry.runId !== runId) continue
+      this.cancelAskEntry(entry.project, entry.groupId, messageId, entry)
+    }
+  }
+
+  /** Mark the ask message cancelled (when its row still exists), broadcast, unblock the run. */
+  private cancelAskEntry(
+    project: string,
+    groupId: string,
+    messageId: string,
+    entry: PendingAsk
+  ): void {
+    this.pendingAsks.delete(messageId)
+    const msg = this.deps.store.updateAskMessage(project, groupId, messageId, {
+      status: 'cancelled'
+    })
+    if (msg) {
+      this.deps.broadcast({ type: 'message', project, groupId, message: msg })
+    }
+    entry.resolve({ answers: [], cancelled: true })
+  }
+
+  /** Cancel stale pending ask rows after a restart (live asks are exempt). */
+  reconcileAsks(project: string): void {
+    const keepIds = new Set<string>()
+    for (const [messageId, entry] of this.pendingAsks) {
+      if (entry.project === project) keepIds.add(messageId)
+    }
+    for (const { groupId, message } of this.deps.store.reconcileAsks(project, keepIds)) {
+      this.deps.broadcast({ type: 'message', project, groupId, message })
+    }
+  }
+
   private sessionFor(project: string, groupId: string): GroupSession {
     const key = GroupChatManager.key(project, groupId)
     let session = this.sessions.get(key)
     if (!session) {
-      session = new GroupSession(this.deps, project, groupId)
+      session = new GroupSession(this.sessionDeps, project, groupId)
       this.sessions.set(key, session)
     }
     return session
@@ -135,7 +326,7 @@ class GroupSession {
   private trace: AiTraceRecorder | null = null
 
   constructor(
-    private readonly deps: SessionDeps,
+    private readonly deps: SessionDepsWithAsk,
     readonly project: string,
     readonly groupId: string
   ) {}
@@ -394,7 +585,8 @@ class GroupSession {
         groupId: this.groupId,
         displayName: `${bot.name} Task`,
         ...(bot.profileId ? { profileId: bot.profileId } : {}),
-        ...(bot.model ? { modelOverride: bot.model } : {})
+        ...(bot.model ? { modelOverride: bot.model } : {}),
+        ask: (run, req) => this.deps.askBotUser(this.project, this.groupId, run, req)
       }
     )
     if (res.ok) {
@@ -723,6 +915,7 @@ Current date: ${new Date().toISOString().slice(0, 10)}.`
 function formatTranscriptLine(m: GroupMessage): string {
   if (m.senderKind === 'user') return `You: ${m.content}`
   if (m.senderKind === 'system') return `[system] ${m.content}`
+  if (m.senderKind === 'ask') return formatAskTranscriptLine(m)
   return `[${m.senderName}${m.role ? ` (${m.role})` : ''}]: ${m.content}`
 }
 
