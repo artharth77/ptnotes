@@ -34,6 +34,7 @@ export function BotsSettingsPane(): React.JSX.Element {
   const saveBotProfile = useAppStore((s) => s.saveBotProfile)
   const deleteBotProfile = useAppStore((s) => s.deleteBotProfile)
   const [profiles, setProfiles] = useState<AIProfile[]>([])
+  const [userName, setUserName] = useState('')
   const [editing, setEditing] = useState<FormState | null>(null)
   const [memories, setMemories] = useState<BotMemoryEntry[]>([])
   const [error, setError] = useState('')
@@ -55,6 +56,7 @@ export function BotsSettingsPane(): React.JSX.Element {
   useEffect(() => {
     void loadBotProfiles()
     void window.ptnotes.ai.getProfiles().then((cfg) => setProfiles(cfg.profiles))
+    void window.ptnotes.bots.getUserName().then(setUserName)
   }, [loadBotProfiles])
 
   useEffect(() => {
@@ -87,6 +89,11 @@ export function BotsSettingsPane(): React.JSX.Element {
     } catch (e) {
       setError(friendlyError(e))
     }
+  }
+
+  async function saveUserName(): Promise<void> {
+    const saved = await window.ptnotes.bots.setUserName(userName)
+    setUserName(saved)
   }
 
   async function openDeleteConfirm(id: string): Promise<void> {
@@ -122,8 +129,18 @@ export function BotsSettingsPane(): React.JSX.Element {
       <p className="hint">
         Bots are global identities you can add to group chats. Each bot has a role, an optional role
         description (shared with the other bots in the group), a persona and an optional model
-        override; memories are scoped per project.
+        override; memories are scoped per project. Your name below tells the bots what to call you.
       </p>
+      <label className="form-label">
+        Your name (optional)
+        <input
+          className="form-input"
+          value={userName}
+          placeholder="Bots will address you by this name (e.g. Alex)"
+          onChange={(e) => setUserName(e.target.value)}
+          onBlur={() => void saveUserName()}
+        />
+      </label>
       <div className="bots-lib-header">
         <span className="form-label">Bot library</span>
         <button

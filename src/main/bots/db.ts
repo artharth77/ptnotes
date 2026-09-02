@@ -216,6 +216,10 @@ export class BotsStore {
     if (!cols.some((c) => c.name === 'role_details')) {
       db.exec('ALTER TABLE bots ADD COLUMN role_details TEXT')
     }
+    db.exec(`CREATE TABLE IF NOT EXISTS bot_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );`)
     this.botsDb = db
     return db
   }
@@ -269,6 +273,24 @@ export class BotsStore {
       `INSERT INTO bots (id, name, role, role_details, persona, profile_id, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(id, name, role, roleDetails, persona, profileId, model, now, now)
     return this.getBot(id)!
+  }
+
+  getUserName(): string {
+    const row = this.globalDb()
+      .prepare('SELECT value FROM bot_settings WHERE key = ?')
+      .get('user_name') as unknown as { value: string } | undefined
+    return row?.value ?? ''
+  }
+
+  setUserName(name: string): string {
+    const value = String(name ?? '').trim()
+    this.globalDb()
+      .prepare(
+        `INSERT INTO bot_settings (key, value) VALUES ('user_name', ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+      )
+      .run(value)
+    return value
   }
 
   /** Delete a bot and remove it from every group roster (leader falls back to the first remaining member). */

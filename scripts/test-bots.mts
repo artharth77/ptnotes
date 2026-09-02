@@ -294,6 +294,15 @@ let alice: BotProfile, bob: BotProfile
   )
   ok('bots: slug ids + uniqueness + list')
 
+  store.setUserName('  Ada Lovelace  ')
+  assert.equal(store.getUserName(), 'Ada Lovelace', 'user name trimmed')
+  const store2 = new BotsStore(() => join(ROOT, 'root'), join(ROOT, 'userdata'))
+  assert.equal(store2.getUserName(), 'Ada Lovelace', 'user name persists in bots.db')
+  store2.setUserName('')
+  assert.equal(store.getUserName(), '', 'empty user name stored and read back')
+  store.setUserName('Ada Lovelace')
+  ok('bots: user name setting persists (bot_settings)')
+
   const group = store.createGroup(PROJECT, {
     title: 'Launch plan',
     botIds: [alice.id, bob.id, carol.id],
@@ -667,6 +676,7 @@ const group = store.createGroup(PROJECT, {
 // A: untagged message → leader acts → leader tags bob → bob assigns a task
 {
   const startCalls: StartCall[] = []
+  const turnCalls: { messages: { role: string; content: string }[] }[] = []
   const m2 = new GroupChatManager({
     store,
     configStore,
@@ -681,10 +691,15 @@ const group = store.createGroup(PROJECT, {
             'On it.\n```assign\n{"title":"Market analysis","task":"Research the market for note:<name>"}\n```'
           ]
         ]
-      ])
+      ]),
+      turnCalls
     )
   })
   await m2.send(PROJECT, group.groupId, 'Prepare a market analysis')
+  assert.ok(
+    turnCalls[0]?.messages[0]?.content.includes('Their name is Ada Lovelace'),
+    'user name injected into group-turn system prompt'
+  )
   const messages = store.listMessages(PROJECT, group.groupId)
   const names = messages.map((m) => `${m.senderKind}:${m.botId ?? m.senderName}`)
   assert.ok(names.includes('user:You'))
@@ -868,6 +883,7 @@ const group = store.createGroup(PROJECT, {
   const sys = reportCall.messages.find((m) => m.role === 'system')!.content
   const user = reportCall.messages.find((m) => m.role === 'user')!.content
   assert.ok(sys.includes('Be friendly and precise'), 'persona included in report prompt')
+  assert.ok(sys.includes('Their name is Ada Lovelace'), 'user name injected into report prompt')
   assert.ok(user.includes('On it, researching now.'), 'pre-task message included for language')
   assert.ok(
     user.includes('Your last message to the group before starting this task'),

@@ -8,6 +8,7 @@
 
 - **AI: `add_kanban_comment` tool**: the assistant can now add a comment to an existing kanban card (matched by title, case-insensitive) — progress notes, questions, decisions — instead of appending free-form text to the card description. The comment is written through the dedicated comment service path (the same one the card modal uses, attributed to you), so it coexists with concurrent card field edits; the board refreshes after the call, and the system prompt tells the model when to use it.
 - **Bots: role details**: each bot in Settings ▸ Bots can have an optional **Role details** description (what the role does, e.g. “Owns the schedule, breaks goals into tasks, tracks progress”). It is stored in the bot library database (existing databases migrate automatically) and appended to the group roster line in every bot's system prompt, so bots know each member's responsibilities when deciding who to involve.
+- **Bots: your name**: Settings ▸ Bots has a global **Your name (optional)** input — when set, every bot's system prompt (group-chat turns and background-task result reports) is told your name and to address you by it when speaking to you. The value is stored in `userData/bots.db` (`bot_settings` key/value table), saved on blur, and bots simply fall back to "You" when it is empty.
 - **Group chat: jump-to-bottom button**: when you scroll up through the history (more than ~80px from the latest message), a chevron button appears above the input; clicking it smoothly scrolls back to the bottom, and it hides again once you're at the bottom.
 
 ### Changed

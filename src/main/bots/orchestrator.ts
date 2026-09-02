@@ -653,7 +653,7 @@ class GroupSession {
 ${bot.persona ? `\nYOUR PERSONA / STANDING INSTRUCTIONS:\n${bot.persona}\n` : ''}
 Group members:
 ${roster}
-The user appears as "You".
+${this.userLine()}
 
 You have no tools. Your background task just completed and you are posting the result report to the group. Do NOT declare new work, do NOT use \`\`\`assign blocks, do NOT mention other bots. Keep it concise (a few sentences or a short list). Write your reply in the language of the original task request (the user's chat), regardless of the Result text's language.${originMsg ? ' Your last chat message before the task started (included below) is the best language reference — match its language.' : ''}
 ${LINK_RULE}`
@@ -852,6 +852,13 @@ Post your result report to the group now.`
     return lines.length > 0 ? lines.join('\n') : '(the conversation starts now)'
   }
 
+  private userLine(): string {
+    const name = this.deps.store.getUserName()
+    return name
+      ? `The user participates as "You". Their name is ${name} — address them by name when speaking to them.`
+      : 'The user participates as "You".'
+  }
+
   private buildSystemPrompt(
     bot: BotProfile,
     group: GroupChatData,
@@ -880,7 +887,7 @@ ${isLeader ? 'You are the GROUP LEADER: messages from the user that do not @ment
 ${bot.persona ? `\nYOUR PERSONA / STANDING INSTRUCTIONS:\n${bot.persona}\n` : ''}
 GROUP MEMBERS (only these exist; mention them with @id):
 ${roster}
-The user participates as "You".
+${this.userLine()}
 
 RULES:
 - You have NO tools in this chat. All real work (files, notes, kanban, schedules, research, documents) happens through background tasks.

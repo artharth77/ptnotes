@@ -303,6 +303,8 @@ const api = {
     saveBot: (input: BotUpsertInput): Promise<BotProfile[]> =>
       ipcRenderer.invoke('bots:saveBot', input),
     deleteBot: (id: string): Promise<boolean> => ipcRenderer.invoke('bots:deleteBot', id),
+    getUserName: (): Promise<string> => ipcRenderer.invoke('bots:getUserName'),
+    setUserName: (name: string): Promise<string> => ipcRenderer.invoke('bots:setUserName', name),
     listMemories: (project: string, botId?: string): Promise<BotMemoryEntry[]> =>
       ipcRenderer.invoke('bots:listMemories', project, botId),
     deleteMemory: (project: string, botId: string, memoryId: string): Promise<boolean> =>

@@ -31,6 +31,12 @@ export function registerBotsIpc(
     return store.deleteBot(id)
   })
 
+  ipcMain.handle('bots:getUserName', async (): Promise<string> => store.getUserName())
+
+  ipcMain.handle('bots:setUserName', async (_e: IpcMainInvokeEvent, name: string) =>
+    store.setUserName(String(name ?? ''))
+  )
+
   ipcMain.handle(
     'bots:listMemories',
     async (_e: IpcMainInvokeEvent, project: string, botId?: string) =>
