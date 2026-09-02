@@ -985,6 +985,7 @@ function GroupModal({
   const createBotGroup = useAppStore((s) => s.createBotGroup)
   const updateBotGroup = useAppStore((s) => s.updateBotGroup)
   const deleteBotGroup = useAppStore((s) => s.deleteBotGroup)
+  const clearBotGroupHistory = useAppStore((s) => s.clearBotGroupHistory)
   const openSettings = useAppStore((s) => s.openSettings)
   const [title, setTitle] = useState(group?.title ?? '')
   // Existing rosters can contain ids of since-deleted bots (deleteBot only scrubs open
@@ -995,6 +996,7 @@ function GroupModal({
   const [leaderBotId, setLeaderBotId] = useState(group?.leaderBotId ?? '')
   const [error, setError] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [confirmClear, setConfirmClear] = useState(false)
   const [saving, setSaving] = useState(false)
 
   function toggleBot(id: string): void {
@@ -1105,22 +1107,40 @@ function GroupModal({
       {error && <div className="form-error">{error}</div>}
       <div className="modal-actions gc-modal-actions">
         {mode === 'edit' && group && (
-          <button
-            className="btn danger"
-            disabled={saving}
-            onClick={() => {
-              if (!confirmDelete) {
-                setConfirmDelete(true)
-                return
-              }
-              void (async () => {
-                await deleteBotGroup(project, group.groupId)
-                onClose()
-              })()
-            }}
-          >
-            {confirmDelete ? 'Really delete?' : 'Delete group'}
-          </button>
+          <>
+            <button
+              className="btn danger"
+              disabled={saving}
+              onClick={() => {
+                if (!confirmClear) {
+                  setConfirmClear(true)
+                  return
+                }
+                void (async () => {
+                  await clearBotGroupHistory(project, group.groupId)
+                  onClose()
+                })()
+              }}
+            >
+              {confirmClear ? 'Really clear?' : 'Clear history'}
+            </button>
+            <button
+              className="btn danger"
+              disabled={saving}
+              onClick={() => {
+                if (!confirmDelete) {
+                  setConfirmDelete(true)
+                  return
+                }
+                void (async () => {
+                  await deleteBotGroup(project, group.groupId)
+                  onClose()
+                })()
+              }}
+            >
+              {confirmDelete ? 'Really delete?' : 'Delete group'}
+            </button>
+          </>
         )}
         <button className="btn" onClick={onClose}>
           Cancel

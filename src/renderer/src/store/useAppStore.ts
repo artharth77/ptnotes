@@ -173,6 +173,7 @@ interface AppState {
   createBotGroup: (project: string, input: NewGroupInput) => Promise<GroupChatMeta>
   updateBotGroup: (project: string, groupId: string, patch: GroupPatch) => Promise<void>
   deleteBotGroup: (project: string, groupId: string) => Promise<void>
+  clearBotGroupHistory: (project: string, groupId: string) => Promise<void>
   sendBotGroupMessage: (text: string) => Promise<void>
   stopBotGroup: () => Promise<void>
   applyBotGroupEvent: (evt: BotGroupEvent) => void
@@ -1059,6 +1060,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     })
     const current = get().activeBotGroupId[project]
     if (current) await get().openBotGroup(project, current)
+  },
+
+  async clearBotGroupHistory(project, groupId) {
+    await window.ptnotes.bots.clearGroupMessages(project, groupId)
+    set((s) => {
+      const messages = { ...s.botGroupMessages }
+      delete messages[groupId]
+      const windows = { ...s.botGroupWindowMeta }
+      delete windows[groupId]
+      return { botGroupMessages: messages, botGroupWindowMeta: windows }
+    })
+    await get().loadBotGroups(project)
+    if (get().activeBotGroupId[project] === groupId) await get().openBotGroup(project, groupId)
   },
 
   async sendBotGroupMessage(text) {

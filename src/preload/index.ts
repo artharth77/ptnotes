@@ -320,6 +320,8 @@ const api = {
       ipcRenderer.invoke('bots:updateGroup', project, groupId, patch),
     deleteGroup: (project: string, groupId: string): Promise<boolean> =>
       ipcRenderer.invoke('bots:deleteGroup', project, groupId),
+    clearGroupMessages: (project: string, groupId: string): Promise<void> =>
+      ipcRenderer.invoke('bots:clearGroupMessages', project, groupId),
     send: (project: string, groupId: string, text: string): Promise<void> =>
       ipcRenderer.invoke('bots:send', project, groupId, text),
     stop: (project: string, groupId: string): Promise<void> =>

@@ -468,6 +468,16 @@ export class BotsStore {
     return info.changes > 0
   }
 
+  async clearGroupMessages(project: string, groupId: string): Promise<void> {
+    const db = this.projectDb(project)
+    const clean = validateId(groupId)
+    db.prepare('DELETE FROM group_messages WHERE group_id = ?').run(clean)
+    db.prepare(
+      'UPDATE group_chats SET summary = NULL, summarized_up_to_seq = NULL, updated_at = ? WHERE group_id = ?'
+    ).run(Date.now(), clean)
+    await this.deleteGroupTrace(project, clean)
+  }
+
   readGroup(project: string, groupId: string, opts?: GroupMessagePageOpts): GroupChatData | null {
     const meta = this.getGroup(project, groupId)
     if (!meta) return null

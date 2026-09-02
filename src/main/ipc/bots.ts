@@ -87,6 +87,14 @@ export function registerBotsIpc(
     }
   )
 
+  ipcMain.handle(
+    'bots:clearGroupMessages',
+    async (_e: IpcMainInvokeEvent, project: string, groupId: string): Promise<void> => {
+      manager.stop(project, groupId)
+      await store.clearGroupMessages(project, groupId)
+    }
+  )
+
   // ---- orchestration ----
   ipcMain.handle(
     'bots:send',

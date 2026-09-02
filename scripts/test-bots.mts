@@ -276,6 +276,43 @@ let alice: BotProfile, bob: BotProfile
   assert.equal(withSummary?.summarizedUpToSeq, 1)
   ok('summary persisted')
 
+  const clearable = store.createGroup(PROJECT, {
+    title: 'Clearable',
+    botIds: ['alice'],
+    leaderBotId: 'alice'
+  })
+  store.appendMessage(PROJECT, clearable.groupId, {
+    senderKind: 'user',
+    senderName: 'You',
+    content: 'to be cleared',
+    ts: Date.now()
+  })
+  store.setSummary(PROJECT, clearable.groupId, 'Stale summary', 1)
+  await store.appendGroupTrace(
+    PROJECT,
+    clearable.groupId,
+    { type: 'header', startedAt: Date.now() },
+    [JSON.stringify({ role: 'user', ts: Date.now(), content: 'x' })]
+  )
+  assert.ok(await store.readGroupTrace(PROJECT, clearable.groupId))
+  await store.clearGroupMessages(PROJECT, clearable.groupId)
+  const cleared = store.readGroup(PROJECT, clearable.groupId)
+  assert.equal(cleared?.messages.length, 0)
+  assert.equal(cleared?.messageCount, 0)
+  assert.equal(cleared?.summary, undefined)
+  assert.equal(cleared?.summarizedUpToSeq, undefined)
+  assert.equal(await store.readGroupTrace(PROJECT, clearable.groupId), null)
+  assert.equal(
+    store.appendMessage(PROJECT, clearable.groupId, {
+      senderKind: 'user',
+      senderName: 'You',
+      content: 'fresh start',
+      ts: Date.now()
+    }).seq,
+    1
+  )
+  ok('messages: clear history resets messages, summary, trace and seq')
+
   const mems = store.saveMemories(PROJECT, 'bob', ['User prefers tables', 'Deadline is Friday'])
   assert.equal(mems.length, 2)
   const merged = store.saveMemories(PROJECT, 'bob', ['Deadline is Friday', 'Budget approved'])
