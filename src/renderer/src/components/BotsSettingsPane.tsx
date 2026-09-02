@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { mdiPencil, mdiPlus, mdiTrashCanOutline } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
 import type { AIProfile } from '@shared/types'
@@ -11,12 +11,20 @@ interface FormState {
   id?: string
   name: string
   role: string
+  roleDetails: string
   persona: string
   profileId: string
   model: string
 }
 
-const EMPTY_FORM: FormState = { name: '', role: '', persona: '', profileId: '', model: '' }
+const EMPTY_FORM: FormState = {
+  name: '',
+  role: '',
+  roleDetails: '',
+  persona: '',
+  profileId: '',
+  model: ''
+}
 
 /** Settings ▸ Bots — manage the global bot library and per-project memories. */
 export function BotsSettingsPane(): React.JSX.Element {
@@ -33,6 +41,16 @@ export function BotsSettingsPane(): React.JSX.Element {
     id: string
     groups: GroupChatMeta[]
   } | null>(null)
+  const nameInputRef = useRef<HTMLInputElement>(null)
+  const editorWasOpen = useRef(false)
+
+  useLayoutEffect(() => {
+    const open = editing !== null
+    if (open && !editorWasOpen.current) {
+      nameInputRef.current?.scrollIntoView({ block: 'start' })
+    }
+    editorWasOpen.current = open
+  }, [editing])
 
   useEffect(() => {
     void loadBotProfiles()
@@ -60,6 +78,7 @@ export function BotsSettingsPane(): React.JSX.Element {
         ...(editing.id ? { id: editing.id } : {}),
         name: editing.name,
         role: editing.role,
+        roleDetails: editing.roleDetails || null,
         persona: editing.persona,
         profileId: editing.profileId || null,
         model: editing.model || null
@@ -101,8 +120,9 @@ export function BotsSettingsPane(): React.JSX.Element {
   return (
     <>
       <p className="hint">
-        Bots are global identities you can add to group chats. Each bot has a role, a persona and an
-        optional model override; memories are scoped per project.
+        Bots are global identities you can add to group chats. Each bot has a role, an optional role
+        description (shared with the other bots in the group), a persona and an optional model
+        override; memories are scoped per project.
       </p>
       <div className="bots-lib-header">
         <span className="form-label">Bot library</span>
@@ -132,6 +152,7 @@ export function BotsSettingsPane(): React.JSX.Element {
                     id: b.id,
                     name: b.name,
                     role: b.role,
+                    roleDetails: b.roleDetails ?? '',
                     persona: b.persona,
                     profileId: b.profileId ?? '',
                     model: b.model ?? ''
@@ -161,6 +182,8 @@ export function BotsSettingsPane(): React.JSX.Element {
             Name
             <input
               className="form-input"
+              ref={nameInputRef}
+              autoFocus
               value={editing.name}
               placeholder="e.g. Alice"
               onChange={(e) => setEditing({ ...editing, name: e.target.value })}
@@ -173,6 +196,16 @@ export function BotsSettingsPane(): React.JSX.Element {
               value={editing.role}
               placeholder="e.g. Project Manager"
               onChange={(e) => setEditing({ ...editing, role: e.target.value })}
+            />
+          </label>
+          <label className="form-label">
+            Role details (optional)
+            <textarea
+              className="form-input bots-persona"
+              rows={2}
+              value={editing.roleDetails}
+              placeholder="What this role does, so other bots know when to involve it (e.g. “Owns the schedule, breaks goals into tasks, tracks progress”)"
+              onChange={(e) => setEditing({ ...editing, roleDetails: e.target.value })}
             />
           </label>
           <label className="form-label">

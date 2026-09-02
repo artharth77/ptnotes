@@ -116,6 +116,7 @@ export function GroupChatPanel(): React.JSX.Element {
     query: string
   } | null>(null)
   const [mentionIndex, setMentionIndex] = useState(0)
+  const [showJumpDown, setShowJumpDown] = useState(false)
 
   useEffect(() => {
     if (activeProject) {
@@ -136,6 +137,7 @@ export function GroupChatPanel(): React.JSX.Element {
       prependAnchorRef.current = null
       prevScrollRef.current = null
       nearBottomRef.current = true
+      setShowJumpDown(false)
       el.scrollTop = el.scrollHeight
       return
     }
@@ -179,8 +181,15 @@ export function GroupChatPanel(): React.JSX.Element {
 
   function onScroll(e: React.UIEvent<HTMLDivElement>): void {
     const el = e.currentTarget
-    nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    nearBottomRef.current = atBottom
+    setShowJumpDown(!atBottom)
     if (el.scrollTop < 80) triggerLoadOlder()
+  }
+
+  function jumpToBottom(): void {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
+    setShowJumpDown(false)
   }
 
   function focusInput(): void {
@@ -493,6 +502,16 @@ export function GroupChatPanel(): React.JSX.Element {
       </div>
 
       <div className="chat-input">
+        {showJumpDown && (
+          <button
+            className="chat-jump-down"
+            onClick={jumpToBottom}
+            title="Jump to bottom"
+            aria-label="Jump to bottom"
+          >
+            <MdiIcon path={mdiChevronDown} size={20} />
+          </button>
+        )}
         {mentionItems.length > 0 && (
           <div className="mention-popup">
             {mentionItems.map((item, i) => (

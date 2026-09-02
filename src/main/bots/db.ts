@@ -34,6 +34,7 @@ interface BotRow {
   id: string
   name: string
   role: string
+  role_details: string | null
   persona: string
   profile_id: string | null
   model: string | null
@@ -84,6 +85,7 @@ function rowToBot(r: BotRow): BotProfile {
     id: r.id,
     name: r.name,
     role: r.role,
+    ...(r.role_details ? { roleDetails: r.role_details } : {}),
     persona: r.persona,
     ...(r.profile_id ? { profileId: r.profile_id } : {}),
     ...(r.model ? { model: r.model } : {}),
@@ -199,12 +201,17 @@ export class BotsStore {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       role TEXT NOT NULL DEFAULT '',
+      role_details TEXT,
       persona TEXT NOT NULL DEFAULT '',
       profile_id TEXT,
       model TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );`)
+    const cols = db.prepare('PRAGMA table_info(bots)').all() as unknown as { name: string }[]
+    if (!cols.some((c) => c.name === 'role_details')) {
+      db.exec('ALTER TABLE bots ADD COLUMN role_details TEXT')
+    }
     this.botsDb = db
     return db
   }
@@ -229,6 +236,7 @@ export class BotsStore {
     const name = String(input.name ?? '').trim()
     if (!name) throw new Error('Bot name is required.')
     const role = String(input.role ?? '').trim()
+    const roleDetails = String(input.roleDetails ?? '').trim() || null
     const persona = String(input.persona ?? '').trim()
     const profileId = input.profileId?.trim() || null
     const model = input.model?.trim() || null
@@ -238,8 +246,8 @@ export class BotsStore {
       const existing = this.getBot(id)
       if (!existing) throw new Error(`Bot not found: ${id}`)
       db.prepare(
-        `UPDATE bots SET name = ?, role = ?, persona = ?, profile_id = ?, model = ?, updated_at = ? WHERE id = ?`
-      ).run(name, role, persona, profileId, model, now, id)
+        `UPDATE bots SET name = ?, role = ?, role_details = ?, persona = ?, profile_id = ?, model = ?, updated_at = ? WHERE id = ?`
+      ).run(name, role, roleDetails, persona, profileId, model, now, id)
       return this.getBot(id)!
     }
     const base = name
@@ -254,8 +262,8 @@ export class BotsStore {
       id = `${base}-${n++}`
     }
     db.prepare(
-      `INSERT INTO bots (id, name, role, persona, profile_id, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(id, name, role, persona, profileId, model, now, now)
+      `INSERT INTO bots (id, name, role, role_details, persona, profile_id, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, name, role, roleDetails, persona, profileId, model, now, now)
     return this.getBot(id)!
   }
 

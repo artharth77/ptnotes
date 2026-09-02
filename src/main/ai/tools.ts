@@ -1119,6 +1119,49 @@ export const tools: PTTool[] = [
     definition: {
       type: 'function',
       function: {
+        name: 'add_kanban_comment',
+        description:
+          'Add a comment to an EXISTING kanban card (matched by title, case-insensitive). Comments are short notes on the card (progress, questions, decisions) — use them instead of appending free text to the description.',
+        parameters: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: 'Current title of the card to comment on' },
+            comment: { type: 'string', description: 'Comment text to add to the card' }
+          },
+          required: ['title', 'comment']
+        }
+      }
+    },
+    async execute(args, ctx) {
+      const project = projectOf(args, ctx)
+      const board = await ctx.service.loadKanban(project)
+      const found = findCardByTitle(board, String(args.title ?? ''))
+      if (!found) {
+        return JSON.stringify({ ok: false, error: `Kanban card "${args.title}" not found` })
+      }
+      try {
+        const updated = await ctx.service.addKanbanComment(project, found.id, {
+          comment: String(args.comment ?? '')
+        })
+        const card = updated.cards.find((c) => c.id === found.id)
+        return JSON.stringify({
+          ok: true,
+          project,
+          card: found.title,
+          commentCount: card?.comments.length ?? 0
+        })
+      } catch (err) {
+        return JSON.stringify({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err)
+        })
+      }
+    }
+  },
+  {
+    definition: {
+      type: 'function',
+      function: {
         name: 'move_kanban_card',
         description:
           'Move an existing kanban card (matched by title, case-insensitive) to another column (matched by name).',

@@ -7,6 +7,8 @@ export interface BotProfile {
   name: string
   /** Role shown as a badge, e.g. "Project Manager". */
   role: string
+  /** Optional description of what this role does; shown in the group roster so other bots know the member's responsibilities. */
+  roleDetails?: string
   /** Persona / standing instructions injected into the bot's system prompt. */
   persona: string
   /** Optional AI provider profile override (falls back to the active profile). */
@@ -110,6 +112,7 @@ export interface BotUpsertInput {
   id?: string
   name: string
   role?: string
+  roleDetails?: string | null
   persona?: string
   profileId?: string | null
   model?: string | null

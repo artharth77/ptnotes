@@ -31,6 +31,7 @@ const KANBAN_TOOLS = new Set([
   'list_kanban_cards',
   'create_kanban_card',
   'update_kanban_card',
+  'add_kanban_comment',
   'move_kanban_card',
   'delete_kanban_card'
 ])

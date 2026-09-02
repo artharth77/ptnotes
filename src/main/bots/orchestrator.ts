@@ -640,7 +640,7 @@ Post your result report to the group now.`
     const roster = members
       .map(
         (m) =>
-          `- @${m.id} — ${m.name}${m.role ? ` (${m.role})` : ''}${m.id === leaderId ? ' [GROUP LEADER]' : ''}${m.id === bot.id ? ' ← you' : ''}`
+          `- @${m.id} — ${m.name}${m.role ? ` (${m.role})` : ''}${m.id === leaderId ? ' [GROUP LEADER]' : ''}${m.id === bot.id ? ' ← you' : ''}${m.roleDetails ? ` — ${m.roleDetails}` : ''}`
       )
       .join('\n')
     const memories = this.deps.store.listMemories(this.project, bot.id)
