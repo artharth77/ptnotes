@@ -1,6 +1,6 @@
 {
   "name": "ptnotes",
-  "version": "0.15.0",
+  "version": "0.15.1",
   "description": "Write notes, track tasks, plan schedules, and chat with an AI assistant — all organized by project",
   "main": "./out/main/index.js",
   "author": "",
