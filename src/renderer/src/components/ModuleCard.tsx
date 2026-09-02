@@ -43,6 +43,7 @@ export function ModuleCard({
 }): React.JSX.Element {
   const activeProject = useAppStore((s) => s.activeProject)
   const loadModules = useAppStore((s) => s.loadModules)
+  const loadBotTasks = useAppStore((s) => s.loadBotTasks)
   const active = !['done', 'failed', 'cancelled'].includes(run.status)
   const doneSteps = run.steps.filter((s) => s.status === 'done' || s.status === 'failed').length
   const [showSteps, setShowSteps] = useState(false)
@@ -69,6 +70,7 @@ export function ModuleCard({
     try {
       await window.ptnotes.modules.deleteRun(activeProject, run.runId, deleteOutputFiles)
       await loadModules(activeProject)
+      if (run.module.id === 'bot-task') await loadBotTasks(activeProject)
     } finally {
       setDeleting(false)
       setConfirmDelete(false)
