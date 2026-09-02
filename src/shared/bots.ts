@@ -95,6 +95,8 @@ export interface BotTaskQueueItem {
   task: string
   /** Display name of who requested it ('You' or a bot name). */
   requestedBy: string
+  /** The bot's last chat message posted right before taking the task on (language reference for the report turn). */
+  originMsg?: string | null
   status: 'queued' | 'running'
   createdAt: number
 }

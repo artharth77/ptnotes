@@ -427,12 +427,16 @@ const configStore = {
 } as unknown as AIConfigStore
 
 /** Fake client: replies are popped per-bot, matched from "Respond now as @id" ('_default' otherwise). */
-function makeFakeClient(replies: Map<string, string[]>): (cfg: AIProviderConfig) => OpenAI {
+function makeFakeClient(
+  replies: Map<string, string[]>,
+  calls?: { messages: { role: string; content: string }[] }[]
+): (cfg: AIProviderConfig) => OpenAI {
   return () => {
     const client = {
       chat: {
         completions: {
           create: async (params: { messages: { role: string; content: string }[] }) => {
+            calls?.push(params)
             const last = params.messages[params.messages.length - 1].content ?? ''
             const m = String(last).match(/Respond now as @([a-z0-9-]+)/)
             const id = m?.[1] ?? '_default'
@@ -535,6 +539,10 @@ const group = store.createGroup(PROJECT, {
   )
   const bobMsg = messages.find((m) => m.senderKind === 'bot' && m.botId === 'bob')
   assert.ok(bobMsg && !bobMsg.content.includes('```'), 'assign block stripped from chat')
+  const queueItem = store.listQueue(PROJECT).find((q) => q.title === 'Market analysis')
+  assert.ok(queueItem, 'queue item created for bob')
+  assert.equal(queueItem.originMsg, 'On it.', 'pre-task chat message stored as originMsg')
+  store.finishTask(PROJECT, queueItem.queueId)
   ok('orchestration: leader → tag → assign → task started')
 }
 
@@ -603,13 +611,57 @@ const group = store.createGroup(PROJECT, {
   )
   const after = store.listQueue(PROJECT).filter((q) => q.botId === 'bob')
   assert.equal(after.filter((q) => q.status === 'queued').length, 1, 'one queued item remains')
+  const queuedRow = after.find((q) => q.status === 'queued')!
+  assert.equal(queuedRow.originMsg, 'Starting the second one too.')
+  // the running task finishes → the queued task starts on the SAME queue row (no duplicate row)
+  m4.handleModuleEvent({
+    runId: 'run-busy',
+    project: PROJECT,
+    type: 'done',
+    run: {
+      runId: 'run-busy',
+      module: { id: 'bot-task', name: 'Bot Task', description: '' },
+      project: PROJECT,
+      title: 'First',
+      prompt: 'p',
+      status: 'done',
+      steps: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      botId: 'bob',
+      groupId: group.groupId,
+      result: 'ok'
+    }
+  } as ModuleEvent)
+  await new Promise((r) => setTimeout(r, 300))
+  assert.equal(startCalls.length, 2, 'queued task started after the running one finished')
+  assert.equal(startCalls[1].title, 'Second task')
+  const drained = store.listQueue(PROJECT).filter((q) => q.botId === 'bob')
+  assert.equal(drained.length, 1, 'queue row reused — no duplicate row created')
+  assert.equal(drained[0].queueId, queuedRow.queueId)
+  assert.equal(drained[0].status, 'running')
   // cleanup the queue rows for later tests
-  for (const q of after) store.finishTask(PROJECT, q.queueId)
+  for (const q of drained) store.finishTask(PROJECT, q.queueId)
   ok('orchestration: single-flight queue')
 }
 
 // D: task completion report
 {
+  bob = store.saveBot({
+    id: bob.id,
+    name: 'Bob',
+    role: 'Researcher',
+    persona: 'Be friendly and precise'
+  })
+  const reportItem = store.enqueueTask(PROJECT, {
+    groupId: group.groupId,
+    botId: 'bob',
+    title: 'Market analysis',
+    task: 'Research the market for note:<name>',
+    requestedBy: 'You',
+    originMsg: 'On it, researching now.'
+  })
+  store.setTaskRunning(PROJECT, reportItem.queueId, 'run-report-1')
   const run: ModuleRun = {
     runId: 'run-report-1',
     module: { id: 'bot-task', name: 'Bot Task', description: '' },
@@ -624,13 +676,15 @@ const group = store.createGroup(PROJECT, {
     groupId: group.groupId,
     result: 'Analysis done: created note:market.md'
   }
+  const calls: { messages: { role: string; content: string }[] }[] = []
   const m5 = new GroupChatManager({
     store,
     configStore,
     moduleManager: makeStubModuleManager([]),
     broadcast: () => {},
     clientFactory: makeFakeClient(
-      new Map([['_default', ['Done! The analysis is in note:market.md.']]])
+      new Map([['_default', ['Done! The analysis is in note:market.md.']]]),
+      calls
     )
   })
   m5.handleModuleEvent({
@@ -645,6 +699,15 @@ const group = store.createGroup(PROJECT, {
   const report = messages.filter((m) => m.senderKind === 'bot' && m.botId === 'bob').at(-1)
   assert.ok(report && report.content.includes('note:market.md'), 'bot posted the report')
   assert.equal(report?.taskId, 'run-report-1')
+  const reportCall = calls.at(-1)!
+  const sys = reportCall.messages.find((m) => m.role === 'system')!.content
+  const user = reportCall.messages.find((m) => m.role === 'user')!.content
+  assert.ok(sys.includes('Be friendly and precise'), 'persona included in report prompt')
+  assert.ok(user.includes('On it, researching now.'), 'pre-task message included for language')
+  assert.ok(
+    user.includes('Your last message to the group before starting this task'),
+    'last-message reference labelled'
+  )
   ok('orchestration: task completion report')
 }
 
@@ -683,6 +746,80 @@ const group = store.createGroup(PROJECT, {
     'task report turn traced'
   )
   ok('trace: JSONL written (system + assistant)')
+}
+
+// F2: clear history drops the group's task queue, cancels live runs, suppresses reports
+{
+  store.appendMessage(PROJECT, group.groupId, {
+    senderKind: 'user',
+    senderName: 'You',
+    content: 'history to clear',
+    ts: Date.now()
+  })
+  const runningItem = store.enqueueTask(PROJECT, {
+    groupId: group.groupId,
+    botId: 'bob',
+    title: 'Live task',
+    task: 'p',
+    requestedBy: 'You'
+  })
+  store.setTaskRunning(PROJECT, runningItem.queueId, 'run-clear-1')
+  store.enqueueTask(PROJECT, {
+    groupId: group.groupId,
+    botId: 'bob',
+    title: 'Waiting task',
+    task: 'p',
+    requestedBy: 'You'
+  })
+  const liveRun: ModuleRun = {
+    runId: 'run-clear-1',
+    module: { id: 'bot-task', name: 'Bot Task', description: '' },
+    project: PROJECT,
+    title: 'Live task',
+    prompt: 'p',
+    status: 'running',
+    steps: [],
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    botId: 'bob',
+    groupId: group.groupId
+  }
+  const stopped: string[] = []
+  const m7 = new GroupChatManager({
+    store,
+    configStore,
+    moduleManager: {
+      start: async () => ({
+        ok: true as const,
+        runId: 'run-x',
+        module: { id: 'bot-task', name: 'Bot Task', description: '' },
+        title: 'x'
+      }),
+      list: async () => [liveRun],
+      stop: (runId: string) => stopped.push(runId)
+    } as never,
+    broadcast: () => {},
+    clientFactory: makeFakeClient(new Map())
+  })
+  await m7.clearGroupHistory(PROJECT, group.groupId)
+  assert.deepEqual(stopped, ['run-clear-1'], 'live bot-task run cancelled')
+  assert.equal(
+    store.listQueue(PROJECT).filter((q) => q.groupId === group.groupId).length,
+    0,
+    'task queue rows cleared'
+  )
+  assert.equal(store.listMessages(PROJECT, group.groupId).length, 0, 'messages cleared')
+  assert.equal(await store.readGroupTrace(PROJECT, group.groupId), null, 'trace cleared')
+  // the cancelled run's terminal event arrives later — its report must be suppressed
+  m7.handleModuleEvent({
+    runId: 'run-clear-1',
+    project: PROJECT,
+    type: 'status',
+    run: { ...liveRun, status: 'cancelled' }
+  } as ModuleEvent)
+  await new Promise((r) => setTimeout(r, 300))
+  assert.equal(store.listMessages(PROJECT, group.groupId).length, 0, 'no report posted after clear')
+  ok('orchestration: clear history drops queue + suppresses reports')
 }
 
 // G: group delete removes messages

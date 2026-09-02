@@ -76,6 +76,7 @@ interface QueueRow {
   title: string
   task: string
   requested_by: string
+  origin_msg: string | null
   status: string
   created_at: number
 }
@@ -139,6 +140,7 @@ function rowToQueueItem(r: QueueRow): BotTaskQueueItem {
     title: r.title,
     task: r.task,
     requestedBy: r.requested_by,
+    ...(r.origin_msg ? { originMsg: r.origin_msg } : {}),
     status: r.status === 'running' ? 'running' : 'queued',
     createdAt: r.created_at
   }
@@ -349,9 +351,16 @@ export class BotsStore {
       title TEXT NOT NULL,
       task TEXT NOT NULL,
       requested_by TEXT NOT NULL,
+      origin_msg TEXT,
       status TEXT NOT NULL,
       created_at INTEGER NOT NULL
     );`)
+    const queueCols = db.prepare('PRAGMA table_info(bot_task_queue)').all() as unknown as {
+      name: string
+    }[]
+    if (!queueCols.some((c) => c.name === 'origin_msg')) {
+      db.exec('ALTER TABLE bot_task_queue ADD COLUMN origin_msg TEXT')
+    }
     this.projectDbs.set(project, db)
     return db
   }
@@ -472,6 +481,7 @@ export class BotsStore {
     const db = this.projectDb(project)
     const clean = validateId(groupId)
     db.prepare('DELETE FROM group_messages WHERE group_id = ?').run(clean)
+    db.prepare('DELETE FROM bot_task_queue WHERE group_id = ?').run(clean)
     db.prepare(
       'UPDATE group_chats SET summary = NULL, summarized_up_to_seq = NULL, updated_at = ? WHERE group_id = ?'
     ).run(Date.now(), clean)
@@ -642,6 +652,7 @@ export class BotsStore {
       queueId?: string
     }
   ): BotTaskQueueItem {
+    const originMsg: string | null = item.originMsg ?? null
     const full: BotTaskQueueItem = {
       queueId: item.queueId ?? randomUUID(),
       groupId: item.groupId,
@@ -649,14 +660,15 @@ export class BotsStore {
       title: item.title,
       task: item.task,
       requestedBy: item.requestedBy,
+      originMsg,
       runId: null,
       status: 'queued',
       createdAt: Date.now()
     }
     this.projectDb(project)
       .prepare(
-        `INSERT INTO bot_task_queue (queue_id, group_id, bot_id, run_id, title, task, requested_by, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO bot_task_queue (queue_id, group_id, bot_id, run_id, title, task, requested_by, origin_msg, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         full.queueId,
@@ -666,6 +678,7 @@ export class BotsStore {
         full.title,
         full.task,
         full.requestedBy,
+        originMsg,
         'queued',
         full.createdAt
       )

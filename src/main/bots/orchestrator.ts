@@ -78,6 +78,22 @@ export class GroupChatManager {
     this.sessions.get(GroupChatManager.key(project, groupId))?.stop()
   }
 
+  /**
+   * Clear a group's history: stop orchestration, cancel its live bot-task runs
+   * (their completion reports are suppressed) and drop its task-queue rows.
+   */
+  async clearGroupHistory(project: string, groupId: string): Promise<void> {
+    this.stop(project, groupId)
+    const runs = await this.deps.moduleManager.list(project)
+    for (const run of runs) {
+      if (run.module.id !== 'bot-task' || run.groupId !== groupId) continue
+      if (TERMINAL_STATUSES.has(run.status)) continue
+      this.reportedRuns.add(run.runId)
+      this.deps.moduleManager.stop(run.runId)
+    }
+    await this.deps.store.clearGroupMessages(project, groupId)
+  }
+
   /** Drop cached sessions (e.g. after the project root changed). */
   closeAll(): void {
     for (const s of this.sessions.values()) s.stop()
@@ -267,7 +283,7 @@ class GroupSession {
       const turnNote = opts.leaderDirected
         ? `The user addressed this message to you directly (@${bot.id}).`
         : opts.tagPolicy === 'free'
-          ? `You are the group leader; the user's message was addressed to you. Assign work to members by @mentioning them when appropriate.`
+          ? `You are the group leader; the user's message was addressed to you. Assign work to members by @mentioning them when appropriate. Delegate via @mention; do not create assign blocks for delegated work.`
           : `${opts.triggerLabel} asked you to respond / take this on.`
       const userContent = `${transcript}\n\n---\nRespond now as @${bot.id} (${bot.name}). ${turnNote}`
 
@@ -298,11 +314,12 @@ class GroupSession {
       if (this.stopped) return
 
       const parsed = parseBotReply(raw, memberIds)
+      const lastChatMessage = parsed.content ?? undefined
       if (parsed.content) {
         this.appendBotMessage(bot, parsed.content, group)
       }
       for (const assign of parsed.assigns) {
-        await this.handleAssignment(bot, assign, opts.triggerLabel)
+        await this.handleAssignment(bot, assign, opts.triggerLabel, lastChatMessage)
       }
 
       const plan = planTagTriggers(parsed.tags, opts.tagPolicy, state.relaysLeft, state.turnsLeft)
@@ -329,7 +346,8 @@ class GroupSession {
   private async handleAssignment(
     bot: BotProfile,
     assign: { title: string; task: string },
-    requestedBy: string
+    requestedBy: string,
+    lastChatMessage?: string
   ): Promise<void> {
     const queue = this.deps.store.listQueue(this.project)
     const running = queue.find((q) => q.botId === bot.id && q.status === 'running')
@@ -339,27 +357,32 @@ class GroupSession {
         botId: bot.id,
         title: assign.title,
         task: assign.task,
-        requestedBy
+        requestedBy,
+        ...(lastChatMessage ? { originMsg: lastChatMessage } : {})
       })
       const position = queue.filter((q) => q.botId === bot.id && q.status === 'queued').length + 1
       this.system(`⏳ ${bot.name} queued task “${assign.title}” (position ${position})`)
       return
     }
-    await this.startTask(bot, assign, requestedBy)
+    await this.startTask(bot, assign, requestedBy, { originMsg: lastChatMessage })
   }
 
   private async startTask(
     bot: BotProfile,
     assign: { title: string; task: string },
-    requestedBy: string
+    requestedBy: string,
+    opts?: { queueId?: string; originMsg?: string }
   ): Promise<void> {
-    const item = this.deps.store.enqueueTask(this.project, {
-      groupId: this.groupId,
-      botId: bot.id,
-      title: assign.title,
-      task: assign.task,
-      requestedBy
-    })
+    const queueId =
+      opts?.queueId ??
+      this.deps.store.enqueueTask(this.project, {
+        groupId: this.groupId,
+        botId: bot.id,
+        title: assign.title,
+        task: assign.task,
+        requestedBy,
+        ...(opts?.originMsg ? { originMsg: opts.originMsg } : {})
+      }).queueId
     const res = await this.deps.moduleManager.start(
       this.project,
       'bot-task',
@@ -375,10 +398,10 @@ class GroupSession {
       }
     )
     if (res.ok) {
-      this.deps.store.setTaskRunning(this.project, item.queueId, res.runId)
+      this.deps.store.setTaskRunning(this.project, queueId, res.runId)
       this.system(`▶️ ${bot.name} started background task “${assign.title}”`, { taskId: res.runId })
     } else {
-      this.deps.store.finishTask(this.project, item.queueId)
+      this.deps.store.finishTask(this.project, queueId)
       this.system(`⚠️ ${bot.name}: failed to start “${assign.title}” — ${res.error}`, {
         error: true
       })
@@ -388,7 +411,9 @@ class GroupSession {
   private async startNextQueued(bot: BotProfile): Promise<void> {
     const next = this.deps.store.nextQueuedTask(this.project, bot.id)
     if (!next) return
-    await this.startTask(bot, { title: next.title, task: next.task }, next.requestedBy)
+    await this.startTask(bot, { title: next.title, task: next.task }, next.requestedBy, {
+      queueId: next.queueId
+    })
   }
 
   private async processTaskReportJob(job: Job): Promise<void> {
@@ -427,18 +452,20 @@ class GroupSession {
       const roster = members
         .map((m) => `- @${m.id} — ${m.name}${m.id === group.leaderBotId ? ' (leader)' : ''}`)
         .join('\n')
+      const originMsg = item?.originMsg?.trim()
       const sys = `You are ${bot.name} (@${bot.id}), ${bot.role || 'a bot member'} in the group chat "${group.title}" (project "${this.project}").
+${bot.persona ? `\nYOUR PERSONA / STANDING INSTRUCTIONS:\n${bot.persona}\n` : ''}
 Group members:
 ${roster}
 The user appears as "You".
 
-You have no tools. Your background task just completed and you are posting the result report to the group. Do NOT declare new work, do NOT use \`\`\`assign blocks, do NOT mention other bots. Keep it concise (a few sentences or a short list). Write your reply in the language of the original task request (the user's chat), regardless of the Result text's language.
+You have no tools. Your background task just completed and you are posting the result report to the group. Do NOT declare new work, do NOT use \`\`\`assign blocks, do NOT mention other bots. Keep it concise (a few sentences or a short list). Write your reply in the language of the original task request (the user's chat), regardless of the Result text's language.${originMsg ? ' Your last chat message before the task started (included below) is the best language reference — match its language.' : ''}
 ${LINK_RULE}`
       const user = `Your background task "${run.title}" ${statusText}.
 Requested by: ${item?.requestedBy ?? 'the group'}
 Result:
 ${resultText}
-
+${originMsg ? `\nYour last message to the group before starting this task:\n"""\n${originMsg}\n"""\n` : ''}
 Post your result report to the group now.`
       const trace = await this.traceRecorder()
       trace.append({ role: 'system', ts: Date.now(), content: sys })
@@ -653,7 +680,7 @@ Post your result report to the group now.`
       : ''
 
     return `You are ${bot.name} (@${bot.id})${bot.role ? `, the ${bot.role}` : ''}, a member of the group chat "${group.title}" (project "${this.project}").
-${isLeader ? 'You are the GROUP LEADER: messages from the user that do not @mention anyone are addressed to you — decide what to do, answer directly, and/or assign work to members by @mentioning them.' : ''}
+${isLeader ? 'You are the GROUP LEADER: messages from the user that do not @mention anyone are addressed to you — decide what to do, answer directly, and/or assign work to members by @mentioning them. When you delegate work to a member, do NOT also declare it in an assign block — assign blocks create background tasks for YOU only.' : ''}
 ${bot.persona ? `\nYOUR PERSONA / STANDING INSTRUCTIONS:\n${bot.persona}\n` : ''}
 GROUP MEMBERS (only these exist; mention them with @id):
 ${roster}
@@ -665,8 +692,8 @@ RULES:
 \`\`\`assign
 {"title": "<short task title>", "task": "<full standalone instructions, including source references like note:<name>, file:<name>, plan:<schedule id>>"}
 \`\`\`
-The block is removed from the chat; a background run starts for you. If a task is already running for you, the new one is queued automatically — say it is queued in your reply.
-- To ask another member a question or hand them a task, @mention them. Members you @mention will respond.
+The block is removed from the chat; a background run starts for you (never for a member you mentioned). If a task is already running for you, the new one is queued automatically — say it is queued in your reply.
+- To ask another member a question or hand them a task, @mention them — they will take it on and declare their own assign block. Never emit an assign block for work you just delegated via @mention.
 - If you were brought in by another bot, answer directly WITHOUT mentioning other bots, unless the person who tagged you explicitly asked you to involve someone else. Never mention the bot who tagged you back.
 ${LINK_RULE}
 - Keep replies concise and match the user's language.
