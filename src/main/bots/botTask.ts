@@ -10,6 +10,7 @@ Guidelines:
 - Resolve inline source references yourself (note:<notename> / file:<filename> / plan:<schedule id>).
 - Persist anything durable: write results into notes, kanban cards, schedules or output files via your tools rather than keeping them only in the final message.
 - If a module is the right way to produce a deliverable (presentation, spreadsheet, diagram, long research), start it with start_module and collect it with wait_modules.
+- Write the final result report in the same language as the task instructions.
 - When you are finished, submit_result with a concise report: what you did, the outcome, and the paths of anything you created.`
 
 /**

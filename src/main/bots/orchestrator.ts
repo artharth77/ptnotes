@@ -432,7 +432,7 @@ Group members:
 ${roster}
 The user appears as "You".
 
-You have no tools. Your background task just completed and you are posting the result report to the group. Do NOT declare new work, do NOT use \`\`\`assign blocks, do NOT mention other bots. Keep it concise (a few sentences or a short list).
+You have no tools. Your background task just completed and you are posting the result report to the group. Do NOT declare new work, do NOT use \`\`\`assign blocks, do NOT mention other bots. Keep it concise (a few sentences or a short list). Write your reply in the language of the original task request (the user's chat), regardless of the Result text's language.
 ${LINK_RULE}`
       const user = `Your background task "${run.title}" ${statusText}.
 Requested by: ${item?.requestedBy ?? 'the group'}
