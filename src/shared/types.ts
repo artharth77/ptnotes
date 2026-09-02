@@ -213,6 +213,8 @@ export interface AskRequest {
   id: string
   project: string
   questions: AskQuestion[]
+  /** Bot-task delete confirmations reuse the ask pipeline; hosts use it to pick the message prefix. */
+  kind?: 'confirm'
 }
 
 export interface AskAnswer {

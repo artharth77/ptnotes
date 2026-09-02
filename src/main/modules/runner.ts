@@ -5,6 +5,7 @@ import type {
   AiTraceToolCall,
   AskAnswer,
   AskRequest,
+  ConfirmRequest,
   ModuleChatMessage,
   ModuleEventType,
   ModuleRun,
@@ -648,7 +649,7 @@ export class ModuleRunner {
     const ctx: ToolContext = {
       service: this.service,
       activeProject: this.activeProject,
-      confirm: async () => false,
+      confirm: this.askHandler ? (req) => this.runConfirmViaAsk(req) : async () => false,
       ...(this.askHandler ? { ask: (req) => this.runAsk(req) } : {})
     }
     try {
@@ -692,6 +693,21 @@ export class ModuleRunner {
         }
       )
     })
+  }
+
+  /**
+   * Destructive-tool confirmation for runs with an ask host (bot tasks): the
+   * ConfirmRequest is surfaced through the same group-chat ask pipeline as
+   * `ask_user` — one Yes/No question, no timeout. Approved only when the user
+   * explicitly picks "Yes" (dismissed or "No" → not approved).
+   */
+  private async runConfirmViaAsk(req: Omit<ConfirmRequest, 'id'>): Promise<boolean> {
+    const res = await this.runAsk({
+      project: req.project,
+      questions: [{ id: 'confirm', question: req.message, options: ['Yes', 'No'] }],
+      kind: 'confirm'
+    })
+    return !res.cancelled && res.answers[0]?.answer === 'Yes'
   }
 
   /** Track every successful tool result that produced an output file path. */

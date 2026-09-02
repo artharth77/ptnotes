@@ -1056,7 +1056,7 @@ const group = store.createGroup(PROJECT, {
 interface AskFn {
   (
     run: ModuleRun,
-    req: { project: string; questions: AskQuestion[] }
+    req: { project: string; questions: AskQuestion[]; kind?: 'confirm' }
   ): Promise<{ answers: AskAnswer[]; cancelled?: boolean }>
 }
 
@@ -1064,7 +1064,7 @@ interface AskFn {
 function makeAskModuleManager(
   startCalls: StartCall[],
   asks: { runId: string; promise: Promise<{ answers: AskAnswer[]; cancelled?: boolean }> }[],
-  req: { project: string; questions: AskQuestion[] }
+  req: { project: string; questions: AskQuestion[]; kind?: 'confirm' }
 ): never {
   return {
     start: async (
@@ -1257,6 +1257,63 @@ const assignReply = 'I need details.\n```assign\n{"title":"Ask task","task":"p"}
   const stored = store.getMessage(PROJECT, g.groupId, askMsg.id)
   assert.equal(parseGroupAsk(stored!.content)?.status, 'cancelled', 'message marked cancelled')
   ok('orchestration: closeAll cancels pending asks')
+}
+
+// M: delete confirmations ride the ask bridge with a distinct prefix
+{
+  const startCalls: StartCall[] = []
+  const asks: { runId: string; promise: Promise<{ answers: AskAnswer[]; cancelled?: boolean }> }[] =
+    []
+  // drain leftover running tasks so the single-flight check lets alice start a new one
+  for (const q of store.listQueue(PROJECT)) {
+    if (q.botId === 'alice') store.finishTask(PROJECT, q.queueId)
+  }
+  const g = store.createGroup(PROJECT, {
+    title: 'Ask confirm',
+    botIds: ['alice'],
+    leaderBotId: 'alice'
+  })
+  const m12 = new GroupChatManager({
+    store,
+    configStore,
+    moduleManager: makeAskModuleManager(startCalls, asks, {
+      project: PROJECT,
+      kind: 'confirm',
+      questions: [
+        {
+          id: 'confirm',
+          question: 'Delete kanban card "Deploy Docs" from "P"?',
+          options: ['Yes', 'No']
+        }
+      ]
+    }),
+    broadcast: () => {},
+    clientFactory: makeFakeClient(new Map([['alice', [assignReply]]]))
+  })
+  await m12.send(PROJECT, g.groupId, 'go')
+  assert.equal(asks.length, 1, 'the stub fired the ask bridge for the confirm')
+  const messages = store.listMessages(PROJECT, g.groupId)
+  const qMsg = messages.find(
+    (m) => m.senderKind === 'bot' && m.content.includes('Please confirm to continue')
+  )
+  assert.ok(qMsg, 'confirm prompt posted with the confirm prefix')
+  assert.ok(
+    !messages.some(
+      (m) => m.senderKind === 'bot' && m.content.includes('I need your input to continue')
+    ),
+    'plain ask prefix not used for confirmations'
+  )
+  const askMsg = messages.find((m) => m.senderKind === 'ask')
+  assert.ok(askMsg, 'interactive ask message posted')
+  const payload = parseGroupAsk(askMsg!.content)
+  assert.equal(payload?.status, 'pending')
+  assert.deepEqual(payload?.questions[0]?.options, ['Yes', 'No'])
+  assert.equal(
+    m12.resolveBotAsk(PROJECT, g.groupId, askMsg!.id, [{ id: 'confirm', answer: 'Yes' }], false),
+    true
+  )
+  assert.deepEqual(await asks[0].promise, { answers: [{ id: 'confirm', answer: 'Yes' }] })
+  ok('orchestration: confirm-kind ask uses the confirm prefix + resolves like asks')
 }
 
 console.log(`\nbots tests passed (${passed} groups)`)

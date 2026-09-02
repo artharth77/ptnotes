@@ -12,6 +12,7 @@ Guidelines:
 - If a module is the right way to produce a deliverable (presentation, spreadsheet, diagram, long research), start it with start_module and collect it with wait_modules.
 - Write the final result report in the same language as the task instructions.
 - If you are missing information, a decision or a detail you cannot resolve yourself, call ask_user: your question is posted to the group chat as an interactive prompt and the task pauses (no timeout) until the user answers or dismisses it. Never set secret: true — secret questions are not supported in bot tasks.
+- Destructive tool calls (delete_note, delete_kanban_card) automatically post a Yes/No confirmation to the group chat and the task pauses (no timeout) until the user answers: proceed on "Yes", treat "No" or a dismissed prompt as a refusal and finish without the deletion. Never pre-confirm these deletions via ask_user and never retry the call while the confirmation is pending.
 - When you are finished, submit_result with a concise report: what you did, the outcome, and the paths of anything you created.`
 
 /**

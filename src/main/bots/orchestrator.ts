@@ -189,7 +189,11 @@ export class GroupChatManager {
     if (!group) throw new Error('Group chat not found.')
     const isLeader = !!bot && bot.id === group.leaderBotId
 
-    const questionText = `❓ I need your input to continue:\n${req.questions
+    const questionText = `${
+      req.kind === 'confirm'
+        ? '⚠️ Please confirm to continue:'
+        : '❓ I need your input to continue:'
+    }\n${req.questions
       .map((q, i) => {
         const opts = q.options?.length ? `\n   - ${q.options.join('\n   - ')}` : ''
         return `${i + 1}. **${q.question}**${opts}`
