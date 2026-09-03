@@ -1374,7 +1374,7 @@ const assignReply = 'I need details.\n```assign\n{"title":"Ask task","task":"p"}
     leaderBotId: 'alice'
   })
   store.saveMemories(PROJECT, 'alice', ['Issue #42 is open', 'User prefers tables'])
-  // round 1: >2k un-memorized chars → extraction rewrites the whole memory (stale fact dropped)
+  // round 1: >4k un-memorized chars → extraction rewrites the whole memory (stale fact dropped)
   const m13 = new GroupChatManager({
     store,
     configStore,
@@ -1387,20 +1387,26 @@ const assignReply = 'I need details.\n```assign\n{"title":"Ask task","task":"p"}
       ])
     )
   })
-  await m13.send(PROJECT, g.groupId, 'd'.repeat(2100))
+  await m13.send(PROJECT, g.groupId, 'd'.repeat(4100))
   const mems1 = store.listMemories(PROJECT, 'alice').map((m) => m.content)
   assert.deepEqual(mems1, ['User prefers tables', 'Deadline moved to Friday'])
   const cursor1 = store.readGroup(PROJECT, g.groupId)?.memorizedUpToSeq
   assert.ok(cursor1 && cursor1 > 0, 'memorized cursor advanced')
-  // round 2: the model answers [] — existing memory must survive the wipe guard
+  // round 2: crossed the summary threshold too — the _default queue feeds the summarizer
+  // first, then the model answers [] for memory — existing memory must survive the wipe guard
   const m14 = new GroupChatManager({
     store,
     configStore,
     moduleManager: makeStubModuleManager([]),
     broadcast: () => {},
-    clientFactory: makeFakeClient(new Map([['alice', ['Ok.']]]))
+    clientFactory: makeFakeClient(
+      new Map([
+        ['alice', ['Ok.']],
+        ['_default', ['Summary of earlier talk.', '[]']]
+      ])
+    )
   })
-  await m14.send(PROJECT, g.groupId, 'x'.repeat(2100))
+  await m14.send(PROJECT, g.groupId, 'x'.repeat(4100))
   const mems2 = store.listMemories(PROJECT, 'alice').map((m) => m.content)
   assert.deepEqual(mems2, mems1, 'empty extraction answer does not wipe memory')
   ok('orchestration: memory consolidation replaces stale facts, empty answers guarded')

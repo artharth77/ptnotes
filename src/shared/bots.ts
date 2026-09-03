@@ -195,7 +195,7 @@ export const SUMMARY_THRESHOLD_CHARS = 8_000
 /** Messages kept out of the summary (recent tail always sent verbatim). */
 export const SUMMARY_KEEP_RECENT = 6
 /** When the un-memorized context exceeds this many chars, involved bots re-consolidate their memory. */
-export const MEMORY_THRESHOLD_CHARS = 2_000
+export const MEMORY_THRESHOLD_CHARS = 4_000
 /** Max memory entries kept per bot per project. */
 export const MAX_MEMORY_ENTRIES = 50
 
