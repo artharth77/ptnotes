@@ -5,6 +5,7 @@ import type {
   AIConfig,
   AIProviderConfig,
   AiTraceFile,
+  AppearanceSettings,
   AskAnswer,
   AskResponse,
   BotGroupEvent,
@@ -30,6 +31,7 @@ import type {
   StorageSettings,
   ToolsetSettings,
   NoteMeta,
+  NoteSearchMatch,
   PdfExtractResult,
   Project,
   ProjectCalendar,
@@ -73,7 +75,11 @@ const api = {
     delete: (project: string, id: string): Promise<void> =>
       ipcRenderer.invoke('notes:delete', project, id),
     reveal: (project: string, id: string): Promise<void> =>
-      ipcRenderer.invoke('notes:reveal', project, id)
+      ipcRenderer.invoke('notes:reveal', project, id),
+    setStarred: (project: string, id: string, starred: boolean): Promise<NoteMeta[]> =>
+      ipcRenderer.invoke('notes:setStarred', project, id, starred),
+    search: (project: string, query: string): Promise<NoteSearchMatch[]> =>
+      ipcRenderer.invoke('notes:search', project, query)
   },
   kanban: {
     load: (project: string): Promise<KanbanBoard> => ipcRenderer.invoke('kanban:load', project),
@@ -213,6 +219,12 @@ const api = {
   },
   settings: {
     get: (): Promise<StorageSettings> => ipcRenderer.invoke('settings:get'),
+    getTheme: (): Promise<'light' | 'dark' | 'system'> => ipcRenderer.invoke('settings:getTheme'),
+    setTheme: (theme: 'light' | 'dark' | 'system'): Promise<'light' | 'dark' | 'system'> =>
+      ipcRenderer.invoke('settings:setTheme', theme),
+    getAppearance: (): Promise<AppearanceSettings> => ipcRenderer.invoke('settings:getAppearance'),
+    setAppearance: (patch: Partial<AppearanceSettings>): Promise<AppearanceSettings> =>
+      ipcRenderer.invoke('settings:setAppearance', patch),
     getAbout: (): Promise<AboutInfo> => ipcRenderer.invoke('settings:getAbout'),
     chooseRoot: (): Promise<string | null> => ipcRenderer.invoke('settings:chooseRoot'),
     changeRoot: (newRoot: string): Promise<StorageSettings> =>
@@ -349,6 +361,13 @@ const api = {
       return () => {
         ipcRenderer.removeListener('bots:event', listener)
       }
+    }
+  },
+  onOpenFind: (callback: () => void): (() => void) => {
+    const listener = (): void => callback()
+    ipcRenderer.on('global:open-find', listener)
+    return () => {
+      ipcRenderer.removeListener('global:open-find', listener)
     }
   }
 }

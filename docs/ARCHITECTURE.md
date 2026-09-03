@@ -74,7 +74,7 @@ Run `npm run typecheck` and `npm run lint` after any change.
 | Chat placement      | Collapsible right-side drawer, shared with the **Bots** and **Module** panels (top-bar toggles + ⌘⇧C/⌘⇧G/⌘⇧M, one view at a time)                                                                                                                                                                        |
 | Bots                | Global bot identities (userData SQLite) + per-project group chats/messages/memories/task queue (project SQLite); leader-centric routing with relay budget + turn cap; tool-less chat turns, background work via hidden `bot-task` runs; SQLite via the `node:sqlite` builtin (no install, no dependency) |
 | AI streaming        | Yes (real-time)                                                                                                                                                                                                                                                                                          |
-| Settings dialog     | Two-panel dialog: **Storage** (project root path) + **AI Settings** (profile set: active selector, per-profile base URL/API key/model with endpoint presets, global PDF toggle) + Modules + Skills + About                                                                                               |
+| Settings dialog     | Two-panel dialog: **Storage** (project root path) + **Appearance** (Light/Dark/System color-scheme modes) + **AI Settings** (profile set: active selector, per-profile base URL/API key/model with endpoint presets, global PDF toggle) + Modules + Toolsets + Skills + Bots + About                                                                                                                    |
 | Project root        | Configurable via settings; default `~/Documents/PTNotes`; changing it moves all data + registry to the new location after confirmation                                                                                                                                                                   |
 | Chat history        | Persisted per session as JSON files under `<project>/.data/chat/`; auto-saved per message; New Chat archives current thread; history picker can view/reopen old sessions                                                                                                                                 |
 | Chat titles         | Hybrid: local heuristic from first message immediately, refined by a background AI completion; manual rename supported; history popup shows title + message count                                                                                                                                        |
@@ -203,7 +203,7 @@ src/
 │   │   │   ├── BotTasksPanel.tsx    # bot background tasks panel (Modules-panel layout filtered to bot-task runs)
 │   │   │   ├── BotsSettingsPane.tsx # Settings ▸ Bots (bot library CRUD + per-project memory viewer)
 │   │   │   ├── ModuleHistoryOverlay.tsx # read-only transcript overlay for module runs (💬 button on ModuleCard)
-│   │   │   └── SettingsDialog.tsx  # multi-panel Settings (Storage + AI + Modules + Toolsets + Skills + Bots + About)
+│   │   │   └── SettingsDialog.tsx  # multi-panel Settings (Storage + Appearance + AI + Modules + Toolsets + Skills + Bots + About)
 │   └── ...
 └── shared/
     ├── types.ts         # Project, NoteMeta, ChatMessage, tool types (+ re-exports bots/planner/kanban types)
@@ -490,6 +490,12 @@ Two-panel dialog (`.settings-layout` with `.settings-nav` + `.settings-pane`):
   folder picker. Selecting a new root prompts for explicit confirmation ("Move all project data…")
   before `PTNotesService.changeRootDir` moves every project dir + `.ptnotes-projects.json`, and the
   settings store persists the new root.
+- **Appearance:** segmented **Light / Dark / System** color-scheme modes. Setting persists in
+  `userData/app-settings.json` (main process) + renderer `localStorage` (fast startup read without
+  blocking on IPC); the renderer immediately writes `document.documentElement[data-theme=…]` so CSS
+  custom properties flip instantly (no FOUC). A top-bar icon-only button cycles `light → dark →
+  system`; every utility-process chart/diagram/infographic renderer can request the active theme
+  via IPC for palette-matched PNG/SVG output.
 - **AI Settings:** a set of **profiles** (each a named base URL / API key / model combination). The
   UI lets you pick the **active** profile (used by chat), create new profiles (auto id `profile-N`,
   editable name, not active), edit any profile, and delete non-active ones. The **Base URL** field
@@ -506,6 +512,15 @@ Two-panel dialog (`.settings-layout` with `.settings-nav` + `.settings-pane`):
   tool description and refused by `ModuleRunManager.start`; the list comes from
   `modules:listAvailable` / `modules:setEnabled`, persisted as `disabledModules` in
   `ptnotes-settings.json`. Toggles apply immediately, no Save button.
+- **Toolsets:** a table of AI tool bundles that add extra chat-side tools the LLM can call (never
+  available to module subagents). Each toolset is listed with an enable/disable toggle and any
+  per-toolset key/value config fields. Driven by IPC: `toolsets:listAvailable`,
+  `toolsets:setEnabled(id, enabled)`, `toolsets:setConfig(id, key, value)`; results are applied
+  immediately.
+- **Bots:** a CRUD library of global bot identities (kept in `userData/bots.db`) — each bot has a
+  display name, avatar emoji, system prompt, default model, temperature, and enabled flag. The pane
+  also lets you inspect the per-project bot group-chat memory when a project is open (read-only in
+  settings; edits happen in the Bots group chat panel).
 - **Skills:** lists global + project skills (name, description, enabled state) with a per-skill
   enable/disable toggle and a `⋮` context menu (Edit skill, Move to Global/Project skills,
   Delete-with-confirm). Build-in skills (app-shipped, read-only) are also listed in a separate

@@ -10,6 +10,7 @@ import type {
   ChatThread,
   CreateProjectResult,
   NoteMeta,
+  NoteSearchMatch,
   Project,
   ProjectCalendar,
   Schedule,
@@ -175,6 +176,99 @@ export class PTNotesService {
   /** Per-project app-internal data dir (`chat`, `modules`, … live under it). */
   private dataDir(name: string): string {
     return join(this.projectDir(name), '.data')
+  }
+
+  private notesMetaPath(name: string): string {
+    return join(this.dataDir(name), 'notes', 'meta.json')
+  }
+
+  private async loadNotesMeta(
+    project: string
+  ): Promise<Record<string, { createdAt?: number; starred?: boolean }>> {
+    try {
+      const raw = await fs.readFile(this.notesMetaPath(project), 'utf8')
+      const parsed = JSON.parse(raw) as unknown
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, { createdAt?: number; starred?: boolean }>
+      }
+      return {}
+    } catch {
+      return {}
+    }
+  }
+
+  private async saveNotesMeta(
+    project: string,
+    meta: Record<string, { createdAt?: number; starred?: boolean }>
+  ): Promise<void> {
+    const dir = join(this.dataDir(project), 'notes')
+    await fs.mkdir(dir, { recursive: true })
+    await fs.writeFile(this.notesMetaPath(project), JSON.stringify(meta, null, 2), {
+      encoding: 'utf8',
+      mode: 0o600
+    })
+  }
+
+  async setNoteStarred(project: string, noteId: string, starred: boolean): Promise<NoteMeta[]> {
+    const safeId = validateNoteId(noteId)
+    const meta = await this.loadNotesMeta(project)
+    const entry = meta[safeId] ?? {}
+    meta[safeId] = { ...entry, starred: !!starred }
+    await this.saveNotesMeta(project, meta)
+    return this.listNotes(project)
+  }
+
+  async searchNotes(project: string, rawQuery: string): Promise<NoteSearchMatch[]> {
+    const query = rawQuery.trim()
+    const out: NoteSearchMatch[] = []
+    if (!query) return out
+    const dir = this.notesDir(project)
+    let entries: string[]
+    try {
+      entries = await fs.readdir(dir)
+    } catch {
+      return out
+    }
+    const lowerQuery = query.toLowerCase()
+    const mdEntries = entries.filter((f) => f.endsWith('.md'))
+    const MAX_RESULTS = 50
+    const MAX_PER_FILE = 5
+    const SNIPPET_RADIUS = 30
+    for (const entry of mdEntries) {
+      if (out.length >= MAX_RESULTS) break
+      const id = entry.slice(0, -3)
+      let content: string
+      try {
+        content = await fs.readFile(join(dir, entry), 'utf8')
+      } catch {
+        continue
+      }
+      const lower = content.toLowerCase()
+      let idx = lower.indexOf(lowerQuery)
+      let count = 0
+      while (idx !== -1 && count < MAX_PER_FILE && out.length < MAX_RESULTS) {
+        const before = content.slice(0, idx)
+        const line = before.split('\n').length
+        const snippetStart = Math.max(0, idx - SNIPPET_RADIUS)
+        const snippetEnd = Math.min(content.length, idx + query.length + SNIPPET_RADIUS)
+        const rawSnippet = content.slice(snippetStart, snippetEnd)
+        const snippetPrefix = snippetStart > 0 ? '…' : ''
+        const snippetSuffix = snippetEnd < content.length ? '…' : ''
+        const snippet = `${snippetPrefix}${rawSnippet.replace(/\s+/g, ' ').trim()}${snippetSuffix}`
+        const relMatchStart = snippetPrefix.length + Math.max(0, idx - snippetStart)
+        out.push({
+          noteId: id,
+          name: id,
+          snippet,
+          line,
+          matchStart: relMatchStart,
+          matchEnd: relMatchStart + query.length
+        })
+        count++
+        idx = lower.indexOf(lowerQuery, idx + query.length)
+      }
+    }
+    return out
   }
 
   private chatDir(name: string): string {
@@ -427,17 +521,36 @@ export class PTNotesService {
     } catch {
       return []
     }
+    const meta = await this.loadNotesMeta(project)
+    const metaDirty: Record<string, { createdAt?: number; starred?: boolean }> = { ...meta }
+    let dirty = false
     const notes: NoteMeta[] = []
     for (const entry of entries) {
       if (!entry.endsWith('.md')) continue
       const id = entry.slice(0, -3)
       let updatedAt = 0
+      let createdAt = 0
       try {
-        updatedAt = (await fs.stat(join(dir, entry))).mtimeMs
+        const st = await fs.stat(join(dir, entry))
+        updatedAt = st.mtimeMs
+        createdAt = st.birthtimeMs && st.birthtimeMs > 0 ? st.birthtimeMs : st.mtimeMs
       } catch {
         // ignore
       }
-      notes.push({ id, name: id, updatedAt })
+      const stored = metaDirty[id]
+      if (stored?.createdAt && stored.createdAt > 0) {
+        createdAt = stored.createdAt
+      } else if (createdAt > 0) {
+        metaDirty[id] = { ...stored, createdAt }
+        dirty = true
+      } else {
+        createdAt = updatedAt
+      }
+      const starred = !!(stored && stored.starred)
+      notes.push({ id, name: id, updatedAt, createdAt, starred })
+    }
+    if (dirty) {
+      await this.saveNotesMeta(project, metaDirty).catch(() => {})
     }
     notes.sort((a, b) => a.name.localeCompare(b.name))
     return notes
@@ -481,8 +594,12 @@ export class PTNotesService {
     return this.withNoteLock(project, async () => {
       const base = slugify(title)
       const id = await this.uniqueNoteId(project, base)
+      const now = Date.now()
       await this.atomicWrite(this.notePath(project, id), `# ${id}\n\n`)
-      return { id, name: id, updatedAt: Date.now() }
+      const meta = await this.loadNotesMeta(project)
+      meta[id] = { ...(meta[id] ?? {}), createdAt: now, starred: false }
+      await this.saveNotesMeta(project, meta)
+      return { id, name: id, updatedAt: now, createdAt: now, starred: false }
     })
   }
 
@@ -520,16 +637,35 @@ export class PTNotesService {
 
   async renameNote(project: string, noteId: string, newTitle: string): Promise<NoteMeta> {
     return this.withNoteLock(project, async () => {
+      const safeId = validateNoteId(noteId)
       const base = slugify(newTitle)
-      const newId = await this.uniqueNoteId(project, base, noteId)
-      await fs.rename(this.notePath(project, noteId), this.notePath(project, newId))
-      return { id: newId, name: newId, updatedAt: Date.now() }
+      const newId = await this.uniqueNoteId(project, base, safeId)
+      await fs.rename(this.notePath(project, safeId), this.notePath(project, newId))
+      const now = Date.now()
+      let createdAt = now
+      let starred = false
+      const meta = await this.loadNotesMeta(project)
+      const existing = meta[safeId]
+      if (existing) {
+        if (existing.createdAt) createdAt = existing.createdAt
+        if (existing.starred) starred = existing.starred
+        delete meta[safeId]
+      }
+      meta[newId] = { createdAt, starred }
+      await this.saveNotesMeta(project, meta)
+      return { id: newId, name: newId, updatedAt: now, createdAt, starred }
     })
   }
 
   async deleteNote(project: string, noteId: string): Promise<void> {
     return this.withNoteLock(project, async () => {
-      await fs.unlink(this.notePath(project, noteId)).catch(() => {})
+      const safeId = validateNoteId(noteId)
+      await fs.unlink(this.notePath(project, safeId)).catch(() => {})
+      const meta = await this.loadNotesMeta(project)
+      if (meta[safeId]) {
+        delete meta[safeId]
+        await this.saveNotesMeta(project, meta)
+      }
     })
   }
 

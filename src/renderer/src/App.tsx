@@ -13,6 +13,8 @@ import { ChatDrawer } from './components/ChatDrawer'
 import { GroupChatPanel } from './components/GroupChatPanel'
 import { BotTasksPanel } from './components/BotTasksPanel'
 import { SettingsDialog } from './components/SettingsDialog'
+import { CommandPalette } from './components/CommandPalette'
+import { GlobalFind } from './components/GlobalFind'
 import { AskUserDialog } from './components/AskUserDialog'
 import { ModulePanel } from './components/ModulePanel'
 import { ModuleHistoryOverlay } from './components/ModuleHistoryOverlay'
@@ -26,6 +28,20 @@ const SIDEBAR_MIN = 200
 const SIDEBAR_MAX = 560
 const CHAT_MIN = 280
 const CHAT_MAX = 720
+
+const OVERLAY_SELECTOR =
+  '.modal-overlay, .command-palette-backdrop, .global-find-overlay, .module-history-backdrop'
+
+function hasOpenOverlay(): boolean {
+  return document.querySelector(OVERLAY_SELECTOR) !== null
+}
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  const t = target as HTMLElement | null
+  if (!t) return false
+  const tag = t.tagName
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable === true
+}
 
 const KANBAN_TOOLS = new Set([
   'list_kanban_cards',
@@ -304,6 +320,45 @@ function App(): React.JSX.Element {
     void init()
   }, [init])
 
+  useEffect(() => {
+    const theme = useAppStore.getState().theme
+    document.documentElement.setAttribute('data-theme', theme)
+    const fontSize = useAppStore.getState().fontSize
+    document.documentElement.setAttribute('data-font-size', fontSize)
+    const density = useAppStore.getState().uiDensity
+    document.documentElement.setAttribute('data-ui-density', density)
+    const editorFont = useAppStore.getState().editorFontFamily
+    document.documentElement.setAttribute('data-editor-font', editorFont)
+  }, [init])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const remote = await window.ptnotes.settings.getAppearance()
+        const state = useAppStore.getState()
+        if (!cancelled) {
+          const patch: Array<() => void> = []
+          if (remote.theme && remote.theme !== state.theme)
+            patch.push(() => state.setTheme(remote.theme))
+          if (remote.fontSize && remote.fontSize !== state.fontSize)
+            patch.push(() => state.setFontSize(remote.fontSize))
+          if (remote.uiDensity && remote.uiDensity !== state.uiDensity)
+            patch.push(() => state.setUiDensity(remote.uiDensity))
+          if (remote.editorFontFamily && remote.editorFontFamily !== state.editorFontFamily) {
+            patch.push(() => state.setEditorFontFamily(remote.editorFontFamily))
+          }
+          patch.forEach((fn) => fn())
+        }
+      } catch {
+        /* preload IPC unavailable in isolated renderer/HMR; safe to ignore */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   // Handle AI stream events: update chat store, auto-refresh notes/kanban on tool calls
   useEffect(() => {
     return window.ptnotes.ai.onStreamEvent((evt) => {
@@ -470,13 +525,13 @@ function App(): React.JSX.Element {
   // Cmd/Ctrl+Shift+G toggles the bots group chat
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent): void {
+      if (isEditableTarget(e.target)) return
       const mod =
         (window.electron.process.platform === 'darwin' ? e.metaKey : e.ctrlKey) && e.shiftKey
       if (!mod || e.altKey) return
       const key = e.key.toLowerCase()
       if (key !== 'c' && key !== 'm' && key !== 'g') return
-      const modalOpen = document.querySelector('.modal-overlay, .module-history-backdrop') !== null
-      if (modalOpen) return
+      if (hasOpenOverlay()) return
       e.preventDefault()
       const view = key === 'c' ? 'chat' : key === 'm' ? 'modules' : 'bots'
       if (view !== 'chat' && !activeProject) return
@@ -485,6 +540,39 @@ function App(): React.JSX.Element {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [activeProject, setRightView])
+
+  // Global command palette shortcut: Cmd/Ctrl+K
+  useEffect(() => {
+    const toggleCommandPalette = useAppStore.getState().toggleCommandPalette
+    function onKeyDown(e: KeyboardEvent): void {
+      if (isEditableTarget(e.target)) return
+      const isMac = window.electron.process.platform === 'darwin'
+      const mod = isMac ? e.metaKey : e.ctrlKey
+      if (!mod || e.shiftKey || e.altKey) return
+      if (e.key.toLowerCase() !== 'k') return
+      if (hasOpenOverlay()) return
+      e.preventDefault()
+      toggleCommandPalette()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  useEffect(() => {
+    const openFind = useAppStore.getState().setGlobalFindOpen
+    const dispose = window.ptnotes.onOpenFind(() => {
+      const state = useAppStore.getState()
+      if (state.globalFindOpen) {
+        const input = document.querySelector('.global-find-input') as HTMLInputElement | null
+        input?.focus()
+        input?.select()
+        return
+      }
+      if (hasOpenOverlay()) return
+      openFind(true)
+    })
+    return dispose
+  }, [])
 
   // Show a skeleton briefly while the module panel animates open/close or switches to it
   const moduleWasOpen = useRef(rightOpen && rightView === 'modules')
@@ -621,6 +709,8 @@ function App(): React.JSX.Element {
       )}
 
       {settingsOpen && <SettingsDialog />}
+      <CommandPalette />
+      <GlobalFind />
       {(kanbanEditingId || kanbanCreatingColumnId || kanbanViewingId) && (
         <KanbanCardModal key={kanbanEditingId ?? kanbanCreatingColumnId ?? kanbanViewingId} />
       )}
