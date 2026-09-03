@@ -27,6 +27,10 @@ export class SettingsStore {
       const disabledToolsets = Array.isArray(parsed.disabledToolsets)
         ? parsed.disabledToolsets.filter((id): id is string => typeof id === 'string')
         : []
+      const theme: StorageSettings['theme'] =
+        parsed.theme === 'light' || parsed.theme === 'dark' || parsed.theme === 'system'
+          ? parsed.theme
+          : 'system'
       const builtinSkillOverrides: Record<string, boolean> = {}
       if (
         parsed.builtinSkillOverrides &&
@@ -44,10 +48,11 @@ export class SettingsStore {
         browserHeadless: !!parsed.browserHeadless,
         browserMaximize: !!parsed.browserMaximize,
         browserIgnoreHttpsErrors: !!parsed.browserIgnoreHttpsErrors,
+        theme,
         builtinSkillOverrides
       }
     } catch {
-      return defaultSettings()
+      return { ...defaultSettings(), theme: 'system' }
     }
   }
 
@@ -71,6 +76,7 @@ export class SettingsStore {
       browserHeadless: !!settings.browserHeadless,
       browserMaximize: !!settings.browserMaximize,
       browserIgnoreHttpsErrors: !!settings.browserIgnoreHttpsErrors,
+      theme: settings.theme === 'light' || settings.theme === 'dark' ? settings.theme : 'system',
       builtinSkillOverrides: {}
     }
     if (settings.builtinSkillOverrides && typeof settings.builtinSkillOverrides === 'object') {

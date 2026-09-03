@@ -100,7 +100,8 @@ interface AppState {
   confirmRequest: ConfirmRequest | null
   askRequest: AskRequest | null
   settingsOpen: boolean
-  settingsCategory: 'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets' | 'bots'
+  settingsCategory:
+    'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets' | 'bots' | 'appearance'
   skillEditRequest: string | null
   sidebarVisible: boolean
   formatHelperEnabled: boolean
@@ -199,10 +200,11 @@ interface AppState {
   setAskRequest: (req: AskRequest | null) => void
   setSettingsOpen: (open: boolean) => void
   setSettingsCategory: (
-    category: 'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets' | 'bots'
+    category: 'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets' | 'bots' | 'appearance'
   ) => void
   openSettings: (
-    category?: 'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets' | 'bots'
+    category?:
+      'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets' | 'bots' | 'appearance'
   ) => void
   openSkillEditor: (name: string) => void
   clearSkillEditRequest: () => void
@@ -1395,6 +1397,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     localStorage.setItem('ptnotes:theme', theme)
     document.documentElement.setAttribute('data-theme', theme)
     set({ theme })
+    void (async () => {
+      try {
+        await window.ptnotes.settings.setTheme(theme)
+      } catch {
+        /* preload IPC unavailable in isolated renderer/HMR; safe to ignore */
+      }
+    })()
   },
 
   setCommandPaletteOpen(commandPaletteOpen) {

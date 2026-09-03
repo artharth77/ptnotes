@@ -6882,7 +6882,7 @@ fieldset.kanban-form {
 .command-palette-list {
   max-height: 52vh;
   overflow-y: auto;
-  padding: 8px;
+  padding: 4px 0 8px;
 }
 
 .command-palette-empty {
@@ -6890,6 +6890,54 @@ fieldset.kanban-form {
   text-align: center;
   color: var(--text-dim);
   font-size: 13px;
+}
+
+.command-palette-group + .command-palette-group {
+  margin-top: 10px;
+}
+
+.command-palette-group-header {
+  position: sticky;
+  top: -4px;
+  z-index: 1;
+  padding: 8px 16px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: linear-gradient(
+    to bottom,
+    var(--bg) 0%,
+    var(--bg) 70%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  backdrop-filter: blur(2px);
+}
+
+:root[data-theme='dark'] .command-palette-group-header,
+:root[data-theme='system'] .command-palette-group-header {
+  background: linear-gradient(
+    to bottom,
+    var(--bg) 0%,
+    var(--bg) 70%,
+    rgba(0, 0, 0, 0) 100%
+  );
+}
+
+.command-palette-group .command-palette-item {
+  border-radius: 0;
+  padding: 10px 16px;
+}
+
+.command-palette-group .command-palette-item:first-of-type {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.command-palette-group .command-palette-item:last-child {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
 }
 
 .command-palette-item {

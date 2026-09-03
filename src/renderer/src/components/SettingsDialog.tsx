@@ -1133,6 +1133,12 @@ export function SettingsDialog(): React.JSX.Element {
             Storage
           </button>
           <button
+            className={category === 'appearance' ? 'active' : ''}
+            onClick={() => setSettingsCategory('appearance')}
+          >
+            Appearance
+          </button>
+          <button
             className={category === 'ai' ? 'active' : ''}
             onClick={() => setSettingsCategory('ai')}
           >
@@ -1186,7 +1192,9 @@ export function SettingsDialog(): React.JSX.Element {
                   Change…
                 </button>
               </div>
-              <div style={{ height: 16 }} />
+            </>
+          ) : category === 'appearance' ? (
+            <>
               <AppearanceSettings />
             </>
           ) : category === 'modules' ? (

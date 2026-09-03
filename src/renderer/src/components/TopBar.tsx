@@ -1,14 +1,37 @@
 import {
   mdiAccountGroupOutline,
+  mdiBrightness4,
   mdiChatProcessingOutline,
   mdiCogOutline,
-  mdiPuzzleOutline
+  mdiPuzzleOutline,
+  mdiWeatherNight,
+  mdiWeatherSunny
 } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
 import { ProjectDropdown } from './ProjectDropdown'
 import { MdiIcon } from './MdiIcon'
 
 const NO_RUNS: never[] = []
+
+type ThemeMode = 'light' | 'dark' | 'system'
+const THEME_CYCLE: ThemeMode[] = ['light', 'dark', 'system']
+function nextTheme(t: ThemeMode): ThemeMode {
+  const idx = THEME_CYCLE.indexOf(t)
+  return THEME_CYCLE[(idx + 1) % THEME_CYCLE.length]
+}
+function themeIcon(t: ThemeMode): string {
+  switch (t) {
+    case 'light':
+      return mdiWeatherSunny
+    case 'dark':
+      return mdiWeatherNight
+    default:
+      return mdiBrightness4
+  }
+}
+function themeTitle(t: ThemeMode): string {
+  return `Theme: ${t} — click for ${nextTheme(t)}`
+}
 
 export function TopBar(): React.JSX.Element {
   const chatOpen = useAppStore((s) => s.chatOpen)
@@ -35,6 +58,8 @@ export function TopBar(): React.JSX.Element {
   const sidebarVisible = useAppStore((s) => s.sidebarVisible)
   const setSidebarVisible = useAppStore((s) => s.setSidebarVisible)
   const activeProject = useAppStore((s) => s.activeProject)
+  const theme = useAppStore((s) => s.theme)
+  const setTheme = useAppStore((s) => s.setTheme)
 
   return (
     <header className="topbar">
@@ -80,6 +105,15 @@ export function TopBar(): React.JSX.Element {
         <ProjectDropdown />
       </div>
       <div className="topbar-right">
+        <button
+          className="btn ghost"
+          onClick={() => setTheme(nextTheme(theme as ThemeMode))}
+          title={themeTitle(theme as ThemeMode)}
+        >
+          <span className="btn-icon">
+            <MdiIcon path={themeIcon(theme as ThemeMode)} size={18} />
+          </span>
+        </button>
         <button className="btn ghost" onClick={() => setSettingsOpen(true)} title="Settings">
           <span className="btn-icon">
             <MdiIcon path={mdiCogOutline} size={18} />

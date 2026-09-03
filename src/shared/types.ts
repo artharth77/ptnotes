@@ -45,6 +45,7 @@ export interface StorageSettings {
   browserHeadless?: boolean
   browserMaximize?: boolean
   browserIgnoreHttpsErrors?: boolean
+  theme?: 'light' | 'dark' | 'system'
   /** User enable/disable choices for builtin (app-shipped, read-only) skills, keyed by skill name. */
   builtinSkillOverrides?: Record<string, boolean>
 }

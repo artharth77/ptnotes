@@ -212,6 +212,9 @@ const api = {
   },
   settings: {
     get: (): Promise<StorageSettings> => ipcRenderer.invoke('settings:get'),
+    getTheme: (): Promise<'light' | 'dark' | 'system'> => ipcRenderer.invoke('settings:getTheme'),
+    setTheme: (theme: 'light' | 'dark' | 'system'): Promise<'light' | 'dark' | 'system'> =>
+      ipcRenderer.invoke('settings:setTheme', theme),
     getAbout: (): Promise<AboutInfo> => ipcRenderer.invoke('settings:getAbout'),
     chooseRoot: (): Promise<string | null> => ipcRenderer.invoke('settings:chooseRoot'),
     changeRoot: (newRoot: string): Promise<StorageSettings> =>

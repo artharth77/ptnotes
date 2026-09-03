@@ -28,7 +28,8 @@ export type CommandPaletteAction = {
   run: () => void
 }
 
-type SettingsCategory = 'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets' | 'bots'
+type SettingsCategory =
+  'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets' | 'bots' | 'appearance'
 
 function fuzzyMatch(haystack: string, needle: string): number | null {
   if (!needle) return 0
@@ -197,6 +198,7 @@ function useActions(): CommandPaletteAction[] {
         run: () => closeAndRun(() => setSidebarVisible(!sidebarVisible))
       },
       openSettings('storage', 'Storage', mdiCogOutline),
+      openSettings('appearance', 'Appearance', mdiBrightness4),
       openSettings('ai', 'AI', mdiCogOutline),
       openSettings('modules', 'Modules', mdiCogOutline),
       openSettings('toolsets', 'Toolsets', mdiCogOutline),
@@ -253,6 +255,22 @@ export function CommandPalette(): React.JSX.Element | null {
     return out
   }, [actions, query])
 
+  const grouped = useMemo<
+    Array<{ category: string; entries: Array<{ item: (typeof filtered)[number]; index: number }> }>
+  >(() => {
+    const order: string[] = []
+    const byCat = new Map<string, Array<{ item: (typeof filtered)[number]; index: number }>>()
+    filtered.forEach((item, index) => {
+      const cat = item.action.category
+      if (!byCat.has(cat)) {
+        order.push(cat)
+        byCat.set(cat, [])
+      }
+      byCat.get(cat)!.push({ item, index })
+    })
+    return order.map((category) => ({ category, entries: byCat.get(category)! }))
+  }, [filtered])
+
   useEffect(() => {
     const clamped = Math.min(activeIndex, Math.max(0, filtered.length - 1))
     if (clamped !== activeIndex) setActiveIndex(clamped)
@@ -307,24 +325,28 @@ export function CommandPalette(): React.JSX.Element | null {
           {filtered.length === 0 ? (
             <div className="command-palette-empty">No commands match “{query}”.</div>
           ) : (
-            filtered.map(({ action }, i) => (
-              <button
-                key={action.id}
-                className={`command-palette-item${i === activeIndex ? ' active' : ''}`}
-                onClick={() => select(i)}
-                onMouseEnter={() => setActiveIndex(i)}
-              >
-                <span className="command-palette-icon">
-                  <MdiIcon path={action.iconPath} size={18} />
-                </span>
-                <span className="command-palette-text">
-                  <span className="command-palette-title">{action.title}</span>
-                  {action.subtitle && (
-                    <span className="command-palette-subtitle">{action.subtitle}</span>
-                  )}
-                </span>
-                <span className="command-palette-category">{action.category}</span>
-              </button>
+            grouped.map((group) => (
+              <div key={group.category} className="command-palette-group">
+                <div className="command-palette-group-header">{group.category}</div>
+                {group.entries.map(({ item, index: i }) => (
+                  <button
+                    key={item.action.id}
+                    className={`command-palette-item${i === activeIndex ? ' active' : ''}`}
+                    onClick={() => select(i)}
+                    onMouseEnter={() => setActiveIndex(i)}
+                  >
+                    <span className="command-palette-icon">
+                      <MdiIcon path={item.action.iconPath} size={18} />
+                    </span>
+                    <span className="command-palette-text">
+                      <span className="command-palette-title">{item.action.title}</span>
+                      {item.action.subtitle && (
+                        <span className="command-palette-subtitle">{item.action.subtitle}</span>
+                      )}
+                    </span>
+                  </button>
+                ))}
+              </div>
             ))
           )}
         </div>

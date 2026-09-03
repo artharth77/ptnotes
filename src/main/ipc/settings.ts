@@ -37,6 +37,25 @@ export function registerSettingsIpc(
 ): void {
   ipcMain.handle('settings:get', async (): Promise<StorageSettings> => store.load())
 
+  ipcMain.handle(
+    'settings:getTheme',
+    async (): Promise<'light' | 'dark' | 'system'> => (await store.load()).theme ?? 'system'
+  )
+
+  ipcMain.handle(
+    'settings:setTheme',
+    async (
+      _e: IpcMainInvokeEvent,
+      theme: 'light' | 'dark' | 'system'
+    ): Promise<'light' | 'dark' | 'system'> => {
+      const current = await store.load()
+      const valid: 'light' | 'dark' | 'system' =
+        theme === 'light' || theme === 'dark' ? theme : 'system'
+      const next = await store.save({ ...current, theme: valid })
+      return next.theme ?? 'system'
+    }
+  )
+
   ipcMain.handle('settings:getAbout', async (): Promise<AboutInfo> => ({
     name: app.getName(),
     version: app.getVersion(),

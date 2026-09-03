@@ -309,6 +309,24 @@ function App(): React.JSX.Element {
     document.documentElement.setAttribute('data-theme', theme)
   }, [init])
 
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const remote = await window.ptnotes.settings.getTheme()
+        const current = useAppStore.getState().theme
+        if (!cancelled && remote && remote !== current) {
+          useAppStore.getState().setTheme(remote)
+        }
+      } catch {
+        /* preload IPC unavailable in isolated renderer/HMR; safe to ignore */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   // Handle AI stream events: update chat store, auto-refresh notes/kanban on tool calls
   useEffect(() => {
     return window.ptnotes.ai.onStreamEvent((evt) => {
