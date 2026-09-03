@@ -229,6 +229,7 @@ export class GroupChatManager {
       ts: Date.now(),
       taskId: run.runId
     })
+    this.deps.broadcast({ type: 'message', project, groupId, message: askMsg })
 
     return await new Promise<AskResult>((resolve) => {
       this.pendingAsks.set(askMsg.id, {

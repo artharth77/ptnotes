@@ -12,7 +12,7 @@ import type {
   ModuleRun
 } from '../src/shared/types'
 import type { AIConfigStore } from '../src/main/ai/config'
-import type { BotProfile } from '../src/shared/bots'
+import type { BotGroupEvent, BotProfile } from '../src/shared/bots'
 import {
   MAX_BOT_TURNS_PER_MESSAGE,
   extractBotTags,
@@ -1130,6 +1130,7 @@ const assignReply = 'I need details.\n```assign\n{"title":"Ask task","task":"p"}
   const startCalls: StartCall[] = []
   const asks: { runId: string; promise: Promise<{ answers: AskAnswer[]; cancelled?: boolean }> }[] =
     []
+  const broadcasts: BotGroupEvent[] = []
   const m8 = new GroupChatManager({
     store,
     configStore,
@@ -1137,7 +1138,7 @@ const assignReply = 'I need details.\n```assign\n{"title":"Ask task","task":"p"}
       project: PROJECT,
       questions: [{ id: 'color', question: 'Pick a color', options: ['Red', 'Blue'] }]
     }),
-    broadcast: () => {},
+    broadcast: (evt) => broadcasts.push(evt),
     clientFactory: makeFakeClient(new Map([['alice', [assignReply]]]))
   })
   await m8.send(PROJECT, group.groupId, 'Do the ask task')
@@ -1156,6 +1157,14 @@ const assignReply = 'I need details.\n```assign\n{"title":"Ask task","task":"p"}
     (m) => m.senderKind === 'bot' && m.content.includes('I need your input to continue')
   )
   assert.ok(qMsg, 'question text posted as a bot message')
+  assert.ok(
+    broadcasts.some((e) => e.type === 'message' && e.message.id === askMsg.id),
+    'interactive ask message broadcast live'
+  )
+  assert.ok(
+    broadcasts.some((e) => e.type === 'message' && e.message.id === qMsg?.id),
+    'question text broadcast live'
+  )
   assert.equal(
     m8.resolveBotAsk(PROJECT, group.groupId, 'unknown-id', [], false),
     false,
@@ -1169,6 +1178,15 @@ const assignReply = 'I need details.\n```assign\n{"title":"Ask task","task":"p"}
   const stored = store.getMessage(PROJECT, group.groupId, askMsg.id)
   assert.equal(parseGroupAsk(stored!.content)?.status, 'answered')
   assert.deepEqual(parseGroupAsk(stored!.content)?.answers, [{ id: 'color', answer: 'Blue' }])
+  assert.ok(
+    broadcasts.some(
+      (e) =>
+        e.type === 'message' &&
+        e.message.id === askMsg.id &&
+        parseGroupAsk(e.message.content)?.status === 'answered'
+    ),
+    'answered ask message broadcast live'
+  )
   assert.equal(
     m8.resolveBotAsk(PROJECT, group.groupId, askMsg.id, [], false),
     false,
@@ -1289,6 +1307,7 @@ const assignReply = 'I need details.\n```assign\n{"title":"Ask task","task":"p"}
     botIds: ['alice'],
     leaderBotId: 'alice'
   })
+  const broadcastsM: BotGroupEvent[] = []
   const m12 = new GroupChatManager({
     store,
     configStore,
@@ -1303,7 +1322,7 @@ const assignReply = 'I need details.\n```assign\n{"title":"Ask task","task":"p"}
         }
       ]
     }),
-    broadcast: () => {},
+    broadcast: (evt) => broadcastsM.push(evt),
     clientFactory: makeFakeClient(new Map([['alice', [assignReply]]]))
   })
   await m12.send(PROJECT, g.groupId, 'go')
@@ -1321,6 +1340,14 @@ const assignReply = 'I need details.\n```assign\n{"title":"Ask task","task":"p"}
   )
   const askMsg = messages.find((m) => m.senderKind === 'ask')
   assert.ok(askMsg, 'interactive ask message posted')
+  assert.ok(
+    broadcastsM.some((e) => e.type === 'message' && e.message.id === askMsg!.id),
+    'interactive confirm ask message broadcast live'
+  )
+  assert.ok(
+    broadcastsM.some((e) => e.type === 'message' && e.message.id === qMsg?.id),
+    'confirm prompt broadcast live'
+  )
   const payload = parseGroupAsk(askMsg!.content)
   assert.equal(payload?.status, 'pending')
   assert.deepEqual(payload?.questions[0]?.options, ['Yes', 'No'])
