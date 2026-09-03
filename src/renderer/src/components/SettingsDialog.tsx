@@ -572,6 +572,172 @@ function ToolsetsPane({
   )
 }
 
+function AppearanceSettings(): React.JSX.Element {
+  const theme = useAppStore((s) => s.theme)
+  const fontSize = useAppStore((s) => s.fontSize)
+  const uiDensity = useAppStore((s) => s.uiDensity)
+  const editorFontFamily = useAppStore((s) => s.editorFontFamily)
+  const setTheme = useAppStore((s) => s.setTheme)
+  const setFontSize = useAppStore((s) => s.setFontSize)
+  const setUiDensity = useAppStore((s) => s.setUiDensity)
+  const setEditorFontFamily = useAppStore((s) => s.setEditorFontFamily)
+  const themeOptions: Array<{
+    value: 'light' | 'dark' | 'system'
+    label: string
+    desc: string
+  }> = [
+    { value: 'light', label: 'Light', desc: 'Always use light mode' },
+    { value: 'dark', label: 'Dark', desc: 'Always use dark mode' },
+    { value: 'system', label: 'System', desc: 'Follow the OS setting' }
+  ]
+  const fontSizeOptions: Array<{
+    value: 'small' | 'default' | 'large' | 'xlarge'
+    label: string
+    desc: string
+  }> = [
+    { value: 'small', label: 'S', desc: '13px' },
+    { value: 'default', label: 'M', desc: '14px' },
+    { value: 'large', label: 'L', desc: '15px' },
+    { value: 'xlarge', label: 'XL', desc: '16px' }
+  ]
+  const densityOptions: Array<{
+    value: 'compact' | 'cozy'
+    label: string
+    desc: string
+  }> = [
+    { value: 'compact', label: 'Compact', desc: 'Tighter spacing' },
+    { value: 'cozy', label: 'Cozy', desc: 'Default spacing' }
+  ]
+  const editorFontOptions: Array<{
+    value: 'sans' | 'serif' | 'mono'
+    label: string
+    desc: string
+  }> = [
+    { value: 'sans', label: 'Sans Serif', desc: 'System UI font' },
+    { value: 'serif', label: 'Serif', desc: 'Georgia / Times style' },
+    { value: 'mono', label: 'Monospace', desc: 'Code / fixed width' }
+  ]
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>Appearance</div>
+          <p className="hint" style={{ marginTop: 2, marginBottom: 0 }}>
+            Choose PTNotes&apos; color scheme.
+          </p>
+        </div>
+      </div>
+      <div className="kanban-seg block" role="radiogroup" aria-label="Theme">
+        {themeOptions.map((opt) => (
+          <button
+            key={opt.value}
+            role="radio"
+            aria-checked={theme === opt.value}
+            className={`kanban-seg-btn${theme === opt.value ? ' active' : ''}`}
+            onClick={() => setTheme(opt.value)}
+            title={opt.desc}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ height: 24 }} />
+
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>Font size</div>
+          <p className="hint" style={{ marginTop: 2, marginBottom: 0 }}>
+            Base text size for the whole interface.
+          </p>
+        </div>
+      </div>
+      <div className="kanban-seg block" role="radiogroup" aria-label="Font size">
+        {fontSizeOptions.map((opt) => (
+          <button
+            key={opt.value}
+            role="radio"
+            aria-checked={fontSize === opt.value}
+            className={`kanban-seg-btn${fontSize === opt.value ? ' active' : ''}`}
+            onClick={() => setFontSize(opt.value)}
+            title={opt.desc}
+          >
+            {opt.label}
+            <span
+              style={{
+                marginLeft: 6,
+                fontSize: 11,
+                color: fontSize === opt.value ? 'var(--accent)' : 'var(--text-dim)',
+                fontWeight: 400
+              }}
+            >
+              {opt.desc}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      <div style={{ height: 24 }} />
+
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>UI density</div>
+          <p className="hint" style={{ marginTop: 2, marginBottom: 0 }}>
+            Compact = less vertical padding (more information on screen).
+          </p>
+        </div>
+      </div>
+      <div className="kanban-seg block" role="radiogroup" aria-label="UI density">
+        {densityOptions.map((opt) => (
+          <button
+            key={opt.value}
+            role="radio"
+            aria-checked={uiDensity === opt.value}
+            className={`kanban-seg-btn${uiDensity === opt.value ? ' active' : ''}`}
+            onClick={() => setUiDensity(opt.value)}
+            title={opt.desc}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ height: 24 }} />
+
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>Editor font</div>
+          <p className="hint" style={{ marginTop: 2, marginBottom: 0 }}>
+            Font family for note body content. Does not change the UI chrome font.
+          </p>
+        </div>
+      </div>
+      <div className="kanban-seg block" role="radiogroup" aria-label="Editor font">
+        {editorFontOptions.map((opt) => (
+          <button
+            key={opt.value}
+            role="radio"
+            aria-checked={editorFontFamily === opt.value}
+            className={`kanban-seg-btn${editorFontFamily === opt.value ? ' active' : ''}`}
+            onClick={() => setEditorFontFamily(opt.value)}
+            title={opt.desc}
+            style={{
+              fontFamily:
+                opt.value === 'sans'
+                  ? "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+                  : opt.value === 'serif'
+                    ? "Georgia, 'Times New Roman', 'Noto Serif', serif"
+                    : "'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace"
+            }}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+    </>
+  )
+}
+
 function AboutPane(): React.JSX.Element {
   const [about, setAbout] = useState<AboutInfo | null>(null)
   const [error, setError] = useState('')
@@ -1098,6 +1264,12 @@ export function SettingsDialog(): React.JSX.Element {
             Storage
           </button>
           <button
+            className={category === 'appearance' ? 'active' : ''}
+            onClick={() => setSettingsCategory('appearance')}
+          >
+            Appearance
+          </button>
+          <button
             className={category === 'ai' ? 'active' : ''}
             onClick={() => setSettingsCategory('ai')}
           >
@@ -1151,6 +1323,10 @@ export function SettingsDialog(): React.JSX.Element {
                   Change…
                 </button>
               </div>
+            </>
+          ) : category === 'appearance' ? (
+            <>
+              <AppearanceSettings />
             </>
           ) : category === 'modules' ? (
             <>

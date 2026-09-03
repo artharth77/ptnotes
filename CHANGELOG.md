@@ -1,3 +1,33 @@
+# Changelog
+
+## [0.15.1-dev] — 2026-09-03
+
+### Added
+
+- **Command Palette (⌘K / Ctrl+K)**: global fuzzy action launcher, invoked from anywhere in the app.
+  - Fuzzy-matches across every registered action (tab switches, settings openers, theme switches, project refreshes, create quick note, new chat, sidebar toggle, and future app-wide actions).
+  - Keyboard navigation: `ArrowUp`/`ArrowDown` with wraparound-free index clamping, `Enter` runs the highlighted entry, `Esc` closes. Hover sets the active index; mouse click runs directly.
+  - Per-action icon (`@mdi/js`), title, optional subtitle (e.g. currently active state for tabs/theme), plus a category label that becomes a **sticky grouped header** in the result list so the View / Create / Project / Settings / Appearance sections stay visually scannable even in long results.
+  - 100% renderer-local store state (`commandPaletteOpen`, `commandPaletteQuery`, `commandPaletteActiveIndex`) — no network or file I/O.
+- **Appearance / Theme system**: three built-in color-scheme modes, persisted to `localStorage` and applied instantly via CSS custom properties.
+  - New dedicated **Appearance** tab in Settings (moved out of the bottom of the Storage pane): segmented `Light` / `Dark` / `System` buttons with active-state highlighting.
+  - `:root[data-theme='light'|'dark']` override palettes; `:root[data-theme='system']` uses the existing `@media (prefers-color-scheme: dark)` branch. Explicit light/dark never collide with the media query.
+  - `color-scheme: light/dark` set per-mode so native scrollbars and form controls follow the theme.
+  - Quick-toggle theme button in the top bar: one click cycles `light → dark → system → light` with an icon that reflects the current mode (sun / moon / auto-brightness).
+  - `init()` applies the saved theme to `<html data-theme="…">` on startup so there is no FOUC / light-then-dark flash.
+- **Note Templates**: a built-in 400-line template library + UI picker in the New Note modal.
+  - 15 presets: blank, meeting-notes, daily-journal, project-brief, task-list, sprint-retro, bug-report, prd, onboarding-checklist, brainstorm, swot, howto, decision-log, plus a recipes cookbook.
+  - Two-column scrollable card grid in the Create Note modal: each card shows an emoji icon, preset name, and a one-line description; active card highlights with the accent-soft background.
+  - After `createNote(title)` the chosen template's `content(title, new Date())` factory is applied via an immediate `saveNote`, so the editor opens pre-filled with a ready-to-edit structure.
+  - Close/cancel paths always reset `selectedTemplate` back to `blank` so the next New Note doesn't inherit a stale choice.
+
+### Fixed
+
+- **Command Palette: active index out of bounds after filter updates** — when the user typed a narrower query (or any text that shortened the filtered list) the old `activeIndex` could point past the new array length; pressing `Enter` then ran `select(undefined)` and nothing happened. A `useEffect` now clamps `activeIndex` to `Math.min(activeIndex, Math.max(0, filtered.length - 1))` every time the filtered list changes, and the `ArrowDown`/`ArrowUp` handlers already did the right thing for per-keypress motion.
+- **Settings Appearance pane grammar fix** — the hint text “Choose how PTNotes' color scheme.” was grammatically incomplete (no verb after “how”). Shortened to the natural “Choose PTNotes' color scheme.”.
+- **Command Palette: sidebar toggle icon was misleading** — the `sidebar:toggle` action used `mdiWindowClose` (an X icon), which visually means “close a window”, not “show/hide a sidebar”. Replaced with `mdiMenu`, the universal hamburger/sidebar-toggle glyph that matches the top-bar button's intent.
+- **Settings tab organization**: the Appearance settings were prototyped tacked onto the bottom of the **Storage** pane (semantically unrelated — storage is about root paths and file moves; appearance is about visual theming). Appearance is now its own first-class tab in the settings nav, ordered between Storage and AI Settings, with its own route branch inside the `SettingsDialog` render.
+
 ## [0.15.0] — 2026-08-31
 
 ### Added

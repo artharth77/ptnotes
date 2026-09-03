@@ -31,6 +31,7 @@ import type {
   NewKanbanCardInput,
   NewKanbanColumnInput,
   NoteMeta,
+  NoteSearchMatch,
   Project,
   ProjectCalendar,
   Schedule,
@@ -100,10 +101,24 @@ interface AppState {
   confirmRequest: ConfirmRequest | null
   askRequest: AskRequest | null
   settingsOpen: boolean
-  settingsCategory: 'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets' | 'bots'
+  settingsCategory:
+    'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets' | 'bots' | 'appearance'
   skillEditRequest: string | null
   sidebarVisible: boolean
   formatHelperEnabled: boolean
+  theme: 'light' | 'dark' | 'system'
+  fontSize: 'small' | 'default' | 'large' | 'xlarge'
+  uiDensity: 'compact' | 'cozy'
+  editorFontFamily: 'sans' | 'serif' | 'mono'
+  commandPaletteOpen: boolean
+  commandPaletteQuery: string
+  commandPaletteActiveIndex: number
+  notesSort: 'name' | 'created' | 'modified'
+  notesSortDir: 'asc' | 'desc'
+  globalFindOpen: boolean
+  globalFindQuery: string
+  globalFindMatches: NoteSearchMatch[]
+  globalFindLoading: boolean
   loading: boolean
 
   init: () => Promise<void>
@@ -115,6 +130,13 @@ interface AppState {
   changeRoot: (newRoot: string) => Promise<void>
   selectProject: (name: string) => Promise<void>
   refreshNotes: () => Promise<void>
+  toggleNoteStarred: (noteId: string, starred: boolean) => Promise<void>
+  setNotesSort: (sort: 'name' | 'created' | 'modified') => void
+  toggleNotesSortDir: () => void
+  setGlobalFindOpen: (open: boolean) => void
+  setGlobalFindQuery: (q: string) => void
+  runGlobalFind: (q: string) => Promise<void>
+  clearGlobalFind: () => void
   refreshKanban: () => Promise<void>
   createKanbanCard: (input: NewKanbanCardInput) => Promise<void>
   updateKanbanCard: (cardId: string, patch: KanbanCardPatch) => Promise<void>
@@ -195,15 +217,24 @@ interface AppState {
   setAskRequest: (req: AskRequest | null) => void
   setSettingsOpen: (open: boolean) => void
   setSettingsCategory: (
-    category: 'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets' | 'bots'
+    category: 'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets' | 'bots' | 'appearance'
   ) => void
   openSettings: (
-    category?: 'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets' | 'bots'
+    category?:
+      'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets' | 'bots' | 'appearance'
   ) => void
   openSkillEditor: (name: string) => void
   clearSkillEditRequest: () => void
   setSidebarVisible: (visible: boolean) => void
   setFormatHelperEnabled: (enabled: boolean) => void
+  setTheme: (theme: 'light' | 'dark' | 'system') => void
+  setFontSize: (size: 'small' | 'default' | 'large' | 'xlarge') => void
+  setUiDensity: (density: 'compact' | 'cozy') => void
+  setEditorFontFamily: (family: 'sans' | 'serif' | 'mono') => void
+  setCommandPaletteOpen: (open: boolean) => void
+  toggleCommandPalette: () => void
+  setCommandPaletteQuery: (q: string) => void
+  setCommandPaletteActiveIndex: (i: number) => void
   newChat: (project: string) => Promise<void>
   openChat: (project: string, sessionId: string) => Promise<void>
   deleteChat: (project: string, sessionId: string) => Promise<void>
@@ -265,6 +296,24 @@ export const useAppStore = create<AppState>((set, get) => ({
   skillEditRequest: null,
   sidebarVisible: true,
   formatHelperEnabled: localStorage.getItem('ptnotes:formatHelper') !== '0',
+  theme: (localStorage.getItem('ptnotes:theme') as 'light' | 'dark' | 'system' | null) ?? 'system',
+  fontSize:
+    (localStorage.getItem('ptnotes:fontSize') as 'small' | 'default' | 'large' | 'xlarge' | null) ??
+    'default',
+  uiDensity: (localStorage.getItem('ptnotes:uiDensity') as 'compact' | 'cozy' | null) ?? 'cozy',
+  editorFontFamily:
+    (localStorage.getItem('ptnotes:editorFont') as 'sans' | 'serif' | 'mono' | null) ?? 'sans',
+  commandPaletteOpen: false,
+  commandPaletteQuery: '',
+  commandPaletteActiveIndex: 0,
+  notesSort:
+    (localStorage.getItem('ptnotes:notesSort') as 'name' | 'created' | 'modified' | null) ??
+    'modified',
+  notesSortDir: (localStorage.getItem('ptnotes:notesSortDir') as 'asc' | 'desc' | null) ?? 'desc',
+  globalFindOpen: false,
+  globalFindQuery: '',
+  globalFindMatches: [],
+  globalFindLoading: false,
   loading: false,
 
   async init() {
@@ -401,13 +450,70 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!project) return set({ notes: [] })
     const notes = await window.ptnotes.notes.list(project)
     const { activeNoteId } = get()
-    // The active note may have been deleted by an AI tool run or externally;
-    // drop it (and its stale editor content) so edits cannot resurrect the file.
     if (activeNoteId && !notes.some((n) => n.id === activeNoteId)) {
       set({ notes, activeNoteId: null, noteContent: '' })
     } else {
       set({ notes })
     }
+  },
+
+  async toggleNoteStarred(noteId, starred) {
+    const project = get().activeProject
+    if (!project) return
+    const existing = get().notes.find((n) => n.id === noteId)
+    if (existing) {
+      set({
+        notes: get().notes.map((n) => (n.id === noteId ? { ...n, starred: !!starred } : n))
+      })
+    }
+    try {
+      const notes = await window.ptnotes.notes.setStarred(project, noteId, !!starred)
+      set({ notes })
+    } catch {
+      void get().refreshNotes()
+    }
+  },
+
+  setNotesSort(sort) {
+    localStorage.setItem('ptnotes:notesSort', sort)
+    set({ notesSort: sort })
+  },
+
+  toggleNotesSortDir() {
+    const next = get().notesSortDir === 'asc' ? 'desc' : 'asc'
+    localStorage.setItem('ptnotes:notesSortDir', next)
+    set({ notesSortDir: next })
+  },
+
+  setGlobalFindOpen(open) {
+    set({ globalFindOpen: open })
+  },
+
+  setGlobalFindQuery(q) {
+    set({ globalFindQuery: q })
+  },
+
+  async runGlobalFind(q) {
+    const project = get().activeProject
+    if (!project) return
+    const trimmed = q.trim()
+    set({ globalFindQuery: q, globalFindMatches: [], globalFindLoading: !!trimmed })
+    if (!trimmed) return
+    try {
+      const matches = await window.ptnotes.notes.search(project, trimmed)
+      set({ globalFindMatches: matches, globalFindLoading: false })
+    } catch {
+      set({ globalFindMatches: [], globalFindLoading: false })
+    }
+  },
+
+  clearGlobalFind() {
+    set({
+      globalFindOpen: false,
+      globalFindQuery: '',
+      globalFindMatches: [],
+      globalFindLoading: false
+    })
   },
 
   async refreshKanban() {
@@ -1376,5 +1482,85 @@ export const useAppStore = create<AppState>((set, get) => ({
   setFormatHelperEnabled(enabled) {
     localStorage.setItem('ptnotes:formatHelper', enabled ? '1' : '0')
     set({ formatHelperEnabled: enabled })
+  },
+
+  setTheme(theme) {
+    localStorage.setItem('ptnotes:theme', theme)
+    document.documentElement.setAttribute('data-theme', theme)
+    set({ theme })
+    void (async () => {
+      try {
+        await window.ptnotes.settings.setTheme(theme)
+      } catch {
+        /* preload IPC unavailable in isolated renderer/HMR; safe to ignore */
+      }
+    })()
+  },
+
+  setFontSize(size) {
+    localStorage.setItem('ptnotes:fontSize', size)
+    document.documentElement.setAttribute('data-font-size', size)
+    set({ fontSize: size })
+    void (async () => {
+      try {
+        await window.ptnotes.settings.setAppearance({ fontSize: size })
+      } catch {
+        /* safe to ignore */
+      }
+    })()
+  },
+
+  setUiDensity(density) {
+    localStorage.setItem('ptnotes:uiDensity', density)
+    document.documentElement.setAttribute('data-ui-density', density)
+    set({ uiDensity: density })
+    void (async () => {
+      try {
+        await window.ptnotes.settings.setAppearance({ uiDensity: density })
+      } catch {
+        /* safe to ignore */
+      }
+    })()
+  },
+
+  setEditorFontFamily(family) {
+    localStorage.setItem('ptnotes:editorFont', family)
+    document.documentElement.setAttribute('data-editor-font', family)
+    set({ editorFontFamily: family })
+    void (async () => {
+      try {
+        await window.ptnotes.settings.setAppearance({ editorFontFamily: family })
+      } catch {
+        /* safe to ignore */
+      }
+    })()
+  },
+
+  setCommandPaletteOpen(commandPaletteOpen) {
+    if (commandPaletteOpen) {
+      set({ commandPaletteOpen: true, commandPaletteQuery: '', commandPaletteActiveIndex: 0 })
+    } else {
+      set({ commandPaletteOpen: false })
+    }
+  },
+
+  toggleCommandPalette() {
+    set((s) =>
+      s.commandPaletteOpen
+        ? { commandPaletteOpen: false }
+        : {
+            commandPaletteOpen: true,
+            commandPaletteQuery: '',
+            commandPaletteActiveIndex: 0
+          }
+    )
+  },
+
+  setCommandPaletteQuery(commandPaletteQuery) {
+    set({ commandPaletteQuery, commandPaletteActiveIndex: 0 })
+  },
+
+  setCommandPaletteActiveIndex(commandPaletteActiveIndex) {
+    set({ commandPaletteActiveIndex })
   }
 }))
