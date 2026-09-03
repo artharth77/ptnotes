@@ -29,6 +29,20 @@ const SIDEBAR_MAX = 560
 const CHAT_MIN = 280
 const CHAT_MAX = 720
 
+const OVERLAY_SELECTOR =
+  '.modal-overlay, .command-palette-backdrop, .global-find-overlay, .module-history-backdrop'
+
+function hasOpenOverlay(): boolean {
+  return document.querySelector(OVERLAY_SELECTOR) !== null
+}
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  const t = target as HTMLElement | null
+  if (!t) return false
+  const tag = t.tagName
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable === true
+}
+
 const KANBAN_TOOLS = new Set([
   'list_kanban_cards',
   'create_kanban_card',
@@ -510,13 +524,13 @@ function App(): React.JSX.Element {
   // Cmd/Ctrl+Shift+G toggles the bots group chat
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent): void {
+      if (isEditableTarget(e.target)) return
       const mod =
         (window.electron.process.platform === 'darwin' ? e.metaKey : e.ctrlKey) && e.shiftKey
       if (!mod || e.altKey) return
       const key = e.key.toLowerCase()
       if (key !== 'c' && key !== 'm' && key !== 'g') return
-      const modalOpen = document.querySelector('.modal-overlay, .module-history-backdrop') !== null
-      if (modalOpen) return
+      if (hasOpenOverlay()) return
       e.preventDefault()
       const view = key === 'c' ? 'chat' : key === 'm' ? 'modules' : 'bots'
       if (view !== 'chat' && !activeProject) return
@@ -530,10 +544,12 @@ function App(): React.JSX.Element {
   useEffect(() => {
     const toggleCommandPalette = useAppStore.getState().toggleCommandPalette
     function onKeyDown(e: KeyboardEvent): void {
+      if (isEditableTarget(e.target)) return
       const isMac = window.electron.process.platform === 'darwin'
       const mod = isMac ? e.metaKey : e.ctrlKey
       if (!mod || e.shiftKey || e.altKey) return
       if (e.key.toLowerCase() !== 'k') return
+      if (hasOpenOverlay()) return
       e.preventDefault()
       toggleCommandPalette()
     }
@@ -544,6 +560,14 @@ function App(): React.JSX.Element {
   useEffect(() => {
     const openFind = useAppStore.getState().setGlobalFindOpen
     const dispose = window.ptnotes.onOpenFind(() => {
+      const state = useAppStore.getState()
+      if (state.globalFindOpen) {
+        const input = document.querySelector('.global-find-input') as HTMLInputElement | null
+        input?.focus()
+        input?.select()
+        return
+      }
+      if (hasOpenOverlay()) return
       openFind(true)
     })
     return dispose

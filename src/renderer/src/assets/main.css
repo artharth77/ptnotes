@@ -1805,6 +1805,11 @@ fieldset.kanban-form {
   overflow: hidden;
 }
 
+.kanban-seg.block {
+  display: flex;
+  width: 100%;
+}
+
 .kanban-seg-btn {
   display: inline-flex;
   align-items: center;

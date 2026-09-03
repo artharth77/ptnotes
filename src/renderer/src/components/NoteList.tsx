@@ -2,9 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   mdiArrowDown,
   mdiArrowUp,
+  mdiCheck,
   mdiDotsVertical,
   mdiFolderOpenOutline,
   mdiPencil,
+  mdiPlus,
   mdiRefresh,
   mdiSort,
   mdiStar,
@@ -15,6 +17,12 @@ import { useAppStore } from '../store/useAppStore'
 import { Modal, TextField } from './Modal'
 import { MdiIcon } from './MdiIcon'
 import { NOTE_TEMPLATES, getNoteTemplate } from '../noteTemplates'
+
+const SORT_MENU_W = 200
+const SORT_MENU_H = 220
+const CONTEXT_MENU_W = 180
+const CONTEXT_MENU_H = 160
+const MENU_MARGIN = 8
 
 function formatDate(ms: number): string {
   if (!ms) return ''
@@ -47,8 +55,33 @@ export function NoteList(): React.JSX.Element {
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [sortMenuOpen, setSortMenuOpen] = useState(false)
+  const [sortMenuPos, setSortMenuPos] = useState<{ x: number; y: number } | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const sortMenuRef = useRef<HTMLDivElement>(null)
+  const sortBtnRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (!sortMenuOpen) return
+    function onKey(e: KeyboardEvent): void {
+      if (e.key === 'Escape') {
+        setSortMenuOpen(false)
+        setSortMenuPos(null)
+        sortBtnRef.current?.focus()
+      }
+    }
+    function close(): void {
+      setSortMenuOpen(false)
+      setSortMenuPos(null)
+    }
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('resize', close)
+    window.addEventListener('scroll', close, true)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', close)
+      window.removeEventListener('scroll', close, true)
+    }
+  }, [sortMenuOpen])
 
   const filteredAndSortedNotes = useMemo(() => {
     const filtered = notes.filter((note) =>
@@ -144,18 +177,29 @@ export function NoteList(): React.JSX.Element {
       setMenuFor(null)
       return
     }
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-    const menuW = 180
-    const menuH = 160
-    const x = Math.min(rect.right, window.innerWidth - menuW - 8)
-    const y = Math.min(rect.bottom, window.innerHeight - menuH - 8)
-    setMenuPos({ x: Math.max(8, x), y: Math.max(8, y) })
+    const t = e.currentTarget as HTMLElement | null
+    if (!t) return
+    const rect = t.getBoundingClientRect()
+    const x = Math.min(rect.right, window.innerWidth - CONTEXT_MENU_W - MENU_MARGIN)
+    const y = Math.min(rect.bottom, window.innerHeight - CONTEXT_MENU_H - MENU_MARGIN)
+    setMenuPos({ x: Math.max(MENU_MARGIN, x), y: Math.max(MENU_MARGIN, y) })
     setMenuFor(id)
   }
 
   function toggleSortMenu(e: React.MouseEvent): void {
     e.stopPropagation()
-    setSortMenuOpen((o) => !o)
+    if (sortMenuOpen) {
+      setSortMenuOpen(false)
+      setSortMenuPos(null)
+      return
+    }
+    const t = e.currentTarget as HTMLElement | null
+    if (!t) return
+    const rect = t.getBoundingClientRect()
+    const x = Math.min(rect.right, window.innerWidth - SORT_MENU_W - MENU_MARGIN)
+    const y = Math.min(rect.bottom + 4, window.innerHeight - SORT_MENU_H - MENU_MARGIN)
+    setSortMenuPos({ x: Math.max(MENU_MARGIN, x), y: Math.max(MENU_MARGIN, y) })
+    setSortMenuOpen(true)
   }
 
   const sortLabel = notesSort === 'name' ? 'Name' : notesSort === 'created' ? 'Created' : 'Modified'
@@ -185,19 +229,31 @@ export function NoteList(): React.JSX.Element {
         <div className="note-header-actions">
           <div style={{ position: 'relative' }}>
             <button
+              ref={sortBtnRef}
               className="icon-btn refresh-btn"
-              title={`Sort by ${sortLabel} (${notesSortDir})`}
+              title={`Sort: ${sortLabel} · ${notesSortDir}`}
+              aria-label={`Sort notes: ${sortLabel}, ${notesSortDir}`}
+              aria-haspopup="menu"
+              aria-expanded={sortMenuOpen}
               onClick={toggleSortMenu}
             >
               <MdiIcon path={mdiSort} size={16} />
             </button>
-            {sortMenuOpen && (
+            {sortMenuOpen && sortMenuPos && (
               <>
-                <div className="menu-overlay" onClick={() => setSortMenuOpen(false)} />
+                <div
+                  className="menu-overlay"
+                  onClick={() => {
+                    setSortMenuOpen(false)
+                    setSortMenuPos(null)
+                  }}
+                />
                 <div
                   ref={sortMenuRef}
                   className="note-menu"
-                  style={{ right: 8, top: 36, width: 180 }}
+                  role="menu"
+                  aria-label="Sort notes"
+                  style={{ left: sortMenuPos.x, top: sortMenuPos.y, width: SORT_MENU_W }}
                   onClick={(e) => e.stopPropagation()}
                 >
                   {(['modified', 'created', 'name'] as const).map((k) => {
@@ -207,23 +263,69 @@ export function NoteList(): React.JSX.Element {
                     return (
                       <button
                         key={k}
+                        role="menuitemradio"
+                        aria-checked={active}
                         className={`note-menu-item${active ? ' active' : ''}`}
                         onClick={() => {
-                          if (active) {
-                            toggleNotesSortDir()
-                          } else {
-                            setNotesSort(k)
-                          }
+                          setNotesSort(k)
                           setSortMenuOpen(false)
+                          setSortMenuPos(null)
+                          sortBtnRef.current?.focus()
                         }}
                       >
                         <span className="note-menu-icon">
                           {active ? (
-                            notesSortDir === 'asc' ? (
-                              <MdiIcon path={mdiArrowUp} size={14} />
-                            ) : (
-                              <MdiIcon path={mdiArrowDown} size={14} />
-                            )
+                            <MdiIcon path={mdiCheck} size={14} />
+                          ) : (
+                            <span style={{ display: 'inline-block', width: 14 }} />
+                          )}
+                        </span>{' '}
+                        {label}
+                        {active && (
+                          <span
+                            style={{
+                              marginLeft: 'auto',
+                              paddingLeft: 8,
+                              display: 'inline-flex'
+                            }}
+                          >
+                            <MdiIcon
+                              path={notesSortDir === 'asc' ? mdiArrowUp : mdiArrowDown}
+                              size={13}
+                              style={{ color: 'var(--text-dim)' }}
+                            />
+                          </span>
+                        )}
+                      </button>
+                    )
+                  })}
+                  <div
+                    role="separator"
+                    style={{
+                      height: 1,
+                      background: 'var(--border)',
+                      margin: '4px 8px'
+                    }}
+                  />
+                  {(['asc', 'desc'] as const).map((d) => {
+                    const active = notesSortDir === d
+                    const label = d === 'asc' ? 'Ascending' : 'Descending'
+                    return (
+                      <button
+                        key={d}
+                        role="menuitemradio"
+                        aria-checked={active}
+                        className={`note-menu-item${active ? ' active' : ''}`}
+                        onClick={() => {
+                          if (notesSortDir !== d) toggleNotesSortDir()
+                          setSortMenuOpen(false)
+                          setSortMenuPos(null)
+                          sortBtnRef.current?.focus()
+                        }}
+                      >
+                        <span className="note-menu-icon">
+                          {active ? (
+                            <MdiIcon path={mdiCheck} size={14} />
                           ) : (
                             <span style={{ display: 'inline-block', width: 14 }} />
                           )}
@@ -238,20 +340,18 @@ export function NoteList(): React.JSX.Element {
           </div>
           <button
             className="icon-btn refresh-btn"
-            title={`Sort direction: ${notesSortDir}. Click to flip.`}
-            onClick={() => toggleNotesSortDir()}
-          >
-            <MdiIcon path={notesSortDir === 'asc' ? mdiArrowUp : mdiArrowDown} size={16} />
-          </button>
-          <button
-            className="icon-btn refresh-btn"
             title="Refresh notes list"
             onClick={() => void refreshNotes()}
           >
             <MdiIcon path={mdiRefresh} size={16} />
           </button>
-          <button className="btn small" onClick={() => setCreating(true)}>
-            + New
+          <button
+            className="icon-btn refresh-btn"
+            title="New Note"
+            aria-label="New Note"
+            onClick={() => setCreating(true)}
+          >
+            <MdiIcon path={mdiPlus} size={16} />
           </button>
         </div>
       </div>

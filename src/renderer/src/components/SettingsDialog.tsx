@@ -627,14 +627,15 @@ function AppearanceSettings(): React.JSX.Element {
           </p>
         </div>
       </div>
-      <div style={{ display: 'flex', gap: 8 }}>
+      <div className="kanban-seg block" role="radiogroup" aria-label="Theme">
         {themeOptions.map((opt) => (
           <button
             key={opt.value}
-            className={`btn ${theme === opt.value ? 'active' : ''}`}
+            role="radio"
+            aria-checked={theme === opt.value}
+            className={`kanban-seg-btn${theme === opt.value ? ' active' : ''}`}
             onClick={() => setTheme(opt.value)}
             title={opt.desc}
-            style={{ flex: 1, justifyContent: 'center' }}
           >
             {opt.label}
           </button>
@@ -651,21 +652,22 @@ function AppearanceSettings(): React.JSX.Element {
           </p>
         </div>
       </div>
-      <div style={{ display: 'flex', gap: 8 }}>
+      <div className="kanban-seg block" role="radiogroup" aria-label="Font size">
         {fontSizeOptions.map((opt) => (
           <button
             key={opt.value}
-            className={`btn ${fontSize === opt.value ? 'active' : ''}`}
+            role="radio"
+            aria-checked={fontSize === opt.value}
+            className={`kanban-seg-btn${fontSize === opt.value ? ' active' : ''}`}
             onClick={() => setFontSize(opt.value)}
             title={opt.desc}
-            style={{ flex: 1, justifyContent: 'center' }}
           >
             {opt.label}
             <span
               style={{
                 marginLeft: 6,
                 fontSize: 11,
-                color: 'var(--text-dim)',
+                color: fontSize === opt.value ? 'var(--accent)' : 'var(--text-dim)',
                 fontWeight: 400
               }}
             >
@@ -685,14 +687,15 @@ function AppearanceSettings(): React.JSX.Element {
           </p>
         </div>
       </div>
-      <div style={{ display: 'flex', gap: 8 }}>
+      <div className="kanban-seg block" role="radiogroup" aria-label="UI density">
         {densityOptions.map((opt) => (
           <button
             key={opt.value}
-            className={`btn ${uiDensity === opt.value ? 'active' : ''}`}
+            role="radio"
+            aria-checked={uiDensity === opt.value}
+            className={`kanban-seg-btn${uiDensity === opt.value ? ' active' : ''}`}
             onClick={() => setUiDensity(opt.value)}
             title={opt.desc}
-            style={{ flex: 1, justifyContent: 'center' }}
           >
             {opt.label}
           </button>
@@ -709,16 +712,16 @@ function AppearanceSettings(): React.JSX.Element {
           </p>
         </div>
       </div>
-      <div style={{ display: 'flex', gap: 8 }}>
+      <div className="kanban-seg block" role="radiogroup" aria-label="Editor font">
         {editorFontOptions.map((opt) => (
           <button
             key={opt.value}
-            className={`btn ${editorFontFamily === opt.value ? 'active' : ''}`}
+            role="radio"
+            aria-checked={editorFontFamily === opt.value}
+            className={`kanban-seg-btn${editorFontFamily === opt.value ? ' active' : ''}`}
             onClick={() => setEditorFontFamily(opt.value)}
             title={opt.desc}
             style={{
-              flex: 1,
-              justifyContent: 'center',
               fontFamily:
                 opt.value === 'sans'
                   ? "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
