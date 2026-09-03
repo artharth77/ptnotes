@@ -112,6 +112,8 @@ export interface GroupChatData extends GroupChatMeta {
   summary?: string
   /** All messages with seq <= this are represented by the summary. */
   summarizedUpToSeq?: number
+  /** All messages with seq <= this have been folded into the bots' memory extraction. */
+  memorizedUpToSeq?: number
   /** Set only when reading a page: whether older messages remain above the returned window. */
   hasMore?: boolean
   /** Set only when reading a page: seq of the oldest message in the returned window (cursor for loading older). */
@@ -192,6 +194,8 @@ export const MAX_RELAY_DEPTH = 3
 export const SUMMARY_THRESHOLD_CHARS = 8_000
 /** Messages kept out of the summary (recent tail always sent verbatim). */
 export const SUMMARY_KEEP_RECENT = 6
+/** When the un-memorized context exceeds this many chars, involved bots re-consolidate their memory. */
+export const MEMORY_THRESHOLD_CHARS = 2_000
 /** Max memory entries kept per bot per project. */
 export const MAX_MEMORY_ENTRIES = 50
 

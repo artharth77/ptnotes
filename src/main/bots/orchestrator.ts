@@ -15,6 +15,7 @@ import type {
 } from '@shared/bots'
 import {
   MAX_BOT_TURNS_PER_MESSAGE,
+  MEMORY_THRESHOLD_CHARS,
   SUMMARY_KEEP_RECENT,
   SUMMARY_THRESHOLD_CHARS,
   formatAskTranscriptLine,
@@ -448,7 +449,8 @@ class GroupSession {
       })
     }
 
-    await this.maybeSummarizeAndRemember([...state.involved])
+    await this.maybeSummarize()
+    await this.maybeRemember([...state.involved])
     if (state.turnCapHit) {
       this.system(
         `⚠️ Reached the limit of ${MAX_BOT_TURNS_PER_MESSAGE} bot turns for this message; further replies were not triggered.`,
@@ -709,7 +711,7 @@ Post your result report to the group now.`
 
   // ---- summarization + memory ----
 
-  private async maybeSummarizeAndRemember(involvedBotIds: string[]): Promise<void> {
+  private async maybeSummarize(): Promise<void> {
     const group = this.group()
     const messages = this.deps.store.listMessages(this.project, this.groupId)
     const upTo = group.summarizedUpToSeq ?? 0
@@ -722,7 +724,7 @@ Post your result report to the group now.`
     )
     if (toSummarize.length === 0) return
 
-    const { leader, members } = this.resolveBots(group)
+    const { leader } = this.resolveBots(group)
     if (!leader) return
 
     try {
@@ -758,12 +760,25 @@ Post your result report to the group now.`
     } catch {
       // summarization is best-effort; never fail the orchestration for it
     }
+  }
 
-    for (const botId of involvedBotIds) {
-      const bot = members.find((m) => m.id === botId)
-      if (!bot) continue
+  private async maybeRemember(involvedBotIds: string[]): Promise<void> {
+    if (involvedBotIds.length === 0) return
+    const group = this.group()
+    const messages = this.deps.store.listMessages(this.project, this.groupId)
+    const upTo = group.memorizedUpToSeq ?? 0
+    const unmemorized = messages.filter((m) => m.seq > upTo)
+    const chars = unmemorized.reduce((sum, m) => sum + m.content.length, 0)
+    if (chars < MEMORY_THRESHOLD_CHARS) return
+
+    const members = this.resolveBots(group).members
+    const bots = involvedBotIds
+      .map((id) => members.find((m) => m.id === id))
+      .filter((b): b is BotProfile => !!b)
+    for (const bot of bots) {
       await this.extractMemory(bot)
     }
+    this.deps.store.setMemorizedUpTo(this.project, this.groupId, messages[messages.length - 1].seq)
   }
 
   private async extractMemory(bot: BotProfile): Promise<void> {
@@ -776,8 +791,8 @@ Post your result report to the group now.`
         .slice(-40)
         .map((m) => formatTranscriptLine(m))
         .join('\n')
-      const sys = `You maintain the private memory of "${bot.name}" (@${bot.id}), ${bot.role || 'a bot'}, in project "${this.project}". From the conversation, extract durable facts worth remembering for FUTURE conversations in this project: decisions, preferences, project facts, standing commitments. Ignore small talk and one-off details. Output ONLY a JSON array of short strings (max 10). Output [] if there is nothing new.`
-      const user = `Existing memory:\n${existing.map((m) => `- ${m.content}`).join('\n') || '(empty)'}\n\nRecent conversation:\n${recent}`
+      const sys = `You maintain the private memory of "${bot.name}" (@${bot.id}), ${bot.role || 'a bot'}, in project "${this.project}". Your memory is a short list of durable facts you rely on in FUTURE conversations in this project. Given your current memory and the recent conversation, output the COMPLETE updated memory as a JSON array of short strings (max 10): keep existing facts that are still true (reword if clearer), drop facts that are now outdated or superseded (e.g. tasks or issues that have been resolved, decisions that changed), and add new durable facts (decisions, preferences, project facts, standing commitments). Never record group membership, bot roles, or who the leader is — that is always provided in your prompt. Ignore small talk and one-off details. Output ONLY the JSON array. Output [] if nothing is worth remembering.`
+      const user = `Current memory:\n${existing.map((m) => `- ${m.content}`).join('\n') || '(empty)'}\n\nRecent conversation:\n${recent}`
       const completion = await client.chat.completions.create(
         {
           model: cfg.model,
@@ -791,7 +806,8 @@ Post your result report to the group now.`
       )
       const raw = completion.choices[0]?.message?.content ?? '[]'
       const fresh = parseJsonArray(raw)
-      if (fresh.length > 0) {
+      // an empty answer must never wipe existing memory (entry removal is manual, Settings ▸ Bots)
+      if (fresh.length > 0 || existing.length === 0) {
         this.deps.store.saveMemories(this.project, bot.id, fresh)
       }
     } catch {

@@ -1,11 +1,9 @@
-## [0.15.1] — 2026-09-02
+## [0.15.1] — 2026-09-03
 
 ### Added
 
 - **Bots: delete confirmations in bot tasks (human-in-the-loop destructive actions)**: when a bot task calls `delete_note` or `delete_kanban_card`, the confirmation is now surfaced in the group chat through the same pipeline as `ask_user` instead of being silently refused: the tool pauses (no timeout), a bot message "**⚠️ Please confirm to continue:**" appears above an interactive Yes/No bubble, and only an explicit **Yes** performs the deletion — **No** or a dismissed bubble returns a cancelled result and the data is untouched. The main chat still shows its own confirmation dialog as before (and the model is still told not to pre-confirm via `ask_user`), plain background module runs still cannot delete (no host to confirm in), and `delete_skill` stays read-only for all module runs.
-
 - **Bots: `ask_user` in bot tasks (human-in-the-loop in the group chat)**: a background bot task that needs information can now call `ask_user` — the question is posted to the group chat as a bot message plus an interactive question bubble (user-style, right-aligned) where you answer with radios, checkboxes or free text and hit **Confirm** (or **Cancel**). The task pauses with **no timeout** until you answer, then continues with your answers fed back to the bot; several bots can have asks pending at once. Secret (`password`) questions are not supported in bot tasks and are rejected up-front. Pending asks are cancelled — with the bubble marked *Cancelled* — when the task is stopped, the group's history is cleared, the group is deleted, or the app restarts; the chat Stop button leaves them waiting.
-
 - **AI: `add_kanban_comment` tool**: the assistant can now add a comment to an existing kanban card (matched by title, case-insensitive) — progress notes, questions, decisions — instead of appending free-form text to the card description. The comment is written through the dedicated comment service path (the same one the card modal uses, attributed to you), so it coexists with concurrent card field edits; the board refreshes after the call, and the system prompt tells the model when to use it.
 - **Bots: role details**: each bot in Settings ▸ Bots can have an optional **Role details** description (what the role does, e.g. “Owns the schedule, breaks goals into tasks, tracks progress”). It is stored in the bot library database (existing databases migrate automatically) and appended to the group roster line in every bot's system prompt, so bots know each member's responsibilities when deciding who to involve.
 - **Bots: your name**: Settings ▸ Bots has a global **Your name (optional)** input — when set, every bot's system prompt (group-chat turns and background-task result reports) is told your name and to address you by it when speaking to you. The value is stored in `userData/bots.db` (`bot_settings` key/value table), saved on blur, and bots simply fall back to "You" when it is empty.
@@ -13,6 +11,7 @@
 
 ### Changed
 
+- **Bots: memory consolidation (no stale or roster facts)**: bot memory is now rewritten as a whole instead of only appended to — each extraction pass keeps still-true facts, drops outdated ones (e.g. tasks/issues that have since been resolved, superseded decisions) and adds new durable facts, and is explicitly told never to record group membership, bot roles or who the leader is (the roster is already in every prompt). Memory also updates more often: it now refreshes once ~2k new characters of conversation have passed (previously only when the ~8k summarization threshold hit), so task-completion reports are reflected in the next few rounds. A bot's memory can no longer be emptied by an extraction pass (an empty model answer is ignored; use Settings ▸ Bots to forget entries).
 - **Bots: editor opens at the Name field**: opening the New/Edit bot editor in Settings ▸ Bots now scrolls the pane so the Name input is in view and places the cursor in it automatically.
 
 ## [0.15.0] — 2026-08-31

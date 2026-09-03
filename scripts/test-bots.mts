@@ -398,14 +398,21 @@ let alice: BotProfile, bob: BotProfile
 
   const mems = store.saveMemories(PROJECT, 'bob', ['User prefers tables', 'Deadline is Friday'])
   assert.equal(mems.length, 2)
-  const merged = store.saveMemories(PROJECT, 'bob', ['Deadline is Friday', 'Budget approved'])
+  // consolidation contract: the model returns the COMPLETE updated list — the stale
+  // "Deadline is Friday" is dropped, a new fact is added, duplicate/blank entries are ignored
+  const merged = store.saveMemories(PROJECT, 'bob', [
+    'User prefers tables',
+    'Budget approved',
+    'Budget approved',
+    '  '
+  ])
   assert.deepEqual(
     merged.map((m) => m.content),
-    ['User prefers tables', 'Deadline is Friday', 'Budget approved']
+    ['User prefers tables', 'Budget approved']
   )
-  assert.equal(store.listMemories(PROJECT).length, 3)
+  assert.equal(store.listMemories(PROJECT).length, 2)
   assert.equal(store.deleteMemory(PROJECT, 'bob', merged[0].id), true)
-  ok('memories: merge + delete')
+  ok('memories: replace (consolidate) + delete')
 
   const item = store.enqueueTask(PROJECT, {
     groupId: group.groupId,
@@ -1357,6 +1364,46 @@ const assignReply = 'I need details.\n```assign\n{"title":"Ask task","task":"p"}
   )
   assert.deepEqual(await asks[0].promise, { answers: [{ id: 'confirm', answer: 'Yes' }] })
   ok('orchestration: confirm-kind ask uses the confirm prefix + resolves like asks')
+}
+
+// N: memory consolidation — stale entries dropped, cursor advances, empty answers never wipe
+{
+  const g = store.createGroup(PROJECT, {
+    title: 'Memory',
+    botIds: ['alice'],
+    leaderBotId: 'alice'
+  })
+  store.saveMemories(PROJECT, 'alice', ['Issue #42 is open', 'User prefers tables'])
+  // round 1: >2k un-memorized chars → extraction rewrites the whole memory (stale fact dropped)
+  const m13 = new GroupChatManager({
+    store,
+    configStore,
+    moduleManager: makeStubModuleManager([]),
+    broadcast: () => {},
+    clientFactory: makeFakeClient(
+      new Map([
+        ['alice', ['Noted.']],
+        ['_default', ['["User prefers tables", "Deadline moved to Friday"]']]
+      ])
+    )
+  })
+  await m13.send(PROJECT, g.groupId, 'd'.repeat(2100))
+  const mems1 = store.listMemories(PROJECT, 'alice').map((m) => m.content)
+  assert.deepEqual(mems1, ['User prefers tables', 'Deadline moved to Friday'])
+  const cursor1 = store.readGroup(PROJECT, g.groupId)?.memorizedUpToSeq
+  assert.ok(cursor1 && cursor1 > 0, 'memorized cursor advanced')
+  // round 2: the model answers [] — existing memory must survive the wipe guard
+  const m14 = new GroupChatManager({
+    store,
+    configStore,
+    moduleManager: makeStubModuleManager([]),
+    broadcast: () => {},
+    clientFactory: makeFakeClient(new Map([['alice', ['Ok.']]]))
+  })
+  await m14.send(PROJECT, g.groupId, 'x'.repeat(2100))
+  const mems2 = store.listMemories(PROJECT, 'alice').map((m) => m.content)
+  assert.deepEqual(mems2, mems1, 'empty extraction answer does not wipe memory')
+  ok('orchestration: memory consolidation replaces stale facts, empty answers guarded')
 }
 
 console.log(`\nbots tests passed (${passed} groups)`)

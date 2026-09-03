@@ -51,6 +51,7 @@ interface GroupRow {
   leader_bot_id: string
   summary: string | null
   summarized_up_to_seq: number | null
+  memorized_up_to_seq: number | null
   created_at: number
   updated_at: number
 }
@@ -342,6 +343,7 @@ export class BotsStore {
       leader_bot_id TEXT NOT NULL,
       summary TEXT,
       summarized_up_to_seq INTEGER,
+      memorized_up_to_seq INTEGER,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -384,6 +386,12 @@ export class BotsStore {
     }[]
     if (!queueCols.some((c) => c.name === 'origin_msg')) {
       db.exec('ALTER TABLE bot_task_queue ADD COLUMN origin_msg TEXT')
+    }
+    const groupCols = db.prepare('PRAGMA table_info(group_chats)').all() as unknown as {
+      name: string
+    }[]
+    if (!groupCols.some((c) => c.name === 'memorized_up_to_seq')) {
+      db.exec('ALTER TABLE group_chats ADD COLUMN memorized_up_to_seq INTEGER')
     }
     this.projectDbs.set(project, db)
     return db
@@ -507,7 +515,7 @@ export class BotsStore {
     db.prepare('DELETE FROM group_messages WHERE group_id = ?').run(clean)
     db.prepare('DELETE FROM bot_task_queue WHERE group_id = ?').run(clean)
     db.prepare(
-      'UPDATE group_chats SET summary = NULL, summarized_up_to_seq = NULL, updated_at = ? WHERE group_id = ?'
+      'UPDATE group_chats SET summary = NULL, summarized_up_to_seq = NULL, memorized_up_to_seq = NULL, updated_at = ? WHERE group_id = ?'
     ).run(Date.now(), clean)
     await this.deleteGroupTrace(project, clean)
   }
@@ -516,12 +524,19 @@ export class BotsStore {
     const meta = this.getGroup(project, groupId)
     if (!meta) return null
     const row = this.projectDb(project)
-      .prepare('SELECT summary, summarized_up_to_seq FROM group_chats WHERE group_id = ?')
-      .get(groupId) as unknown as { summary: string | null; summarized_up_to_seq: number | null }
+      .prepare(
+        'SELECT summary, summarized_up_to_seq, memorized_up_to_seq FROM group_chats WHERE group_id = ?'
+      )
+      .get(groupId) as unknown as {
+      summary: string | null
+      summarized_up_to_seq: number | null
+      memorized_up_to_seq: number | null
+    }
     const base = {
       ...meta,
       ...(row.summary ? { summary: row.summary } : {}),
-      ...(row.summarized_up_to_seq ? { summarizedUpToSeq: row.summarized_up_to_seq } : {})
+      ...(row.summarized_up_to_seq ? { summarizedUpToSeq: row.summarized_up_to_seq } : {}),
+      ...(row.memorized_up_to_seq ? { memorizedUpToSeq: row.memorized_up_to_seq } : {})
     }
     const paged = opts && (opts.limit !== undefined || opts.beforeSeq !== undefined)
     if (!paged) {
@@ -675,6 +690,13 @@ export class BotsStore {
       .run(summary, upToSeq, groupId)
   }
 
+  /** Advance the per-group cursor marking messages already folded into bot memory extraction. */
+  setMemorizedUpTo(project: string, groupId: string, upToSeq: number): void {
+    this.projectDb(project)
+      .prepare('UPDATE group_chats SET memorized_up_to_seq = ? WHERE group_id = ?')
+      .run(upToSeq, groupId)
+  }
+
   // ---- bot memories (per project) ----
 
   listMemories(project: string, botId?: string): BotMemoryEntry[] {
@@ -704,11 +726,13 @@ export class BotsStore {
     }))
   }
 
-  /** Replace a bot's memory with the merged (existing + fresh) fact list, capped. */
+  /**
+   * Replace a bot's memory with the given list (the consolidation contract: the model
+   * outputs the complete updated memory), deduped case-insensitively and capped.
+   */
   saveMemories(project: string, botId: string, fresh: string[]): BotMemoryEntry[] {
     const db = this.projectDb(project)
-    const existing = this.listMemories(project, botId).map((m) => m.content)
-    const merged = mergeMemoryEntries(existing, fresh, MAX_MEMORY_ENTRIES)
+    const merged = mergeMemoryEntries([], fresh, MAX_MEMORY_ENTRIES)
     db.prepare('DELETE FROM bot_memories WHERE bot_id = ?').run(botId)
     const insert = db.prepare(
       'INSERT INTO bot_memories (bot_id, id, content, created_at) VALUES (?, ?, ?, ?)'
