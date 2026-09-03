@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { mdiPencil, mdiPlus, mdiTrashCanOutline } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
+import { formatGroupTimestamp } from '@shared/bots'
 import type { AIProfile } from '@shared/types'
 import type { BotMemoryEntry, GroupChatMeta } from '@shared/bots'
 import { Modal } from './Modal'
@@ -123,6 +124,7 @@ export function BotsSettingsPane(): React.JSX.Element {
   }
 
   const botMemories = memories.filter((m) => m.botId === editing?.id)
+  const lastMemoryUpdate = botMemories.reduce((max, m) => Math.max(max, m.createdAt), 0)
 
   return (
     <>
@@ -134,7 +136,7 @@ export function BotsSettingsPane(): React.JSX.Element {
       <label className="form-label">
         Your name (optional)
         <input
-          className="form-input"
+          className="text-field"
           value={userName}
           placeholder="Bots will address you by this name (e.g. Alex)"
           onChange={(e) => setUserName(e.target.value)}
@@ -198,7 +200,7 @@ export function BotsSettingsPane(): React.JSX.Element {
           <label className="form-label">
             Name
             <input
-              className="form-input"
+              className="text-field"
               ref={nameInputRef}
               autoFocus
               value={editing.name}
@@ -209,7 +211,7 @@ export function BotsSettingsPane(): React.JSX.Element {
           <label className="form-label">
             Role
             <input
-              className="form-input"
+              className="text-field"
               value={editing.role}
               placeholder="e.g. Project Manager"
               onChange={(e) => setEditing({ ...editing, role: e.target.value })}
@@ -218,7 +220,7 @@ export function BotsSettingsPane(): React.JSX.Element {
           <label className="form-label">
             Role details (optional)
             <textarea
-              className="form-input bots-persona"
+              className="text-field bots-persona"
               rows={2}
               value={editing.roleDetails}
               placeholder="What this role does, so other bots know when to involve it (e.g. “Owns the schedule, breaks goals into tasks, tracks progress”)"
@@ -228,7 +230,7 @@ export function BotsSettingsPane(): React.JSX.Element {
           <label className="form-label">
             Persona / standing instructions
             <textarea
-              className="form-input bots-persona"
+              className="text-field bots-persona"
               rows={4}
               value={editing.persona}
               placeholder="How this bot behaves in group chats…"
@@ -238,7 +240,7 @@ export function BotsSettingsPane(): React.JSX.Element {
           <label className="form-label">
             AI profile
             <select
-              className="form-input"
+              className="text-field"
               value={editing.profileId}
               onChange={(e) => setEditing({ ...editing, profileId: e.target.value })}
             >
@@ -253,7 +255,7 @@ export function BotsSettingsPane(): React.JSX.Element {
           <label className="form-label">
             Model override
             <input
-              className="form-input"
+              className="text-field"
               value={editing.model}
               placeholder="Optional — overrides the profile's model"
               onChange={(e) => setEditing({ ...editing, model: e.target.value })}
@@ -273,29 +275,43 @@ export function BotsSettingsPane(): React.JSX.Element {
           </div>
           {editing.id && activeProject && (
             <div className="bots-memory">
-              <div className="form-label">Memory in “{activeProject}”</div>
-              {botMemories.length === 0 && <div className="form-hint">Nothing remembered yet.</div>}
-              {botMemories.map((m) => (
-                <div key={m.id} className="bots-memory-row">
-                  <span className="bots-memory-content">{m.content}</span>
-                  <button
-                    className="icon-btn"
-                    title="Forget"
-                    onClick={() => {
-                      void window.ptnotes.bots
-                        .deleteMemory(activeProject, m.botId, m.id)
-                        .then((ok) => {
-                          if (ok)
-                            setMemories((prev) =>
-                              prev.filter((x) => x.id !== m.id || x.botId !== m.botId)
-                            )
-                        })
-                    }}
+              <div className="bots-memory-header">
+                <span className="form-label">Memory in “{activeProject}”</span>
+                {lastMemoryUpdate > 0 && (
+                  <span
+                    className="bots-memory-updated"
+                    title={new Date(lastMemoryUpdate).toLocaleString()}
                   >
-                    <MdiIcon path={mdiTrashCanOutline} size={14} />
-                  </button>
+                    Updated {formatGroupTimestamp(lastMemoryUpdate)}
+                  </span>
+                )}
+              </div>
+              {botMemories.length === 0 && <div className="form-hint">Nothing remembered yet.</div>}
+              {botMemories.length > 0 && (
+                <div className="bots-memory-list">
+                  {botMemories.map((m) => (
+                    <div key={m.id} className="bots-memory-row">
+                      <span className="bots-memory-content">{m.content}</span>
+                      <button
+                        className="icon-btn"
+                        title="Forget"
+                        onClick={() => {
+                          void window.ptnotes.bots
+                            .deleteMemory(activeProject, m.botId, m.id)
+                            .then((ok) => {
+                              if (ok)
+                                setMemories((prev) =>
+                                  prev.filter((x) => x.id !== m.id || x.botId !== m.botId)
+                                )
+                            })
+                        }}
+                      >
+                        <MdiIcon path={mdiTrashCanOutline} size={14} />
+                      </button>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
           )}
         </div>

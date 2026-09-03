@@ -1196,7 +1196,7 @@ function GroupModal({
     <Modal title={mode === 'create' ? 'New group chat' : 'Group settings'} onClose={onClose}>
       <label className="form-label">Title</label>
       <input
-        className="form-input"
+        className="text-field"
         value={title}
         placeholder="Group chat title"
         onChange={(e) => setTitle(e.target.value)}

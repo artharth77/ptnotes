@@ -6866,6 +6866,28 @@ fieldset.kanban-form {
   padding-top: 10px;
 }
 
+.bots-memory-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bots-memory-updated {
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.bots-memory-list {
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 10px;
+  margin-top: 6px;
+}
+
 .bots-memory-row {
   display: flex;
   align-items: flex-start;
