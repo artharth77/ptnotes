@@ -1,9 +1,24 @@
-import type { AIProviderConfig, ModuleEvent, ModuleRun } from '@shared/types'
-import type { BotGroupEvent, BotProfile, GroupChatData, GroupMessage } from '@shared/bots'
+import type {
+  AIProviderConfig,
+  AskAnswer,
+  AskQuestion,
+  AskRequest,
+  ModuleEvent,
+  ModuleRun
+} from '@shared/types'
+import type {
+  BotGroupEvent,
+  BotProfile,
+  GroupAskPayload,
+  GroupChatData,
+  GroupMessage
+} from '@shared/bots'
 import {
   MAX_BOT_TURNS_PER_MESSAGE,
+  MEMORY_THRESHOLD_CHARS,
   SUMMARY_KEEP_RECENT,
   SUMMARY_THRESHOLD_CHARS,
+  formatAskTranscriptLine,
   parseBotReply,
   planTagTriggers,
   type TagPolicy
@@ -12,6 +27,7 @@ import { createClient } from '../ai/client'
 import { AiTraceRecorder } from '../ai/trace'
 import type { AIConfigStore } from '../ai/config'
 import type { ModuleRunManager } from '../modules/runs'
+import type { AskResult } from '../modules/runner'
 import type { BotsStore } from './db'
 import type OpenAI from 'openai'
 
@@ -58,11 +74,38 @@ interface SessionDeps {
   clientFactory?: (cfg: AIProviderConfig) => OpenAI
 }
 
+/** A pending ask_user: the promise the bot-task run is blocked on, keyed by message id. */
+interface PendingAsk {
+  project: string
+  groupId: string
+  runId: string
+  questions: AskQuestion[]
+  resolve: (res: AskResult) => void
+}
+
+/** Session deps: the manager's deps plus the ask bridge it injects itself. */
+interface SessionDepsWithAsk extends SessionDeps {
+  askBotUser: (
+    project: string,
+    groupId: string,
+    run: ModuleRun,
+    req: Omit<AskRequest, 'id'>
+  ) => Promise<AskResult>
+}
+
 export class GroupChatManager {
   private readonly sessions = new Map<string, GroupSession>()
   private readonly reportedRuns = new Set<string>()
+  /** Live pending asks keyed by their ask message id (several may wait at once). */
+  private readonly pendingAsks = new Map<string, PendingAsk>()
+  private readonly sessionDeps: SessionDepsWithAsk
 
-  constructor(private readonly deps: SessionDeps) {}
+  constructor(private readonly deps: SessionDeps) {
+    this.sessionDeps = {
+      ...deps,
+      askBotUser: (project, groupId, run, req) => this.handleBotAsk(project, groupId, run, req)
+    }
+  }
 
   static key(project: string, groupId: string): string {
     return `${project}::${groupId}`
@@ -78,10 +121,32 @@ export class GroupChatManager {
     this.sessions.get(GroupChatManager.key(project, groupId))?.stop()
   }
 
+  /**
+   * Clear a group's history: stop orchestration, cancel its live bot-task runs
+   * (their completion reports are suppressed) and drop its task-queue rows.
+   */
+  async clearGroupHistory(project: string, groupId: string): Promise<void> {
+    this.stop(project, groupId)
+    const runs = await this.deps.moduleManager.list(project)
+    for (const run of runs) {
+      if (run.module.id !== 'bot-task' || run.groupId !== groupId) continue
+      if (TERMINAL_STATUSES.has(run.status)) continue
+      this.reportedRuns.add(run.runId)
+      this.deps.moduleManager.stop(run.runId)
+    }
+    // Runs cancelled above never reach the terminal-event ask cleanup (their runIds
+    // are in reportedRuns), so cancel this group's pending asks directly.
+    this.cancelAsksForGroup(project, groupId)
+    await this.deps.store.clearGroupMessages(project, groupId)
+  }
+
   /** Drop cached sessions (e.g. after the project root changed). */
   closeAll(): void {
     for (const s of this.sessions.values()) s.stop()
     this.sessions.clear()
+    for (const [messageId, entry] of [...this.pendingAsks]) {
+      this.cancelAskEntry(entry.project, entry.groupId, messageId, entry)
+    }
   }
 
   /**
@@ -93,6 +158,9 @@ export class GroupChatManager {
     if (!run.botId || !run.groupId) return
     if (!TERMINAL_STATUSES.has(run.status)) return
     if (evt.type !== 'done' && evt.type !== 'error' && evt.type !== 'status') return
+    // A terminal run cannot still be waiting on an ask — cancel it before the
+    // report bookkeeping (which may suppress this run entirely).
+    this.cancelAsksForRun(run.project, run.runId)
     if (this.reportedRuns.has(run.runId)) return
     this.reportedRuns.add(run.runId)
     if (this.reportedRuns.size > 1000) this.reportedRuns.clear()
@@ -100,11 +168,156 @@ export class GroupChatManager {
     session.enqueueTaskReport(run)
   }
 
+  // ---- ask_user bridge (bot tasks) ----
+
+  /**
+   * Surface a bot task's `ask_user` call in the group chat: post the question as a
+   * bot message plus an interactive ask message, then wait (no timeout) for the
+   * user's answer via `bots:askResponse`.
+   */
+  private async handleBotAsk(
+    project: string,
+    groupId: string,
+    run: ModuleRun,
+    req: Omit<AskRequest, 'id'>
+  ): Promise<AskResult> {
+    if (req.questions.some((q) => q.secret)) {
+      throw new Error('ask_user secret questions are not supported in bot tasks.')
+    }
+    const bot = run.botId ? this.deps.store.getBot(run.botId) : null
+    const botName = bot?.name ?? run.module.name
+    const group = this.deps.store.readGroup(project, groupId)
+    if (!group) throw new Error('Group chat not found.')
+    const isLeader = !!bot && bot.id === group.leaderBotId
+
+    const questionText = `${
+      req.kind === 'confirm'
+        ? '⚠️ Please confirm to continue:'
+        : '❓ I need your input to continue:'
+    }\n${req.questions
+      .map((q, i) => {
+        const opts = q.options?.length ? `\n   - ${q.options.join('\n   - ')}` : ''
+        return `${i + 1}. **${q.question}**${opts}`
+      })
+      .join('\n')}`
+    const questionMsg = this.deps.store.appendMessage(project, groupId, {
+      senderKind: 'bot',
+      ...(bot ? { botId: bot.id } : {}),
+      senderName: botName,
+      ...(bot?.role ? { role: bot.role } : {}),
+      ...(isLeader ? { isLeader: true } : {}),
+      content: questionText,
+      ts: Date.now(),
+      taskId: run.runId
+    })
+    this.deps.broadcast({
+      type: 'message',
+      project,
+      groupId,
+      message: questionMsg
+    })
+
+    const askMsg = this.deps.store.appendMessage(project, groupId, {
+      senderKind: 'ask',
+      ...(bot ? { botId: bot.id } : {}),
+      senderName: botName,
+      ...(bot?.role ? { role: bot.role } : {}),
+      ...(isLeader ? { isLeader: true } : {}),
+      content: JSON.stringify({
+        questions: req.questions,
+        status: 'pending'
+      } satisfies GroupAskPayload),
+      ts: Date.now(),
+      taskId: run.runId
+    })
+    this.deps.broadcast({ type: 'message', project, groupId, message: askMsg })
+
+    return await new Promise<AskResult>((resolve) => {
+      this.pendingAsks.set(askMsg.id, {
+        project,
+        groupId,
+        runId: run.runId,
+        questions: req.questions,
+        resolve
+      })
+    })
+  }
+
+  /** Resolve a pending ask from the renderer (`bots:askResponse`). Unknown id → false. */
+  resolveBotAsk(
+    project: string,
+    groupId: string,
+    messageId: string,
+    answers: AskAnswer[],
+    cancelled: boolean
+  ): boolean {
+    const entry = this.pendingAsks.get(messageId)
+    if (!entry) return false
+    this.pendingAsks.delete(messageId)
+    // Persisted payload masks secret answers (defense-in-depth; secret asks are
+    // rejected up-front, so this only guards against legacy pending rows).
+    const secretIds = new Set(entry.questions.filter((q) => q.secret).map((q) => q.id))
+    const persisted = answers.map((a) => (secretIds.has(a.id) ? { ...a, answer: '••••••' } : a))
+    const msg = this.deps.store.updateAskMessage(project, groupId, messageId, {
+      status: cancelled ? 'cancelled' : 'answered',
+      ...(cancelled ? {} : { answers: persisted })
+    })
+    if (msg) {
+      this.deps.broadcast({ type: 'message', project, groupId, message: msg })
+    }
+    entry.resolve({ answers, ...(cancelled ? { cancelled: true } : {}) })
+    return true
+  }
+
+  /** Cancel every pending ask of a group (delete-group path; rows are removed anyway). */
+  cancelAsksForGroup(project: string, groupId: string): void {
+    for (const [messageId, entry] of [...this.pendingAsks]) {
+      if (entry.project !== project || entry.groupId !== groupId) continue
+      this.cancelAskEntry(project, groupId, messageId, entry)
+    }
+  }
+
+  /** Cancel pending asks that belong to one run (stop / terminal status). */
+  private cancelAsksForRun(project: string, runId: string): void {
+    for (const [messageId, entry] of [...this.pendingAsks]) {
+      if (entry.project !== project || entry.runId !== runId) continue
+      this.cancelAskEntry(entry.project, entry.groupId, messageId, entry)
+    }
+  }
+
+  /** Mark the ask message cancelled (when its row still exists), broadcast, unblock the run. */
+  private cancelAskEntry(
+    project: string,
+    groupId: string,
+    messageId: string,
+    entry: PendingAsk
+  ): void {
+    this.pendingAsks.delete(messageId)
+    const msg = this.deps.store.updateAskMessage(project, groupId, messageId, {
+      status: 'cancelled'
+    })
+    if (msg) {
+      this.deps.broadcast({ type: 'message', project, groupId, message: msg })
+    }
+    entry.resolve({ answers: [], cancelled: true })
+  }
+
+  /** Cancel stale pending ask rows after a restart (live asks are exempt). */
+  reconcileAsks(project: string): void {
+    const keepIds = new Set<string>()
+    for (const [messageId, entry] of this.pendingAsks) {
+      if (entry.project === project) keepIds.add(messageId)
+    }
+    for (const { groupId, message } of this.deps.store.reconcileAsks(project, keepIds)) {
+      this.deps.broadcast({ type: 'message', project, groupId, message })
+    }
+  }
+
   private sessionFor(project: string, groupId: string): GroupSession {
     const key = GroupChatManager.key(project, groupId)
     let session = this.sessions.get(key)
     if (!session) {
-      session = new GroupSession(this.deps, project, groupId)
+      session = new GroupSession(this.sessionDeps, project, groupId)
       this.sessions.set(key, session)
     }
     return session
@@ -119,7 +332,7 @@ class GroupSession {
   private trace: AiTraceRecorder | null = null
 
   constructor(
-    private readonly deps: SessionDeps,
+    private readonly deps: SessionDepsWithAsk,
     readonly project: string,
     readonly groupId: string
   ) {}
@@ -236,7 +449,8 @@ class GroupSession {
       })
     }
 
-    await this.maybeSummarizeAndRemember([...state.involved])
+    await this.maybeSummarize()
+    await this.maybeRemember([...state.involved])
     if (state.turnCapHit) {
       this.system(
         `⚠️ Reached the limit of ${MAX_BOT_TURNS_PER_MESSAGE} bot turns for this message; further replies were not triggered.`,
@@ -267,7 +481,7 @@ class GroupSession {
       const turnNote = opts.leaderDirected
         ? `The user addressed this message to you directly (@${bot.id}).`
         : opts.tagPolicy === 'free'
-          ? `You are the group leader; the user's message was addressed to you. Assign work to members by @mentioning them when appropriate.`
+          ? `You are the group leader; the user's message was addressed to you. Assign work to members by @mentioning them when appropriate. Delegate via @mention; do not create assign blocks for delegated work.`
           : `${opts.triggerLabel} asked you to respond / take this on.`
       const userContent = `${transcript}\n\n---\nRespond now as @${bot.id} (${bot.name}). ${turnNote}`
 
@@ -298,11 +512,12 @@ class GroupSession {
       if (this.stopped) return
 
       const parsed = parseBotReply(raw, memberIds)
+      const lastChatMessage = parsed.content ?? undefined
       if (parsed.content) {
         this.appendBotMessage(bot, parsed.content, group)
       }
       for (const assign of parsed.assigns) {
-        await this.handleAssignment(bot, assign, opts.triggerLabel)
+        await this.handleAssignment(bot, assign, opts.triggerLabel, lastChatMessage)
       }
 
       const plan = planTagTriggers(parsed.tags, opts.tagPolicy, state.relaysLeft, state.turnsLeft)
@@ -329,7 +544,8 @@ class GroupSession {
   private async handleAssignment(
     bot: BotProfile,
     assign: { title: string; task: string },
-    requestedBy: string
+    requestedBy: string,
+    lastChatMessage?: string
   ): Promise<void> {
     const queue = this.deps.store.listQueue(this.project)
     const running = queue.find((q) => q.botId === bot.id && q.status === 'running')
@@ -339,46 +555,53 @@ class GroupSession {
         botId: bot.id,
         title: assign.title,
         task: assign.task,
-        requestedBy
+        requestedBy,
+        ...(lastChatMessage ? { originMsg: lastChatMessage } : {})
       })
       const position = queue.filter((q) => q.botId === bot.id && q.status === 'queued').length + 1
       this.system(`⏳ ${bot.name} queued task “${assign.title}” (position ${position})`)
       return
     }
-    await this.startTask(bot, assign, requestedBy)
+    await this.startTask(bot, assign, requestedBy, { originMsg: lastChatMessage })
   }
 
   private async startTask(
     bot: BotProfile,
     assign: { title: string; task: string },
-    requestedBy: string
+    requestedBy: string,
+    opts?: { queueId?: string; originMsg?: string }
   ): Promise<void> {
-    const item = this.deps.store.enqueueTask(this.project, {
-      groupId: this.groupId,
-      botId: bot.id,
-      title: assign.title,
-      task: assign.task,
-      requestedBy
-    })
+    const queueId =
+      opts?.queueId ??
+      this.deps.store.enqueueTask(this.project, {
+        groupId: this.groupId,
+        botId: bot.id,
+        title: assign.title,
+        task: assign.task,
+        requestedBy,
+        ...(opts?.originMsg ? { originMsg: opts.originMsg } : {})
+      }).queueId
     const res = await this.deps.moduleManager.start(
       this.project,
       'bot-task',
       assign.title,
-      assign.task,
+      `You are @${bot.id} (display name "${bot.name}").\n\n${assign.task}`,
       BOT_TASK_EXPECT,
       {
         botId: bot.id,
+        botName: bot.name,
         groupId: this.groupId,
         displayName: `${bot.name} Task`,
         ...(bot.profileId ? { profileId: bot.profileId } : {}),
-        ...(bot.model ? { modelOverride: bot.model } : {})
+        ...(bot.model ? { modelOverride: bot.model } : {}),
+        ask: (run, req) => this.deps.askBotUser(this.project, this.groupId, run, req)
       }
     )
     if (res.ok) {
-      this.deps.store.setTaskRunning(this.project, item.queueId, res.runId)
+      this.deps.store.setTaskRunning(this.project, queueId, res.runId)
       this.system(`▶️ ${bot.name} started background task “${assign.title}”`, { taskId: res.runId })
     } else {
-      this.deps.store.finishTask(this.project, item.queueId)
+      this.deps.store.finishTask(this.project, queueId)
       this.system(`⚠️ ${bot.name}: failed to start “${assign.title}” — ${res.error}`, {
         error: true
       })
@@ -388,7 +611,9 @@ class GroupSession {
   private async startNextQueued(bot: BotProfile): Promise<void> {
     const next = this.deps.store.nextQueuedTask(this.project, bot.id)
     if (!next) return
-    await this.startTask(bot, { title: next.title, task: next.task }, next.requestedBy)
+    await this.startTask(bot, { title: next.title, task: next.task }, next.requestedBy, {
+      queueId: next.queueId
+    })
   }
 
   private async processTaskReportJob(job: Job): Promise<void> {
@@ -427,18 +652,20 @@ class GroupSession {
       const roster = members
         .map((m) => `- @${m.id} — ${m.name}${m.id === group.leaderBotId ? ' (leader)' : ''}`)
         .join('\n')
+      const originMsg = item?.originMsg?.trim()
       const sys = `You are ${bot.name} (@${bot.id}), ${bot.role || 'a bot member'} in the group chat "${group.title}" (project "${this.project}").
+${bot.persona ? `\nYOUR PERSONA / STANDING INSTRUCTIONS:\n${bot.persona}\n` : ''}
 Group members:
 ${roster}
-The user appears as "You".
+${this.userLine()}
 
-You have no tools. Your background task just completed and you are posting the result report to the group. Do NOT declare new work, do NOT use \`\`\`assign blocks, do NOT mention other bots. Keep it concise (a few sentences or a short list).
+You have no tools. Your background task just completed and you are posting the result report to the group. Do NOT declare new work, do NOT use \`\`\`assign blocks, do NOT mention other bots. Keep it concise (a few sentences or a short list). Write your reply in the language of the original task request (the user's chat), regardless of the Result text's language.${originMsg ? ' Your last chat message before the task started (included below) is the best language reference — match its language.' : ''}
 ${LINK_RULE}`
       const user = `Your background task "${run.title}" ${statusText}.
 Requested by: ${item?.requestedBy ?? 'the group'}
 Result:
 ${resultText}
-
+${originMsg ? `\nYour last message to the group before starting this task:\n"""\n${originMsg}\n"""\n` : ''}
 Post your result report to the group now.`
       const trace = await this.traceRecorder()
       trace.append({ role: 'system', ts: Date.now(), content: sys })
@@ -485,7 +712,7 @@ Post your result report to the group now.`
 
   // ---- summarization + memory ----
 
-  private async maybeSummarizeAndRemember(involvedBotIds: string[]): Promise<void> {
+  private async maybeSummarize(): Promise<void> {
     const group = this.group()
     const messages = this.deps.store.listMessages(this.project, this.groupId)
     const upTo = group.summarizedUpToSeq ?? 0
@@ -498,7 +725,7 @@ Post your result report to the group now.`
     )
     if (toSummarize.length === 0) return
 
-    const { leader, members } = this.resolveBots(group)
+    const { leader } = this.resolveBots(group)
     if (!leader) return
 
     try {
@@ -534,12 +761,25 @@ Post your result report to the group now.`
     } catch {
       // summarization is best-effort; never fail the orchestration for it
     }
+  }
 
-    for (const botId of involvedBotIds) {
-      const bot = members.find((m) => m.id === botId)
-      if (!bot) continue
+  private async maybeRemember(involvedBotIds: string[]): Promise<void> {
+    if (involvedBotIds.length === 0) return
+    const group = this.group()
+    const messages = this.deps.store.listMessages(this.project, this.groupId)
+    const upTo = group.memorizedUpToSeq ?? 0
+    const unmemorized = messages.filter((m) => m.seq > upTo)
+    const chars = unmemorized.reduce((sum, m) => sum + m.content.length, 0)
+    if (chars < MEMORY_THRESHOLD_CHARS) return
+
+    const members = this.resolveBots(group).members
+    const bots = involvedBotIds
+      .map((id) => members.find((m) => m.id === id))
+      .filter((b): b is BotProfile => !!b)
+    for (const bot of bots) {
       await this.extractMemory(bot)
     }
+    this.deps.store.setMemorizedUpTo(this.project, this.groupId, messages[messages.length - 1].seq)
   }
 
   private async extractMemory(bot: BotProfile): Promise<void> {
@@ -552,8 +792,8 @@ Post your result report to the group now.`
         .slice(-40)
         .map((m) => formatTranscriptLine(m))
         .join('\n')
-      const sys = `You maintain the private memory of "${bot.name}" (@${bot.id}), ${bot.role || 'a bot'}, in project "${this.project}". From the conversation, extract durable facts worth remembering for FUTURE conversations in this project: decisions, preferences, project facts, standing commitments. Ignore small talk and one-off details. Output ONLY a JSON array of short strings (max 10). Output [] if there is nothing new.`
-      const user = `Existing memory:\n${existing.map((m) => `- ${m.content}`).join('\n') || '(empty)'}\n\nRecent conversation:\n${recent}`
+      const sys = `You maintain the private memory of "${bot.name}" (@${bot.id}), ${bot.role || 'a bot'}, in project "${this.project}". Your memory is a short list of durable facts you rely on in FUTURE conversations in this project. Given your current memory and the recent conversation, output the COMPLETE updated memory as a JSON array of short strings (max 10): keep existing facts that are still true (reword if clearer), drop facts that are now outdated or superseded (e.g. tasks or issues that have been resolved, decisions that changed), and add new durable facts (decisions, preferences, project facts, standing commitments). Never record group membership, bot roles, or who the leader is — that is always provided in your prompt. Ignore small talk and one-off details. Output ONLY the JSON array. Output [] if nothing is worth remembering.`
+      const user = `Current memory:\n${existing.map((m) => `- ${m.content}`).join('\n') || '(empty)'}\n\nRecent conversation:\n${recent}`
       const completion = await client.chat.completions.create(
         {
           model: cfg.model,
@@ -567,7 +807,8 @@ Post your result report to the group now.`
       )
       const raw = completion.choices[0]?.message?.content ?? '[]'
       const fresh = parseJsonArray(raw)
-      if (fresh.length > 0) {
+      // an empty answer must never wipe existing memory (entry removal is manual, Settings ▸ Bots)
+      if (fresh.length > 0 || existing.length === 0) {
         this.deps.store.saveMemories(this.project, bot.id, fresh)
       }
     } catch {
@@ -629,6 +870,13 @@ Post your result report to the group now.`
     return lines.length > 0 ? lines.join('\n') : '(the conversation starts now)'
   }
 
+  private userLine(): string {
+    const name = this.deps.store.getUserName()
+    return name
+      ? `The user participates as "You". Their name is ${name} — address them by name when speaking to them.`
+      : 'The user participates as "You".'
+  }
+
   private buildSystemPrompt(
     bot: BotProfile,
     group: GroupChatData,
@@ -640,7 +888,7 @@ Post your result report to the group now.`
     const roster = members
       .map(
         (m) =>
-          `- @${m.id} — ${m.name}${m.role ? ` (${m.role})` : ''}${m.id === leaderId ? ' [GROUP LEADER]' : ''}${m.id === bot.id ? ' ← you' : ''}`
+          `- @${m.id} — ${m.name}${m.role ? ` (${m.role})` : ''}${m.id === leaderId ? ' [GROUP LEADER]' : ''}${m.id === bot.id ? ' ← you' : ''}${m.roleDetails ? ` — ${m.roleDetails}` : ''}`
       )
       .join('\n')
     const memories = this.deps.store.listMemories(this.project, bot.id)
@@ -653,11 +901,11 @@ Post your result report to the group now.`
       : ''
 
     return `You are ${bot.name} (@${bot.id})${bot.role ? `, the ${bot.role}` : ''}, a member of the group chat "${group.title}" (project "${this.project}").
-${isLeader ? 'You are the GROUP LEADER: messages from the user that do not @mention anyone are addressed to you — decide what to do, answer directly, and/or assign work to members by @mentioning them.' : ''}
+${isLeader ? 'You are the GROUP LEADER: messages from the user that do not @mention anyone are addressed to you — decide what to do, answer directly, and/or assign work to members by @mentioning them. When you delegate work to a member, do NOT also declare it in an assign block — assign blocks create background tasks for YOU only.' : ''}
 ${bot.persona ? `\nYOUR PERSONA / STANDING INSTRUCTIONS:\n${bot.persona}\n` : ''}
 GROUP MEMBERS (only these exist; mention them with @id):
 ${roster}
-The user participates as "You".
+${this.userLine()}
 
 RULES:
 - You have NO tools in this chat. All real work (files, notes, kanban, schedules, research, documents) happens through background tasks.
@@ -665,8 +913,8 @@ RULES:
 \`\`\`assign
 {"title": "<short task title>", "task": "<full standalone instructions, including source references like note:<name>, file:<name>, plan:<schedule id>>"}
 \`\`\`
-The block is removed from the chat; a background run starts for you. If a task is already running for you, the new one is queued automatically — say it is queued in your reply.
-- To ask another member a question or hand them a task, @mention them. Members you @mention will respond.
+The block is removed from the chat; a background run starts for you (never for a member you mentioned). If a task is already running for you, the new one is queued automatically — say it is queued in your reply.
+- To ask another member a question or hand them a task, @mention them — they will take it on and declare their own assign block. Never emit an assign block for work you just delegated via @mention.
 - If you were brought in by another bot, answer directly WITHOUT mentioning other bots, unless the person who tagged you explicitly asked you to involve someone else. Never mention the bot who tagged you back.
 ${LINK_RULE}
 - Keep replies concise and match the user's language.
@@ -696,6 +944,7 @@ Current date: ${new Date().toISOString().slice(0, 10)}.`
 function formatTranscriptLine(m: GroupMessage): string {
   if (m.senderKind === 'user') return `You: ${m.content}`
   if (m.senderKind === 'system') return `[system] ${m.content}`
+  if (m.senderKind === 'ask') return formatAskTranscriptLine(m)
   return `[${m.senderName}${m.role ? ` (${m.role})` : ''}]: ${m.content}`
 }
 

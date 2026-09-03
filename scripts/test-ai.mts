@@ -446,6 +446,44 @@ assert.deepEqual(r.fields, ['title', 'storyPoints'])
 r = await call('update_kanban_card', { title: 'Task A2', priority: null })
 assert.equal(r.ok, true, 'null clears the priority')
 
+// add_kanban_comment (matched by title, case-insensitive; appends to the card)
+r = await call('add_kanban_comment', { title: 'task a2', comment: 'Blocked on API keys' })
+assert.equal(r.ok, true)
+assert.equal(r.card, 'Task A2')
+assert.equal(r.commentCount, 1)
+r = await call('add_kanban_comment', { title: 'Task A2', comment: 'Keys received, unblocked' })
+assert.equal(r.ok, true)
+assert.equal(r.commentCount, 2)
+{
+  const board = await service.loadKanban('Research')
+  const a2 = board.cards.find((c) => c.title === 'Task A2')
+  assert.equal(a2?.comments.length, 2)
+  assert.equal(a2?.comments[0].comment, 'Blocked on API keys')
+  assert.equal(a2?.comments[0].commentBy, 'you')
+  assert.ok(a2?.comments[0].timestamp)
+}
+r = await call('add_kanban_comment', { title: 'Nope', comment: 'x' })
+assert.equal(r.ok, false)
+assert.match(r.error, /not found/)
+r = await call('add_kanban_comment', { title: 'Task A2', comment: '   ' })
+assert.equal(r.ok, false)
+assert.match(r.error, /Comment text is required/)
+
+// bot-run attribution: ctx.commenterName lands as the comment author
+r = await callWith(
+  'add_kanban_comment',
+  { title: 'Task A2', comment: 'Attempt 1 failed: API keys still missing' },
+  { commenterName: 'Data Bot' }
+)
+assert.equal(r.ok, true)
+assert.equal(r.commentCount, 3)
+{
+  const board = await service.loadKanban('Research')
+  const a2 = board.cards.find((c) => c.title === 'Task A2')
+  assert.equal(a2?.comments[2].commentBy, 'Data Bot')
+  assert.equal(a2?.comments[2].comment, 'Attempt 1 failed: API keys still missing')
+}
+
 // move_kanban_card
 r = await call('move_kanban_card', { title: 'Task A2', column: 'Done' })
 assert.equal(r.ok, true)

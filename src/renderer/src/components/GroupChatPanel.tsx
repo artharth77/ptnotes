@@ -19,10 +19,12 @@ import {
   GROUP_CHAT_PAGE_SIZE,
   linkifyBotMentions,
   MAX_GROUP_BOTS,
+  parseGroupAsk,
   resolveKanbanCardNames,
   splitMentionSegments
 } from '@shared/bots'
 import type { GroupChatMeta, GroupMessage } from '@shared/bots'
+import type { AskAnswer, AskQuestion } from '@shared/types'
 import { MarkdownContent } from './MarkdownContent'
 import { USER_MSG_COLLAPSE_LIMIT } from './chatContent'
 import { Modal } from './Modal'
@@ -116,6 +118,7 @@ export function GroupChatPanel(): React.JSX.Element {
     query: string
   } | null>(null)
   const [mentionIndex, setMentionIndex] = useState(0)
+  const [showJumpDown, setShowJumpDown] = useState(false)
 
   useEffect(() => {
     if (activeProject) {
@@ -136,6 +139,7 @@ export function GroupChatPanel(): React.JSX.Element {
       prependAnchorRef.current = null
       prevScrollRef.current = null
       nearBottomRef.current = true
+      setShowJumpDown(false)
       el.scrollTop = el.scrollHeight
       return
     }
@@ -179,8 +183,15 @@ export function GroupChatPanel(): React.JSX.Element {
 
   function onScroll(e: React.UIEvent<HTMLDivElement>): void {
     const el = e.currentTarget
-    nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    nearBottomRef.current = atBottom
+    setShowJumpDown(!atBottom)
     if (el.scrollTop < 80) triggerLoadOlder()
+  }
+
+  function jumpToBottom(): void {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
+    setShowJumpDown(false)
   }
 
   function focusInput(): void {
@@ -467,6 +478,7 @@ export function GroupChatPanel(): React.JSX.Element {
             )}
             <MessageRow
               msg={m}
+              groupId={activeGroupId ?? ''}
               leaderId={activeGroup?.leaderBotId}
               bots={groupBots}
               kanbanCards={kanban?.cards ?? []}
@@ -493,6 +505,16 @@ export function GroupChatPanel(): React.JSX.Element {
       </div>
 
       <div className="chat-input">
+        {showJumpDown && (
+          <button
+            className="chat-jump-down"
+            onClick={jumpToBottom}
+            title="Jump to bottom"
+            aria-label="Jump to bottom"
+          >
+            <MdiIcon path={mdiChevronDown} size={20} />
+          </button>
+        )}
         {mentionItems.length > 0 && (
           <div className="mention-popup">
             {mentionItems.map((item, i) => (
@@ -585,6 +607,7 @@ export function GroupChatPanel(): React.JSX.Element {
 
 function MessageRow({
   msg,
+  groupId,
   leaderId,
   bots,
   kanbanCards,
@@ -594,6 +617,7 @@ function MessageRow({
   onOpenFile
 }: {
   msg: GroupMessage
+  groupId: string
   leaderId?: string
   bots: { id: string; name: string }[]
   kanbanCards: { id: string; title: string }[]
@@ -602,6 +626,9 @@ function MessageRow({
   onOpenKanban?: (cardTitle: string) => void
   onOpenFile?: (fileName: string) => void
 }): React.JSX.Element {
+  if (msg.senderKind === 'ask') {
+    return <GroupAskBubble msg={msg} groupId={groupId} />
+  }
   if (msg.senderKind === 'system') {
     return (
       <div className={`gc-system${msg.error ? ' error' : ''}`} title={formatGroupTimestamp(msg.ts)}>
@@ -680,8 +707,147 @@ function GroupUserBubble({
   )
 }
 
-/** Header dropdown: group title + chevron; lists group chats with a "New group chat" row on top. */
-function GroupSwitcher({
+/**
+ * Interactive `ask_user` bubble posted by a bot task: user-style, right-aligned.
+ * Pending → per-question radios/checkboxes/free text + Cancel/Confirm; answered →
+ * read-only question→answer lines; cancelled → state only.
+ */
+function GroupAskBubble({
+  msg,
+  groupId
+}: {
+  msg: GroupMessage
+  groupId: string
+}): React.JSX.Element {
+  const activeProject = useAppStore((s) => s.activeProject)
+  const respondBotGroupAsk = useAppStore((s) => s.respondBotGroupAsk)
+  const ask = useMemo(() => parseGroupAsk(msg.content), [msg.content])
+  const [selections, setSelections] = useState<Record<string, string[]>>({})
+  const [freeText, setFreeText] = useState<Record<string, string>>({})
+  const [submitting, setSubmitting] = useState(false)
+
+  if (!ask) {
+    return (
+      <div className="chat-msg user gc-msg">
+        <div className="chat-msg-label gc-msg-meta">
+          Question · {msg.senderName} · {formatGroupTimestamp(msg.ts)}
+        </div>
+        <div className="chat-msg-content user-bubble">{msg.content}</div>
+      </div>
+    )
+  }
+
+  const pending = ask.status === 'pending'
+  const allAnswered = ask.questions.every((q) =>
+    q.options?.length
+      ? (selections[q.id]?.length ?? 0) > 0
+      : (freeText[q.id] ?? '').trim().length > 0
+  )
+
+  const toggle = (q: AskQuestion, option: string): void => {
+    setSelections((prev) => {
+      const cur = prev[q.id] ?? []
+      if (q.multiple) {
+        return {
+          ...prev,
+          [q.id]: cur.includes(option) ? cur.filter((o) => o !== option) : [...cur, option]
+        }
+      }
+      return { ...prev, [q.id]: [option] }
+    })
+  }
+
+  const respond = async (cancelled: boolean): Promise<void> => {
+    if (!activeProject || submitting) return
+    setSubmitting(true)
+    try {
+      const answers: AskAnswer[] = cancelled
+        ? []
+        : ask.questions.map((q) => {
+            const sel = selections[q.id]
+            if (q.options?.length) {
+              return sel && sel.length > 0
+                ? { id: q.id, answer: sel.join(', '), ...(q.multiple ? { selections: sel } : {}) }
+                : { id: q.id, answer: '' }
+            }
+            return { id: q.id, answer: freeText[q.id] ?? '' }
+          })
+      await respondBotGroupAsk(activeProject, groupId, msg.id, answers, cancelled)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="chat-msg user gc-msg">
+      <div className="chat-msg-label gc-msg-meta">
+        Question · {msg.senderName} · {formatGroupTimestamp(msg.ts)}
+      </div>
+      <div className="chat-msg-content user-bubble gc-ask">
+        {ask.status === 'answered'
+          ? ask.questions.map((q) => {
+              const a = ask.answers?.find((x) => x.id === q.id)
+              return (
+                <div key={q.id} className="gc-ask-resolved">
+                  <span className="gc-ask-q">{q.question}</span>
+                  <strong className="gc-ask-a">{a?.answer || '—'}</strong>
+                </div>
+              )
+            })
+          : ask.questions.map((q) => (
+              <div key={q.id} className="gc-ask-question">
+                <div className="gc-ask-q">{q.question}</div>
+                {pending &&
+                  (q.options?.length ? (
+                    <div className="gc-ask-options">
+                      {q.options.map((option) => (
+                        <label key={option} className="gc-ask-option">
+                          <input
+                            type={q.multiple ? 'checkbox' : 'radio'}
+                            name={`${msg.id}-${q.id}`}
+                            checked={selections[q.id]?.includes(option) ?? false}
+                            onChange={() => toggle(q, option)}
+                          />
+                          {option}
+                        </label>
+                      ))}
+                    </div>
+                  ) : (
+                    <input
+                      className="gc-ask-input"
+                      type={q.secret ? 'password' : 'text'}
+                      value={freeText[q.id] ?? ''}
+                      placeholder="Type your answer…"
+                      onChange={(e) => setFreeText((prev) => ({ ...prev, [q.id]: e.target.value }))}
+                    />
+                  ))}
+              </div>
+            ))}
+        {pending && (
+          <div className="gc-ask-actions">
+            <button className="btn small" disabled={submitting} onClick={() => void respond(true)}>
+              Cancel
+            </button>
+            <button
+              className="btn small primary"
+              disabled={submitting || !allAnswered}
+              onClick={() => void respond(false)}
+            >
+              Confirm
+            </button>
+          </div>
+        )}
+        {!pending && (
+          <div className={`gc-ask-state${ask.status === 'cancelled' ? ' cancelled' : ''}`}>
+            {ask.status === 'cancelled' ? 'Cancelled' : 'Answered'}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** Header dropdown: group title + chevron; lists group chats with a "New group chat" row on top. */ function GroupSwitcher({
   title,
   open,
   setOpen,
@@ -966,6 +1132,7 @@ function GroupModal({
   const createBotGroup = useAppStore((s) => s.createBotGroup)
   const updateBotGroup = useAppStore((s) => s.updateBotGroup)
   const deleteBotGroup = useAppStore((s) => s.deleteBotGroup)
+  const clearBotGroupHistory = useAppStore((s) => s.clearBotGroupHistory)
   const openSettings = useAppStore((s) => s.openSettings)
   const [title, setTitle] = useState(group?.title ?? '')
   // Existing rosters can contain ids of since-deleted bots (deleteBot only scrubs open
@@ -976,6 +1143,7 @@ function GroupModal({
   const [leaderBotId, setLeaderBotId] = useState(group?.leaderBotId ?? '')
   const [error, setError] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [confirmClear, setConfirmClear] = useState(false)
   const [saving, setSaving] = useState(false)
 
   function toggleBot(id: string): void {
@@ -1028,7 +1196,7 @@ function GroupModal({
     <Modal title={mode === 'create' ? 'New group chat' : 'Group settings'} onClose={onClose}>
       <label className="form-label">Title</label>
       <input
-        className="form-input"
+        className="text-field"
         value={title}
         placeholder="Group chat title"
         onChange={(e) => setTitle(e.target.value)}
@@ -1086,22 +1254,40 @@ function GroupModal({
       {error && <div className="form-error">{error}</div>}
       <div className="modal-actions gc-modal-actions">
         {mode === 'edit' && group && (
-          <button
-            className="btn danger"
-            disabled={saving}
-            onClick={() => {
-              if (!confirmDelete) {
-                setConfirmDelete(true)
-                return
-              }
-              void (async () => {
-                await deleteBotGroup(project, group.groupId)
-                onClose()
-              })()
-            }}
-          >
-            {confirmDelete ? 'Really delete?' : 'Delete group'}
-          </button>
+          <>
+            <button
+              className="btn danger"
+              disabled={saving}
+              onClick={() => {
+                if (!confirmClear) {
+                  setConfirmClear(true)
+                  return
+                }
+                void (async () => {
+                  await clearBotGroupHistory(project, group.groupId)
+                  onClose()
+                })()
+              }}
+            >
+              {confirmClear ? 'Really clear?' : 'Clear history'}
+            </button>
+            <button
+              className="btn danger"
+              disabled={saving}
+              onClick={() => {
+                if (!confirmDelete) {
+                  setConfirmDelete(true)
+                  return
+                }
+                void (async () => {
+                  await deleteBotGroup(project, group.groupId)
+                  onClose()
+                })()
+              }}
+            >
+              {confirmDelete ? 'Really delete?' : 'Delete group'}
+            </button>
+          </>
         )}
         <button className="btn" onClick={onClose}>
           Cancel

@@ -18,6 +18,7 @@ interface BotGroupWindow {
   total: number
 }
 import type {
+  AskAnswer,
   AskRequest,
   ChatMessage,
   ChatSessionMeta,
@@ -195,8 +196,16 @@ interface AppState {
   createBotGroup: (project: string, input: NewGroupInput) => Promise<GroupChatMeta>
   updateBotGroup: (project: string, groupId: string, patch: GroupPatch) => Promise<void>
   deleteBotGroup: (project: string, groupId: string) => Promise<void>
+  clearBotGroupHistory: (project: string, groupId: string) => Promise<void>
   sendBotGroupMessage: (text: string) => Promise<void>
   stopBotGroup: () => Promise<void>
+  respondBotGroupAsk: (
+    project: string,
+    groupId: string,
+    messageId: string,
+    answers: AskAnswer[],
+    cancelled: boolean
+  ) => Promise<void>
   applyBotGroupEvent: (evt: BotGroupEvent) => void
   loadBotTasks: (project: string) => Promise<void>
   selectNote: (id: string) => Promise<void>
@@ -1167,6 +1176,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (current) await get().openBotGroup(project, current)
   },
 
+  async clearBotGroupHistory(project, groupId) {
+    await window.ptnotes.bots.clearGroupMessages(project, groupId)
+    set((s) => {
+      const messages = { ...s.botGroupMessages }
+      delete messages[groupId]
+      const windows = { ...s.botGroupWindowMeta }
+      delete windows[groupId]
+      return { botGroupMessages: messages, botGroupWindowMeta: windows }
+    })
+    await get().loadBotGroups(project)
+    if (get().activeBotGroupId[project] === groupId) await get().openBotGroup(project, groupId)
+  },
+
   async sendBotGroupMessage(text) {
     const project = get().activeProject
     const groupId = project ? get().activeBotGroupId[project] : null
@@ -1208,18 +1230,25 @@ export const useAppStore = create<AppState>((set, get) => ({
     await window.ptnotes.bots.stop(project, groupId)
   },
 
+  async respondBotGroupAsk(project, groupId, messageId, answers, cancelled) {
+    await window.ptnotes.bots.askResponse(project, groupId, messageId, answers, cancelled)
+  },
+
   applyBotGroupEvent(evt) {
     if (evt.type === 'message') {
       set((s) => {
         const list = s.botGroupMessages[evt.groupId] ?? []
         const idx = list.findIndex((m) => m.id === evt.message.id)
         const isNew = idx === -1
+        const win = s.botGroupWindowMeta[evt.groupId]
+        // An upsert for a message older than the loaded window (a replaced ask
+        // bubble outside the page) must not re-appear at the bottom.
+        if (isNew && win?.oldestSeq != null && evt.message.seq < win.oldestSeq) return {}
         const next = isNew
           ? [...list, evt.message]
           : list.map((m, i) => (i === idx ? evt.message : m))
         const typing =
           evt.message.senderKind === 'bot' ? { ...s.botTyping, [evt.groupId]: null } : s.botTyping
-        const win = s.botGroupWindowMeta[evt.groupId]
         const total = (win?.total ?? list.length) + (isNew ? 1 : 0)
         return {
           botGroupMessages: { ...s.botGroupMessages, [evt.groupId]: next },

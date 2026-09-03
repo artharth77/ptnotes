@@ -40,6 +40,8 @@ export interface ToolContext {
   registerSecret?: (value: string) => string
   /** Present only in the interactive chat; lets long-running tools abort when the chat is stopped. */
   isStopped?: () => boolean
+  /** Attribution for kanban comments written by this session (bot-task runs set it to the bot's name; absent → "you"). */
+  commenterName?: string
 }
 
 export interface PTTool {
@@ -955,11 +957,23 @@ export const tools: PTTool[] = [
               type: 'string',
               description: 'Column name to place the card in (default: the first column)'
             },
-            priority: { type: 'string', enum: ['high', 'medium', 'low'] },
-            labels: { type: 'array', items: { type: 'string' } },
+            priority: {
+              type: 'string',
+              enum: ['high', 'medium', 'low'],
+              description: 'Card priority: "high", "medium", or "low"'
+            },
+            labels: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Initial labels for the card, e.g. ["demo"]'
+            },
             dueDate: { type: 'string', description: 'Due date as YYYY-MM-DD' },
-            storyPoints: { type: 'number' },
-            assignee: { type: 'string' },
+            storyPoints: { type: 'number', description: 'Story points estimate (number)' },
+            assignee: {
+              type: 'string',
+              description:
+                'Name of the person or bot assigned to the card (your own display name if you will work on it)'
+            },
             attributes: {
               type: 'object',
               additionalProperties: { type: 'string' },
@@ -1033,12 +1047,25 @@ export const tools: PTTool[] = [
             },
             priority: {
               type: ['string', 'null'],
-              enum: ['high', 'medium', 'low', null]
+              enum: ['high', 'medium', 'low', null],
+              description: 'Card priority: "high", "medium", "low" — or null to clear it'
             },
-            labels: { type: 'array', items: { type: 'string' } },
+            labels: {
+              type: 'array',
+              items: { type: 'string' },
+              description:
+                'Replaces the card\'s whole label list — include existing labels you want to keep, e.g. ["demo", "failed"]'
+            },
             dueDate: { type: ['string', 'null'], description: 'YYYY-MM-DD, or null to clear' },
-            storyPoints: { type: ['number', 'null'] },
-            assignee: { type: ['string', 'null'] },
+            storyPoints: {
+              type: ['number', 'null'],
+              description: 'Story points estimate (number) — or null to clear'
+            },
+            assignee: {
+              type: ['string', 'null'],
+              description:
+                'Name of the person or bot assigned to the card — to claim a card pass your own display name; empty string or null unassigns it'
+            },
             attributes: {
               type: 'object',
               additionalProperties: { type: 'string' },
@@ -1106,6 +1133,50 @@ export const tools: PTTool[] = [
           project,
           updated: found.title,
           fields: Object.keys(patch)
+        })
+      } catch (err) {
+        return JSON.stringify({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err)
+        })
+      }
+    }
+  },
+  {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'add_kanban_comment',
+        description:
+          'Add a comment to an EXISTING kanban card (matched by title, case-insensitive). Comments are short notes on the card (progress, questions, decisions) — use them instead of appending free text to the description.',
+        parameters: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: 'Current title of the card to comment on' },
+            comment: { type: 'string', description: 'Comment text to add to the card' }
+          },
+          required: ['title', 'comment']
+        }
+      }
+    },
+    async execute(args, ctx) {
+      const project = projectOf(args, ctx)
+      const board = await ctx.service.loadKanban(project)
+      const found = findCardByTitle(board, String(args.title ?? ''))
+      if (!found) {
+        return JSON.stringify({ ok: false, error: `Kanban card "${args.title}" not found` })
+      }
+      try {
+        const updated = await ctx.service.addKanbanComment(project, found.id, {
+          comment: String(args.comment ?? ''),
+          ...(ctx.commenterName ? { commentBy: ctx.commenterName } : {})
+        })
+        const card = updated.cards.find((c) => c.id === found.id)
+        return JSON.stringify({
+          ok: true,
+          project,
+          card: found.title,
+          commentCount: card?.comments.length ?? 0
         })
       } catch (err) {
         return JSON.stringify({

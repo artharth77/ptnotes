@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs'
 import assert from 'node:assert/strict'
 import { join } from 'node:path'
 import type { OpenAI } from 'openai'
-import type { AIProviderConfig, ModuleEvent } from '../src/shared/types'
+import type { AIProviderConfig, AskQuestion, ModuleEvent, ModuleRun } from '../src/shared/types'
 import type { AIConfigStore } from '../src/main/ai/config'
 
 const ROOT = '/tmp/ptnotes-modules-test-root'
@@ -2503,5 +2503,336 @@ assert.ok(
   (await service.listStoredModuleRuns(PROJECT)).some((s) => s.runId === loopRunId),
   'failed run persisted'
 )
+
+// ---- bot-task ask_user: handler runs offer it, handler-less runs never do ----
+{
+  const { createBotTaskModule } = await import('../src/main/bots/botTask')
+  const botRegistry = new ModuleRegistry()
+  const botManager = new ModuleRunManager(
+    service,
+    configStore,
+    botRegistry,
+    () => {},
+    makeScriptedClient([
+      { tool_calls: [step('a1', 'set_plan', { steps: ['Ask the user', 'Report'] })] },
+      {
+        tool_calls: [
+          step('a2', 'ask_user', {
+            questions: [
+              { id: 'color', question: 'Which color?', options: ['Red', 'Blue'] },
+              { id: 'note', question: 'Anything else?' }
+            ]
+          })
+        ]
+      },
+      {
+        tool_calls: [step('a3', 'submit_result', { result: 'The user picked Blue; nothing else.' })]
+      },
+      { content: 'Done.' }
+    ])
+  )
+  botRegistry.register(createBotTaskModule(botManager, botRegistry, []))
+
+  const askReqs: { run: ModuleRun; questions: AskQuestion[] }[] = []
+  const started = await botManager.start(
+    PROJECT,
+    'bot-task',
+    'Ask task',
+    'Ask the user which color they prefer.',
+    'A short report.',
+    {
+      botId: 'bob',
+      groupId: 'group-ask',
+      displayName: 'Bob Task',
+      ask: async (run, req) => {
+        askReqs.push({ run, questions: req.questions })
+        return {
+          answers: [
+            { id: 'color', answer: 'Blue' },
+            { id: 'note', answer: '' }
+          ]
+        }
+      }
+    }
+  )
+  assert.equal(started.ok, true, 'bot-task run with an ask handler starts')
+  const askRunId = started.ok ? started.runId : ''
+  await waitFor(async () => {
+    const runs = await botManager.list(PROJECT)
+    const r = runs.find((x) => x.runId === askRunId)
+    return !!r && ['done', 'failed', 'cancelled'].includes(r.status)
+  })
+  const askRun = (await botManager.list(PROJECT)).find((r) => r.runId === askRunId)
+  assert.equal(askRun!.status, 'done', 'run continues after the ask is answered')
+  assert.equal(askRun!.result, 'The user picked Blue; nothing else.')
+  assert.equal(askReqs.length, 1, 'ask handler called exactly once')
+  assert.deepEqual(
+    askReqs[0]!.questions.map((q) => q.id),
+    ['color', 'note']
+  )
+  assert.equal(askReqs[0]!.run.runId, askRunId, 'handler receives the run')
+  const askChat = await botManager.readChat(PROJECT, askRunId)
+  const askToolMsg = askChat.find((m) => m.role === 'tool' && m.name === 'ask_user')
+  assert.ok(askToolMsg, 'ask_user call recorded in the transcript')
+  assert.ok(askToolMsg!.content?.includes('"answer":"Blue"'), 'answers returned as the tool result')
+
+  // handler-less run: ask_user is not offered — the call comes back as an unknown tool
+  const noAskManager = new ModuleRunManager(
+    service,
+    configStore,
+    botRegistry,
+    () => {},
+    makeScriptedClient([
+      { tool_calls: [step('b1', 'set_plan', { steps: ['Try to ask'] })] },
+      {
+        tool_calls: [step('b2', 'ask_user', { questions: [{ id: 'x', question: 'Q?' }] })]
+      },
+      { tool_calls: [step('b3', 'submit_result', { result: 'could not ask' })] },
+      { content: 'Done.' }
+    ])
+  )
+  const noAskStart = await noAskManager.start(
+    PROJECT,
+    'bot-task',
+    'No ask task',
+    'Try ask_user.',
+    'A short report.',
+    { botId: 'bob', groupId: 'group-ask' }
+  )
+  assert.equal(noAskStart.ok, true)
+  const noAskRunId = noAskStart.ok ? noAskStart.runId : ''
+  await waitFor(async () => {
+    const runs = await noAskManager.list(PROJECT)
+    const r = runs.find((x) => x.runId === noAskRunId)
+    return !!r && ['done', 'failed', 'cancelled'].includes(r.status)
+  })
+  const noAskChat = await noAskManager.readChat(PROJECT, noAskRunId)
+  const noAskToolMsg = noAskChat.find((m) => m.role === 'tool' && m.name === 'ask_user')
+  assert.ok(noAskToolMsg, 'ask_user tool message recorded')
+  assert.match(
+    noAskToolMsg!.content ?? '',
+    /Unknown tool: ask_user/,
+    'handler-less runs do not offer ask_user'
+  )
+
+  // stop during a pending ask: the run unblocks and transitions to cancelled
+  let askEntered = false
+  let releaseAsk: (() => void) | null = null
+  const gate = new Promise<void>((resolve) => {
+    releaseAsk = resolve
+  })
+  const stopManager = new ModuleRunManager(
+    service,
+    configStore,
+    botRegistry,
+    () => {},
+    makeScriptedClient([
+      { tool_calls: [step('s1', 'set_plan', { steps: ['Ask'] })] },
+      {
+        tool_calls: [step('s2', 'ask_user', { questions: [{ id: 'x', question: 'Q?' }] })]
+      }
+    ])
+  )
+  const stopStart = await stopManager.start(
+    PROJECT,
+    'bot-task',
+    'Stop ask task',
+    'Ask then hang.',
+    'A short report.',
+    {
+      botId: 'bob',
+      groupId: 'group-ask',
+      ask: async () => {
+        askEntered = true
+        await gate
+        return { answers: [] }
+      }
+    }
+  )
+  const stopRunId = stopStart.ok ? stopStart.runId : ''
+  await waitFor(() => askEntered)
+  stopManager.stop(stopRunId)
+  await waitFor(async () => {
+    const runs = await stopManager.list(PROJECT)
+    const r = runs.find((x) => x.runId === stopRunId)
+    return !!r && ['done', 'failed', 'cancelled'].includes(r.status)
+  })
+  const stopRun = (await stopManager.list(PROJECT)).find((r) => r.runId === stopRunId)
+  assert.equal(stopRun!.status, 'cancelled', 'stop during a pending ask cancels the run')
+  releaseAsk!()
+}
+
+// ---- bot-task delete confirmations: ctx.confirm rides the ask pipeline ----
+{
+  const { createBotTaskModule } = await import('../src/main/bots/botTask')
+  const confirmRegistry = new ModuleRegistry()
+
+  const notesBefore = await service.listNotes(PROJECT)
+  await service.createNote(PROJECT, 'Archive Me')
+  await service.createKanbanCard(PROJECT, { title: 'Deploy Docs' })
+  await service.createKanbanCard(PROJECT, { title: 'Keep Me' })
+
+  // "Yes" confirmation → the deletion proceeds
+  const confirmAsks: { message: string; questions: AskQuestion[] }[] = []
+  const yesManager = new ModuleRunManager(
+    service,
+    configStore,
+    confirmRegistry,
+    () => {},
+    makeScriptedClient([
+      { tool_calls: [step('y1', 'set_plan', { steps: ['Delete data'] })] },
+      {
+        tool_calls: [
+          step('y2', 'delete_kanban_card', { title: 'Deploy Docs' }),
+          step('y3', 'delete_note', { titles: ['Archive Me'] })
+        ]
+      },
+      { tool_calls: [step('y4', 'submit_result', { result: 'Deleted card and note.' })] },
+      { content: 'Done.' }
+    ])
+  )
+  confirmRegistry.register(createBotTaskModule(yesManager, confirmRegistry, []))
+  const yesStart = await yesManager.start(
+    PROJECT,
+    'bot-task',
+    'Confirm delete',
+    'Delete the Deploy Docs card and the Archive Me note.',
+    'A short report.',
+    {
+      botId: 'bob',
+      groupId: 'group-confirm-yes',
+      displayName: 'Bob Task',
+      ask: async (_run, req) => {
+        confirmAsks.push({ message: req.questions[0]?.question ?? '', questions: req.questions })
+        return { answers: [{ id: 'confirm', answer: 'Yes' }] }
+      }
+    }
+  )
+  assert.equal(yesStart.ok, true, 'bot-task delete run starts')
+  const yesRunId = yesStart.ok ? yesStart.runId : ''
+  await waitFor(async () => {
+    const runs = await yesManager.list(PROJECT)
+    const r = runs.find((x) => x.runId === yesRunId)
+    return !!r && ['done', 'failed', 'cancelled'].includes(r.status)
+  })
+  assert.equal(confirmAsks.length, 2, 'each delete tool surfaced one confirm ask')
+  assert.deepEqual(
+    confirmAsks[0]!.questions[0]!.options,
+    ['Yes', 'No'],
+    'confirm ask is a Yes/No question'
+  )
+  assert.deepEqual(
+    confirmAsks.map((a) => a.message),
+    [`Delete kanban card "Deploy Docs" from "${PROJECT}"?`, `Delete 1 note(s) from "${PROJECT}"?`],
+    'confirm ask carries the tool confirm message'
+  )
+  const yesChat = await yesManager.readChat(PROJECT, yesRunId)
+  const kanbanMsg = yesChat.find((m) => m.role === 'tool' && m.name === 'delete_kanban_card')
+  const noteMsg = yesChat.find((m) => m.role === 'tool' && m.name === 'delete_note')
+  assert.ok(kanbanMsg && kanbanMsg.content?.includes('"ok":true'), 'card deleted after Yes')
+  assert.ok(noteMsg && noteMsg.content?.includes('"ok":true'), 'note deleted after Yes')
+  const boardAfter = await service.loadKanban(PROJECT)
+  assert.ok(!boardAfter.cards.some((c) => c.title === 'Deploy Docs'), 'card is gone from the board')
+  assert.equal(
+    (await service.listNotes(PROJECT)).length,
+    notesBefore.length,
+    'note is gone after Yes'
+  )
+
+  // "No" answer and a dismissed prompt both refuse the deletion
+  let noAskCount = 0
+  const noManager = new ModuleRunManager(
+    service,
+    configStore,
+    confirmRegistry,
+    () => {},
+    makeScriptedClient([
+      { tool_calls: [step('n1', 'set_plan', { steps: ['Try to delete'] })] },
+      { tool_calls: [step('n2', 'delete_kanban_card', { title: 'Keep Me' })] },
+      { tool_calls: [step('n3', 'delete_kanban_card', { title: 'Keep Me' })] },
+      { tool_calls: [step('n4', 'submit_result', { result: 'User refused.' })] },
+      { content: 'Done.' }
+    ])
+  )
+  const noStart = await noManager.start(
+    PROJECT,
+    'bot-task',
+    'Refuse delete',
+    'Try to delete the Keep Me card.',
+    'A short report.',
+    {
+      botId: 'bob',
+      groupId: 'group-confirm-no',
+      ask: async () => {
+        if (noAskCount === 0) {
+          noAskCount = 1
+          return { answers: [{ id: 'confirm', answer: 'No' }] }
+        }
+        return { answers: [], cancelled: true }
+      }
+    }
+  )
+  assert.equal(noStart.ok, true)
+  const noRunId = noStart.ok ? noStart.runId : ''
+  await waitFor(async () => {
+    const runs = await noManager.list(PROJECT)
+    const r = runs.find((x) => x.runId === noRunId)
+    return !!r && ['done', 'failed', 'cancelled'].includes(r.status)
+  })
+  const noChat = await noManager.readChat(PROJECT, noRunId)
+  const noMsgs = noChat.filter((m) => m.role === 'tool' && m.name === 'delete_kanban_card')
+  assert.equal(noMsgs.length, 2, 'both delete attempts reached the tool')
+  for (const m of noMsgs) {
+    assert.ok(
+      m.content?.includes('"cancelled":true') && m.content?.includes('"ok":false'),
+      'delete refused without Yes'
+    )
+  }
+  const noBoard = await service.loadKanban(PROJECT)
+  assert.ok(
+    noBoard.cards.some((c) => c.title === 'Keep Me'),
+    'card survives "No" and dismissed confirmations'
+  )
+
+  // delete_skill stays excluded from bot-task runs
+  const skillManager = new ModuleRunManager(
+    service,
+    configStore,
+    confirmRegistry,
+    () => {},
+    makeScriptedClient([
+      { tool_calls: [step('s1', 'set_plan', { steps: ['Try to delete a skill'] })] },
+      { tool_calls: [step('s2', 'delete_skill', { scope: 'project', name: 'nope' })] },
+      { tool_calls: [step('s3', 'submit_result', { result: 'not available' })] },
+      { content: 'Done.' }
+    ])
+  )
+  const skillStart = await skillManager.start(
+    PROJECT,
+    'bot-task',
+    'Skill delete task',
+    'Try to delete a skill.',
+    'A short report.',
+    {
+      botId: 'bob',
+      groupId: 'group-confirm-skill',
+      ask: async () => ({ answers: [{ id: 'confirm', answer: 'Yes' }] })
+    }
+  )
+  assert.equal(skillStart.ok, true)
+  const skillRunId = skillStart.ok ? skillStart.runId : ''
+  await waitFor(async () => {
+    const runs = await skillManager.list(PROJECT)
+    const r = runs.find((x) => x.runId === skillRunId)
+    return !!r && ['done', 'failed', 'cancelled'].includes(r.status)
+  })
+  const skillChat = await skillManager.readChat(PROJECT, skillRunId)
+  const skillMsg = skillChat.find((m) => m.role === 'tool' && m.name === 'delete_skill')
+  assert.match(
+    skillMsg!.content ?? '',
+    /Unknown tool: delete_skill/,
+    'bot tasks cannot delete skills'
+  )
+}
 
 console.log('MODULES TESTS PASSED')

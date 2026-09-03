@@ -3,6 +3,9 @@ import type {
   AIProviderConfig,
   AiTraceFile,
   AiTraceToolCall,
+  AskAnswer,
+  AskRequest,
+  ConfirmRequest,
   ModuleChatMessage,
   ModuleEventType,
   ModuleRun,
@@ -109,6 +112,15 @@ export interface ModuleNotifyEvent {
   toolCall?: ToolCallInfo
 }
 
+/** Result of a bot ask: the user's answers, or `cancelled` when the ask was dismissed. */
+export type AskResult = { answers: AskAnswer[]; cancelled?: boolean }
+
+/**
+ * Bridges the `ask_user` tool into a host that can surface questions to the user
+ * (currently the bots group chat). Present → the run may call `ask_user`.
+ */
+export type BotAskHandler = (run: ModuleRun, req: Omit<AskRequest, 'id'>) => Promise<AskResult>
+
 export interface ModuleRunnerOptions {
   service: PTNotesService
   activeProject: string
@@ -117,6 +129,8 @@ export interface ModuleRunnerOptions {
   getConfig: () => Promise<AIProviderConfig>
   createClientFn?: (config: AIProviderConfig) => OpenAI
   notify: (run: ModuleRun, evt: ModuleNotifyEvent) => void
+  /** When set, the `ask_user` tool is offered and routed to this handler. */
+  ask?: BotAskHandler
 }
 
 function buildSystemPrompt(
@@ -170,9 +184,12 @@ export class ModuleRunner {
   private readonly getConfig: () => Promise<AIProviderConfig>
   private readonly notify: (run: ModuleRun, evt: ModuleNotifyEvent) => void
   private readonly clientFn: (config: AIProviderConfig) => OpenAI
+  private readonly askHandler?: BotAskHandler
   private config: AIProviderConfig = { baseUrl: '', apiKey: '', model: '' }
   private stopped = false
   private abortController: AbortController | undefined
+  /** Set while an ask_user call is waiting; stop() resolves it so the run can finish. */
+  private askCancel: ((res: AskResult) => void) | null = null
   private planned = false
   private plannedHintSent = false
   private finishHintsSent = 0
@@ -190,6 +207,7 @@ export class ModuleRunner {
     this.getConfig = opts.getConfig
     this.notify = opts.notify
     this.clientFn = opts.createClientFn ? opts.createClientFn : createClient
+    this.askHandler = opts.ask
     this.trace = new AiTraceRecorder({
       project: this.activeProject,
       key: this.run.runId,
@@ -239,6 +257,8 @@ export class ModuleRunner {
   stop(): void {
     this.stopped = true
     this.abortController?.abort()
+    // Unblock a waiting ask_user so the run can transition to `cancelled`.
+    this.askCancel?.({ answers: [], cancelled: true })
   }
 
   async start(): Promise<void> {
@@ -307,10 +327,12 @@ export class ModuleRunner {
   }
 
   private toolList(): PTTool[] {
-    // ask_user is chat-only (modules are background subagents — they must never pop dialogs).
+    // ask_user is chat-only by default (modules are background subagents — they must
+    // never pop dialogs). Bot-task runs inject a group-chat ask handler instead.
     // create_skill/delete_skill are chat-only too (modules may read skills, never mutate them).
-    const EXCLUDED = new Set(['ask_user', 'create_skill', 'delete_skill'])
-    const base = baseTools.filter((t) => !EXCLUDED.has(t.definition.function.name))
+    const excluded = new Set(['create_skill', 'delete_skill'])
+    if (!this.askHandler) excluded.add('ask_user')
+    const base = baseTools.filter((t) => !excluded.has(t.definition.function.name))
     const framework = [setPlanTool(this), updateStepTool(this)]
     if (this.run.expectResult) framework.push(submitResultTool(this))
     return [...base, ...this.module.tools, ...framework]
@@ -627,7 +649,9 @@ export class ModuleRunner {
     const ctx: ToolContext = {
       service: this.service,
       activeProject: this.activeProject,
-      confirm: async () => false
+      confirm: this.askHandler ? (req) => this.runConfirmViaAsk(req) : async () => false,
+      ...(this.askHandler ? { ask: (req) => this.runAsk(req) } : {}),
+      ...(this.run.botName ? { commenterName: this.run.botName } : {})
     }
     try {
       const raw = await tool.execute(args, ctx)
@@ -637,6 +661,54 @@ export class ModuleRunner {
       const message = err instanceof Error ? err.message : String(err)
       return JSON.stringify({ ok: false, error: message })
     }
+  }
+
+  /**
+   * Await the ask handler behind a settled guard: `stop()` resolves the wait with
+   * `cancelled: true` so a stopped run unblocks (the host resolves/cancels the
+   * surfaced ask via the terminal module event).
+   */
+  private async runAsk(req: Omit<AskRequest, 'id'>): Promise<AskResult> {
+    const handler = this.askHandler
+    if (!handler) throw new Error('ask_user is not available for this run')
+    return await new Promise<AskResult>((resolve, reject) => {
+      let settled = false
+      this.askCancel = (res) => {
+        if (settled) return
+        settled = true
+        this.askCancel = null
+        resolve(res)
+      }
+      handler(this.run, req).then(
+        (res) => {
+          if (settled) return
+          settled = true
+          this.askCancel = null
+          resolve(res)
+        },
+        (err: unknown) => {
+          if (settled) return
+          settled = true
+          this.askCancel = null
+          reject(err)
+        }
+      )
+    })
+  }
+
+  /**
+   * Destructive-tool confirmation for runs with an ask host (bot tasks): the
+   * ConfirmRequest is surfaced through the same group-chat ask pipeline as
+   * `ask_user` — one Yes/No question, no timeout. Approved only when the user
+   * explicitly picks "Yes" (dismissed or "No" → not approved).
+   */
+  private async runConfirmViaAsk(req: Omit<ConfirmRequest, 'id'>): Promise<boolean> {
+    const res = await this.runAsk({
+      project: req.project,
+      questions: [{ id: 'confirm', question: req.message, options: ['Yes', 'No'] }],
+      kind: 'confirm'
+    })
+    return !res.cancelled && res.answers[0]?.answer === 'Yes'
   }
 
   /** Track every successful tool result that produced an output file path. */

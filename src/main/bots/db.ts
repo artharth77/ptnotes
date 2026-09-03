@@ -7,6 +7,7 @@ import type {
   BotProfile,
   BotTaskQueueItem,
   BotUpsertInput,
+  GroupAskPayload,
   GroupChatData,
   GroupChatMeta,
   GroupMessage,
@@ -19,9 +20,10 @@ import {
   GROUP_CHAT_PAGE_SIZE,
   MAX_GROUP_BOTS,
   MAX_MEMORY_ENTRIES,
-  mergeMemoryEntries
+  mergeMemoryEntries,
+  parseGroupAsk
 } from '@shared/bots'
-import type { AiTraceFile } from '@shared/types'
+import type { AiTraceFile, AskAnswer } from '@shared/types'
 
 function validateId(id: string): string {
   if (!id || id === '.' || id === '..' || id.includes('/') || id.includes('\\')) {
@@ -34,6 +36,7 @@ interface BotRow {
   id: string
   name: string
   role: string
+  role_details: string | null
   persona: string
   profile_id: string | null
   model: string | null
@@ -48,6 +51,7 @@ interface GroupRow {
   leader_bot_id: string
   summary: string | null
   summarized_up_to_seq: number | null
+  memorized_up_to_seq: number | null
   created_at: number
   updated_at: number
 }
@@ -75,6 +79,7 @@ interface QueueRow {
   title: string
   task: string
   requested_by: string
+  origin_msg: string | null
   status: string
   created_at: number
 }
@@ -84,6 +89,7 @@ function rowToBot(r: BotRow): BotProfile {
     id: r.id,
     name: r.name,
     role: r.role,
+    ...(r.role_details ? { roleDetails: r.role_details } : {}),
     persona: r.persona,
     ...(r.profile_id ? { profileId: r.profile_id } : {}),
     ...(r.model ? { model: r.model } : {}),
@@ -137,6 +143,7 @@ function rowToQueueItem(r: QueueRow): BotTaskQueueItem {
     title: r.title,
     task: r.task,
     requestedBy: r.requested_by,
+    ...(r.origin_msg ? { originMsg: r.origin_msg } : {}),
     status: r.status === 'running' ? 'running' : 'queued',
     createdAt: r.created_at
   }
@@ -199,11 +206,20 @@ export class BotsStore {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       role TEXT NOT NULL DEFAULT '',
+      role_details TEXT,
       persona TEXT NOT NULL DEFAULT '',
       profile_id TEXT,
       model TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
+    );`)
+    const cols = db.prepare('PRAGMA table_info(bots)').all() as unknown as { name: string }[]
+    if (!cols.some((c) => c.name === 'role_details')) {
+      db.exec('ALTER TABLE bots ADD COLUMN role_details TEXT')
+    }
+    db.exec(`CREATE TABLE IF NOT EXISTS bot_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
     );`)
     this.botsDb = db
     return db
@@ -229,6 +245,7 @@ export class BotsStore {
     const name = String(input.name ?? '').trim()
     if (!name) throw new Error('Bot name is required.')
     const role = String(input.role ?? '').trim()
+    const roleDetails = String(input.roleDetails ?? '').trim() || null
     const persona = String(input.persona ?? '').trim()
     const profileId = input.profileId?.trim() || null
     const model = input.model?.trim() || null
@@ -238,8 +255,8 @@ export class BotsStore {
       const existing = this.getBot(id)
       if (!existing) throw new Error(`Bot not found: ${id}`)
       db.prepare(
-        `UPDATE bots SET name = ?, role = ?, persona = ?, profile_id = ?, model = ?, updated_at = ? WHERE id = ?`
-      ).run(name, role, persona, profileId, model, now, id)
+        `UPDATE bots SET name = ?, role = ?, role_details = ?, persona = ?, profile_id = ?, model = ?, updated_at = ? WHERE id = ?`
+      ).run(name, role, roleDetails, persona, profileId, model, now, id)
       return this.getBot(id)!
     }
     const base = name
@@ -254,9 +271,27 @@ export class BotsStore {
       id = `${base}-${n++}`
     }
     db.prepare(
-      `INSERT INTO bots (id, name, role, persona, profile_id, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(id, name, role, persona, profileId, model, now, now)
+      `INSERT INTO bots (id, name, role, role_details, persona, profile_id, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, name, role, roleDetails, persona, profileId, model, now, now)
     return this.getBot(id)!
+  }
+
+  getUserName(): string {
+    const row = this.globalDb()
+      .prepare('SELECT value FROM bot_settings WHERE key = ?')
+      .get('user_name') as unknown as { value: string } | undefined
+    return row?.value ?? ''
+  }
+
+  setUserName(name: string): string {
+    const value = String(name ?? '').trim()
+    this.globalDb()
+      .prepare(
+        `INSERT INTO bot_settings (key, value) VALUES ('user_name', ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+      )
+      .run(value)
+    return value
   }
 
   /** Delete a bot and remove it from every group roster (leader falls back to the first remaining member). */
@@ -308,6 +343,7 @@ export class BotsStore {
       leader_bot_id TEXT NOT NULL,
       summary TEXT,
       summarized_up_to_seq INTEGER,
+      memorized_up_to_seq INTEGER,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -341,9 +377,22 @@ export class BotsStore {
       title TEXT NOT NULL,
       task TEXT NOT NULL,
       requested_by TEXT NOT NULL,
+      origin_msg TEXT,
       status TEXT NOT NULL,
       created_at INTEGER NOT NULL
     );`)
+    const queueCols = db.prepare('PRAGMA table_info(bot_task_queue)').all() as unknown as {
+      name: string
+    }[]
+    if (!queueCols.some((c) => c.name === 'origin_msg')) {
+      db.exec('ALTER TABLE bot_task_queue ADD COLUMN origin_msg TEXT')
+    }
+    const groupCols = db.prepare('PRAGMA table_info(group_chats)').all() as unknown as {
+      name: string
+    }[]
+    if (!groupCols.some((c) => c.name === 'memorized_up_to_seq')) {
+      db.exec('ALTER TABLE group_chats ADD COLUMN memorized_up_to_seq INTEGER')
+    }
     this.projectDbs.set(project, db)
     return db
   }
@@ -460,16 +509,34 @@ export class BotsStore {
     return info.changes > 0
   }
 
+  async clearGroupMessages(project: string, groupId: string): Promise<void> {
+    const db = this.projectDb(project)
+    const clean = validateId(groupId)
+    db.prepare('DELETE FROM group_messages WHERE group_id = ?').run(clean)
+    db.prepare('DELETE FROM bot_task_queue WHERE group_id = ?').run(clean)
+    db.prepare(
+      'UPDATE group_chats SET summary = NULL, summarized_up_to_seq = NULL, memorized_up_to_seq = NULL, updated_at = ? WHERE group_id = ?'
+    ).run(Date.now(), clean)
+    await this.deleteGroupTrace(project, clean)
+  }
+
   readGroup(project: string, groupId: string, opts?: GroupMessagePageOpts): GroupChatData | null {
     const meta = this.getGroup(project, groupId)
     if (!meta) return null
     const row = this.projectDb(project)
-      .prepare('SELECT summary, summarized_up_to_seq FROM group_chats WHERE group_id = ?')
-      .get(groupId) as unknown as { summary: string | null; summarized_up_to_seq: number | null }
+      .prepare(
+        'SELECT summary, summarized_up_to_seq, memorized_up_to_seq FROM group_chats WHERE group_id = ?'
+      )
+      .get(groupId) as unknown as {
+      summary: string | null
+      summarized_up_to_seq: number | null
+      memorized_up_to_seq: number | null
+    }
     const base = {
       ...meta,
       ...(row.summary ? { summary: row.summary } : {}),
-      ...(row.summarized_up_to_seq ? { summarizedUpToSeq: row.summarized_up_to_seq } : {})
+      ...(row.summarized_up_to_seq ? { summarizedUpToSeq: row.summarized_up_to_seq } : {}),
+      ...(row.memorized_up_to_seq ? { memorizedUpToSeq: row.memorized_up_to_seq } : {})
     }
     const paged = opts && (opts.limit !== undefined || opts.beforeSeq !== undefined)
     if (!paged) {
@@ -558,10 +625,76 @@ export class BotsStore {
     return full
   }
 
+  getMessage(project: string, groupId: string, messageId: string): GroupMessage | null {
+    const row = this.projectDb(project)
+      .prepare('SELECT * FROM group_messages WHERE group_id = ? AND id = ?')
+      .get(validateId(groupId), messageId) as unknown as MessageRow | undefined
+    return row ? rowToMessage(row) : null
+  }
+
+  /**
+   * Transition an ask message (status answered/cancelled + optional answers) by
+   * merging the patch into its JSON payload. Returns null for unknown ids or
+   * messages whose content is not an ask payload (idempotent, broadcast-safe).
+   */
+  updateAskMessage(
+    project: string,
+    groupId: string,
+    messageId: string,
+    patch: { status: GroupAskPayload['status']; answers?: AskAnswer[] }
+  ): GroupMessage | null {
+    const msg = this.getMessage(project, groupId, messageId)
+    if (!msg) return null
+    const ask = parseGroupAsk(msg.content)
+    if (!ask) return null
+    const next: GroupAskPayload = {
+      ...ask,
+      status: patch.status,
+      ...(patch.answers ? { answers: patch.answers } : {})
+    }
+    const content = JSON.stringify(next)
+    this.projectDb(project)
+      .prepare('UPDATE group_messages SET content = ? WHERE id = ?')
+      .run(content, messageId)
+    return { ...msg, content }
+  }
+
+  /**
+   * Crash recovery: cancel every `pending` ask message whose id is not in
+   * `keepIds` (live pending asks; the in-memory registry dies with the app).
+   * Returns the updated messages with their group ids for broadcasting.
+   */
+  reconcileAsks(
+    project: string,
+    keepIds: Set<string>
+  ): { groupId: string; message: GroupMessage }[] {
+    const db = this.projectDb(project)
+    const rows = db
+      .prepare("SELECT * FROM group_messages WHERE sender_kind = 'ask' ORDER BY seq ASC")
+      .all() as unknown as MessageRow[]
+    const updated: { groupId: string; message: GroupMessage }[] = []
+    for (const row of rows) {
+      const msg = rowToMessage(row)
+      const ask = parseGroupAsk(msg.content)
+      if (!ask || ask.status !== 'pending' || keepIds.has(msg.id)) continue
+      const content = JSON.stringify({ ...ask, status: 'cancelled' } satisfies GroupAskPayload)
+      db.prepare('UPDATE group_messages SET content = ? WHERE id = ?').run(content, msg.id)
+      updated.push({ groupId: row.group_id, message: { ...msg, content } })
+    }
+    return updated
+  }
+
   setSummary(project: string, groupId: string, summary: string, upToSeq: number): void {
     this.projectDb(project)
       .prepare('UPDATE group_chats SET summary = ?, summarized_up_to_seq = ? WHERE group_id = ?')
       .run(summary, upToSeq, groupId)
+  }
+
+  /** Advance the per-group cursor marking messages already folded into bot memory extraction. */
+  setMemorizedUpTo(project: string, groupId: string, upToSeq: number): void {
+    this.projectDb(project)
+      .prepare('UPDATE group_chats SET memorized_up_to_seq = ? WHERE group_id = ?')
+      .run(upToSeq, groupId)
   }
 
   // ---- bot memories (per project) ----
@@ -593,11 +726,13 @@ export class BotsStore {
     }))
   }
 
-  /** Replace a bot's memory with the merged (existing + fresh) fact list, capped. */
+  /**
+   * Replace a bot's memory with the given list (the consolidation contract: the model
+   * outputs the complete updated memory), deduped case-insensitively and capped.
+   */
   saveMemories(project: string, botId: string, fresh: string[]): BotMemoryEntry[] {
     const db = this.projectDb(project)
-    const existing = this.listMemories(project, botId).map((m) => m.content)
-    const merged = mergeMemoryEntries(existing, fresh, MAX_MEMORY_ENTRIES)
+    const merged = mergeMemoryEntries([], fresh, MAX_MEMORY_ENTRIES)
     db.prepare('DELETE FROM bot_memories WHERE bot_id = ?').run(botId)
     const insert = db.prepare(
       'INSERT INTO bot_memories (bot_id, id, content, created_at) VALUES (?, ?, ?, ?)'
@@ -624,6 +759,7 @@ export class BotsStore {
       queueId?: string
     }
   ): BotTaskQueueItem {
+    const originMsg: string | null = item.originMsg ?? null
     const full: BotTaskQueueItem = {
       queueId: item.queueId ?? randomUUID(),
       groupId: item.groupId,
@@ -631,14 +767,15 @@ export class BotsStore {
       title: item.title,
       task: item.task,
       requestedBy: item.requestedBy,
+      originMsg,
       runId: null,
       status: 'queued',
       createdAt: Date.now()
     }
     this.projectDb(project)
       .prepare(
-        `INSERT INTO bot_task_queue (queue_id, group_id, bot_id, run_id, title, task, requested_by, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO bot_task_queue (queue_id, group_id, bot_id, run_id, title, task, requested_by, origin_msg, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         full.queueId,
@@ -648,6 +785,7 @@ export class BotsStore {
         full.title,
         full.task,
         full.requestedBy,
+        originMsg,
         'queued',
         full.createdAt
       )

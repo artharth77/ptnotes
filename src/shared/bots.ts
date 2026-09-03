@@ -1,5 +1,7 @@
 // ---- Bots group chat (shared between main, renderer and tests) ----
 
+import type { AskAnswer, AskQuestion } from './types'
+
 /** A bot identity. Global (app-wide); memories are scoped per project. */
 export interface BotProfile {
   /** Slug id used in @mentions (unique across the bot library). */
@@ -7,6 +9,8 @@ export interface BotProfile {
   name: string
   /** Role shown as a badge, e.g. "Project Manager". */
   role: string
+  /** Optional description of what this role does; shown in the group roster so other bots know the member's responsibilities. */
+  roleDetails?: string
   /** Persona / standing instructions injected into the bot's system prompt. */
   persona: string
   /** Optional AI provider profile override (falls back to the active profile). */
@@ -17,7 +21,55 @@ export interface BotProfile {
   updatedAt: number
 }
 
-export type GroupSenderKind = 'user' | 'bot' | 'system'
+export type GroupSenderKind = 'user' | 'bot' | 'system' | 'ask'
+
+/**
+ * Interactive `ask_user` payload, stored as the JSON `content` of a message with
+ * `senderKind: 'ask'`. No DB schema change — the payload lives in the message body.
+ */
+export interface GroupAskPayload {
+  questions: AskQuestion[]
+  status: 'pending' | 'answered' | 'cancelled'
+  /** Set once resolved; answers to `secret` questions are masked. */
+  answers?: AskAnswer[]
+}
+
+/** Safe parse of an ask message's content; null for anything that is not an ask payload. */
+export function parseGroupAsk(content: string): GroupAskPayload | null {
+  try {
+    const parsed = JSON.parse(content) as unknown
+    if (!parsed || typeof parsed !== 'object') return null
+    const p = parsed as { questions?: unknown; status?: unknown; answers?: unknown }
+    if (!Array.isArray(p.questions) || p.questions.length === 0) return null
+    if (p.status !== 'pending' && p.status !== 'answered' && p.status !== 'cancelled') return null
+    if (p.answers !== undefined && !Array.isArray(p.answers)) return null
+    return {
+      questions: p.questions as AskQuestion[],
+      status: p.status,
+      ...(Array.isArray(p.answers) ? { answers: p.answers as AskAnswer[] } : {})
+    }
+  } catch {
+    return null
+  }
+}
+
+/** One transcript line for an ask message (bot prompts, summaries, memory extraction). */
+export function formatAskTranscriptLine(m: GroupMessage): string {
+  const ask = parseGroupAsk(m.content)
+  if (!ask || ask.status === 'pending') {
+    return `[${m.senderName}] asked the user a question (waiting for the answer).`
+  }
+  if (ask.status === 'cancelled') {
+    return `[${m.senderName}] asked the user a question; the user dismissed it.`
+  }
+  const pairs = (ask.answers ?? [])
+    .map((a) => {
+      const q = ask.questions.find((x) => x.id === a.id)
+      return `${q?.question ?? a.id}: ${a.answer}`
+    })
+    .join(', ')
+  return `[${m.senderName}] asked the user a question; user answer: ${pairs}`
+}
 
 /** How many group messages the UI loads per page (latest page first, then older on scroll-up). */
 export const GROUP_CHAT_PAGE_SIZE = 50
@@ -60,6 +112,8 @@ export interface GroupChatData extends GroupChatMeta {
   summary?: string
   /** All messages with seq <= this are represented by the summary. */
   summarizedUpToSeq?: number
+  /** All messages with seq <= this have been folded into the bots' memory extraction. */
+  memorizedUpToSeq?: number
   /** Set only when reading a page: whether older messages remain above the returned window. */
   hasMore?: boolean
   /** Set only when reading a page: seq of the oldest message in the returned window (cursor for loading older). */
@@ -93,6 +147,8 @@ export interface BotTaskQueueItem {
   task: string
   /** Display name of who requested it ('You' or a bot name). */
   requestedBy: string
+  /** The bot's last chat message posted right before taking the task on (language reference for the report turn). */
+  originMsg?: string | null
   status: 'queued' | 'running'
   createdAt: number
 }
@@ -110,6 +166,7 @@ export interface BotUpsertInput {
   id?: string
   name: string
   role?: string
+  roleDetails?: string | null
   persona?: string
   profileId?: string | null
   model?: string | null
@@ -137,6 +194,8 @@ export const MAX_RELAY_DEPTH = 3
 export const SUMMARY_THRESHOLD_CHARS = 8_000
 /** Messages kept out of the summary (recent tail always sent verbatim). */
 export const SUMMARY_KEEP_RECENT = 6
+/** When the un-memorized context exceeds this many chars, involved bots re-consolidate their memory. */
+export const MEMORY_THRESHOLD_CHARS = 4_000
 /** Max memory entries kept per bot per project. */
 export const MAX_MEMORY_ENTRIES = 50
 

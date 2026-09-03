@@ -6,6 +6,7 @@ import type {
   AIProviderConfig,
   AiTraceFile,
   AppearanceSettings,
+  AskAnswer,
   AskResponse,
   BotGroupEvent,
   BotMemoryEntry,
@@ -314,6 +315,8 @@ const api = {
     saveBot: (input: BotUpsertInput): Promise<BotProfile[]> =>
       ipcRenderer.invoke('bots:saveBot', input),
     deleteBot: (id: string): Promise<boolean> => ipcRenderer.invoke('bots:deleteBot', id),
+    getUserName: (): Promise<string> => ipcRenderer.invoke('bots:getUserName'),
+    setUserName: (name: string): Promise<string> => ipcRenderer.invoke('bots:setUserName', name),
     listMemories: (project: string, botId?: string): Promise<BotMemoryEntry[]> =>
       ipcRenderer.invoke('bots:listMemories', project, botId),
     deleteMemory: (project: string, botId: string, memoryId: string): Promise<boolean> =>
@@ -332,10 +335,20 @@ const api = {
       ipcRenderer.invoke('bots:updateGroup', project, groupId, patch),
     deleteGroup: (project: string, groupId: string): Promise<boolean> =>
       ipcRenderer.invoke('bots:deleteGroup', project, groupId),
+    clearGroupMessages: (project: string, groupId: string): Promise<void> =>
+      ipcRenderer.invoke('bots:clearGroupMessages', project, groupId),
     send: (project: string, groupId: string, text: string): Promise<void> =>
       ipcRenderer.invoke('bots:send', project, groupId, text),
     stop: (project: string, groupId: string): Promise<void> =>
       ipcRenderer.invoke('bots:stop', project, groupId),
+    askResponse: (
+      project: string,
+      groupId: string,
+      messageId: string,
+      answers: AskAnswer[],
+      cancelled: boolean
+    ): Promise<boolean> =>
+      ipcRenderer.invoke('bots:askResponse', project, groupId, messageId, answers, cancelled),
     listTasks: (project: string): Promise<ModuleRun[]> =>
       ipcRenderer.invoke('bots:listTasks', project),
     clearTaskHistory: (project: string, deleteOutputFiles?: boolean): Promise<number> =>
