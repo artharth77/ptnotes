@@ -219,9 +219,16 @@ function createWindow(windowState: WindowState): void {
   })
 
   mainWindow.webContents.on('before-input-event', (event, input) => {
-    if (!plannerEditActive) return
     const key = input.key.toLowerCase()
     const mod = input.meta || input.control
+    const shift = !!input.shift && !input.alt
+    const isGlobalFind = mod && shift && key === 'f'
+    if (isGlobalFind) {
+      event.preventDefault()
+      mainWindow?.webContents.send('global:open-find')
+      return
+    }
+    if (!plannerEditActive) return
     const isUndo = mod && !input.alt && !input.shift && key === 'z'
     const isRedo =
       (mod && !input.alt && input.shift && key === 'z') ||

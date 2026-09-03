@@ -39,6 +39,14 @@ export function registerNoteIpc(service: PTNotesService): void {
   ipcMain.handle('notes:reveal', async (_e: IpcMainInvokeEvent, project: string, noteId: string) =>
     service.revealNoteInFolder(project, noteId)
   )
+  ipcMain.handle(
+    'notes:setStarred',
+    async (_e: IpcMainInvokeEvent, project: string, noteId: string, starred: boolean) =>
+      service.setNoteStarred(project, noteId, starred)
+  )
+  ipcMain.handle('notes:search', async (_e: IpcMainInvokeEvent, project: string, query: string) =>
+    service.searchNotes(project, query)
+  )
 }
 
 export function registerChatIpc(service: PTNotesService): void {

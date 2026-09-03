@@ -31,6 +31,21 @@ export class SettingsStore {
         parsed.theme === 'light' || parsed.theme === 'dark' || parsed.theme === 'system'
           ? parsed.theme
           : 'system'
+      const fontSize: StorageSettings['fontSize'] =
+        parsed.fontSize === 'small' ||
+        parsed.fontSize === 'default' ||
+        parsed.fontSize === 'large' ||
+        parsed.fontSize === 'xlarge'
+          ? parsed.fontSize
+          : 'default'
+      const uiDensity: StorageSettings['uiDensity'] =
+        parsed.uiDensity === 'compact' || parsed.uiDensity === 'cozy' ? parsed.uiDensity : 'cozy'
+      const editorFontFamily: StorageSettings['editorFontFamily'] =
+        parsed.editorFontFamily === 'sans' ||
+        parsed.editorFontFamily === 'serif' ||
+        parsed.editorFontFamily === 'mono'
+          ? parsed.editorFontFamily
+          : 'sans'
       const builtinSkillOverrides: Record<string, boolean> = {}
       if (
         parsed.builtinSkillOverrides &&
@@ -49,10 +64,19 @@ export class SettingsStore {
         browserMaximize: !!parsed.browserMaximize,
         browserIgnoreHttpsErrors: !!parsed.browserIgnoreHttpsErrors,
         theme,
+        fontSize,
+        uiDensity,
+        editorFontFamily,
         builtinSkillOverrides
       }
     } catch {
-      return { ...defaultSettings(), theme: 'system' }
+      return {
+        ...defaultSettings(),
+        theme: 'system',
+        fontSize: 'default',
+        uiDensity: 'cozy',
+        editorFontFamily: 'sans'
+      }
     }
   }
 
@@ -77,6 +101,17 @@ export class SettingsStore {
       browserMaximize: !!settings.browserMaximize,
       browserIgnoreHttpsErrors: !!settings.browserIgnoreHttpsErrors,
       theme: settings.theme === 'light' || settings.theme === 'dark' ? settings.theme : 'system',
+      fontSize:
+        settings.fontSize === 'small' ||
+        settings.fontSize === 'large' ||
+        settings.fontSize === 'xlarge'
+          ? settings.fontSize
+          : 'default',
+      uiDensity: settings.uiDensity === 'compact' ? 'compact' : 'cozy',
+      editorFontFamily:
+        settings.editorFontFamily === 'serif' || settings.editorFontFamily === 'mono'
+          ? settings.editorFontFamily
+          : 'sans',
       builtinSkillOverrides: {}
     }
     if (settings.builtinSkillOverrides && typeof settings.builtinSkillOverrides === 'object') {

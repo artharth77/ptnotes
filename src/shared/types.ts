@@ -11,6 +11,17 @@ export interface NoteMeta {
   id: string
   name: string
   updatedAt: number
+  createdAt: number
+  starred: boolean
+}
+
+export interface NoteSearchMatch {
+  noteId: string
+  name: string
+  snippet: string
+  line: number
+  matchStart: number
+  matchEnd: number
 }
 
 export type Tab = 'notes' | 'kanban' | 'modules' | 'planner'
@@ -46,8 +57,18 @@ export interface StorageSettings {
   browserMaximize?: boolean
   browserIgnoreHttpsErrors?: boolean
   theme?: 'light' | 'dark' | 'system'
+  fontSize?: 'small' | 'default' | 'large' | 'xlarge'
+  uiDensity?: 'compact' | 'cozy'
+  editorFontFamily?: 'sans' | 'serif' | 'mono'
   /** User enable/disable choices for builtin (app-shipped, read-only) skills, keyed by skill name. */
   builtinSkillOverrides?: Record<string, boolean>
+}
+
+export interface AppearanceSettings {
+  theme: 'light' | 'dark' | 'system'
+  fontSize: 'small' | 'default' | 'large' | 'xlarge'
+  uiDensity: 'compact' | 'cozy'
+  editorFontFamily: 'sans' | 'serif' | 'mono'
 }
 
 /** Persisted main-window geometry restored on next launch. */

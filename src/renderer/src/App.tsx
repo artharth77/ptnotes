@@ -14,6 +14,7 @@ import { GroupChatPanel } from './components/GroupChatPanel'
 import { BotTasksPanel } from './components/BotTasksPanel'
 import { SettingsDialog } from './components/SettingsDialog'
 import { CommandPalette } from './components/CommandPalette'
+import { GlobalFind } from './components/GlobalFind'
 import { AskUserDialog } from './components/AskUserDialog'
 import { ModulePanel } from './components/ModulePanel'
 import { ModuleHistoryOverlay } from './components/ModuleHistoryOverlay'
@@ -307,16 +308,32 @@ function App(): React.JSX.Element {
   useEffect(() => {
     const theme = useAppStore.getState().theme
     document.documentElement.setAttribute('data-theme', theme)
+    const fontSize = useAppStore.getState().fontSize
+    document.documentElement.setAttribute('data-font-size', fontSize)
+    const density = useAppStore.getState().uiDensity
+    document.documentElement.setAttribute('data-ui-density', density)
+    const editorFont = useAppStore.getState().editorFontFamily
+    document.documentElement.setAttribute('data-editor-font', editorFont)
   }, [init])
 
   useEffect(() => {
     let cancelled = false
     void (async () => {
       try {
-        const remote = await window.ptnotes.settings.getTheme()
-        const current = useAppStore.getState().theme
-        if (!cancelled && remote && remote !== current) {
-          useAppStore.getState().setTheme(remote)
+        const remote = await window.ptnotes.settings.getAppearance()
+        const state = useAppStore.getState()
+        if (!cancelled) {
+          const patch: Array<() => void> = []
+          if (remote.theme && remote.theme !== state.theme)
+            patch.push(() => state.setTheme(remote.theme))
+          if (remote.fontSize && remote.fontSize !== state.fontSize)
+            patch.push(() => state.setFontSize(remote.fontSize))
+          if (remote.uiDensity && remote.uiDensity !== state.uiDensity)
+            patch.push(() => state.setUiDensity(remote.uiDensity))
+          if (remote.editorFontFamily && remote.editorFontFamily !== state.editorFontFamily) {
+            patch.push(() => state.setEditorFontFamily(remote.editorFontFamily))
+          }
+          patch.forEach((fn) => fn())
         }
       } catch {
         /* preload IPC unavailable in isolated renderer/HMR; safe to ignore */
@@ -524,6 +541,14 @@ function App(): React.JSX.Element {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
+  useEffect(() => {
+    const openFind = useAppStore.getState().setGlobalFindOpen
+    const dispose = window.ptnotes.onOpenFind(() => {
+      openFind(true)
+    })
+    return dispose
+  }, [])
+
   // Show a skeleton briefly while the module panel animates open/close or switches to it
   const moduleWasOpen = useRef(rightOpen && rightView === 'modules')
   useEffect(() => {
@@ -660,6 +685,7 @@ function App(): React.JSX.Element {
 
       {settingsOpen && <SettingsDialog />}
       <CommandPalette />
+      <GlobalFind />
       {(kanbanEditingId || kanbanCreatingColumnId || kanbanViewingId) && (
         <KanbanCardModal key={kanbanEditingId ?? kanbanCreatingColumnId ?? kanbanViewingId} />
       )}
