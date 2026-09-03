@@ -288,6 +288,8 @@ export interface ModuleRun {
   expectResult?: string
   /** Set on hidden `bot-task` runs: the group-chat bot that owns this background task. */
   botId?: string
+  /** Display name of that bot — used to attribute kanban comments the task writes. */
+  botName?: string
   /** Group chat the task was assigned from (hidden `bot-task` runs only). */
   groupId?: string
   /** AI provider profile id the task runs with (resolved per-bot override; never the API key). */

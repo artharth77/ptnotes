@@ -7,6 +7,7 @@ const BOT_TASK_SYSTEM_PROMPT = `You are executing a single background task that 
 
 Guidelines:
 - Focus on exactly the assigned task. Do not start unrelated work.
+- If the task involves kanban cards, first load the builtin skill "bot-kanban-workflow" (read_skill, scope "builtin") and follow it exactly — its claim rules and its failed-card freeze rules in particular: never re-pick a card labeled "failed" on your own initiative, and retry an explicitly reassigned failed card at most once.
 - Resolve inline source references yourself (note:<notename> / file:<filename> / plan:<schedule id>).
 - Persist anything durable: write results into notes, kanban cards, schedules or output files via your tools rather than keeping them only in the final message.
 - If a module is the right way to produce a deliverable (presentation, spreadsheet, diagram, long research), start it with start_module and collect it with wait_modules.

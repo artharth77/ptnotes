@@ -469,6 +469,21 @@ r = await call('add_kanban_comment', { title: 'Task A2', comment: '   ' })
 assert.equal(r.ok, false)
 assert.match(r.error, /Comment text is required/)
 
+// bot-run attribution: ctx.commenterName lands as the comment author
+r = await callWith(
+  'add_kanban_comment',
+  { title: 'Task A2', comment: 'Attempt 1 failed: API keys still missing' },
+  { commenterName: 'Data Bot' }
+)
+assert.equal(r.ok, true)
+assert.equal(r.commentCount, 3)
+{
+  const board = await service.loadKanban('Research')
+  const a2 = board.cards.find((c) => c.title === 'Task A2')
+  assert.equal(a2?.comments[2].commentBy, 'Data Bot')
+  assert.equal(a2?.comments[2].comment, 'Attempt 1 failed: API keys still missing')
+}
+
 // move_kanban_card
 r = await call('move_kanban_card', { title: 'Task A2', column: 'Done' })
 assert.equal(r.ok, true)

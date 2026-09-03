@@ -6664,12 +6664,22 @@ fieldset.kanban-form {
 }
 
 .gc-ask-input {
-  background: #fff;
-  color: var(--text);
-  border: none;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.4);
   border-radius: 6px;
   padding: 5px 8px;
   font-size: 12.5px;
+}
+
+.gc-ask-input::placeholder {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.gc-ask-input:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.22);
 }
 
 .gc-ask-actions {

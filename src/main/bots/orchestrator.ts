@@ -585,10 +585,11 @@ class GroupSession {
       this.project,
       'bot-task',
       assign.title,
-      assign.task,
+      `You are @${bot.id} (display name "${bot.name}").\n\n${assign.task}`,
       BOT_TASK_EXPECT,
       {
         botId: bot.id,
+        botName: bot.name,
         groupId: this.groupId,
         displayName: `${bot.name} Task`,
         ...(bot.profileId ? { profileId: bot.profileId } : {}),

@@ -75,6 +75,8 @@ export class ModuleRunManager {
     expectResult?: string,
     botOpts?: {
       botId?: string
+      /** Display name of that bot — attributed on kanban comments the run writes. */
+      botName?: string
       groupId?: string
       profileId?: string
       modelOverride?: string
@@ -140,6 +142,7 @@ export class ModuleRunManager {
       updatedAt: now,
       ...(cleanExpect ? { expectResult: cleanExpect } : {}),
       ...(botOpts?.botId ? { botId: botOpts.botId } : {}),
+      ...(botOpts?.botName ? { botName: botOpts.botName } : {}),
       ...(botOpts?.groupId ? { groupId: botOpts.groupId } : {}),
       ...(botOpts?.profileId ? { profileId: botOpts.profileId } : {}),
       ...(botOpts?.modelOverride ? { modelOverride: botOpts.modelOverride } : {})

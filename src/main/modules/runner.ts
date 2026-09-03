@@ -650,7 +650,8 @@ export class ModuleRunner {
       service: this.service,
       activeProject: this.activeProject,
       confirm: this.askHandler ? (req) => this.runConfirmViaAsk(req) : async () => false,
-      ...(this.askHandler ? { ask: (req) => this.runAsk(req) } : {})
+      ...(this.askHandler ? { ask: (req) => this.runAsk(req) } : {}),
+      ...(this.run.botName ? { commenterName: this.run.botName } : {})
     }
     try {
       const raw = await tool.execute(args, ctx)
