@@ -572,6 +572,41 @@ function ToolsetsPane({
   )
 }
 
+function AppearanceSettings(): React.JSX.Element {
+  const theme = useAppStore((s) => s.theme)
+  const setTheme = useAppStore((s) => s.setTheme)
+  const options: Array<{ value: 'light' | 'dark' | 'system'; label: string; desc: string }> = [
+    { value: 'light', label: 'Light', desc: 'Always use light mode' },
+    { value: 'dark', label: 'Dark', desc: 'Always use dark mode' },
+    { value: 'system', label: 'System', desc: 'Follow the OS setting' }
+  ]
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>Appearance</div>
+          <p className="hint" style={{ marginTop: 2, marginBottom: 0 }}>
+            Choose PTNotes&apos; color scheme.
+          </p>
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        {options.map((opt) => (
+          <button
+            key={opt.value}
+            className={`btn ${theme === opt.value ? 'active' : ''}`}
+            onClick={() => setTheme(opt.value)}
+            title={opt.desc}
+            style={{ flex: 1, justifyContent: 'center' }}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+    </>
+  )
+}
+
 function AboutPane(): React.JSX.Element {
   const [about, setAbout] = useState<AboutInfo | null>(null)
   const [error, setError] = useState('')
@@ -1151,6 +1186,8 @@ export function SettingsDialog(): React.JSX.Element {
                   Change…
                 </button>
               </div>
+              <div style={{ height: 16 }} />
+              <AppearanceSettings />
             </>
           ) : category === 'modules' ? (
             <>

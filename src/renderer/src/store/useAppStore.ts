@@ -104,6 +104,10 @@ interface AppState {
   skillEditRequest: string | null
   sidebarVisible: boolean
   formatHelperEnabled: boolean
+  theme: 'light' | 'dark' | 'system'
+  commandPaletteOpen: boolean
+  commandPaletteQuery: string
+  commandPaletteActiveIndex: number
   loading: boolean
 
   init: () => Promise<void>
@@ -204,6 +208,11 @@ interface AppState {
   clearSkillEditRequest: () => void
   setSidebarVisible: (visible: boolean) => void
   setFormatHelperEnabled: (enabled: boolean) => void
+  setTheme: (theme: 'light' | 'dark' | 'system') => void
+  setCommandPaletteOpen: (open: boolean) => void
+  toggleCommandPalette: () => void
+  setCommandPaletteQuery: (q: string) => void
+  setCommandPaletteActiveIndex: (i: number) => void
   newChat: (project: string) => Promise<void>
   openChat: (project: string, sessionId: string) => Promise<void>
   deleteChat: (project: string, sessionId: string) => Promise<void>
@@ -265,6 +274,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   skillEditRequest: null,
   sidebarVisible: true,
   formatHelperEnabled: localStorage.getItem('ptnotes:formatHelper') !== '0',
+  theme: (localStorage.getItem('ptnotes:theme') as 'light' | 'dark' | 'system' | null) ?? 'system',
+  commandPaletteOpen: false,
+  commandPaletteQuery: '',
+  commandPaletteActiveIndex: 0,
   loading: false,
 
   async init() {
@@ -1376,5 +1389,39 @@ export const useAppStore = create<AppState>((set, get) => ({
   setFormatHelperEnabled(enabled) {
     localStorage.setItem('ptnotes:formatHelper', enabled ? '1' : '0')
     set({ formatHelperEnabled: enabled })
+  },
+
+  setTheme(theme) {
+    localStorage.setItem('ptnotes:theme', theme)
+    document.documentElement.setAttribute('data-theme', theme)
+    set({ theme })
+  },
+
+  setCommandPaletteOpen(commandPaletteOpen) {
+    if (commandPaletteOpen) {
+      set({ commandPaletteOpen: true, commandPaletteQuery: '', commandPaletteActiveIndex: 0 })
+    } else {
+      set({ commandPaletteOpen: false })
+    }
+  },
+
+  toggleCommandPalette() {
+    set((s) =>
+      s.commandPaletteOpen
+        ? { commandPaletteOpen: false }
+        : {
+            commandPaletteOpen: true,
+            commandPaletteQuery: '',
+            commandPaletteActiveIndex: 0
+          }
+    )
+  },
+
+  setCommandPaletteQuery(commandPaletteQuery) {
+    set({ commandPaletteQuery, commandPaletteActiveIndex: 0 })
+  },
+
+  setCommandPaletteActiveIndex(commandPaletteActiveIndex) {
+    set({ commandPaletteActiveIndex })
   }
 }))

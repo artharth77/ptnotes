@@ -13,6 +13,7 @@ import { ChatDrawer } from './components/ChatDrawer'
 import { GroupChatPanel } from './components/GroupChatPanel'
 import { BotTasksPanel } from './components/BotTasksPanel'
 import { SettingsDialog } from './components/SettingsDialog'
+import { CommandPalette } from './components/CommandPalette'
 import { AskUserDialog } from './components/AskUserDialog'
 import { ModulePanel } from './components/ModulePanel'
 import { ModuleHistoryOverlay } from './components/ModuleHistoryOverlay'
@@ -303,6 +304,11 @@ function App(): React.JSX.Element {
     void init()
   }, [init])
 
+  useEffect(() => {
+    const theme = useAppStore.getState().theme
+    document.documentElement.setAttribute('data-theme', theme)
+  }, [init])
+
   // Handle AI stream events: update chat store, auto-refresh notes/kanban on tool calls
   useEffect(() => {
     return window.ptnotes.ai.onStreamEvent((evt) => {
@@ -485,6 +491,21 @@ function App(): React.JSX.Element {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [activeProject, setRightView])
 
+  // Global command palette shortcut: Cmd/Ctrl+K
+  useEffect(() => {
+    const toggleCommandPalette = useAppStore.getState().toggleCommandPalette
+    function onKeyDown(e: KeyboardEvent): void {
+      const isMac = window.electron.process.platform === 'darwin'
+      const mod = isMac ? e.metaKey : e.ctrlKey
+      if (!mod || e.shiftKey || e.altKey) return
+      if (e.key.toLowerCase() !== 'k') return
+      e.preventDefault()
+      toggleCommandPalette()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
   // Show a skeleton briefly while the module panel animates open/close or switches to it
   const moduleWasOpen = useRef(rightOpen && rightView === 'modules')
   useEffect(() => {
@@ -620,6 +641,7 @@ function App(): React.JSX.Element {
       )}
 
       {settingsOpen && <SettingsDialog />}
+      <CommandPalette />
       {(kanbanEditingId || kanbanCreatingColumnId || kanbanViewingId) && (
         <KanbanCardModal key={kanbanEditingId ?? kanbanCreatingColumnId ?? kanbanViewingId} />
       )}
