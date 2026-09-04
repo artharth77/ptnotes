@@ -3332,7 +3332,7 @@ fieldset.kanban-form {
   padding: 9px 12px;
   border-radius: 10px;
   background: var(--bg-hover);
-  font-size: 13px;
+  font-size: var(--app-font-size);
   line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -3343,6 +3343,10 @@ fieldset.kanban-form {
   white-space: normal;
   font-size: 13px;
   line-height: 1.55;
+}
+
+.chat-msg-content .markdown-body {
+  font-size: var(--app-font-size);
 }
 
 .markdown-body > :first-child {

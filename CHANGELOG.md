@@ -9,6 +9,7 @@
 
 ### Changed
 
+- **UI: chat bubble font size follows the appearance font size** — chat bubbles (1:1 and group chat, including their markdown content) now scale with the Appearance ▸ Font size setting (small 13px / default 14px / large 15px / xlarge 16px) instead of being fixed at 13px. Kanban card comments and the raw AI trace viewer keep their fixed 13px.
 - **UI: uniform sidebar list header height** — `.list-header` is now fixed at 40px; the Notes/Planner filter input previously made those headers taller than the other panels.
 - **Kanban: add-column icon enlarged** (15 → 16).
 - **Planner: "+ New" text button replaced with a plus icon button** (title "New schedule").
