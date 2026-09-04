@@ -208,7 +208,7 @@ export function KanbanPanel(): React.JSX.Element {
               setColumnError(null)
             }}
           >
-            <MdiIcon path={mdiPlus} size={15} />
+            <MdiIcon path={mdiPlus} size={16} />
           </button>
         )}
       </div>

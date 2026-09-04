@@ -1,5 +1,14 @@
 # Changelog
 
+## [dev]
+
+### Changed
+
+- **UI: uniform sidebar list header height** — `.list-header` is now fixed at 40px; the Notes/Planner filter input previously made those headers taller than the other panels.
+- **Kanban: add-column icon enlarged** (15 → 16).
+- **Planner: "+ New" text button replaced with a plus icon button** (title "New schedule").
+- **AI Settings: profile picker is now a grid** — the active-profile dropdown is replaced by a scrollable profile grid (Name / Model columns, checkmark on the active profile). Select a row and hit **Set active** to switch; New / Edit / Delete act on the selected profile.
+
 ## [0.15.1] — 2026-09-03
 
 ### Added

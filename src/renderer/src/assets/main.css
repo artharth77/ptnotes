@@ -601,7 +601,8 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 10px 12px;
+  height: 40px;
+  padding: 0 12px;
   font-weight: 600;
   font-size: 13px;
 }
@@ -2349,16 +2350,79 @@ fieldset.kanban-form {
   gap: 10px;
 }
 
-.profile-block .profile-active {
-  flex: 1;
-  min-width: 0;
-  margin-bottom: 0;
+.profile-section-title {
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .profile-actions {
   display: flex;
   gap: 8px;
   flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.profile-grid {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.profile-grid-header,
+.profile-grid-row {
+  display: grid;
+  grid-template-columns: 24px minmax(120px, 1.3fr) minmax(100px, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.profile-grid-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+.profile-grid-row {
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.profile-grid-row:last-child {
+  border-bottom: none;
+}
+
+.profile-grid-row:hover {
+  background: var(--bg-hover);
+}
+
+.profile-grid-row.selected {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.profile-grid-cell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-grid-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
 }
 
 .endpoint-combo {

@@ -3,6 +3,7 @@ import {
   mdiDotsVertical,
   mdiFolderOpenOutline,
   mdiPencil,
+  mdiPlus,
   mdiRefresh,
   mdiTrashCanOutline
 } from '@mdi/js'
@@ -142,13 +143,14 @@ export function PlannerPanel(): React.JSX.Element {
             <MdiIcon path={mdiRefresh} size={16} />
           </button>
           <button
-            className="btn small"
+            className="icon-btn"
+            title="New schedule"
             onClick={() => {
               setFormError('')
               setCreating(true)
             }}
           >
-            + New
+            <MdiIcon path={mdiPlus} size={16} />
           </button>
         </div>
       </div>
