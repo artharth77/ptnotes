@@ -8,10 +8,16 @@ const ROOT = '/tmp/ptnotes-pdf-test-root'
 
 let FAKE_TEXT = 'Hello PDF content'
 let FAKE_PAGES = 3
+let FAKE_LAST_PARAMS: { first?: number; last?: number } | undefined
 
 class FakePDFParse {
-  async getText(): Promise<{ text: string; total: number; pages: unknown[] }> {
-    return { text: FAKE_TEXT, total: FAKE_PAGES, pages: [] }
+  async getText(params?: {
+    first?: number
+    last?: number
+  }): Promise<{ text: string; total: number; pages: unknown[] }> {
+    FAKE_LAST_PARAMS = params
+    const label = params?.first !== undefined ? ` (page ${params.first})` : ''
+    return { text: FAKE_TEXT + label, total: FAKE_PAGES, pages: [] }
   }
   async destroy(): Promise<void> {
     return
@@ -93,6 +99,25 @@ res = await extractPdf(pdfPath)
 assert.equal(res.truncated, true)
 assert.equal(res.text.length, MAX_PDF_CHARS)
 assert.equal(res.charCount, MAX_PDF_CHARS + 500)
+
+// ---- extractPdf: page parameter ----
+FAKE_TEXT = 'Hello PDF content'
+FAKE_PAGES = 3
+FAKE_LAST_PARAMS = undefined
+res = await extractPdf(pdfPath, 2)
+assert.equal(res.text, 'Hello PDF content (page 2)')
+assert.equal(res.page, 2)
+assert.equal(res.totalPages, 3)
+assert.equal(res.truncated, false)
+assert.deepEqual(FAKE_LAST_PARAMS, { first: 2, last: 2 })
+FAKE_LAST_PARAMS = undefined
+res = await extractPdf(pdfPath)
+assert.equal(res.text, 'Hello PDF content')
+assert.equal(res.page, undefined)
+assert.equal(res.totalPages, 3)
+assert.equal(FAKE_LAST_PARAMS, undefined, 'no page params passed when page is omitted')
+await assert.rejects(() => extractPdf(pdfPath, 99), /out of range: this PDF has 3 pages/)
+await assert.rejects(() => extractPdf(pdfPath, 0), /out of range/)
 
 const mdPath = `${ROOT}/notes.md`
 await fs.writeFile(mdPath, '# Notes\n\nSome markdown content')
@@ -212,6 +237,17 @@ assert.ok(resDocx.text.includes('| --- | --- |'), 'docx table separator row extr
 assert.ok(resDocx.text.includes('| EMEA | 18 |'), 'docx table data row extracted')
 assert.equal(resDocx.pageCount, 0)
 assert.equal(resDocx.truncated, false)
+assert.equal(resDocx.totalPages, 1)
+
+const resDocxPage = await readFileAsText(docxPath, 'json', undefined, 1)
+assert.equal(resDocxPage.page, 1)
+assert.equal(resDocxPage.totalPages, 1)
+assert.ok(resDocxPage.text.includes('# Quarterly Report'), 'docx page 1 window')
+await assert.rejects(
+  () => readFileAsText(docxPath, 'json', undefined, 2),
+  /out of range: this file has 1 page/,
+  'docx page beyond the single page rejected'
+)
 
 // ---- readFileAsText: workbook query (worksheet filter) ----
 const { parseWorkbookQuery } = await import('../src/main/ai/reader')
@@ -272,6 +308,17 @@ await assert.rejects(
   'query rejected for non-Excel files'
 )
 
+await assert.rejects(
+  () => readFileAsText(xlsxPath, 'json', undefined, 1),
+  /page parameter is not supported for Excel/,
+  'page rejected for Excel workbooks'
+)
+await assert.rejects(
+  () => readFileAsText(xlsxPath, 'json', parseWorkbookQuery('workspace=1'), 1),
+  /page parameter is not supported for Excel/,
+  'page rejected for Excel even with a valid query'
+)
+
 const longTxt = 'x'.repeat(MAX_PDF_CHARS + 100)
 const txtPath = `${ROOT}/long.txt`
 await fs.writeFile(txtPath, longTxt)
@@ -279,6 +326,25 @@ res2 = await readFileAsText(txtPath)
 assert.equal(res2.truncated, true)
 assert.equal(res2.text.length, MAX_PDF_CHARS)
 assert.equal(res2.charCount, MAX_PDF_CHARS + 100)
+assert.equal(res2.totalPages, 2)
+
+// ---- readFileAsText: page parameter (240k char windows) ----
+const longPage1 = await readFileAsText(txtPath, 'json', undefined, 1)
+assert.equal(longPage1.page, 1)
+assert.equal(longPage1.totalPages, 2)
+assert.equal(longPage1.truncated, false)
+assert.equal(longPage1.text, 'x'.repeat(MAX_PDF_CHARS), 'page 1 = first window')
+const longPage2 = await readFileAsText(txtPath, 'json', undefined, 2)
+assert.equal(longPage2.page, 2)
+assert.equal(longPage2.totalPages, 2)
+assert.equal(longPage2.truncated, false)
+assert.equal(longPage2.text, 'x'.repeat(100), 'page 2 = remainder')
+assert.equal(longPage2.charCount, MAX_PDF_CHARS + 100, 'charCount stays full-file length')
+await assert.rejects(
+  () => readFileAsText(txtPath, 'json', undefined, 3),
+  /out of range: this file has 2 pages/,
+  'text page beyond totalPages rejected'
+)
 
 // ---- copyFileToProject: .md / .txt ----
 const mdSrc = `${ROOT}/My Notes.md`
@@ -379,6 +445,32 @@ assert.match(rr.text, /Hello PDF content/)
 const rrMissing = JSON.parse(await readFileTool.execute({ name: 'nope.pdf' }, ctx))
 assert.equal(rrMissing.ok, false)
 assert.match(rrMissing.error, /not found/)
+
+// ---- read_file tool: page parameter ----
+const rrPage = JSON.parse(await readFileTool.execute({ name: 'my-report.pdf', page: 2 }, ctx))
+assert.equal(rrPage.ok, true)
+assert.equal(rrPage.page, 2)
+assert.equal(rrPage.totalPages, 2)
+assert.match(rrPage.text, /Hello PDF content \(page 2\)/)
+const rrPageBad = JSON.parse(await readFileTool.execute({ name: 'my-report.pdf', page: 0 }, ctx))
+assert.equal(rrPageBad.ok, false)
+assert.match(rrPageBad.error, /positive integer/)
+const rrPageFloat = JSON.parse(
+  await readFileTool.execute({ name: 'my-report.pdf', page: 1.5 }, ctx)
+)
+assert.equal(rrPageFloat.ok, false)
+assert.match(rrPageFloat.error, /positive integer/)
+const rrPageOOR = JSON.parse(await readFileTool.execute({ name: 'my-report.pdf', page: 99 }, ctx))
+assert.equal(rrPageOOR.ok, false)
+assert.match(rrPageOOR.error, /out of range: this PDF has 2 pages/)
+const mdPage = JSON.parse(await readFileTool.execute({ name: 'my-notes.md', page: 1 }, ctx))
+assert.equal(mdPage.ok, true)
+assert.equal(mdPage.page, 1)
+assert.equal(mdPage.totalPages, 1)
+assert.match(mdPage.text, /# Hello/)
+const xlsxPage = JSON.parse(await readFileTool.execute({ name: 'sample.xlsx', page: 1 }, ctx))
+assert.equal(xlsxPage.ok, false)
+assert.match(xlsxPage.error, /page parameter is not supported for Excel/)
 
 const mdRead = JSON.parse(await readFileTool.execute({ name: 'my-notes.md' }, ctx))
 assert.equal(mdRead.ok, true)

@@ -717,7 +717,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'read_file',
         description:
-          'Read the text content of a project file (PDF, Word documents converted to markdown, Excel workbooks converted to JSON/CSV, or any text file such as markdown, plain text, JSON, logs or YAML; files live in the project files folder, referenced as `file:<name>`). Excel workbooks can be filtered to a single worksheet with the `query` parameter. Extracts the text locally and returns it, so the user does not need to drag and drop the file again.',
+          'Read the text content of a project file (PDF, Word documents converted to markdown, Excel workbooks converted to JSON/CSV, or any text file such as markdown, plain text, JSON, logs or YAML; files live in the project files folder, referenced as `file:<name>`). Excel workbooks can be filtered to a single worksheet with the `query` parameter. Extracts the text locally and returns it, so the user does not need to drag and drop the file again. Content is truncated at 240,000 characters; for long files use the `page` parameter to read further pages (the result reports `totalPages`).',
         parameters: {
           type: 'object',
           properties: {
@@ -735,6 +735,11 @@ export const tools: PTTool[] = [
               type: 'string',
               description:
                 'Excel workbooks only, formatted as URL-style vars "var=value&var=value" (values may be URL-encoded). Supported vars: workspace = worksheet name or 1-based worksheet number, e.g. "workspace=Sales" or "workspace=2"; list=workspace returns a JSON list of all worksheets with their 1-based index instead of content. Only supported when reading .xlsx/.xlsm files.'
+            },
+            page: {
+              type: 'number',
+              description:
+                '1-based page to read, for long files. PDF: that PDF page. Text/Word files: a ~240,000-character window (page 1 = the first 240,000 characters). Omit to read from the start (truncated at 240,000 characters). The result includes totalPages — call again with the next page to read more. Not supported for Excel workbooks (use query=workspace=... instead).'
             }
           },
           required: ['name']
@@ -759,10 +764,21 @@ export const tools: PTTool[] = [
         const format = (args.format as 'json' | 'csv') ?? 'json'
         const rawQuery = String(args.query ?? '').trim()
         const excelQuery = rawQuery ? parseWorkbookQuery(rawQuery) : undefined
-        const { text, pageCount, charCount, truncated } = await readFileAsText(
+        let pageNum: number | undefined
+        if (args.page !== undefined && args.page !== null && args.page !== '') {
+          pageNum = Number(args.page)
+          if (!Number.isInteger(pageNum) || pageNum < 1) {
+            return JSON.stringify({
+              ok: false,
+              error: 'The page parameter must be a positive integer (1-based page number).'
+            })
+          }
+        }
+        const { text, pageCount, charCount, truncated, page, totalPages } = await readFileAsText(
           path,
           format,
-          excelQuery
+          excelQuery,
+          pageNum
         )
         return JSON.stringify({
           ok: true,
@@ -771,6 +787,8 @@ export const tools: PTTool[] = [
           pageCount,
           charCount,
           truncated,
+          ...(page !== undefined ? { page } : {}),
+          ...(totalPages !== undefined ? { totalPages } : {}),
           text
         })
       } catch (err) {

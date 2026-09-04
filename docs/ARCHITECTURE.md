@@ -299,7 +299,10 @@ ChatPanel (renderer) ──send──▶ Main process
 - A `#` file mention inserts `file:<filename>`; the system prompt instructs the AI that a
   `file:<filename>` message means it must call `read_file` (content-based local extraction;
   `.pdf` via pdf-parse, `.docx` via jszip+cheerio as markdown-style text, any text file as raw
-  text) before responding — so previously dropped files can be reused without re-dragging.
+  text) before responding — so previously dropped files can be reused without re-dragging. Long
+  content is truncated at 240,000 characters; the system prompt tells the AI to follow up with
+  the `read_file` `page` parameter (1-based — that PDF page, or a 240k-character window for
+  text/Word files) using the `totalPages` reported in the result.
 - The system prompt includes an orchestration guideline: delegate parallel deliverables to
   background modules via `start_module` (passing `expect` to specify the result payload), then
   call `wait_modules` with all runIds and continue with the returned results; never wait when the
@@ -383,7 +386,7 @@ ChatPanel (renderer) ──send──▶ Main process
 | `update_kanban_card`    | update fields of an existing card (matched by title, case-insensitive); only the provided fields are changed, `null` clears, `newTitle` renames                                                                                                                                                                                                                                                                                                                                 |
 | `move_kanban_card`      | move a card (matched by title) to another column (matched by name)                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `delete_kanban_card`    | delete a card (matched by title; requires user confirmation dialog)                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `read_file`             | extract text of a project file locally via `readFileAsText` (pdf-parse for `.pdf`, jszip+cheerio for `.docx` as markdown-style text — headings, paragraphs and tables, exceljs for `.xlsx`/`.xlsm` with optional `query` — `workspace=<name\|n>` sheet filter or `list=workspace` index/name list, raw text for any text file)                                                                                                                                                                                                                                      |
+| `read_file`             | extract text of a project file locally via `readFileAsText` (pdf-parse for `.pdf`, jszip+cheerio for `.docx` as markdown-style text — headings, paragraphs and tables, exceljs for `.xlsx`/`.xlsm` with optional `query` — `workspace=<name\|n>` sheet filter or `list=workspace` index/name list, raw text for any text file); content is truncated at 240,000 characters — the optional `page` parameter (1-based) reads one page: that PDF page, or a 240k-character window for text/Word files (rejected for Excel); the result reports `totalPages` so the AI can page through long files                                                                                                                                                  |
 | `create_skill`          | upsert a skill (`scope`: `global`/`project`) from name + description + content                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `read_skill`            | load a skill's `SKILL.md` or a sibling file inside that skill folder (`file` param, relative path like `FORMAT.md` or `doc/DOC.md`); skills are listed in the system prompt, no separate `list_skills`                                                                                                                                                                                                                                                                          |
 | `delete_skill`          | delete a skill (requires user confirmation dialog)                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -428,8 +431,10 @@ ChatPanel (renderer) ──send──▶ Main process
   `.pdf`, jszip+cheerio markdown-style text for `.docx`, raw text for any text file).
 - If a file with the same name already exists in `files/` with the same size **and** SHA-256 hash,
   the existing file is reused instead of saving a new `-2` copy.
-- Long files are truncated to `MAX_PDF_CHARS` with a `truncated` warning; scanned/image PDFs surface a
-  clear "No text found" error.
+- Long files are truncated to `MAX_PDF_CHARS` with a `truncated` warning; the `read_file` `page`
+  parameter (1-based) reads one page at a time — that PDF page, or a `MAX_PDF_CHARS`-sized window
+  for text/Word files — and the result reports `totalPages` so the AI can page through the rest;
+  scanned/image PDFs surface a clear "No text found" error.
 - Renderer obtains each dropped file's path via preload `files.getPathForFile(file)` using Electron's
   `webUtils.getPathForFile` (never `File.path`).
 - Drop turns share the same per-project `ChatSession`; `createSessionRegistry` in `ipc/ai.ts` owns the

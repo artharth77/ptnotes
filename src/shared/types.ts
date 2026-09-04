@@ -174,6 +174,8 @@ export interface PdfExtractResult {
   pageCount: number
   charCount: number
   truncated: boolean
+  page?: number
+  totalPages?: number
 }
 
 export interface ChatSessionMeta {

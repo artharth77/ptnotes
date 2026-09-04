@@ -44,49 +44,84 @@ export async function detectFileKind(path: string): Promise<FileKind> {
 export async function readFileAsText(
   path: string,
   format: 'json' | 'csv' = 'json',
-  query?: ExcelQuery
+  query?: ExcelQuery,
+  page?: number
 ): Promise<PdfExtractResult> {
   const kind = await detectFileKind(path)
   if (query && kind !== 'excel') {
     throw new Error('The query parameter is only supported for Excel workbooks (.xlsx/.xlsm).')
   }
-  if (kind === 'pdf') return extractPdf(path)
+  if (page !== undefined && kind === 'excel') {
+    throw new Error(
+      'The page parameter is not supported for Excel workbooks. Use the query parameter (workspace=<name|n>) to select a worksheet.'
+    )
+  }
+  if (kind === 'pdf') return extractPdf(path, page)
   if (kind === 'excel') return extractExcel(path, format, query)
-  if (kind === 'docx') return extractDocx(path)
+  if (kind === 'docx') return extractDocx(path, page)
   if (kind === 'unsupported') {
     throw new Error(
       'This file is a binary file that is not a PDF, Word document or Excel workbook, so it cannot be read.'
     )
   }
   const text = await fs.readFile(path, 'utf8')
-  const truncated = text.length > MAX_PDF_CHARS
-  return {
-    text: truncated ? text.slice(0, MAX_PDF_CHARS) : text,
-    pageCount: 0,
-    charCount: text.length,
-    truncated
-  }
+  return paginateText(text, page)
 }
 
-export async function extractPdf(path: string): Promise<PdfExtractResult> {
+export async function extractPdf(path: string, page?: number): Promise<PdfExtractResult> {
   const buffer = await fs.readFile(path)
   const parser = new PDFParse({ data: buffer })
   try {
-    const result = await parser.getText()
+    const result = await parser.getText(
+      page !== undefined ? { first: page, last: page } : undefined
+    )
     const text = result.text ?? ''
+    const total = result.total ?? 0
+    if (page !== undefined && (page < 1 || page > total)) {
+      throw new Error(
+        `Page ${page} is out of range: this PDF has ${total} ${total === 1 ? 'page' : 'pages'}.`
+      )
+    }
     const truncated = text.length > MAX_PDF_CHARS
     return {
       text: truncated ? text.slice(0, MAX_PDF_CHARS) : text,
-      pageCount: result.total ?? 0,
+      pageCount: total,
       charCount: text.length,
-      truncated
+      truncated,
+      ...(page !== undefined ? { page } : {}),
+      totalPages: total
     }
   } finally {
     await parser.destroy().catch(() => {})
   }
 }
 
-export async function extractDocx(path: string): Promise<PdfExtractResult> {
+/** Window `fullText` into 240k-character pages. With `page`, returns that page's
+ * window (page 1 is the first MAX_PDF_CHARS characters); without, returns the
+ * whole text truncated at MAX_PDF_CHARS. `charCount` is always the full length. */
+function paginateText(fullText: string, page?: number): PdfExtractResult {
+  const totalPages = Math.max(1, Math.ceil(fullText.length / MAX_PDF_CHARS))
+  if (page !== undefined && (page < 1 || page > totalPages)) {
+    throw new Error(
+      `Page ${page} is out of range: this file has ${totalPages} ${
+        totalPages === 1 ? 'page' : 'pages'
+      } (${fullText.length} characters).`
+    )
+  }
+  const windowed =
+    page === undefined ? fullText : fullText.slice((page - 1) * MAX_PDF_CHARS, page * MAX_PDF_CHARS)
+  const truncated = windowed.length > MAX_PDF_CHARS
+  return {
+    text: truncated ? windowed.slice(0, MAX_PDF_CHARS) : windowed,
+    pageCount: 0,
+    charCount: fullText.length,
+    truncated,
+    ...(page !== undefined ? { page } : {}),
+    totalPages
+  }
+}
+
+export async function extractDocx(path: string, page?: number): Promise<PdfExtractResult> {
   const buffer = await fs.readFile(path)
   let zip: JSZip
   try {
@@ -104,7 +139,7 @@ export async function extractDocx(path: string): Promise<PdfExtractResult> {
     const block = docxBlockText(node, $)
     if (block) blocks.push(block)
   }
-  return finishExtract(blocks.join('\n\n'))
+  return paginateText(blocks.join('\n\n'), page)
 }
 
 function docxBlockText(el: Element, $: cheerio.CheerioAPI): string | null {
