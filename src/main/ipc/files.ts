@@ -32,6 +32,79 @@ export function registerFilesIpc(
   )
 
   ipcMain.handle(
+    'files:absPath',
+    async (_e: IpcMainInvokeEvent, project: string, fileName: string): Promise<string | null> => {
+      return service.projectFilePath(project, fileName)
+    }
+  )
+
+  ipcMain.handle(
+    'files:readText',
+    async (_e: IpcMainInvokeEvent, project: string, fileName: string): Promise<string> => {
+      return service.readFileText(project, fileName)
+    }
+  )
+
+  ipcMain.handle(
+    'files:explorerList',
+    async (_e: IpcMainInvokeEvent, project: string, subpath?: string) => {
+      return service.listExplorerEntries(project, subpath ?? '')
+    }
+  )
+
+  ipcMain.handle('files:explorerTree', async (_e: IpcMainInvokeEvent, project: string) => {
+    return service.listExplorerTree(project)
+  })
+
+  ipcMain.handle(
+    'files:explorerCreateFolder',
+    async (_e: IpcMainInvokeEvent, project: string, parentSubpath: string, name: string) => {
+      return service.createFilesFolder(project, parentSubpath, name)
+    }
+  )
+
+  ipcMain.handle(
+    'files:explorerCopy',
+    async (_e: IpcMainInvokeEvent, project: string, fromPaths: string[], destSubpath: string) => {
+      return service.copyFilesEntries(project, fromPaths, destSubpath)
+    }
+  )
+
+  ipcMain.handle(
+    'files:explorerMove',
+    async (_e: IpcMainInvokeEvent, project: string, fromPaths: string[], destSubpath: string) => {
+      return service.moveFilesEntries(project, fromPaths, destSubpath)
+    }
+  )
+
+  ipcMain.handle(
+    'files:explorerRename',
+    async (_e: IpcMainInvokeEvent, project: string, itemPath: string, newName: string) => {
+      return service.renameFilesEntry(project, itemPath, newName)
+    }
+  )
+
+  ipcMain.handle(
+    'files:explorerDelete',
+    async (_e: IpcMainInvokeEvent, project: string, itemPaths: string[]) => {
+      return service.deleteFilesEntries(project, itemPaths)
+    }
+  )
+
+  ipcMain.handle(
+    'files:importDropped',
+    async (
+      _e: IpcMainInvokeEvent,
+      project: string,
+      sourcePath: string,
+      destSubpath: string,
+      fileName?: string
+    ) => {
+      return service.importDroppedFile(project, sourcePath, destSubpath, fileName)
+    }
+  )
+
+  ipcMain.handle(
     'files:extract',
     async (_e: IpcMainInvokeEvent, path: string): Promise<PdfExtractResult> => {
       return readFileAsText(path)

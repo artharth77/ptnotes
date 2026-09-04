@@ -24,7 +24,7 @@ export interface NoteSearchMatch {
   matchEnd: number
 }
 
-export type Tab = 'notes' | 'kanban' | 'modules' | 'planner'
+export type Tab = 'notes' | 'kanban' | 'modules' | 'planner' | 'files'
 
 export interface AIProviderConfig {
   baseUrl: string
@@ -182,6 +182,26 @@ export interface PdfExtractResult {
 export interface FileEntry {
   name: string
   isDir: boolean
+}
+
+/** One entry in the file explorer listing (`<project>/files/<subpath>`, one level). */
+export interface ExplorerEntry {
+  name: string
+  /** Path relative to the files root ('' segments are the root itself). */
+  path: string
+  isDir: boolean
+  /** Bytes; null for folders. */
+  size: number | null
+  /** Last modified, ms epoch. */
+  mtime: number
+}
+
+/** One folder node in the file explorer tree (folders only). */
+export interface ExplorerFolderNode {
+  name: string
+  /** Path relative to the files root; root node uses ''. */
+  path: string
+  children: ExplorerFolderNode[]
 }
 
 export interface ChatSessionMeta {

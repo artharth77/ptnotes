@@ -2,6 +2,8 @@ import {
   mdiBookOpenVariant,
   mdiFileCodeOutline,
   mdiFileOutline,
+  mdiFilePdfBox,
+  mdiFileExcelOutline,
   mdiFilePowerpointOutline,
   mdiFileWordOutline,
   mdiImageOutline,
@@ -22,6 +24,11 @@ export function fileTypeIcon(file: string): string {
       return mdiFileWordOutline
     case 'pptx':
       return mdiFilePowerpointOutline
+    case 'pdf':
+      return mdiFilePdfBox
+    case 'xlsx':
+    case 'xlsm':
+      return mdiFileExcelOutline
     case 'png':
     case 'jpeg':
     case 'jpg':

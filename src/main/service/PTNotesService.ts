@@ -1,6 +1,6 @@
 import { promises as fs, type Dirent } from 'fs'
 import { createHash, randomUUID } from 'crypto'
-import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'path'
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'path'
 import { app, shell } from 'electron'
 import type {
   AiTraceEntry,
@@ -9,6 +9,8 @@ import type {
   ChatSessionMeta,
   ChatThread,
   CreateProjectResult,
+  ExplorerEntry,
+  ExplorerFolderNode,
   FileEntry,
   NoteMeta,
   NoteSearchMatch,
@@ -57,6 +59,21 @@ const REGISTRY_FILE = '.ptnotes-projects.json'
 const GLOBAL_SKILLS_DIR = '.skills'
 const BUILTIN_SKILLS_DIR = 'builtin-skills'
 const MAX_LISTED_FILES = 500
+const MAX_EXPLORER_TREE_NODES = 2000
+const MAX_EXPLORER_TREE_DEPTH = 12
+const MAX_PREVIEW_TEXT_BYTES = 2 * 1024 * 1024
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  const units = ['KB', 'MB', 'GB']
+  let v = bytes
+  let i = -1
+  do {
+    v /= 1024
+    i++
+  } while (v >= 1024 && i < units.length - 1)
+  return `${v >= 100 ? Math.round(v) : v.toFixed(1)} ${units[i]}`
+}
 const WELCOME_NOTE = `# Welcome to PTNotes
 
 This is your first note. Everything you write here is stored as markdown in:
@@ -1152,6 +1169,234 @@ export class PTNotesService {
     const full = this.resolveFilesPath(project, fileName)
     if (!full) return null
     return (await this.pathExists(full)) ? full : null
+  }
+
+  // ---- Files explorer (`<project>/files/` tree + mutations, backing the explorer panel) ----
+
+  /** One level of `<project>/files/<subpath>` enriched with size/mtime for the explorer list. */
+  async listExplorerEntries(project: string, subpath = ''): Promise<ExplorerEntry[]> {
+    const target = this.resolveFilesPath(project, subpath)
+    if (!target) return []
+    const rel = subpath
+      .split(/[\\/]+/)
+      .filter((s) => s !== '' && s !== '.')
+      .join('/')
+    let entries: Dirent[]
+    try {
+      entries = await fs.readdir(target, { withFileTypes: true })
+    } catch {
+      return []
+    }
+    const out: ExplorerEntry[] = []
+    for (const e of entries) {
+      if (e.name.startsWith('.')) continue
+      let st
+      try {
+        st = await fs.stat(join(target, e.name))
+      } catch {
+        continue
+      }
+      out.push({
+        name: e.name,
+        path: rel ? `${rel}/${e.name}` : e.name,
+        isDir: e.isDirectory(),
+        size: e.isDirectory() ? null : st.size,
+        mtime: st.mtimeMs
+      })
+    }
+    return out.sort((a, b) =>
+      a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1
+    )
+  }
+
+  /** Full folder tree of `<project>/files/` (folders only, capped) for the explorer side panel. */
+  async listExplorerTree(project: string): Promise<ExplorerFolderNode> {
+    const root: ExplorerFolderNode = { name: 'files', path: '', children: [] }
+    let count = 1
+    const walk = async (
+      dir: string,
+      rel: string,
+      parent: ExplorerFolderNode,
+      depth: number
+    ): Promise<void> => {
+      if (depth > MAX_EXPLORER_TREE_DEPTH || count >= MAX_EXPLORER_TREE_NODES) return
+      let entries: Dirent[] = []
+      try {
+        entries = await fs.readdir(dir, { withFileTypes: true })
+      } catch {
+        return
+      }
+      for (const e of entries) {
+        if (!e.isDirectory() || e.name.startsWith('.') || count >= MAX_EXPLORER_TREE_NODES) continue
+        count++
+        const childRel = rel ? `${rel}/${e.name}` : e.name
+        const child: ExplorerFolderNode = { name: e.name, path: childRel, children: [] }
+        parent.children.push(child)
+        await walk(join(dir, e.name), childRel, child, depth + 1)
+      }
+      parent.children.sort((a, b) => a.name.localeCompare(b.name))
+    }
+    await walk(this.filesDir(project), '', root, 0)
+    return root
+  }
+
+  /** Validate a single entry name (create folder / rename): no separators, dots-only tricks. */
+  private validateEntryName(name: string): string {
+    const trimmed = name.trim()
+    if (!trimmed) throw new Error('Name cannot be empty')
+    if (trimmed === '.' || trimmed === '..') throw new Error(`Invalid name: "${trimmed}"`)
+    if (trimmed.includes('/') || trimmed.includes('\\')) {
+      throw new Error(`Name cannot contain path separators: "${trimmed}"`)
+    }
+    if (trimmed.startsWith('.')) throw new Error('Name cannot start with a dot')
+    if (trimmed.length > 255) throw new Error('Name is too long')
+    return trimmed
+  }
+
+  /** First available name in `dir`: `name`, then `name (2)`, `name (3)`, … */
+  private async uniqueEntryName(dir: string, name: string): Promise<string> {
+    if (!(await this.pathExists(join(dir, name)))) return name
+    const ext = extname(name)
+    const stem = ext ? name.slice(0, -ext.length) : name
+    for (let i = 2; ; i++) {
+      const candidate = `${stem} (${i})${ext}`
+      if (!(await this.pathExists(join(dir, candidate)))) return candidate
+    }
+  }
+
+  private async copyEntryRecursive(src: string, dest: string): Promise<void> {
+    const st = await fs.lstat(src)
+    if (st.isDirectory()) {
+      await fs.mkdir(dest, { recursive: true })
+      for (const entry of await fs.readdir(src, { withFileTypes: true })) {
+        await this.copyEntryRecursive(join(src, entry.name), join(dest, entry.name))
+      }
+    } else {
+      await fs.copyFile(src, dest)
+    }
+  }
+
+  async createFilesFolder(project: string, parentSubpath: string, name: string): Promise<string> {
+    const parent = this.resolveFilesPath(project, parentSubpath)
+    if (!parent) throw new Error(`Invalid folder path: "${parentSubpath}"`)
+    const clean = this.validateEntryName(name)
+    await fs.mkdir(parent, { recursive: true })
+    const finalName = await this.uniqueEntryName(parent, clean)
+    const dest = join(parent, finalName)
+    await fs.mkdir(dest)
+    return relative(this.filesDir(project), dest)
+  }
+
+  /** Resolve explorer item paths, rejecting the files root and escapes. */
+  private resolveExplorerItem(project: string, itemPath: string): string {
+    const full = this.resolveFilesPath(project, itemPath)
+    if (!full || full === this.filesDir(project)) {
+      throw new Error(`Invalid path: "${itemPath}"`)
+    }
+    return full
+  }
+
+  async copyFilesEntries(
+    project: string,
+    fromPaths: string[],
+    destSubpath: string
+  ): Promise<number> {
+    const dest = this.resolveFilesPath(project, destSubpath)
+    if (!dest) throw new Error(`Invalid destination folder: "${destSubpath}"`)
+    await fs.mkdir(dest, { recursive: true })
+    for (const from of fromPaths) {
+      const src = this.resolveExplorerItem(project, from)
+      if (dest === src || dest.startsWith(src + sep)) {
+        throw new Error(`Cannot copy "${basename(src)}" into itself`)
+      }
+      const finalName = await this.uniqueEntryName(dest, basename(src))
+      await this.copyEntryRecursive(src, join(dest, finalName))
+    }
+    return fromPaths.length
+  }
+
+  async moveFilesEntries(
+    project: string,
+    fromPaths: string[],
+    destSubpath: string
+  ): Promise<number> {
+    const dest = this.resolveFilesPath(project, destSubpath)
+    if (!dest) throw new Error(`Invalid destination folder: "${destSubpath}"`)
+    await fs.mkdir(dest, { recursive: true })
+    for (const from of fromPaths) {
+      const src = this.resolveExplorerItem(project, from)
+      if (dirname(src) === dest) continue
+      if (dest === src || dest.startsWith(src + sep)) {
+        throw new Error(`Cannot move "${basename(src)}" into itself`)
+      }
+      const finalName = await this.uniqueEntryName(dest, basename(src))
+      const target = join(dest, finalName)
+      try {
+        await fs.rename(src, target)
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'EXDEV') throw err
+        await this.copyEntryRecursive(src, target)
+        await fs.rm(src, { recursive: true })
+      }
+    }
+    return fromPaths.length
+  }
+
+  async renameFilesEntry(project: string, itemPath: string, newName: string): Promise<string> {
+    const src = this.resolveExplorerItem(project, itemPath)
+    const clean = this.validateEntryName(newName)
+    const dest = join(dirname(src), clean)
+    if (dest !== src && (await this.pathExists(dest))) {
+      throw new Error(`"${clean}" already exists`)
+    }
+    if (dest !== src) await fs.rename(src, dest)
+    return relative(this.filesDir(project), dest)
+  }
+
+  async deleteFilesEntries(project: string, itemPaths: string[]): Promise<number> {
+    for (const itemPath of itemPaths) {
+      const full = this.resolveExplorerItem(project, itemPath)
+      await fs.rm(full, { recursive: true, force: true })
+    }
+    return itemPaths.length
+  }
+
+  /** Import an externally dropped file/folder into `<project>/files/<destSubpath>` (raw copy, any type). */
+  async importDroppedFile(
+    project: string,
+    sourcePath: string,
+    destSubpath: string,
+    fileName?: string
+  ): Promise<string> {
+    const dest = this.resolveFilesPath(project, destSubpath)
+    if (!dest) throw new Error(`Invalid destination folder: "${destSubpath}"`)
+    const raw = (fileName || basename(sourcePath)).trim()
+    if (!raw || raw === '.' || raw === '..' || raw.includes('/') || raw.includes('\\')) {
+      throw new Error(`Invalid file name: "${raw}"`)
+    }
+    const st = await fs.stat(sourcePath)
+    await fs.mkdir(dest, { recursive: true })
+    const finalName = await this.uniqueEntryName(dest, raw)
+    const target = join(dest, finalName)
+    if (st.isDirectory()) {
+      await this.copyEntryRecursive(sourcePath, target)
+    } else {
+      await fs.copyFile(sourcePath, target)
+    }
+    return relative(this.filesDir(project), target)
+  }
+
+  /** Read a text file from `<project>/files/` for the explorer preview (capped size). */
+  async readFileText(project: string, subpath: string): Promise<string> {
+    const full = await this.projectFilePath(project, subpath)
+    if (!full) throw new Error(`File not found: "${subpath}"`)
+    const st = await fs.stat(full)
+    if (st.size > MAX_PREVIEW_TEXT_BYTES) {
+      throw new Error(
+        `File is too large to preview (${formatBytes(st.size)}). Limit is ${formatBytes(MAX_PREVIEW_TEXT_BYTES)}.`
+      )
+    }
+    return fs.readFile(full, 'utf8')
   }
 
   // ---- Module run storage (JSON kept in <project>/.data/modules/, out of the # file picker) ----
