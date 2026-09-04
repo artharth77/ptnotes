@@ -1051,11 +1051,13 @@ export class PTNotesService {
       ext = '.pdf'
     } else if (kind === 'excel') {
       ext = originalExt.toLowerCase()
+    } else if (kind === 'docx') {
+      ext = '.docx'
     } else if (kind === 'text') {
       ext = originalExt.toLowerCase() || '.txt'
     } else {
       throw new Error(
-        `Unsupported file: "${original}" is a binary file. Only PDF, Excel (.xlsx/.xlsm) and text files can be added.`
+        `Unsupported file: "${original}" is a binary file. Only PDF, Word (.docx), Excel (.xlsx/.xlsm) and text files can be added.`
       )
     }
     const name = `${base}${ext}`

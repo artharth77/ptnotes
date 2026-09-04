@@ -155,6 +155,64 @@ assert.ok(resXlsxCsv.text.includes('## Sheet: Sheet1'), 'CSV contains sheet head
 assert.ok(resXlsxCsv.text.includes('Name,Value'), 'CSV contains headers')
 assert.ok(resXlsxCsv.text.includes('Test,123'), 'CSV contains data')
 
+// ---- docx: detection + extraction ----
+const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, HeadingLevel } =
+  await import('docx')
+const docxDoc = new Document({
+  sections: [
+    {
+      children: [
+        new Paragraph({
+          heading: HeadingLevel.HEADING_1,
+          children: [new TextRun('Quarterly Report')]
+        }),
+        new Paragraph({
+          children: [
+            new TextRun('Revenue grew to '),
+            new TextRun('42 million'),
+            new TextRun(' this quarter.')
+          ]
+        }),
+        new Table({
+          rows: [
+            new TableRow({
+              children: [
+                new TableCell({ children: [new Paragraph('Region')] }),
+                new TableCell({ children: [new Paragraph('Sales')] })
+              ]
+            }),
+            new TableRow({
+              children: [
+                new TableCell({ children: [new Paragraph('EMEA')] }),
+                new TableCell({ children: [new Paragraph('18')] })
+              ]
+            })
+          ]
+        })
+      ]
+    }
+  ]
+})
+const docxPath = `${ROOT}/sample.docx`
+await fs.writeFile(docxPath, Buffer.from(await Packer.toBuffer(docxDoc)))
+assert.equal(await detectFileKind(docxPath), 'docx', 'docx zip magic + ext detected')
+
+const fakeDocx = `${ROOT}/fake.docx`
+await fs.writeFile(fakeDocx, 'not a zip')
+assert.notEqual(await detectFileKind(fakeDocx), 'docx', 'not a zip is not docx')
+
+const resDocx = await readFileAsText(docxPath)
+assert.ok(resDocx.text.includes('# Quarterly Report'), 'docx heading extracted as markdown')
+assert.ok(
+  resDocx.text.includes('Revenue grew to 42 million this quarter.'),
+  'docx paragraph text extracted'
+)
+assert.ok(resDocx.text.includes('| Region | Sales |'), 'docx table header row extracted')
+assert.ok(resDocx.text.includes('| --- | --- |'), 'docx table separator row extracted')
+assert.ok(resDocx.text.includes('| EMEA | 18 |'), 'docx table data row extracted')
+assert.equal(resDocx.pageCount, 0)
+assert.equal(resDocx.truncated, false)
+
 // ---- readFileAsText: workbook query (worksheet filter) ----
 const { parseWorkbookQuery } = await import('../src/main/ai/reader')
 
@@ -238,6 +296,13 @@ assert.equal(txtSaved, `${ROOT}/Test/files/readme.txt`)
 const xlsxSrc = `${ROOT}/sample.xlsx`
 const xlsxSaved = await service.copyFileToProject('Test', xlsxSrc, 'sample.xlsx')
 assert.equal(xlsxSaved, `${ROOT}/Test/files/sample.xlsx`)
+
+const docxSrc = `${ROOT}/My Report.docx`
+await fs.copyFile(docxPath, docxSrc)
+const docxSaved = await service.copyFileToProject('Test', docxSrc, 'My Report.docx')
+assert.equal(docxSaved, `${ROOT}/Test/files/my-report.docx`, 'docx extension preserved')
+const docxSaved2 = await service.copyFileToProject('Test', docxSrc, 'My Report.docx')
+assert.equal(docxSaved2, docxSaved, 'identical docx reuses existing copy')
 await assert.rejects(() => service.copyFileToProject('Test', binPath, 'image.png'), /binary file/)
 assert.ok((await service.listFiles('Test')).includes('my-notes.md'), 'listFiles surfaces .md')
 assert.ok((await service.listFiles('Test')).includes('readme.txt'), 'listFiles surfaces .txt')
@@ -332,6 +397,18 @@ const xlsxReadCsv = JSON.parse(
 )
 assert.equal(xlsxReadCsv.ok, true)
 assert.ok(xlsxReadCsv.text.includes('Name,Value'), 'Tool reads Excel CSV')
+
+const docxRead = JSON.parse(await readFileTool.execute({ name: 'my-report.docx' }, ctx))
+assert.equal(docxRead.ok, true)
+assert.equal(docxRead.pageCount, 0)
+assert.match(docxRead.text, /# Quarterly Report/, 'Tool reads docx heading')
+assert.match(docxRead.text, /Revenue grew to 42 million this quarter\./, 'Tool reads docx text')
+assert.match(docxRead.text, /\| EMEA \| 18 \|/, 'Tool reads docx table row')
+const qToolDocx = JSON.parse(
+  await readFileTool.execute({ name: 'my-report.docx', query: 'workspace=1' }, ctx)
+)
+assert.equal(qToolDocx.ok, false)
+assert.match(qToolDocx.error, /only supported for Excel/, 'query rejected for docx files')
 
 const multiSaved = await service.copyFileToProject('Test', multiXlsx, 'multi.xlsx')
 assert.equal(multiSaved, `${ROOT}/Test/files/multi.xlsx`)

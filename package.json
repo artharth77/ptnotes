@@ -33,6 +33,7 @@
     "docx": "^9.7.1",
     "exceljs": "^4.4.0",
     "isomorphic-mermaid": "^0.1.1",
+    "jszip": "^3.10.1",
     "lucide-static": "^1.30.0",
     "openai": "^7.4.0",
     "pdf-parse": "^2.4.5",

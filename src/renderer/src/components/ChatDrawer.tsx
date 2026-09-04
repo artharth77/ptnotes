@@ -892,7 +892,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
       }
       if (tokens.length === 0) {
         window.alert(
-          'No supported files added. PDFs, Excel (.xlsx/.xlsm) and text files (markdown, JSON, logs, YAML, plain text) can be added.'
+          'No supported files added. PDFs, Word (.docx), Excel (.xlsx/.xlsm) and text files (markdown, JSON, logs, YAML, plain text) can be added.'
         )
         return
       }
@@ -1315,8 +1315,8 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
             </p>
             <p className="chat-empty-hint">
               Type / for commands and skills, @ to reference a note, ! to reference a kanban card, #
-              to reference a file. Drop PDFs, Excel (.xlsx/.xlsm) or text files (markdown, JSON,
-              logs, YAML, plain text) to add them to the project&apos;s files.
+              to reference a file. Drop PDFs, Word (.docx), Excel (.xlsx/.xlsm) or text files
+              (markdown, JSON, logs, YAML, plain text) to add them to the project&apos;s files.
             </p>
           </div>
         )}
@@ -1675,7 +1675,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
       {dragActive && (
         <div className="chat-drop-overlay">
           <span className="chat-drop-icon">📄</span>
-          <span>Drop PDF, Excel or text files to add to project files</span>
+          <span>Drop PDF, Word or Excel files to add to project files</span>
         </div>
       )}
       {bubbleMenu &&

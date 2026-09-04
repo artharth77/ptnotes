@@ -2,6 +2,10 @@
 
 ## [dev]
 
+### Added
+
+- **AI: `read_file` supports Word documents (.docx)** — the assistant can now read Word files from the project files folder: the text is extracted locally (jszip + cheerio, no network) as markdown-style content with headings, paragraphs and tables. Word files can also be dropped into the chat / added to project files like PDFs and Excel workbooks, and `file:<name>.docx` mentions resolve through the same `read_file` tool.
+
 ### Changed
 
 - **UI: uniform sidebar list header height** — `.list-header` is now fixed at 40px; the Notes/Planner filter input previously made those headers taller than the other panels.

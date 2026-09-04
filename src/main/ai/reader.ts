@@ -2,6 +2,9 @@ import { promises as fs } from 'fs'
 import { extname } from 'path'
 import { PDFParse } from 'pdf-parse'
 import ExcelJS from 'exceljs'
+import JSZip from 'jszip'
+import * as cheerio from 'cheerio'
+import type { Element } from 'domhandler'
 import type { PdfExtractResult } from '@shared/types'
 
 export const MAX_PDF_CHARS = 240_000
@@ -9,12 +12,13 @@ export const MAX_PDF_CHARS = 240_000
 const PDF_MAGIC = '%PDF-'
 const ZIP_MAGIC = 'PK\x03\x04'
 
-export type FileKind = 'text' | 'pdf' | 'excel' | 'unsupported'
+export type FileKind = 'text' | 'pdf' | 'excel' | 'docx' | 'unsupported'
 
 /**
  * Classify a file by content rather than extension:
  * - starts with PDF magic bytes -> 'pdf'
  * - starts with ZIP magic bytes + excel extension -> 'excel'
+ * - starts with ZIP magic bytes + .docx extension -> 'docx'
  * - otherwise any other binary (NUL bytes present, not a PDF) -> 'unsupported'
  * - everything else (text, markdown, JSON, YAML, logs, etc.) -> 'text'
  */
@@ -28,6 +32,7 @@ export async function detectFileKind(path: string): Promise<FileKind> {
     if (buf.subarray(0, ZIP_MAGIC.length).toString('latin1') === ZIP_MAGIC) {
       const ext = extname(path).toLowerCase()
       if (ext === '.xlsx' || ext === '.xlsm') return 'excel'
+      if (ext === '.docx') return 'docx'
     }
     if (buf.includes(0)) return 'unsupported'
     return 'text'
@@ -47,9 +52,10 @@ export async function readFileAsText(
   }
   if (kind === 'pdf') return extractPdf(path)
   if (kind === 'excel') return extractExcel(path, format, query)
+  if (kind === 'docx') return extractDocx(path)
   if (kind === 'unsupported') {
     throw new Error(
-      'This file is a binary file that is not a PDF or Excel workbook, so it cannot be read.'
+      'This file is a binary file that is not a PDF, Word document or Excel workbook, so it cannot be read.'
     )
   }
   const text = await fs.readFile(path, 'utf8')
@@ -78,6 +84,75 @@ export async function extractPdf(path: string): Promise<PdfExtractResult> {
   } finally {
     await parser.destroy().catch(() => {})
   }
+}
+
+export async function extractDocx(path: string): Promise<PdfExtractResult> {
+  const buffer = await fs.readFile(path)
+  let zip: JSZip
+  try {
+    zip = await JSZip.loadAsync(buffer)
+  } catch {
+    throw new Error('This file is not a valid Word document (.docx).')
+  }
+  const entry = zip.file('word/document.xml')
+  if (!entry) throw new Error('This file is not a valid Word document (.docx).')
+  const xml = await entry.async('string')
+  const $ = cheerio.load(xml, { xml: { xmlMode: true } }, false)
+  const blocks: string[] = []
+  for (const node of $('w\\:body').children().get()) {
+    if (node.type !== 'tag') continue
+    const block = docxBlockText(node, $)
+    if (block) blocks.push(block)
+  }
+  return finishExtract(blocks.join('\n\n'))
+}
+
+function docxBlockText(el: Element, $: cheerio.CheerioAPI): string | null {
+  if (el.name === 'w:p') return docxParagraphText($(el), $)
+  if (el.name === 'w:tbl') return docxTableText($(el), $)
+  return null
+}
+
+function docxParagraphText(p: cheerio.Cheerio<Element>, $: cheerio.CheerioAPI): string {
+  let text = ''
+  for (const node of p.find('*').get()) {
+    if (node.type !== 'tag') continue
+    if (node.name === 'w:t') text += $(node).text()
+    else if (node.name === 'w:tab') text += '\t'
+    else if (node.name === 'w:br' || node.name === 'w:cr') text += '\n'
+  }
+  const trimmed = text.trim()
+  const style = p.find('w\\:pStyle').attr('w:val')
+  const heading = style ? /^Heading([1-9])$/.exec(style) : null
+  if (heading) {
+    const level = Math.min(Number(heading[1]), 6)
+    return `${'#'.repeat(level)} ${trimmed}`
+  }
+  return trimmed
+}
+
+function docxTableText(tbl: cheerio.Cheerio<Element>, $: cheerio.CheerioAPI): string {
+  const rows: string[][] = []
+  for (const tr of tbl.children('w\\:tr').get()) {
+    const cells: string[] = []
+    for (const tc of $(tr).children('w\\:tc').get()) {
+      const parts: string[] = []
+      for (const child of $(tc).children().get()) {
+        if (child.type !== 'tag') continue
+        const part = docxBlockText(child, $)
+        if (part) parts.push(part)
+      }
+      cells.push(parts.join(' '))
+    }
+    rows.push(cells)
+  }
+  const lines = rows.map(
+    (cells) => `| ${cells.map((c) => c.replace(/\|/g, '\\|').replace(/\n/g, ' ')).join(' | ')} |`
+  )
+  if (rows.length > 0) {
+    lines.splice(1, 0, `| ${rows[0].map(() => '---').join(' | ')} |`)
+  }
+  return lines.join('\n')
 }
 
 type CellValue = string | number | boolean | null

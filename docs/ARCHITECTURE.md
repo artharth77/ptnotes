@@ -80,9 +80,9 @@ Run `npm run typecheck` and `npm run lint` after any change.
 | Chat titles         | Hybrid: local heuristic from first message immediately, refined by a background AI completion; manual rename supported; history popup shows title + message count                                                                                                                                        |
 | Chat note mention   | `@` opens note list → inserts `note:<notename>` → AI calls `read_note`                                                                                                                                                                                                                                   |
 | Chat kanban mention | `!` opens kanban cards → inserts `kanban:<card title>` (filterable by title)                                                                                                                                                                                                                             |
-| Chat file mention   | `#` opens project file list (`files:list` → `<project>/files/*` for PDF + Excel + text) → inserts `file:<filename>` → AI calls `read_file` (content-based: pdf-parse for PDFs, exceljs for .xlsx/.xlsm, raw text for any text file)                                                                      |
+| Chat file mention   | `#` opens project file list (`files:list` → `<project>/files/*` for PDF + Word + Excel + text) → inserts `file:<filename>` → AI calls `read_file` (content-based: pdf-parse for PDFs, jszip+cheerio for .docx, exceljs for .xlsx/.xlsm, raw text for any text file)                                                                                     |
 
-| Chat file drop | Multi-file drag & drop into the chat: every supported file is copied silently to `<project>/files/` (no popup) and referenced via `#` mentions; support is **content-based** (any text file plus PDFs, detected by content not extension) — non-PDF binary files are rejected; if none are added, an alert is shown |
+| Chat file drop | Multi-file drag & drop into the chat: every supported file is copied silently to `<project>/files/` (no popup) and referenced via `#` mentions; support is **content-based** (any text file plus PDFs, Word .docx and Excel workbooks, detected by content not extension) — other binary files are rejected; if none are added, an alert is shown |
 | Chat response rendering | Markdown via `react-markdown` + `remark-gfm` + `remark-breaks` (raw HTML escaped → XSS-safe) |
 | Web search | DuckDuckGo only (free, no API key) |
 | Page reading | Local cheerio parsing (private, no third-party service) |
@@ -298,8 +298,8 @@ ChatPanel (renderer) ──send──▶ Main process
 - A `!` kanban mention inserts `kanban:<card title>` which is sent to the model as-is.
 - A `#` file mention inserts `file:<filename>`; the system prompt instructs the AI that a
   `file:<filename>` message means it must call `read_file` (content-based local extraction;
-  `.pdf` via pdf-parse, any text file as raw text) before responding — so previously dropped
-  files can be reused without re-dragging.
+  `.pdf` via pdf-parse, `.docx` via jszip+cheerio as markdown-style text, any text file as raw
+  text) before responding — so previously dropped files can be reused without re-dragging.
 - The system prompt includes an orchestration guideline: delegate parallel deliverables to
   background modules via `start_module` (passing `expect` to specify the result payload), then
   call `wait_modules` with all runIds and continue with the returned results; never wait when the
@@ -383,7 +383,7 @@ ChatPanel (renderer) ──send──▶ Main process
 | `update_kanban_card`    | update fields of an existing card (matched by title, case-insensitive); only the provided fields are changed, `null` clears, `newTitle` renames                                                                                                                                                                                                                                                                                                                                 |
 | `move_kanban_card`      | move a card (matched by title) to another column (matched by name)                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `delete_kanban_card`    | delete a card (matched by title; requires user confirmation dialog)                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `read_file`             | extract text of a project file locally via `readFileAsText` (pdf-parse for `.pdf`, exceljs for `.xlsx`/`.xlsm` with optional `query` — `workspace=<name\|n>` sheet filter or `list=workspace` index/name list, raw text for any text file)                                                                                                                                                                                                                                      |
+| `read_file`             | extract text of a project file locally via `readFileAsText` (pdf-parse for `.pdf`, jszip+cheerio for `.docx` as markdown-style text — headings, paragraphs and tables, exceljs for `.xlsx`/`.xlsm` with optional `query` — `workspace=<name\|n>` sheet filter or `list=workspace` index/name list, raw text for any text file)                                                                                                                                                                                                                                      |
 | `create_skill`          | upsert a skill (`scope`: `global`/`project`) from name + description + content                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `read_skill`            | load a skill's `SKILL.md` or a sibling file inside that skill folder (`file` param, relative path like `FORMAT.md` or `doc/DOC.md`); skills are listed in the system prompt, no separate `list_skills`                                                                                                                                                                                                                                                                          |
 | `delete_skill`          | delete a skill (requires user confirmation dialog)                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -416,14 +416,16 @@ ChatPanel (renderer) ──send──▶ Main process
 ### PDF attachments (drag & drop into chat)
 
 - Dropping one or more files onto the chat drawer copies each **supported** file (any text file —
-  `.md`, `.txt`, `.json`, `.log`, `.yaml`, `.yml`, … — plus PDFs) silently into
+  `.md`, `.txt`, `.json`, `.log`, `.yaml`, `.yml`, … — plus PDFs, Word `.docx` and Excel
+  `.xlsx`/`.xlsm`) silently into
   `<project>/files/<slug><ext>` (`copyFileToProject`) with no dialog, refreshes the file list, and
   inserts a `file:<filename>` mention per file into the chat input. Support is decided by **content**
   (`detectFileKind`) not extension: text files of any extension are accepted, binaries are accepted
-  only if they are PDFs, and other binaries are rejected. Unsupported files in the drop are skipped;
+  only if they are PDFs, Word documents or Excel workbooks, and other binaries are rejected.
+  Unsupported files in the drop are skipped;
   if **none** of the dropped files are supported, an alert is shown and nothing is copied. Chat
   messages containing `file:<filename>` are handled by the `read_file` tool (local `pdf-parse` for
-  `.pdf`, raw text for any text file).
+  `.pdf`, jszip+cheerio markdown-style text for `.docx`, raw text for any text file).
 - If a file with the same name already exists in `files/` with the same size **and** SHA-256 hash,
   the existing file is reused instead of saving a new `-2` copy.
 - Long files are truncated to `MAX_PDF_CHARS` with a `truncated` warning; scanned/image PDFs surface a

@@ -717,14 +717,14 @@ export const tools: PTTool[] = [
       function: {
         name: 'read_file',
         description:
-          'Read the text content of a project file (PDF, Excel workbooks converted to JSON/CSV, or any text file such as markdown, plain text, JSON, logs or YAML; files live in the project files folder, referenced as `file:<name>`). Excel workbooks can be filtered to a single worksheet with the `query` parameter. Extracts the text locally and returns it, so the user does not need to drag and drop the file again.',
+          'Read the text content of a project file (PDF, Word documents converted to markdown, Excel workbooks converted to JSON/CSV, or any text file such as markdown, plain text, JSON, logs or YAML; files live in the project files folder, referenced as `file:<name>`). Excel workbooks can be filtered to a single worksheet with the `query` parameter. Extracts the text locally and returns it, so the user does not need to drag and drop the file again.',
         parameters: {
           type: 'object',
           properties: {
             name: {
               type: 'string',
               description:
-                'Name of the file, e.g. report.pdf, data.xlsx, notes.md, data.json or app.log'
+                'Name of the file, e.g. report.pdf, report.docx, data.xlsx, notes.md, data.json or app.log'
             },
             format: {
               type: 'string',
