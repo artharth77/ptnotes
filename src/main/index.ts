@@ -179,10 +179,6 @@ function createWindow(windowState: WindowState): void {
     }
   })
 
-  if (windowState.isMaximized) {
-    mainWindow.maximize()
-  }
-
   const saveWindowState = (): void => {
     if (!mainWindow) return
     if (mainWindow.isDestroyed()) return
@@ -197,6 +193,7 @@ function createWindow(windowState: WindowState): void {
 
   mainWindow.on('ready-to-show', () => {
     mainWindow?.show()
+    if (windowState.isMaximized) mainWindow?.maximize()
     closeSplashWindow()
   })
 
