@@ -38,7 +38,8 @@ import type {
   Schedule,
   ScheduleMeta,
   Tab,
-  ToolCallInfo
+  ToolCallInfo,
+  FileEntry
 } from '@shared/types'
 
 function readKanbanCollapsed(project: string): Record<string, boolean> {
@@ -66,6 +67,7 @@ interface AppState {
   kanbanCreatingColumnId: string | null
   kanbanCollapsed: Record<string, boolean>
   projectFiles: string[]
+  projectFileEntries: FileEntry[]
   schedules: ScheduleMeta[]
   activeScheduleId: string | null
   scheduleContent: Schedule | null
@@ -268,6 +270,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   kanbanCreatingColumnId: null,
   kanbanCollapsed: {},
   projectFiles: [],
+  projectFileEntries: [],
   schedules: [],
   activeScheduleId: null,
   scheduleContent: null,
@@ -798,9 +801,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async refreshFiles() {
     const project = get().activeProject
-    if (!project) return set({ projectFiles: [] })
-    const projectFiles = await window.ptnotes.files.list(project)
-    set({ projectFiles })
+    if (!project) return set({ projectFiles: [], projectFileEntries: [] })
+    const projectFileEntries = await window.ptnotes.files.listEntries(project)
+    set({
+      projectFileEntries,
+      projectFiles: projectFileEntries.filter((e) => !e.isDir).map((e) => e.name)
+    })
   },
 
   async refreshSchedules() {

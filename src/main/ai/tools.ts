@@ -717,14 +717,14 @@ export const tools: PTTool[] = [
       function: {
         name: 'read_file',
         description:
-          'Read the text content of a project file (PDF, Word documents converted to markdown, Excel workbooks converted to JSON/CSV, or any text file such as markdown, plain text, JSON, logs or YAML; files live in the project files folder, referenced as `file:<name>`). Excel workbooks can be filtered to a single worksheet with the `query` parameter. Extracts the text locally and returns it, so the user does not need to drag and drop the file again. Content is truncated at 240,000 characters; for long files use the `page` parameter to read further pages (the result reports `totalPages`).',
+          'Read the text content of a project file (PDF, Word documents converted to markdown, Excel workbooks converted to JSON/CSV, or any text file such as markdown, plain text, JSON, logs or YAML; files live in the project files folder, referenced as `file:<name>` or `file:<subfolder>/<name>` when the file is inside a subfolder). Excel workbooks can be filtered to a single worksheet with the `query` parameter. Extracts the text locally and returns it, so the user does not need to drag and drop the file again. Content is truncated at 240,000 characters; for long files use the `page` parameter to read further pages (the result reports `totalPages`).',
         parameters: {
           type: 'object',
           properties: {
             name: {
               type: 'string',
               description:
-                'Name of the file, e.g. report.pdf, report.docx, data.xlsx, notes.md, data.json or app.log'
+                'Path of the file relative to the project files folder, e.g. report.pdf, docs/report.pdf, data.xlsx, notes.md or app.log'
             },
             format: {
               type: 'string',
@@ -752,7 +752,7 @@ export const tools: PTTool[] = [
       if (!name) return JSON.stringify({ ok: false, error: 'No file name provided' })
       const path = await ctx.service.projectFilePath(project, name)
       if (!path) {
-        const files = await ctx.service.listFiles(project)
+        const files = await ctx.service.listFilesDeep(project)
         return JSON.stringify({
           ok: false,
           error: `File "${name}" not found in this project. Available files: ${

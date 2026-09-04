@@ -434,6 +434,41 @@ assert.equal(
 )
 assert.equal(await service.projectFilePath('Test', '../board.json'), null, 'rejects path traversal')
 
+// ---- subfolder support: listFileEntries / projectFilePath / listFilesDeep ----
+await fs.mkdir(`${ROOT}/Test/files/docs/sub`, { recursive: true })
+await fs.writeFile(`${ROOT}/Test/files/docs/inner.md`, '# Inner note\ninside a folder')
+await fs.writeFile(`${ROOT}/Test/files/docs/sub/deep.txt`, 'deep text')
+const entriesTop = await service.listFileEntries('Test')
+assert.ok(
+  entriesTop.some((e) => e.isDir && e.name === 'docs'),
+  'top-level entries include the docs folder'
+)
+assert.ok(entriesTop.some((e) => !e.isDir && e.name === 'my-report.pdf'))
+const entriesDocs = await service.listFileEntries('Test', 'docs')
+assert.ok(
+  entriesDocs.some((e) => !e.isDir && e.name === 'inner.md'),
+  'docs entries include inner.md'
+)
+assert.ok(
+  entriesDocs.some((e) => e.isDir && e.name === 'sub'),
+  'docs entries include sub folder'
+)
+assert.deepEqual(await service.listFileEntries('Test', 'nope'), [], 'missing subfolder lists empty')
+assert.equal(
+  await service.projectFilePath('Test', 'docs/inner.md'),
+  `${ROOT}/Test/files/docs/inner.md`,
+  'resolves subfolder paths'
+)
+assert.equal(
+  await service.projectFilePath('Test', 'docs/../my-report.pdf'),
+  null,
+  'rejects traversal inside subpaths'
+)
+assert.equal(await service.projectFilePath('Test', '/etc/passwd'), null, 'rejects absolute paths')
+const deepFiles = await service.listFilesDeep('Test')
+assert.ok(deepFiles.includes('docs/inner.md'), 'listFilesDeep includes nested files')
+assert.ok(deepFiles.includes('docs/sub/deep.txt'), 'listFilesDeep includes deep nested files')
+
 FAKE_TEXT = 'Hello PDF content'
 FAKE_PAGES = 2
 const readFileTool = tools.find((t) => t.definition.function.name === 'read_file')!
@@ -445,6 +480,15 @@ assert.match(rr.text, /Hello PDF content/)
 const rrMissing = JSON.parse(await readFileTool.execute({ name: 'nope.pdf' }, ctx))
 assert.equal(rrMissing.ok, false)
 assert.match(rrMissing.error, /not found/)
+
+// ---- read_file tool: files inside subfolders ----
+const rrSub = JSON.parse(await readFileTool.execute({ name: 'docs/inner.md' }, ctx))
+assert.equal(rrSub.ok, true, 'read_file reads files inside subfolders')
+assert.match(rrSub.text, /inside a folder/)
+const rrSubMissing = JSON.parse(await readFileTool.execute({ name: 'docs/nope.md' }, ctx))
+assert.equal(rrSubMissing.ok, false)
+assert.match(rrSubMissing.error, /docs\/nope\.md/)
+assert.match(rrSubMissing.error, /docs\/inner\.md/, 'available files list includes nested paths')
 
 // ---- read_file tool: page parameter ----
 const rrPage = JSON.parse(await readFileTool.execute({ name: 'my-report.pdf', page: 2 }, ctx))

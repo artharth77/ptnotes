@@ -1,4 +1,4 @@
-import { promises as fs } from 'fs'
+import { promises as fs, type Dirent } from 'fs'
 import { createHash, randomUUID } from 'crypto'
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'path'
 import { app, shell } from 'electron'
@@ -9,6 +9,7 @@ import type {
   ChatSessionMeta,
   ChatThread,
   CreateProjectResult,
+  FileEntry,
   NoteMeta,
   NoteSearchMatch,
   Project,
@@ -55,6 +56,7 @@ const WELCOME_ID = 'welcome'
 const REGISTRY_FILE = '.ptnotes-projects.json'
 const GLOBAL_SKILLS_DIR = '.skills'
 const BUILTIN_SKILLS_DIR = 'builtin-skills'
+const MAX_LISTED_FILES = 500
 const WELCOME_NOTE = `# Welcome to PTNotes
 
 This is your first note. Everything you write here is stored as markdown in:
@@ -1085,22 +1087,70 @@ export class PTNotesService {
   }
 
   async listFiles(project: string): Promise<string[]> {
-    const dir = this.filesDir(project)
+    const entries = await this.listFileEntries(project)
+    return entries.filter((e) => !e.isDir).map((e) => e.name)
+  }
+
+  /**
+   * Resolve a user-supplied path (may contain `sub/folder` segments) against
+   * `<project>/files/`. Returns null for absolute paths, empty/dot segments,
+   * `..` escapes or paths that collapse back to the files root itself.
+   */
+  private resolveFilesPath(project: string, subpath: string): string | null {
+    const base = this.filesDir(project)
+    const rel = subpath.trim()
+    if (!rel) return base
+    if (isAbsolute(rel)) return null
+    const segments = rel.split(/[\\/]+/).filter((s) => s !== '' && s !== '.')
+    if (segments.length === 0 || segments.includes('..')) return null
+    const full = join(base, ...segments)
+    return full.startsWith(base + sep) ? full : null
+  }
+
+  /** One level of `<project>/files/<subpath>`: files and folders, dot-entries skipped. */
+  async listFileEntries(project: string, subpath = ''): Promise<FileEntry[]> {
+    const target = this.resolveFilesPath(project, subpath)
+    if (!target) return []
     try {
-      const entries = await fs.readdir(dir, { withFileTypes: true })
+      const entries = await fs.readdir(target, { withFileTypes: true })
       return entries
-        .filter((e) => e.isFile() && !e.name.startsWith('.'))
-        .map((e) => e.name)
-        .sort((a, b) => a.localeCompare(b))
+        .filter((e) => !e.name.startsWith('.'))
+        .map((e) => ({ name: e.name, isDir: e.isDirectory() }))
+        .sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1))
     } catch {
       return []
     }
   }
 
+  /** Every file under `<project>/files/` as a relative path (capped, for AI listings). */
+  async listFilesDeep(project: string): Promise<string[]> {
+    const out: string[] = []
+    const walk = async (dir: string, prefix: string): Promise<void> => {
+      if (out.length >= MAX_LISTED_FILES) return
+      let entries: Dirent[] = []
+      try {
+        entries = await fs.readdir(dir, { withFileTypes: true })
+      } catch {
+        return
+      }
+      for (const e of entries) {
+        if (out.length >= MAX_LISTED_FILES) return
+        if (e.name.startsWith('.')) continue
+        if (e.isDirectory()) {
+          await walk(join(dir, e.name), prefix ? `${prefix}/${e.name}` : e.name)
+        } else if (e.isFile()) {
+          out.push(prefix ? `${prefix}/${e.name}` : e.name)
+        }
+      }
+    }
+    await walk(this.filesDir(project), '')
+    return out.sort((a, b) => a.localeCompare(b))
+  }
+
   async projectFilePath(project: string, fileName: string): Promise<string | null> {
-    const base = basename(fileName)
-    if (base !== fileName) return null
-    const full = join(this.filesDir(project), base)
+    if (!fileName.trim()) return null
+    const full = this.resolveFilesPath(project, fileName)
+    if (!full) return null
     return (await this.pathExists(full)) ? full : null
   }
 

@@ -178,6 +178,12 @@ export interface PdfExtractResult {
   totalPages?: number
 }
 
+/** One entry in a project files folder (the `#` file-mention picker). */
+export interface FileEntry {
+  name: string
+  isDir: boolean
+}
+
 export interface ChatSessionMeta {
   sessionId: string
   project: string

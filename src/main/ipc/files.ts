@@ -25,6 +25,13 @@ export function registerFilesIpc(
   })
 
   ipcMain.handle(
+    'files:listEntries',
+    async (_e: IpcMainInvokeEvent, project: string, subpath?: string) => {
+      return service.listFileEntries(project, subpath ?? '')
+    }
+  )
+
+  ipcMain.handle(
     'files:extract',
     async (_e: IpcMainInvokeEvent, path: string): Promise<PdfExtractResult> => {
       return readFileAsText(path)

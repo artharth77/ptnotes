@@ -4,6 +4,7 @@ import {
   mdiChevronDown,
   mdiCogOutline,
   mdiFileOutline,
+  mdiFolderOpenOutline,
   mdiPencil,
   mdiPlus,
   mdiPuzzleOutline,
@@ -13,6 +14,7 @@ import {
   mdiTrashCanOutline
 } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
+import { fileTokenHasBareSpace, encodeFileToken, parseFileToken } from '@shared/fileMention'
 import {
   formatGroupDateLabel,
   formatGroupTimestamp,
@@ -24,7 +26,7 @@ import {
   splitMentionSegments
 } from '@shared/bots'
 import type { GroupChatMeta, GroupMessage } from '@shared/bots'
-import type { AskAnswer, AskQuestion } from '@shared/types'
+import type { AskAnswer, AskQuestion, FileEntry } from '@shared/types'
 import { MarkdownContent } from './MarkdownContent'
 import { USER_MSG_COLLAPSE_LIMIT } from './chatContent'
 import { Modal } from './Modal'
@@ -55,7 +57,7 @@ type MentionItem =
   | { kind: 'bot'; id: string; name: string; role?: string }
   | { kind: 'note'; id: string; name: string }
   | { kind: 'kanban'; id: string; name: string }
-  | { kind: 'file'; id: string; name: string }
+  | { kind: 'file'; id: string; name: string; isDir: boolean }
 
 /** Right-drawer view: multi-bot group chat with a leader, @mentions and background tasks. */
 export function GroupChatPanel(): React.JSX.Element {
@@ -94,7 +96,7 @@ export function GroupChatPanel(): React.JSX.Element {
   const notes = useAppStore((s) => s.notes)
   const schedules = useAppStore((s) => s.schedules)
   const kanban = useAppStore((s) => s.kanban)
-  const projectFiles = useAppStore((s) => s.projectFiles)
+  const projectFileEntries = useAppStore((s) => s.projectFileEntries)
   const refreshFiles = useAppStore((s) => s.refreshFiles)
   const selectNote = useAppStore((s) => s.selectNote)
   const selectSchedule = useAppStore((s) => s.selectSchedule)
@@ -118,6 +120,7 @@ export function GroupChatPanel(): React.JSX.Element {
     query: string
   } | null>(null)
   const [mentionIndex, setMentionIndex] = useState(0)
+  const [dirEntries, setDirEntries] = useState<Record<string, FileEntry[]>>({})
   const [showJumpDown, setShowJumpDown] = useState(false)
 
   useEffect(() => {
@@ -232,6 +235,25 @@ export function GroupChatPanel(): React.JSX.Element {
     [activeGroup, botProfiles]
   )
 
+  const fileMentionDir = mention?.kind === 'file' ? parseFileToken(mention.query).dir : null
+
+  useEffect(() => {
+    if (!fileMentionDir || !activeProject) return
+    if (dirEntries[fileMentionDir]) return
+    let cancelled = false
+    void window.ptnotes.files
+      .listEntries(activeProject, fileMentionDir)
+      .then((entries) => {
+        if (!cancelled) setDirEntries((prev) => ({ ...prev, [fileMentionDir]: entries }))
+      })
+      .catch(() => {
+        if (!cancelled) setDirEntries((prev) => ({ ...prev, [fileMentionDir]: [] }))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [fileMentionDir, activeProject, dirEntries])
+
   const mentionItems = useMemo<MentionItem[]>(() => {
     if (!mention || !activeGroup) return []
     const q = mention.query.toLowerCase()
@@ -241,9 +263,17 @@ export function GroupChatPanel(): React.JSX.Element {
         .map((c) => ({ kind: 'kanban', id: c.id, name: c.title }))
     }
     if (mention.kind === 'file') {
-      return projectFiles
-        .filter((f) => f.toLowerCase().includes(q))
-        .map((f) => ({ kind: 'file', id: f, name: f }))
+      const { dir, filter } = parseFileToken(mention.query)
+      const q = filter.toLowerCase()
+      const entries = dir ? (dirEntries[dir] ?? []) : projectFileEntries
+      return entries
+        .filter((e) => e.name.toLowerCase().includes(q))
+        .map((e) => ({
+          kind: 'file' as const,
+          id: dir ? `${dir}/${e.name}` : e.name,
+          name: e.name,
+          isDir: e.isDir
+        }))
     }
     const bots: MentionItem[] = groupBots
       .filter((b) => b.id.toLowerCase().includes(q) || b.name.toLowerCase().includes(q))
@@ -252,7 +282,7 @@ export function GroupChatPanel(): React.JSX.Element {
       .filter((n) => n.name.toLowerCase().includes(q))
       .map((n) => ({ kind: 'note', id: n.id, name: n.name }))
     return [...bots, ...noteItems]
-  }, [mention, activeGroup, groupBots, notes, kanban, projectFiles])
+  }, [mention, activeGroup, groupBots, notes, kanban, projectFileEntries, dirEntries])
 
   function updateMention(value: string, caret: number): void {
     const before = value.slice(0, caret)
@@ -262,14 +292,22 @@ export function GroupChatPanel(): React.JSX.Element {
       return
     }
     const token = before.slice(last + 1)
-    if (token.includes(' ')) {
-      setMention(null)
-      return
-    }
     const ch = before[last]
-    if (ch === '@') setMention({ kind: 'at', start: last, query: token })
-    else if (ch === '!') setMention({ kind: 'kanban', start: last, query: token })
-    else {
+    if (ch !== '#') {
+      if (token.includes(' ')) {
+        setMention(null)
+        return
+      }
+      setMention(
+        ch === '@'
+          ? { kind: 'at', start: last, query: token }
+          : { kind: 'kanban', start: last, query: token }
+      )
+    } else {
+      if (fileTokenHasBareSpace(token)) {
+        setMention(null)
+        return
+      }
       if (!mention || mention.kind !== 'file' || mention.start !== last) {
         void refreshFiles()
       }
@@ -282,6 +320,10 @@ export function GroupChatPanel(): React.JSX.Element {
     if (!mention) return
     const before = input.slice(0, mention.start)
     const after = input.slice(mention.start + 1 + mention.query.length)
+    if (item.kind === 'file' && item.isDir) {
+      drillIntoFolder(item, before, after)
+      return
+    }
     const token =
       item.kind === 'bot'
         ? `@${item.id} `
@@ -289,11 +331,31 @@ export function GroupChatPanel(): React.JSX.Element {
           ? `note:${item.name} `
           : item.kind === 'kanban'
             ? `kanban:${item.id} `
-            : `file:${item.name} `
+            : `file:${item.id} `
     const next = `${before}${token}${after}`
     setInput(next)
     setMention(null)
     inputRef.current?.focus()
+  }
+
+  /** Replace the current `#token` with `#folder/` and keep the popup open on that folder. */
+  function drillIntoFolder(
+    item: Extract<MentionItem, { kind: 'file' }>,
+    before: string,
+    after: string
+  ): void {
+    const token = `#${encodeFileToken(item.id)}/`
+    const next = `${before}${token}${after}`
+    const caret = before.length + token.length
+    setInput(next)
+    updateMention(next, caret)
+    requestAnimationFrame(() => {
+      const el = inputRef.current
+      if (el) {
+        el.focus()
+        el.setSelectionRange(caret, caret)
+      }
+    })
   }
 
   async function send(): Promise<void> {
@@ -307,6 +369,14 @@ export function GroupChatPanel(): React.JSX.Element {
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>): void {
     if (mentionItems.length > 0) {
+      if (e.key === '/' && mention?.kind === 'file') {
+        const item = mentionItems[mentionIndex]
+        if (item.kind === 'file' && item.isDir) {
+          e.preventDefault()
+          insertMention(item)
+          return
+        }
+      }
       if (e.key === 'ArrowDown') {
         e.preventDefault()
         setMentionIndex((i) => (i + 1) % mentionItems.length)
@@ -520,6 +590,7 @@ export function GroupChatPanel(): React.JSX.Element {
             {mentionItems.map((item, i) => (
               <div
                 key={`${item.kind}:${item.id}`}
+                title={item.kind === 'file' && item.id !== item.name ? item.id : undefined}
                 ref={(el) => {
                   if (el && i === mentionIndex) el.scrollIntoView({ block: 'nearest' })
                 }}
@@ -547,7 +618,9 @@ export function GroupChatPanel(): React.JSX.Element {
                           item.kind === 'kanban'
                             ? KANBAN_LINK_ICON
                             : item.kind === 'file'
-                              ? mdiFileOutline
+                              ? item.isDir
+                                ? mdiFolderOpenOutline
+                                : mdiFileOutline
                               : NOTE_LINK_ICON
                         }
                         size={16}

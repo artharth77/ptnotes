@@ -18,6 +18,7 @@ import type {
   ChatThread,
   ConfirmResponse,
   CreateProjectResult,
+  FileEntry,
   GroupChatData,
   GroupChatMeta,
   GroupMessagePageOpts,
@@ -264,6 +265,8 @@ const api = {
   },
   files: {
     list: (project: string): Promise<string[]> => ipcRenderer.invoke('files:list', project),
+    listEntries: (project: string, subpath?: string): Promise<FileEntry[]> =>
+      ipcRenderer.invoke('files:listEntries', project, subpath),
     getPathForFile: (file: File): string => webUtils.getPathForFile(file),
     copyToProject: (project: string, sourcePath: string, fileName?: string): Promise<string> =>
       ipcRenderer.invoke('files:copyToProject', project, sourcePath, fileName),
