@@ -103,3 +103,20 @@ export function sortExplorerEntries(entries: ExplorerEntry[], sort: ExplorerSort
   }
   return [...entries.filter((e) => e.isDir).sort(cmp), ...entries.filter((e) => !e.isDir).sort(cmp)]
 }
+
+/** Copy of the listing keeping only entries whose name contains the query
+ *  (case-insensitive substring); an empty query returns the input unchanged. */
+export function filterExplorerEntries(entries: ExplorerEntry[], query: string): ExplorerEntry[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return entries
+  return entries.filter((e) => e.name.toLowerCase().includes(q))
+}
+
+/** The visible explorer listing: name filter applied first, then the column sort. */
+export function visibleExplorerEntries(
+  entries: ExplorerEntry[],
+  sort: ExplorerSort,
+  filter: string
+): ExplorerEntry[] {
+  return sortExplorerEntries(filterExplorerEntries(entries, filter), sort)
+}

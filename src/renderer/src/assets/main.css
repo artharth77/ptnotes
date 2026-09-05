@@ -7631,6 +7631,19 @@ fieldset.kanban-form {
   font-size: 12px;
 }
 
+.file-explorer-filter {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 180px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.file-explorer-filter .note-filter {
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
 .file-explorer-error {
   padding: 5px 12px;
   font-size: 12px;

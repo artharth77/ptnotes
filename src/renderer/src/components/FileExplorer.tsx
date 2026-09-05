@@ -36,7 +36,7 @@ import {
   isImageFile,
   isPdfFile,
   isTextFile,
-  sortExplorerEntries
+  visibleExplorerEntries
 } from '@shared/filesExplorer'
 import { useAppStore } from '../store/useAppStore'
 import { friendlyError } from '../errors'
@@ -199,9 +199,10 @@ export function FileListPanel(): React.JSX.Element {
   const refreshFiles = useAppStore((s) => s.refreshFiles)
   const rawEntries = useAppStore((s) => s.explorerEntries)
   const explorerSort = useAppStore((s) => s.explorerSort)
+  const explorerFilter = useAppStore((s) => s.explorerFilter)
   const entries = useMemo(
-    () => sortExplorerEntries(rawEntries, explorerSort),
-    [rawEntries, explorerSort]
+    () => visibleExplorerEntries(rawEntries, explorerSort, explorerFilter),
+    [rawEntries, explorerSort, explorerFilter]
   )
   const cwd = useAppStore((s) => s.explorerCwd)
   const loadExplorer = useAppStore((s) => s.loadExplorer)
@@ -417,9 +418,11 @@ export function FileListPanel(): React.JSX.Element {
   useEffect(() => {
     function moveSelection(dir: 1 | -1): void {
       const state = useAppStore.getState()
-      const paths = sortExplorerEntries(state.explorerEntries, state.explorerSort).map(
-        (en) => en.path
-      )
+      const paths = visibleExplorerEntries(
+        state.explorerEntries,
+        state.explorerSort,
+        state.explorerFilter
+      ).map((en) => en.path)
       const rows = state.explorerCwd ? ['..', ...paths] : paths
       if (rows.length === 0) return
       const offset = state.explorerCwd ? 1 : 0
@@ -635,6 +638,30 @@ export function FileListPanel(): React.JSX.Element {
           <MdiIcon path={mdiFolderSearchOutline} size={16} />
           <span>Show in Folder</span>
         </button>
+        <div className="file-explorer-filter">
+          <input
+            type="text"
+            className="note-filter"
+            placeholder="Filter files"
+            value={explorerFilter}
+            onChange={(e) => useAppStore.getState().setExplorerFilter(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.stopPropagation()
+                useAppStore.getState().setExplorerFilter('')
+              }
+            }}
+          />
+          {explorerFilter && (
+            <button
+              className="note-filter-clear"
+              title="Clear filter"
+              onClick={() => useAppStore.getState().setExplorerFilter('')}
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </div>
       {error && <div className="file-explorer-error">{error}</div>}
       <div
@@ -713,11 +740,17 @@ export function FileListPanel(): React.JSX.Element {
             </div>
           )
         })}
-        {entries.length === 0 && <div className="file-explorer-empty">This folder is empty</div>}
+        {entries.length === 0 && (
+          <div className="file-explorer-empty">
+            {explorerFilter ? 'No matches' : 'This folder is empty'}
+          </div>
+        )}
       </div>
       <div className="file-explorer-statusbar">
         <span className="file-explorer-item-count">
-          {entries.length} item{entries.length === 1 ? '' : 's'}
+          {explorerFilter
+            ? `${entries.length} of ${rawEntries.length} items`
+            : `${entries.length} item${entries.length === 1 ? '' : 's'}`}
         </span>
         <span className="file-explorer-statusbar-sep" />
         <MdiIcon

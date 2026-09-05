@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { rollupScheduleTasks } from '@shared/planner'
 import { GROUP_CHAT_PAGE_SIZE } from '@shared/bots'
-import { ancestorsOf, sortExplorerEntries } from '@shared/filesExplorer'
+import { ancestorsOf, visibleExplorerEntries } from '@shared/filesExplorer'
 import type {
   BotGroupEvent,
   BotProfile,
@@ -124,6 +124,8 @@ interface AppState {
   explorerCollapsed: string[]
   /** Column sort of the file list; null = default (folders first, name asc). */
   explorerSort: ExplorerSort
+  /** Name filter of the file list ('' = no filter). */
+  explorerFilter: string
   formatHelperEnabled: boolean
   theme: 'light' | 'dark' | 'system'
   fontSize: 'small' | 'default' | 'large' | 'xlarge'
@@ -260,6 +262,7 @@ interface AppState {
   selectExplorerEntry: (path: string, mode: 'single' | 'toggle' | 'range') => void
   setExplorerSelected: (paths: string[]) => void
   setExplorerSort: (sort: ExplorerSort) => void
+  setExplorerFilter: (filter: string) => void
   setFormatHelperEnabled: (enabled: boolean) => void
   setTheme: (theme: 'light' | 'dark' | 'system') => void
   setFontSize: (size: 'small' | 'default' | 'large' | 'xlarge') => void
@@ -338,6 +341,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   explorerExpanded: [''],
   explorerCollapsed: [],
   explorerSort: null,
+  explorerFilter: '',
   formatHelperEnabled: localStorage.getItem('ptnotes:formatHelper') !== '0',
   theme: (localStorage.getItem('ptnotes:theme') as 'light' | 'dark' | 'system' | null) ?? 'system',
   fontSize:
@@ -1599,7 +1603,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       return
     }
     if (mode === 'range' && lastClicked != null) {
-      const entries = sortExplorerEntries(get().explorerEntries, get().explorerSort)
+      const entries = visibleExplorerEntries(
+        get().explorerEntries,
+        get().explorerSort,
+        get().explorerFilter
+      )
       const lo = entries.findIndex((e) => e.path === lastClicked)
       const hi = entries.findIndex((e) => e.path === path)
       if (hi !== -1) {
@@ -1621,6 +1629,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setExplorerSort(sort) {
     set({ explorerSort: sort })
+  },
+
+  setExplorerFilter(filter) {
+    set({ explorerFilter: filter })
   },
 
   setFormatHelperEnabled(enabled) {
