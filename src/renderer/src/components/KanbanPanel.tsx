@@ -274,6 +274,18 @@ export function KanbanPanel(): React.JSX.Element {
                   onClick={() => toggleKanbanColumn(col.id)}
                   onContextMenu={(e) => openMenu('column', col.id, e)}
                 >
+                  <MdiIcon
+                    path={collapsed ? mdiChevronRight : mdiChevronDown}
+                    size={14}
+                    className="kanban-col-chevron"
+                  />
+                  {col.color && (
+                    <span className="kanban-col-swatch" style={{ background: col.color }} />
+                  )}
+                  <span className="kanban-col-title" title={col.title}>
+                    {col.title}
+                  </span>
+                  <span className="kanban-col-count">{cards.length}</span>
                   <span
                     className="kanban-col-grip"
                     title="Drag to reorder column"
@@ -289,18 +301,6 @@ export function KanbanPanel(): React.JSX.Element {
                   >
                     <MdiIcon path={mdiDrag} size={14} />
                   </span>
-                  <MdiIcon
-                    path={collapsed ? mdiChevronRight : mdiChevronDown}
-                    size={14}
-                    className="kanban-col-chevron"
-                  />
-                  {col.color && (
-                    <span className="kanban-col-swatch" style={{ background: col.color }} />
-                  )}
-                  <span className="kanban-col-title" title={col.title}>
-                    {col.title}
-                  </span>
-                  <span className="kanban-col-count">{cards.length}</span>
                 </div>
                 {!collapsed &&
                   cards.map((card) => (
