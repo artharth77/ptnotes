@@ -180,6 +180,10 @@ body {
   opacity: 0.6;
 }
 
+.resizer:hover {
+  transition: background-color 0.15s ease 0.4s;
+}
+
 .sidebar-content {
   flex: 1;
   min-height: 0;
