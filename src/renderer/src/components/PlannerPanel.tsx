@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
+  mdiContentCopy,
   mdiDotsVertical,
   mdiFolderOpenOutline,
   mdiPencil,
@@ -24,6 +25,7 @@ export function PlannerPanel(): React.JSX.Element {
   const selectSchedule = useAppStore((s) => s.selectSchedule)
   const createSchedule = useAppStore((s) => s.createSchedule)
   const renameSchedule = useAppStore((s) => s.renameSchedule)
+  const duplicateSchedule = useAppStore((s) => s.duplicateSchedule)
   const deleteSchedule = useAppStore((s) => s.deleteSchedule)
   const refreshSchedules = useAppStore((s) => s.refreshSchedules)
 
@@ -106,7 +108,7 @@ export function PlannerPanel(): React.JSX.Element {
     }
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     const menuW = 180
-    const menuH = 130
+    const menuH = 168
     const x = Math.min(rect.right, window.innerWidth - menuW - 8)
     const y = Math.min(rect.bottom, window.innerHeight - menuH - 8)
     setMenuPos({ x: Math.max(8, x), y: Math.max(8, y) })
@@ -220,6 +222,18 @@ export function PlannerPanel(): React.JSX.Element {
                       <MdiIcon path={mdiFolderOpenOutline} size={15} />
                     </span>{' '}
                     Show in Folder
+                  </button>
+                  <button
+                    className="note-menu-item"
+                    onClick={() => {
+                      setMenuFor(null)
+                      void duplicateSchedule(menuFor)
+                    }}
+                  >
+                    <span className="note-menu-icon">
+                      <MdiIcon path={mdiContentCopy} size={15} />
+                    </span>{' '}
+                    Duplicate
                   </button>
                   <button
                     className="note-menu-item danger"

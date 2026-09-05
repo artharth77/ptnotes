@@ -160,6 +160,8 @@ const api = {
       ipcRenderer.invoke('planner:create', project, name),
     rename: (project: string, id: string, newName: string): Promise<ScheduleMeta> =>
       ipcRenderer.invoke('planner:rename', project, id, newName),
+    duplicate: (project: string, id: string): Promise<ScheduleMeta> =>
+      ipcRenderer.invoke('planner:duplicate', project, id),
     delete: (project: string, id: string): Promise<void> =>
       ipcRenderer.invoke('planner:delete', project, id),
     reveal: (project: string, id: string): Promise<void> =>

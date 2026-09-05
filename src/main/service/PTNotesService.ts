@@ -1870,6 +1870,29 @@ export class PTNotesService {
     })
   }
 
+  async duplicateSchedule(project: string, id: string): Promise<ScheduleMeta> {
+    return this.withPlannerLock(project, async () => {
+      const schedule = await this.readSchedule(project, id)
+      if (!schedule) throw new Error(`Schedule "${id}" not found`)
+      const base = `${schedule.name} (copy)`
+      let name = base
+      let newId = slugify(name) || 'copy'
+      for (let i = 2; await this.scheduleIdExists(project, newId); i++) {
+        name = `${base} ${i}`
+        newId = slugify(name) || `copy-${i}`
+      }
+      const now = Date.now()
+      const copy: Schedule = { ...schedule, id: newId, name, createdAt: now, updatedAt: now }
+      await this.writeSchedule(project, copy)
+      return {
+        id: newId,
+        name,
+        updatedAt: now,
+        taskCount: copy.tasks.reduce((n, t) => n + countTasks(t), 0)
+      }
+    })
+  }
+
   async deleteSchedule(project: string, id: string): Promise<void> {
     return this.withPlannerLock(project, async () => {
       await fs.unlink(this.schedulePath(project, id)).catch(() => {})

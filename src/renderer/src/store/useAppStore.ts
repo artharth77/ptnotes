@@ -193,6 +193,7 @@ interface AppState {
   saveSchedule: (schedule: Schedule) => Promise<void>
   createSchedule: (name: string) => Promise<void>
   renameSchedule: (id: string, newName: string) => Promise<void>
+  duplicateSchedule: (id: string) => Promise<void>
   deleteSchedule: (id: string) => Promise<void>
   saveCalendar: (calendar: ProjectCalendar) => Promise<void>
   plannerPushUndo: (scheduleId: string, snapshot: Schedule) => void
@@ -905,6 +906,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ activeScheduleId: meta.id })
     }
     await get().refreshSchedules()
+  },
+
+  async duplicateSchedule(id) {
+    const project = get().activeProject
+    if (!project) return
+    const meta = await window.ptnotes.planner.duplicate(project, id)
+    await get().refreshSchedules()
+    await get().selectSchedule(meta.id)
   },
 
   async deleteSchedule(id) {
