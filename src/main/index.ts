@@ -175,7 +175,8 @@ function createWindow(windowState: WindowState): void {
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
-      contextIsolation: true
+      contextIsolation: true,
+      plugins: true
     }
   })
 
@@ -251,7 +252,7 @@ app.whenReady().then(async () => {
 
   createSplashWindow()
 
-  // Handle ptfile:// protocol — serves local files for chat images
+  // Handle ptfile:// protocol — serves local files for chat images and PDF preview
   const IMAGE_MIME: Record<string, string> = {
     '.png': 'image/png',
     '.jpg': 'image/jpeg',
@@ -260,7 +261,8 @@ app.whenReady().then(async () => {
     '.svg': 'image/svg+xml',
     '.webp': 'image/webp',
     '.bmp': 'image/bmp',
-    '.ico': 'image/x-icon'
+    '.ico': 'image/x-icon',
+    '.pdf': 'application/pdf'
   }
   protocol.handle('ptfile', async (request) => {
     const rawPath = new URL(request.url).pathname

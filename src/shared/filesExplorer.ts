@@ -25,6 +25,13 @@ export function isMarkdownFile(name: string): boolean {
   return MARKDOWN_EXTS.has(ext)
 }
 
+const PDF_EXTS = new Set(['pdf'])
+
+/** Whether a file name is a PDF (previewed with Chromium's built-in PDF viewer). */
+export function isPdfFile(name: string): boolean {
+  return PDF_EXTS.has(name.toLowerCase().split('.').pop() ?? '')
+}
+
 const TEXT_EXTS = new Set([
   'txt',
   'json',

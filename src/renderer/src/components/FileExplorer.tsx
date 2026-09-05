@@ -23,12 +23,13 @@ import {
   mdiTrashCanOutline
 } from '@mdi/js'
 import type { ExplorerEntry, ExplorerFolderNode } from '@shared/types'
-import { ancestorsOf, isImageFile, isTextFile } from '@shared/filesExplorer'
+import { ancestorsOf, isImageFile, isPdfFile, isTextFile } from '@shared/filesExplorer'
 import { useAppStore } from '../store/useAppStore'
 import { friendlyError } from '../errors'
 import { Modal, PromptModal } from './Modal'
 import { FileViewer } from './FileViewer'
 import { ImageViewer } from './ImageViewer'
+import { PdfViewer } from './PdfViewer'
 import { MdiIcon } from './MdiIcon'
 import { fileTypeIcon } from './contentIcons'
 
@@ -38,7 +39,7 @@ type Dialog =
 
 /** While any of these is on screen, the file list ignores keyboard navigation. */
 const FILE_LIST_KEY_GUARD_SELECTOR =
-  '.modal-overlay, .command-palette-backdrop, .global-find-overlay, .module-history-backdrop, .menu-overlay, .chat-img-viewer, .file-viewer-backdrop'
+  '.modal-overlay, .command-palette-backdrop, .global-find-overlay, .module-history-backdrop, .menu-overlay, .chat-img-viewer, .file-viewer-backdrop, .pdf-viewer'
 
 function scrollRowIntoView(path: string): void {
   requestAnimationFrame(() => {
@@ -166,6 +167,7 @@ export function FileListPanel(): React.JSX.Element {
   const menuRef = useRef<HTMLDivElement>(null)
   const [viewer, setViewer] = useState<{ src: string; alt: string } | null>(null)
   const [fileViewer, setFileViewer] = useState<{ path: string; name: string } | null>(null)
+  const [pdfViewer, setPdfViewer] = useState<{ src: string; name: string } | null>(null)
   const [dragActive, setDragActive] = useState(false)
   /** Keyboard cursor sits on the virtual `..` row (only reachable via arrow keys).
    *  Stores the cwd it belongs to, so it implicitly resets on any navigation. */
@@ -263,21 +265,28 @@ export function FileListPanel(): React.JSX.Element {
     selectEntry(entry.path, mode)
   }
 
-  /** Double-click / Enter action for an entry (drill in, view image, preview text). */
+  /** Double-click / Enter action for an entry (drill in, view image / PDF, preview text). */
   const activateEntry = useCallback((entry: ExplorerEntry): void => {
     if (entry.isDir) {
       useAppStore.getState().selectExplorerFolder(entry.path)
       return
     }
+    const openLocalViewer = async (
+      entry: ExplorerEntry,
+      show: (src: string) => void
+    ): Promise<void> => {
+      const project = useAppStore.getState().activeProject
+      if (!project) return
+      const abs = await window.ptnotes.files.absPath(project, entry.path)
+      if (!abs) return
+      show(/^[a-zA-Z]:/.test(abs) ? `ptfile://local/${abs}` : `ptfile://local${abs}`)
+    }
     if (isImageFile(entry.name)) {
-      void (async () => {
-        const project = useAppStore.getState().activeProject
-        if (!project) return
-        const abs = await window.ptnotes.files.absPath(project, entry.path)
-        if (!abs) return
-        const src = /^[a-zA-Z]:/.test(abs) ? `ptfile://local/${abs}` : `ptfile://local${abs}`
-        setViewer({ src, alt: entry.name })
-      })()
+      void openLocalViewer(entry, (src) => setViewer({ src, alt: entry.name }))
+      return
+    }
+    if (isPdfFile(entry.name)) {
+      void openLocalViewer(entry, (src) => setPdfViewer({ src, name: entry.name }))
       return
     }
     if (isTextFile(entry.name)) setFileViewer({ path: entry.path, name: entry.name })
@@ -792,6 +801,9 @@ export function FileListPanel(): React.JSX.Element {
         </Modal>
       )}
       {viewer && <ImageViewer src={viewer.src} alt={viewer.alt} onClose={() => setViewer(null)} />}
+      {pdfViewer && (
+        <PdfViewer src={pdfViewer.src} name={pdfViewer.name} onClose={() => setPdfViewer(null)} />
+      )}
       {fileViewer && (
         <FileViewer
           path={fileViewer.path}
