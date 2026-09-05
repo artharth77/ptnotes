@@ -212,17 +212,17 @@ export function KanbanPanel(): React.JSX.Element {
           </button>
         )}
       </div>
-      <div className="kanban-panel-seg kanban-seg">
+      <div className="kanban-view-toggle view-toggle">
         <button
           type="button"
-          className={`kanban-seg-btn${kanbanListView === 'active' ? ' active' : ''}`}
+          className={`view-btn${kanbanListView === 'active' ? ' active' : ''}`}
           onClick={() => setKanbanListView('active')}
         >
           Active
         </button>
         <button
           type="button"
-          className={`kanban-seg-btn${kanbanListView === 'archived' ? ' active' : ''}`}
+          className={`view-btn${kanbanListView === 'archived' ? ' active' : ''}`}
           onClick={() => setKanbanListView('archived')}
         >
           Archived

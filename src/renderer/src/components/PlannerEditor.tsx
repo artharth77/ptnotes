@@ -1843,7 +1843,7 @@ export function PlannerEditor(): React.JSX.Element {
             </button>
           </div>
         )}
-        <div className="planner-view-toggle">
+        <div className="view-toggle">
           <button
             className={`view-btn ${view === 'table' ? 'active' : ''}`}
             onClick={() => switchView('table')}

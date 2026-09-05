@@ -255,6 +255,40 @@ body {
   background: var(--bg-hover);
 }
 
+/* View toggle pill (planner Grid/Gantt, kanban Active/Archived) */
+.view-toggle {
+  display: inline-flex;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.view-toggle .view-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  padding: 4px 12px;
+  font-size: 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-dim);
+  transition: all 0.2s ease;
+}
+
+.view-toggle .view-btn.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.view-toggle .view-btn:hover:not(.active) {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
 .app-logo {
   font-weight: 700;
   font-size: 15px;
@@ -898,15 +932,14 @@ body {
   padding: 4px 6px 10px;
 }
 
-.kanban-panel-seg {
+.kanban-view-toggle {
   display: flex;
   margin: 2px 12px 8px;
 }
 
-.kanban-panel-seg .kanban-seg-btn {
+.kanban-view-toggle .view-btn {
   flex: 1;
-  padding: 4px 8px;
-  font-size: 12px;
+  justify-content: center;
 }
 
 .kanban-archived-row {
@@ -5727,39 +5760,6 @@ fieldset.kanban-form {
   border-top: 1px solid var(--border);
   background: var(--bg-elev);
   flex-shrink: 0;
-}
-
-.planner-view-toggle {
-  display: inline-flex;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 2px;
-}
-
-.planner-view-toggle .view-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: none;
-  background: transparent;
-  padding: 4px 12px;
-  font-size: 12px;
-  border-radius: 4px;
-  cursor: pointer;
-  color: var(--text-dim);
-  transition: all 0.2s ease;
-}
-
-.planner-view-toggle .view-btn.active {
-  background: var(--bg-elev);
-  color: var(--text);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
-.planner-view-toggle .view-btn:hover:not(.active) {
-  color: var(--text);
-  background: var(--bg-hover);
 }
 
 .planner-gantt-zoom {
