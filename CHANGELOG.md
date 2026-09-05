@@ -27,6 +27,10 @@
 - **Planner: "+ New" text button replaced with a plus icon button** (title "New schedule").
 - **AI Settings: profile picker is now a grid** — the active-profile dropdown is replaced by a scrollable profile grid (Name / Model columns, checkmark on the active profile). Select a row and hit **Set active** to switch; New / Edit / Delete act on the selected profile.
 
+### Fixed
+
+- **Browser: tools recover after the browser is closed manually** — when you closed the browser window (or its tab) while the browser process was still connected, the next `browser_*` tool call reused the dead page and failed with "Target page, context or browser has been closed" and no window appeared. The browser module now treats a closed page like a missing one: it reopens a page in the still-open context (keeping cookies/login state) or in a fresh context if that closed too, relaunches the whole browser when the process is gone, and retries once if the browser disconnects mid-call. Concurrent tool calls sharing one (re)launch no longer race to create duplicate pages.
+
 ## [0.15.1] — 2026-09-03
 
 ### Added

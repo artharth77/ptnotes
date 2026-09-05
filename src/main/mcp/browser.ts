@@ -1,4 +1,4 @@
-import type { Browser, BrowserContext, Page } from 'playwright-core'
+import type { Browser, BrowserContext, BrowserContextOptions, Page } from 'playwright-core'
 import { chromium } from 'playwright-core'
 import { screen } from 'electron'
 
@@ -11,11 +11,29 @@ let _headless = false
 let _maximize = false
 let _ignoreHttpsErrors = false
 let _engineName = ''
-let _launching = false
-let _launchQueue: Promise<void> | null = null
+let _ensureQueue: Promise<Page> | null = null
 
 function isRunning(): boolean {
   return !!_browser?.isConnected()
+}
+
+function pageUsable(): boolean {
+  return isRunning() && !!_page && !_page.isClosed()
+}
+
+function isClosedError(err: unknown): boolean {
+  return err instanceof Error && /closed|crashed|disconnected/i.test(err.message)
+}
+
+function contextOptions(
+  maximize: boolean,
+  headless: boolean,
+  ignoreHttpsErrors: boolean
+): BrowserContextOptions {
+  return {
+    ...(maximize && !headless ? { viewport: null } : {}),
+    ignoreHTTPSErrors: ignoreHttpsErrors || undefined
+  }
 }
 
 async function launch(
@@ -41,10 +59,7 @@ async function launch(
       }
       _browser = await chromium.launch(launchOpts)
       _engineName = channel === 'chrome' ? 'Google Chrome' : 'Microsoft Edge'
-      _context = await _browser.newContext({
-        ...(maximize && !headless ? { viewport: null } : {}),
-        ignoreHTTPSErrors: ignoreHttpsErrors || undefined
-      })
+      _context = await _browser.newContext(contextOptions(maximize, headless, ignoreHttpsErrors))
       _page = await _context.newPage()
       _browser.on('disconnected', () => {
         _browser = null
@@ -68,20 +83,35 @@ async function ensureLaunched(
   maximize = false,
   ignoreHttpsErrors = false
 ): Promise<Page> {
-  if (isRunning()) return _page!
+  if (pageUsable()) return _page!
+  if (_ensureQueue) return _ensureQueue
 
-  if (_launching && _launchQueue) {
-    await _launchQueue
-    if (isRunning()) return _page!
-  }
+  const task = (async (): Promise<Page> => {
+    if (pageUsable()) return _page!
 
-  _launching = true
-  _launchQueue = launch(headless, maximize, ignoreHttpsErrors).finally(() => {
-    _launching = false
-    _launchQueue = null
-  })
-  await _launchQueue
-  return _page!
+    if (isRunning() && _browser) {
+      const browser = _browser
+      const context =
+        _context && !_context.isClosed()
+          ? _context
+          : await browser.newContext(contextOptions(maximize, headless, ignoreHttpsErrors))
+      _context = context
+      _page = await context.newPage()
+      return _page
+    }
+
+    await launch(headless, maximize, ignoreHttpsErrors)
+    if (!pageUsable()) throw new Error('Browser closed during launch.')
+    return _page!
+  })()
+
+  _ensureQueue = task
+  void task
+    .catch(() => {})
+    .then(() => {
+      if (_ensureQueue === task) _ensureQueue = null
+    })
+  return task
 }
 
 export async function getBrowserPage(
@@ -89,7 +119,13 @@ export async function getBrowserPage(
   maximize = false,
   ignoreHttpsErrors = false
 ): Promise<Page> {
-  return ensureLaunched(headless, maximize, ignoreHttpsErrors)
+  try {
+    return await ensureLaunched(headless, maximize, ignoreHttpsErrors)
+  } catch (err) {
+    if (!isClosedError(err)) throw err
+    await close()
+    return ensureLaunched(headless, maximize, ignoreHttpsErrors)
+  }
 }
 
 export function headlessMode(): boolean {
@@ -125,9 +161,9 @@ export function setDefaultIgnoreHttpsErrors(ignoreHttpsErrors: boolean): void {
 }
 
 export async function setMode(headless: boolean): Promise<void> {
-  if (_headless === headless && isRunning()) return
+  if (_headless === headless && pageUsable()) return
   await close()
-  await ensureLaunched(headless, _maximize, _ignoreHttpsErrors)
+  await getBrowserPage(headless, _maximize, _ignoreHttpsErrors)
 }
 
 export async function close(): Promise<void> {
