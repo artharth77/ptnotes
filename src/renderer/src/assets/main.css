@@ -1987,6 +1987,40 @@ fieldset.kanban-form {
   margin: 0;
 }
 
+/* ---------- Segmented control (generic; the kanban panel keeps its own variant) ---------- */
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.seg.block {
+  display: flex;
+  width: 100%;
+}
+.seg-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  height: 32px;
+  padding: 0 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.seg-btn:hover {
+  background: var(--bg-hover);
+}
+.seg-btn.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.seg-btn:not(:last-child) {
+  border-right: 1px solid var(--border);
+}
+
 /* ---------- Settings dialog ---------- */
 
 .modal.settings-modal {
@@ -7638,10 +7672,6 @@ fieldset.kanban-form {
   width: 180px;
   margin-left: auto;
   flex-shrink: 0;
-}
-.file-explorer-filter .note-filter {
-  padding: 3px 8px;
-  font-size: 12px;
 }
 
 .file-explorer-error {

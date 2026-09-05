@@ -660,13 +660,13 @@ function AppearanceSettings(): React.JSX.Element {
           </p>
         </div>
       </div>
-      <div className="kanban-seg block" role="radiogroup" aria-label="Theme">
+      <div className="seg block" role="radiogroup" aria-label="Theme">
         {themeOptions.map((opt) => (
           <button
             key={opt.value}
             role="radio"
             aria-checked={theme === opt.value}
-            className={`kanban-seg-btn${theme === opt.value ? ' active' : ''}`}
+            className={`seg-btn${theme === opt.value ? ' active' : ''}`}
             onClick={() => setTheme(opt.value)}
             title={opt.desc}
           >
@@ -685,13 +685,13 @@ function AppearanceSettings(): React.JSX.Element {
           </p>
         </div>
       </div>
-      <div className="kanban-seg block" role="radiogroup" aria-label="Font size">
+      <div className="seg block" role="radiogroup" aria-label="Font size">
         {fontSizeOptions.map((opt) => (
           <button
             key={opt.value}
             role="radio"
             aria-checked={fontSize === opt.value}
-            className={`kanban-seg-btn${fontSize === opt.value ? ' active' : ''}`}
+            className={`seg-btn${fontSize === opt.value ? ' active' : ''}`}
             onClick={() => setFontSize(opt.value)}
             title={opt.desc}
           >
@@ -720,13 +720,13 @@ function AppearanceSettings(): React.JSX.Element {
           </p>
         </div>
       </div>
-      <div className="kanban-seg block" role="radiogroup" aria-label="UI density">
+      <div className="seg block" role="radiogroup" aria-label="UI density">
         {densityOptions.map((opt) => (
           <button
             key={opt.value}
             role="radio"
             aria-checked={uiDensity === opt.value}
-            className={`kanban-seg-btn${uiDensity === opt.value ? ' active' : ''}`}
+            className={`seg-btn${uiDensity === opt.value ? ' active' : ''}`}
             onClick={() => setUiDensity(opt.value)}
             title={opt.desc}
           >
@@ -745,13 +745,13 @@ function AppearanceSettings(): React.JSX.Element {
           </p>
         </div>
       </div>
-      <div className="kanban-seg block" role="radiogroup" aria-label="Editor font">
+      <div className="seg block" role="radiogroup" aria-label="Editor font">
         {editorFontOptions.map((opt) => (
           <button
             key={opt.value}
             role="radio"
             aria-checked={editorFontFamily === opt.value}
-            className={`kanban-seg-btn${editorFontFamily === opt.value ? ' active' : ''}`}
+            className={`seg-btn${editorFontFamily === opt.value ? ' active' : ''}`}
             onClick={() => setEditorFontFamily(opt.value)}
             title={opt.desc}
             style={{
