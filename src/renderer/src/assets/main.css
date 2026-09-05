@@ -617,6 +617,9 @@ body {
   cursor: pointer;
   border-bottom: 2px solid transparent;
   position: relative;
+  transition:
+    color 0.32s ease,
+    border-bottom-color 0.32s ease;
 }
 
 .side-tab:hover {
@@ -661,6 +664,25 @@ body {
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+.sidebar-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  animation: sidebar-panel-in 0.32s ease;
+}
+
+@keyframes sidebar-panel-in {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .note-filter-wrap {

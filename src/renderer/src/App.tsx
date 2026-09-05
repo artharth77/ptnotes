@@ -27,7 +27,7 @@ import { Resizer } from './components/Resizer'
 import type { Tab, ToolCallInfo } from '@shared/types'
 import { addUsage, normalizeUsage } from '@shared/usage'
 
-const SIDEBAR_MIN = 200
+const SIDEBAR_MIN = 240
 const SIDEBAR_MAX = 560
 const CHAT_MIN = 280
 const CHAT_MAX = 720
@@ -612,15 +612,17 @@ function App(): React.JSX.Element {
             style={{ width: sidebarVisible ? sidebarWidth : 0 }}
           >
             <SideTabs />
-            {tab === 'kanban' ? (
-              <KanbanPanel />
-            ) : tab === 'planner' ? (
-              <PlannerPanel />
-            ) : tab === 'files' ? (
-              <FileTreePanel />
-            ) : (
-              <NoteList />
-            )}
+            <div key={tab} className="sidebar-panel">
+              {tab === 'kanban' ? (
+                <KanbanPanel />
+              ) : tab === 'planner' ? (
+                <PlannerPanel />
+              ) : tab === 'files' ? (
+                <FileTreePanel />
+              ) : (
+                <NoteList />
+              )}
+            </div>
           </aside>
           {sidebarVisible && (
             <Resizer
