@@ -18,12 +18,26 @@ import {
   mdiFolderPlusOutline,
   mdiFolderSearchOutline,
   mdiFolderUploadOutline,
+  mdiMenuDown,
+  mdiMenuUp,
   mdiPencil,
   mdiTrayArrowDown,
   mdiTrashCanOutline
 } from '@mdi/js'
-import type { ExplorerEntry, ExplorerFolderNode } from '@shared/types'
-import { ancestorsOf, isImageFile, isPdfFile, isTextFile } from '@shared/filesExplorer'
+import type {
+  ExplorerEntry,
+  ExplorerFolderNode,
+  ExplorerSort,
+  ExplorerSortKey
+} from '@shared/types'
+import {
+  ancestorsOf,
+  fileTypeLabel,
+  isImageFile,
+  isPdfFile,
+  isTextFile,
+  sortExplorerEntries
+} from '@shared/filesExplorer'
 import { useAppStore } from '../store/useAppStore'
 import { friendlyError } from '../errors'
 import { Modal, PromptModal } from './Modal'
@@ -86,6 +100,46 @@ function parentOf(dir: string): string {
   return idx === -1 ? '' : dir.slice(0, idx)
 }
 
+/** Clickable column header: cycles ascending → descending → default for its key. */
+function SortHeaderButton({
+  label,
+  sortKey,
+  sort,
+  onCycle
+}: {
+  label: string
+  sortKey: ExplorerSortKey
+  sort: ExplorerSort
+  onCycle: (key: ExplorerSortKey) => void
+}): React.JSX.Element {
+  const active = sort?.key === sortKey
+  return (
+    <button
+      className={`col-sort${active ? ' active' : ''}`}
+      title={
+        active
+          ? sort!.dir === 'asc'
+            ? 'Sorted ascending — click for descending'
+            : 'Sorted descending — click to reset'
+          : `Sort by ${label.toLowerCase()}`
+      }
+      onClick={(e) => {
+        e.stopPropagation()
+        onCycle(sortKey)
+      }}
+    >
+      {label}
+      {active && (
+        <MdiIcon
+          path={sort!.dir === 'asc' ? mdiMenuUp : mdiMenuDown}
+          size={20}
+          className="file-explorer-sort-icon"
+        />
+      )}
+    </button>
+  )
+}
+
 export function FileTreePanel(): React.JSX.Element {
   const tree = useAppStore((s) => s.explorerTree)
   const cwd = useAppStore((s) => s.explorerCwd)
@@ -143,7 +197,12 @@ export function FileTreePanel(): React.JSX.Element {
 export function FileListPanel(): React.JSX.Element {
   const activeProject = useAppStore((s) => s.activeProject)
   const refreshFiles = useAppStore((s) => s.refreshFiles)
-  const entries = useAppStore((s) => s.explorerEntries)
+  const rawEntries = useAppStore((s) => s.explorerEntries)
+  const explorerSort = useAppStore((s) => s.explorerSort)
+  const entries = useMemo(
+    () => sortExplorerEntries(rawEntries, explorerSort),
+    [rawEntries, explorerSort]
+  )
   const cwd = useAppStore((s) => s.explorerCwd)
   const loadExplorer = useAppStore((s) => s.loadExplorer)
   const selected = useAppStore((s) => s.explorerSelected)
@@ -173,6 +232,17 @@ export function FileListPanel(): React.JSX.Element {
    *  Stores the cwd it belongs to, so it implicitly resets on any navigation. */
   const [dotDotCwd, setDotDotCwd] = useState<string | null>(null)
   const dotDotSelected = dotDotCwd !== null && dotDotCwd === cwd
+
+  const cycleSort = useCallback((key: ExplorerSortKey): void => {
+    const cur = useAppStore.getState().explorerSort
+    const next: ExplorerSort =
+      !cur || cur.key !== key
+        ? { key, dir: 'asc' }
+        : cur.dir === 'asc'
+          ? { key, dir: 'desc' }
+          : null
+    useAppStore.getState().setExplorerSort(next)
+  }, [])
 
   function onDragOver(e: React.DragEvent): void {
     if (!activeProject) return
@@ -347,7 +417,9 @@ export function FileListPanel(): React.JSX.Element {
   useEffect(() => {
     function moveSelection(dir: 1 | -1): void {
       const state = useAppStore.getState()
-      const paths = state.explorerEntries.map((en) => en.path)
+      const paths = sortExplorerEntries(state.explorerEntries, state.explorerSort).map(
+        (en) => en.path
+      )
       const rows = state.explorerCwd ? ['..', ...paths] : paths
       if (rows.length === 0) return
       const offset = state.explorerCwd ? 1 : 0
@@ -574,9 +646,23 @@ export function FileListPanel(): React.JSX.Element {
         onContextMenu={(e) => openMenu(e)}
       >
         <div className="file-explorer-row header">
-          <span className="col-name">Name</span>
-          <span className="col-size">Size</span>
-          <span className="col-modified">Modified</span>
+          <span className="col-name">
+            <SortHeaderButton label="Name" sortKey="name" sort={explorerSort} onCycle={cycleSort} />
+          </span>
+          <span className="col-type">
+            <SortHeaderButton label="Type" sortKey="type" sort={explorerSort} onCycle={cycleSort} />
+          </span>
+          <span className="col-size">
+            <SortHeaderButton label="Size" sortKey="size" sort={explorerSort} onCycle={cycleSort} />
+          </span>
+          <span className="col-modified">
+            <SortHeaderButton
+              label="Modified"
+              sortKey="modified"
+              sort={explorerSort}
+              onCycle={cycleSort}
+            />
+          </span>
         </div>
         {cwd !== '' && (
           <div
@@ -595,6 +681,7 @@ export function FileListPanel(): React.JSX.Element {
               />
               <span className="col-name-text">..</span>
             </span>
+            <span className="col-type" />
             <span className="col-size" />
             <span className="col-modified" />
           </div>
@@ -620,6 +707,7 @@ export function FileListPanel(): React.JSX.Element {
                 />
                 <span className="col-name-text">{entry.name}</span>
               </span>
+              <span className="col-type">{fileTypeLabel(entry.name, entry.isDir)}</span>
               <span className="col-size">{formatSize(entry.size)}</span>
               <span className="col-modified">{formatDate(entry.mtime)}</span>
             </div>
@@ -628,6 +716,15 @@ export function FileListPanel(): React.JSX.Element {
         {entries.length === 0 && <div className="file-explorer-empty">This folder is empty</div>}
       </div>
       <div className="file-explorer-statusbar">
+        <span className="file-explorer-item-count">
+          {entries.length} item{entries.length === 1 ? '' : 's'}
+        </span>
+        <span className="file-explorer-statusbar-sep" />
+        <MdiIcon
+          path={mdiFolderOutline}
+          size={14}
+          className="file-explorer-entry-icon file-explorer-crumb-icon"
+        />
         {crumbs.map((path, i) => (
           <span key={path || '__root__'} className="file-explorer-crumb-item">
             {i > 0 && <span className="file-explorer-crumb-sep">/</span>}

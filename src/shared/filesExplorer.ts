@@ -1,3 +1,5 @@
+import type { ExplorerEntry, ExplorerSort } from './types'
+
 /** Ancestor paths of a files-explorer dir, root ('') first, the dir itself last. */
 export function ancestorsOf(dir: string): string[] {
   const out = ['']
@@ -65,4 +67,39 @@ const TEXT_EXTS = new Set([
 /** Whether a file name can be previewed as text (markdown renders rich, the rest plain). */
 export function isTextFile(name: string): boolean {
   return isMarkdownFile(name) || TEXT_EXTS.has(name.toLowerCase().split('.').pop() ?? '')
+}
+
+const WORD_EXTS = new Set(['docx'])
+const EXCEL_EXTS = new Set(['xlsx', 'xlsm'])
+const POWERPOINT_EXTS = new Set(['pptx'])
+
+/** Human-readable type category of an explorer entry (matches the per-type row icons). */
+export function fileTypeLabel(name: string, isDir: boolean): string {
+  if (isDir) return 'Folder'
+  const ext = name.includes('.') ? (name.toLowerCase().split('.').pop() ?? '') : ''
+  if (isMarkdownFile(name)) return 'Markdown'
+  if (ext === 'pdf') return 'PDF'
+  if (IMAGE_EXTS.has(ext)) return 'Image'
+  if (WORD_EXTS.has(ext)) return 'Word'
+  if (EXCEL_EXTS.has(ext)) return 'Excel'
+  if (POWERPOINT_EXTS.has(ext)) return 'Powerpoint'
+  if (TEXT_EXTS.has(ext)) return 'Text'
+  return ext ? ext.toUpperCase() : 'File'
+}
+
+/** Sorted copy of the listing (null sort = service order); folders stay grouped first
+ *  and the key is compared within folders and within files separately. Ties keep the
+ *  incoming (name-sorted) order via the stable Array.sort. */
+export function sortExplorerEntries(entries: ExplorerEntry[], sort: ExplorerSort): ExplorerEntry[] {
+  if (!sort) return entries
+  const cmp = (a: ExplorerEntry, b: ExplorerEntry): number => {
+    let r: number
+    if (sort.key === 'name') r = a.name.localeCompare(b.name)
+    else if (sort.key === 'type')
+      r = fileTypeLabel(a.name, a.isDir).localeCompare(fileTypeLabel(b.name, b.isDir))
+    else if (sort.key === 'size') r = (a.size ?? 0) - (b.size ?? 0)
+    else r = a.mtime - b.mtime
+    return sort.dir === 'asc' ? r : -r
+  }
+  return [...entries.filter((e) => e.isDir).sort(cmp), ...entries.filter((e) => !e.isDir).sort(cmp)]
 }

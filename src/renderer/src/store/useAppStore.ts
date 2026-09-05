@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { rollupScheduleTasks } from '@shared/planner'
 import { GROUP_CHAT_PAGE_SIZE } from '@shared/bots'
-import { ancestorsOf } from '@shared/filesExplorer'
+import { ancestorsOf, sortExplorerEntries } from '@shared/filesExplorer'
 import type {
   BotGroupEvent,
   BotProfile,
@@ -42,7 +42,8 @@ import type {
   ToolCallInfo,
   FileEntry,
   ExplorerEntry,
-  ExplorerFolderNode
+  ExplorerFolderNode,
+  ExplorerSort
 } from '@shared/types'
 
 function readKanbanCollapsed(project: string): Record<string, boolean> {
@@ -121,6 +122,8 @@ interface AppState {
   explorerExpanded: string[]
   /** Manual collapse overrides — win over the auto-expand of the cwd's ancestor chain. */
   explorerCollapsed: string[]
+  /** Column sort of the file list; null = default (folders first, name asc). */
+  explorerSort: ExplorerSort
   formatHelperEnabled: boolean
   theme: 'light' | 'dark' | 'system'
   fontSize: 'small' | 'default' | 'large' | 'xlarge'
@@ -256,6 +259,7 @@ interface AppState {
   toggleExplorerFolder: (path: string) => void
   selectExplorerEntry: (path: string, mode: 'single' | 'toggle' | 'range') => void
   setExplorerSelected: (paths: string[]) => void
+  setExplorerSort: (sort: ExplorerSort) => void
   setFormatHelperEnabled: (enabled: boolean) => void
   setTheme: (theme: 'light' | 'dark' | 'system') => void
   setFontSize: (size: 'small' | 'default' | 'large' | 'xlarge') => void
@@ -333,6 +337,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   explorerLastClicked: null,
   explorerExpanded: [''],
   explorerCollapsed: [],
+  explorerSort: null,
   formatHelperEnabled: localStorage.getItem('ptnotes:formatHelper') !== '0',
   theme: (localStorage.getItem('ptnotes:theme') as 'light' | 'dark' | 'system' | null) ?? 'system',
   fontSize:
@@ -1594,7 +1599,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       return
     }
     if (mode === 'range' && lastClicked != null) {
-      const entries = get().explorerEntries
+      const entries = sortExplorerEntries(get().explorerEntries, get().explorerSort)
       const lo = entries.findIndex((e) => e.path === lastClicked)
       const hi = entries.findIndex((e) => e.path === path)
       if (hi !== -1) {
@@ -1612,6 +1617,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setExplorerSelected(explorerSelected) {
     set({ explorerSelected })
+  },
+
+  setExplorerSort(sort) {
+    set({ explorerSort: sort })
   },
 
   setFormatHelperEnabled(enabled) {

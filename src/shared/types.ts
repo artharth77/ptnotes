@@ -184,6 +184,11 @@ export interface FileEntry {
   isDir: boolean
 }
 
+/** Sort key of the file explorer listing. */
+export type ExplorerSortKey = 'name' | 'type' | 'size' | 'modified'
+/** Column sort of the file explorer listing; null = default (service) order. */
+export type ExplorerSort = { key: ExplorerSortKey; dir: 'asc' | 'desc' } | null
+
 /** One entry in the file explorer listing (`<project>/files/<subpath>`, one level). */
 export interface ExplorerEntry {
   name: string

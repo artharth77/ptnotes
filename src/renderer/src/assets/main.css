@@ -7651,6 +7651,26 @@ fieldset.kanban-form {
   flex-shrink: 0;
 }
 
+.file-explorer-item-count {
+  color: var(--text-dim);
+  font-size: 12px;
+  white-space: nowrap;
+  padding: 3px 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.file-explorer-statusbar-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--border);
+  margin: 0 6px;
+  flex-shrink: 0;
+}
+
+.file-explorer-crumb-icon {
+  margin: 0 2px 0 4px;
+}
+
 .file-explorer-crumb-item {
   display: inline-flex;
   align-items: center;
@@ -7757,7 +7777,7 @@ fieldset.kanban-form {
 
 .file-explorer-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 90px 170px;
+  grid-template-columns: minmax(0, 1fr) 90px 90px 170px;
   gap: 12px;
   align-items: center;
   height: calc(var(--row-pad-v) * 2 + 16px);
@@ -7829,6 +7849,7 @@ fieldset.kanban-form {
 }
 
 .file-explorer-row .col-size,
+.file-explorer-row .col-type,
 .file-explorer-row .col-modified {
   color: var(--text-dim);
   font-size: 12px;
@@ -7836,6 +7857,29 @@ fieldset.kanban-form {
   overflow: hidden;
   text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
+}
+
+.file-explorer-row.header .col-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.file-explorer-row.header .col-sort:hover {
+  color: var(--text);
+}
+.file-explorer-row.header .col-sort.active {
+  color: var(--accent);
+}
+.file-explorer-row.header .col-sort .file-explorer-sort-icon {
+  color: inherit;
+  flex-shrink: 0;
 }
 
 .file-explorer-empty {
