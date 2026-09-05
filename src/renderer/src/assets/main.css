@@ -762,7 +762,8 @@ body {
 
 .note-star-btn {
   opacity: 0;
-  margin-right: 2px;
+  margin-right: 0;
+  padding: 2px 2px 2px 3px;
   flex-shrink: 0;
 }
 

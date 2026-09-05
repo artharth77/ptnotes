@@ -378,7 +378,7 @@ export function NoteList(): React.JSX.Element {
             >
               <MdiIcon
                 path={note.starred ? mdiStar : mdiStarOutline}
-                size={14}
+                size={16}
                 style={note.starred ? { color: 'var(--accent)' } : undefined}
               />
             </button>
