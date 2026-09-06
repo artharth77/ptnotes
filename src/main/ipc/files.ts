@@ -6,7 +6,7 @@ import type { PTNotesService } from '../service/PTNotesService'
 import { AIConfigStore } from '../ai/config'
 import { readFileAsText } from '../ai/reader'
 import { chatTraceRecorder, type SessionRegistry } from './ai'
-import type { PdfExtractResult } from '@shared/types'
+import type { PdfExtractResult, PdfInfo, PdfPageEdit, PdfPageThumbnail } from '@shared/types'
 
 export function registerFilesIpc(
   service: PTNotesService,
@@ -141,6 +141,51 @@ export function registerFilesIpc(
       const session = registry.getSession(event, project)
       const trace = await chatTraceRecorder(service, project, sessionId)
       await session.uploadPdf(prompt, basename(path), buffer.toString('base64'), trace)
+    }
+  )
+
+  ipcMain.handle(
+    'pdf:info',
+    async (_e: IpcMainInvokeEvent, project: string, subpath: string): Promise<PdfInfo> => {
+      return service.pdfInfo(project, subpath)
+    }
+  )
+
+  ipcMain.handle(
+    'pdf:renderPage',
+    async (
+      _e: IpcMainInvokeEvent,
+      project: string,
+      subpath: string,
+      page: number,
+      rotation?: number
+    ): Promise<PdfPageThumbnail> => {
+      return service.pdfRenderPage(project, subpath, page, rotation)
+    }
+  )
+
+  ipcMain.handle(
+    'pdf:rebuild',
+    async (
+      _e: IpcMainInvokeEvent,
+      project: string,
+      subpath: string,
+      edits: PdfPageEdit[]
+    ): Promise<string> => {
+      return service.pdfRebuild(project, subpath, edits)
+    }
+  )
+
+  ipcMain.handle(
+    'pdf:merge',
+    async (
+      _e: IpcMainInvokeEvent,
+      project: string,
+      sourceSubpaths: string[],
+      destSubpath: string,
+      destName?: string
+    ): Promise<string> => {
+      return service.pdfMerge(project, sourceSubpaths, destSubpath, destName)
     }
   )
 }

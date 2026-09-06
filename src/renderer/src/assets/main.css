@@ -6743,6 +6743,276 @@ fieldset.kanban-form {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
 }
 
+/* ---- PDF page manager (Files ▸ Manage Pages) ---- */
+.pdf-page-manager {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex;
+  flex-direction: column;
+  z-index: 200;
+  animation: img-viewer-in 0.2s ease;
+}
+.pdf-page-manager.closing {
+  animation: img-viewer-out 0.2s ease forwards;
+}
+.pdf-page-manager-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+}
+.pdf-page-manager-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.pdf-page-manager-name {
+  color: #fff;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pdf-page-manager-subtitle {
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.pdf-page-manager-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.pdf-page-manager-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 12px 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.pdf-page-manager-banner.error {
+  background: rgba(229, 72, 77, 0.18);
+  color: #ffd7d8;
+}
+.pdf-page-manager-banner span {
+  flex: 1;
+  min-width: 0;
+}
+.pdf-page-manager-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 12px 12px;
+}
+.pdf-page-manager-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 13px;
+}
+.pdf-page-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+.pdf-page-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: grab;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+}
+.pdf-page-card:hover {
+  border-color: var(--accent);
+}
+.pdf-page-card.dragging {
+  opacity: 0.45;
+  cursor: grabbing;
+}
+.pdf-page-card.drop-target {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.pdf-page-card.removed {
+  opacity: 0.45;
+  cursor: default;
+}
+.pdf-page-thumb {
+  width: 100%;
+  aspect-ratio: 0.707;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-hover);
+  overflow: hidden;
+}
+.pdf-page-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+.pdf-page-placeholder {
+  color: var(--text-faint);
+  font-size: 11px;
+  padding: 4px;
+  text-align: center;
+}
+.pdf-page-retry {
+  background: none;
+  border: none;
+  color: var(--danger);
+  font-size: 10px;
+  cursor: pointer;
+  padding: 6px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+.pdf-page-retry:hover {
+  text-decoration: underline;
+}
+.pdf-page-card-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 4px 8px;
+  border-top: 1px solid var(--border);
+}
+.pdf-page-number {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pdf-page-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.pdf-page-action {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.pdf-page-action:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.pdf-page-action:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.pdf-page-action.danger:hover {
+  color: var(--ok);
+}
+.pdf-page-removed-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(229, 72, 77, 0.14);
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+/* ---- Merge PDFs dialog ---- */
+.pdf-merge-modal {
+  max-width: 460px;
+  width: 92vw;
+}
+.pdf-merge-hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.pdf-merge-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.pdf-merge-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: grab;
+}
+.pdf-merge-row.dragging {
+  opacity: 0.45;
+}
+.pdf-merge-row.drop-target {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.pdf-merge-order {
+  color: var(--text-faint);
+  font-size: 11px;
+  min-width: 16px;
+  text-align: right;
+}
+.pdf-merge-grip {
+  color: var(--text-faint);
+  display: flex;
+  align-items: center;
+}
+.pdf-merge-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pdf-merge-name-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.pdf-merge-name-field label {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
 /* ---- Bots group chat ---- */
 .gc-drawer .chat-scroll {
   gap: 2px;

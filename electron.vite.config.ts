@@ -18,7 +18,8 @@ export default defineConfig({
           'diagram-render-worker': resolve('src/main/modules/shared/diagram-render-worker.ts'),
           'infographic-render-worker': resolve(
             'src/main/modules/shared/infographic-render-worker.ts'
-          )
+          ),
+          'pdf-render-worker': resolve('src/main/pdf/pdf-render-worker.ts')
         }
       }
     }

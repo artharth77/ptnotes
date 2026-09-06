@@ -14,6 +14,9 @@ import type {
   FileEntry,
   NoteMeta,
   NoteSearchMatch,
+  PdfInfo,
+  PdfPageEdit,
+  PdfPageThumbnail,
   Project,
   ProjectCalendar,
   Schedule,
@@ -52,6 +55,8 @@ import {
   validateScheduleId
 } from '@shared/planner'
 import { detectFileKind } from '../ai/reader'
+import { mergePdfs, pdfPageCount, rebuildPdfPages } from '../pdf/ops'
+import { closePdfRender, openPdfRender, renderPdfPage } from '../pdf/pdfRenderer'
 import type { SettingsStore } from '../settings'
 
 const WELCOME_ID = 'welcome'
@@ -62,6 +67,11 @@ const MAX_LISTED_FILES = 500
 const MAX_EXPLORER_TREE_NODES = 2000
 const MAX_EXPLORER_TREE_DEPTH = 12
 const MAX_PREVIEW_TEXT_BYTES = 2 * 1024 * 1024
+const MAX_MANAGE_PDF_BYTES = 50 * 1024 * 1024
+const MAX_MANAGE_PDF_PAGES = 500
+const MAX_MERGE_FILES = 20
+const MAX_MERGE_TOTAL_BYTES = 100 * 1024 * 1024
+const MAX_MERGE_TOTAL_PAGES = 500
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -1397,6 +1407,160 @@ export class PTNotesService {
       )
     }
     return fs.readFile(full, 'utf8')
+  }
+
+  // ---- PDF page management + merge (`<project>/files/` PDFs) ----
+
+  /** Resolve a project file for PDF editing: traversal guards + content check + size cap. */
+  private async resolvePdfForEdit(
+    project: string,
+    subpath: string,
+    maxBytes: number
+  ): Promise<{
+    full: string
+    name: string
+    st: { size: number; mtimeMs: number }
+    buffer: Buffer
+  }> {
+    const full = await this.projectFilePath(project, subpath)
+    if (!full) throw new Error(`File not found: "${subpath}"`)
+    const st = await fs.stat(full)
+    if (st.size > maxBytes) {
+      throw new Error(
+        `"${basename(full)}" is too large (${formatBytes(st.size)}). Limit is ${formatBytes(maxBytes)}.`
+      )
+    }
+    if ((await detectFileKind(full)) !== 'pdf') {
+      throw new Error(`"${basename(full)}" is not a PDF file.`)
+    }
+    const buffer = await fs.readFile(full)
+    return { full, name: basename(full), st, buffer }
+  }
+
+  private pdfRenderKey(full: string, st: { size: number; mtimeMs: number }): string {
+    return `${full}|${st.size}|${Math.round(st.mtimeMs)}`
+  }
+
+  private async guardManagePages(session: PdfInfo, name: string, key: string): Promise<void> {
+    if (session.pages > MAX_MANAGE_PDF_PAGES) {
+      await closePdfRender(key)
+      throw new Error(
+        `"${name}" has too many pages to manage (${session.pages}). Limit is ${MAX_MANAGE_PDF_PAGES}.`
+      )
+    }
+  }
+
+  /** Page count + base rotations for the PDF page manager. */
+  async pdfInfo(project: string, subpath: string): Promise<PdfInfo> {
+    const { full, name, st, buffer } = await this.resolvePdfForEdit(
+      project,
+      subpath,
+      MAX_MANAGE_PDF_BYTES
+    )
+    const key = this.pdfRenderKey(full, st)
+    const session = await openPdfRender(key, buffer)
+    await this.guardManagePages(session, name, key)
+    return { pages: session.pages, rotations: session.rotations }
+  }
+
+  /** Render one page thumbnail for the PDF page manager (optionally rotated). */
+  async pdfRenderPage(
+    project: string,
+    subpath: string,
+    page: number,
+    rotation?: number
+  ): Promise<PdfPageThumbnail> {
+    if (!Number.isInteger(page) || page < 1) throw new Error(`Invalid page number: ${page}.`)
+    if (rotation !== undefined && ![0, 90, 180, 270].includes(rotation)) {
+      throw new Error(`Invalid rotation ${rotation}: must be 0, 90, 180 or 270.`)
+    }
+    const { full, name, st, buffer } = await this.resolvePdfForEdit(
+      project,
+      subpath,
+      MAX_MANAGE_PDF_BYTES
+    )
+    const key = this.pdfRenderKey(full, st)
+    const session = await openPdfRender(key, buffer)
+    await this.guardManagePages(session, name, key)
+    return renderPdfPage(key, buffer, page, rotation)
+  }
+
+  /** Rebuild a PDF (reorder/delete/rotate) and save it beside the source as `name (pages).pdf`. */
+  async pdfRebuild(project: string, subpath: string, edits: PdfPageEdit[]): Promise<string> {
+    const { full, name, buffer } = await this.resolvePdfForEdit(
+      project,
+      subpath,
+      MAX_MANAGE_PDF_BYTES
+    )
+    const pageCount = await pdfPageCount(buffer, name)
+    if (pageCount > MAX_MANAGE_PDF_PAGES) {
+      throw new Error(
+        `"${name}" has too many pages to manage (${pageCount}). Limit is ${MAX_MANAGE_PDF_PAGES}.`
+      )
+    }
+    const out = await rebuildPdfPages(buffer, edits, name)
+    const dir = dirname(full)
+    const ext = extname(name)
+    const stem = ext ? name.slice(0, -ext.length) : name
+    const finalName = await this.uniqueEntryName(dir, `${stem} (pages).pdf`)
+    const dest = join(dir, finalName)
+    await fs.writeFile(dest, out)
+    return relative(this.filesDir(project), dest)
+  }
+
+  /** Merge selected PDFs (in array order) into a new PDF written into `destSubpath`. */
+  async pdfMerge(
+    project: string,
+    sourceSubpaths: string[],
+    destSubpath: string,
+    destName?: string
+  ): Promise<string> {
+    if (!Array.isArray(sourceSubpaths) || sourceSubpaths.length < 2) {
+      throw new Error('Select at least two PDFs to merge.')
+    }
+    if (sourceSubpaths.length > MAX_MERGE_FILES) {
+      throw new Error(
+        `Too many PDFs selected (${sourceSubpaths.length}). Limit is ${MAX_MERGE_FILES}.`
+      )
+    }
+    const names: string[] = []
+    const buffers: Buffer[] = []
+    let totalBytes = 0
+    for (const sourceSubpath of sourceSubpaths) {
+      const { name, buffer } = await this.resolvePdfForEdit(
+        project,
+        sourceSubpath,
+        MAX_MANAGE_PDF_BYTES
+      )
+      totalBytes += buffer.length
+      if (totalBytes > MAX_MERGE_TOTAL_BYTES) {
+        throw new Error(
+          `Selected PDFs are too large in total (${formatBytes(totalBytes)}). Limit is ${formatBytes(MAX_MERGE_TOTAL_BYTES)}.`
+        )
+      }
+      names.push(name)
+      buffers.push(buffer)
+    }
+    let totalPages = 0
+    for (let i = 0; i < buffers.length; i++) {
+      totalPages += await pdfPageCount(buffers[i], names[i])
+    }
+    if (totalPages > MAX_MERGE_TOTAL_PAGES) {
+      throw new Error(
+        `Selected PDFs have too many pages in total (${totalPages}). Limit is ${MAX_MERGE_TOTAL_PAGES}.`
+      )
+    }
+    const merged = await mergePdfs(buffers, names)
+    const dest = this.resolveFilesPath(project, destSubpath)
+    if (!dest) throw new Error(`Invalid destination folder: "${destSubpath}"`)
+    const clean = this.validateEntryName(destName || 'merged.pdf')
+    const finalName = await this.uniqueEntryName(
+      dest,
+      extname(clean).toLowerCase() === '.pdf' ? clean : `${clean}.pdf`
+    )
+    const destPath = join(dest, finalName)
+    await fs.writeFile(destPath, merged)
+    return relative(this.filesDir(project), destPath)
   }
 
   // ---- Module run storage (JSON kept in <project>/.data/modules/, out of the # file picker) ----

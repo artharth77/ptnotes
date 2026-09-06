@@ -36,6 +36,9 @@ import type {
   NoteMeta,
   NoteSearchMatch,
   PdfExtractResult,
+  PdfInfo,
+  PdfPageEdit,
+  PdfPageThumbnail,
   Project,
   ProjectCalendar,
   Schedule,
@@ -265,7 +268,33 @@ const api = {
   pdf: {
     supportsUpload: (): Promise<boolean> => ipcRenderer.invoke('pdf:supportsUpload'),
     upload: (project: string, sessionId: string, path: string, prompt: string): Promise<void> =>
-      ipcRenderer.invoke('pdf:upload', project, sessionId, path, prompt)
+      ipcRenderer.invoke('pdf:upload', project, sessionId, path, prompt),
+    info: (project: string, subpath: string): Promise<PdfInfo> =>
+      ipcRenderer.invoke('pdf:info', project, subpath),
+    setViewerOpen: (open: boolean): void => ipcRenderer.send('pdf-viewer:set-open', open),
+    onEscape: (cb: () => void): (() => void) => {
+      const listener = (): void => cb()
+      ipcRenderer.on('pdf-viewer:escape', listener)
+      return () => {
+        ipcRenderer.removeListener('pdf-viewer:escape', listener)
+      }
+    },
+    renderPage: (
+      project: string,
+      subpath: string,
+      page: number,
+      rotation?: number
+    ): Promise<PdfPageThumbnail> =>
+      ipcRenderer.invoke('pdf:renderPage', project, subpath, page, rotation),
+    rebuild: (project: string, subpath: string, edits: PdfPageEdit[]): Promise<string> =>
+      ipcRenderer.invoke('pdf:rebuild', project, subpath, edits),
+    merge: (
+      project: string,
+      sourceSubpaths: string[],
+      destSubpath: string,
+      destName?: string
+    ): Promise<string> =>
+      ipcRenderer.invoke('pdf:merge', project, sourceSubpaths, destSubpath, destName)
   },
   files: {
     list: (project: string): Promise<string[]> => ipcRenderer.invoke('files:list', project),

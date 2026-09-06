@@ -178,6 +178,29 @@ export interface PdfExtractResult {
   totalPages?: number
 }
 
+/** Base page info for the PDF page manager (1-based page order). */
+export interface PdfInfo {
+  pages: number
+  /** Source rotation of each page, in page order (0/90/180/270). */
+  rotations: number[]
+}
+
+/** One rendered PDF page thumbnail (base64 JPEG data URL). */
+export interface PdfPageThumbnail {
+  page: number
+  dataUrl: string
+  width: number
+  height: number
+  /** The rotation the thumbnail was rendered with. */
+  rotation: number
+}
+
+/** One entry in a page-manager save: 1-based source page + final rotation. */
+export interface PdfPageEdit {
+  page: number
+  rotation?: 0 | 90 | 180 | 270
+}
+
 /** One entry in a project files folder (the `#` file-mention picker). */
 export interface FileEntry {
   name: string

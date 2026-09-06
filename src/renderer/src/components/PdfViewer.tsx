@@ -3,8 +3,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 /**
  * Fullscreen PDF preview using Chromium's built-in PDF viewer (plugins-enabled iframe
  * loaded over ptfile://). Renders nothing when unused — mount it conditionally
- * (`src != null`). Close via the ✕ button or Escape (Escape needs focus outside the
- * iframe — the plugin consumes keyboard input while focused).
+ * (`src != null`). Close via the ✕ button or Escape: while the plugin iframe has
+ * focus it consumes keyboard input, so Escape is additionally intercepted in the
+ * main process (flagged via `pdf.setViewerOpen`) and forwarded as
+ * `pdf.onEscape` — the viewer still closes no matter where focus sits.
  */
 export function PdfViewer({
   src,
@@ -16,15 +18,26 @@ export function PdfViewer({
   onClose: () => void
 }): React.JSX.Element {
   const [closing, setClosing] = useState(false)
+  const closingRef = useRef(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const close = useCallback((): void => {
+    if (closingRef.current) return
+    closingRef.current = true
     setClosing(true)
     timerRef.current = setTimeout(() => {
       onClose()
       setClosing(false)
     }, 200)
   }, [onClose])
+
+  // Escape works while the plugin iframe has focus too (main-process interception)
+  useEffect(() => {
+    window.ptnotes.pdf.setViewerOpen(true)
+    return () => window.ptnotes.pdf.setViewerOpen(false)
+  }, [])
+
+  useEffect(() => window.ptnotes.pdf.onEscape(close), [close])
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent): void => {

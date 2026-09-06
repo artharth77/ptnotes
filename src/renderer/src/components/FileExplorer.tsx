@@ -13,11 +13,13 @@ import {
   mdiContentCopy,
   mdiContentCut,
   mdiContentPaste,
+  mdiFileCogOutline,
   mdiFolderOpenOutline,
   mdiFolderOutline,
   mdiFolderPlusOutline,
   mdiFolderSearchOutline,
   mdiFolderUploadOutline,
+  mdiMerge,
   mdiMenuDown,
   mdiMenuUp,
   mdiPencil,
@@ -44,6 +46,8 @@ import { Modal, PromptModal } from './Modal'
 import { FileViewer } from './FileViewer'
 import { ImageViewer } from './ImageViewer'
 import { PdfViewer } from './PdfViewer'
+import { PdfPageManager } from './PdfPageManager'
+import { PdfMergeDialog } from './PdfMergeDialog'
 import { MdiIcon } from './MdiIcon'
 import { fileTypeIcon } from './contentIcons'
 
@@ -53,7 +57,7 @@ type Dialog =
 
 /** While any of these is on screen, the file list ignores keyboard navigation. */
 const FILE_LIST_KEY_GUARD_SELECTOR =
-  '.modal-overlay, .command-palette-backdrop, .global-find-overlay, .module-history-backdrop, .menu-overlay, .chat-img-viewer, .file-viewer-backdrop, .pdf-viewer'
+  '.modal-overlay, .command-palette-backdrop, .global-find-overlay, .module-history-backdrop, .menu-overlay, .chat-img-viewer, .file-viewer-backdrop, .pdf-viewer, .pdf-page-manager'
 
 function scrollRowIntoView(path: string): void {
   requestAnimationFrame(() => {
@@ -228,6 +232,8 @@ export function FileListPanel(): React.JSX.Element {
   const [viewer, setViewer] = useState<{ src: string; alt: string } | null>(null)
   const [fileViewer, setFileViewer] = useState<{ path: string; name: string } | null>(null)
   const [pdfViewer, setPdfViewer] = useState<{ src: string; name: string } | null>(null)
+  const [pageManager, setPageManager] = useState<{ path: string; name: string } | null>(null)
+  const [mergeDialog, setMergeDialog] = useState<ExplorerEntry[] | null>(null)
   const [dragActive, setDragActive] = useState(false)
   /** Keyboard cursor sits on the virtual `..` row (only reachable via arrow keys).
    *  Stores the cwd it belongs to, so it implicitly resets on any navigation. */
@@ -247,6 +253,9 @@ export function FileListPanel(): React.JSX.Element {
 
   function onDragOver(e: React.DragEvent): void {
     if (!activeProject) return
+    // internal drags (page manager / merge dialog reorders) bubble here too —
+    // never show the import overlay while any modal/overlay is on screen
+    if (document.querySelector(FILE_LIST_KEY_GUARD_SELECTOR)) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'copy'
     setDragActive(true)
@@ -262,6 +271,7 @@ export function FileListPanel(): React.JSX.Element {
     setDragActive(false)
     const project = activeProject
     if (!project) return
+    if (document.querySelector(FILE_LIST_KEY_GUARD_SELECTOR)) return
     const dropped = Array.from(e.dataTransfer.files)
     if (dropped.length === 0) return
     void (async () => {
@@ -499,8 +509,23 @@ export function FileListPanel(): React.JSX.Element {
     () => entries.filter((e) => selected.includes(e.path)),
     [entries, selected]
   )
+  const selectedPdfEntries = useMemo(
+    () => selectedEntries.filter((e) => !e.isDir && isPdfFile(e.name)),
+    [selectedEntries]
+  )
   const cutPaths = clipboard?.mode === 'cut' ? clipboard.paths : null
   const canPaste = !!clipboard && clipboard.paths.length > 0
+
+  function openPageManager(): void {
+    const entry = selectedPdfEntries[0]
+    if (!entry || !activeProject) return
+    setPageManager({ path: entry.path, name: entry.name })
+  }
+
+  function openMergeDialog(): void {
+    if (selectedPdfEntries.length < 2 || !activeProject) return
+    setMergeDialog(selectedPdfEntries)
+  }
 
   function submitRename(name: string): void {
     if (dialog?.kind !== 'rename' || !activeProject) return
@@ -638,6 +663,26 @@ export function FileListPanel(): React.JSX.Element {
           <MdiIcon path={mdiFolderSearchOutline} size={16} />
           <span>Show in Folder</span>
         </button>
+        {selectedPdfEntries.length === 1 && (
+          <button
+            className="icon-btn"
+            onClick={openPageManager}
+            title="Manage pages of the selected PDF"
+          >
+            <MdiIcon path={mdiFileCogOutline} size={16} />
+            <span>Manage Pages</span>
+          </button>
+        )}
+        {selectedPdfEntries.length >= 2 && (
+          <button
+            className="icon-btn"
+            onClick={openMergeDialog}
+            title="Merge the selected PDFs into a new file"
+          >
+            <MdiIcon path={mdiMerge} size={16} />
+            <span>Merge PDFs</span>
+          </button>
+        )}
         <div className="file-explorer-filter">
           <input
             type="text"
@@ -869,6 +914,34 @@ export function FileListPanel(): React.JSX.Element {
               </span>
               Show in Folder
             </button>
+            {selectedPdfEntries.length === 1 && (
+              <button
+                className="note-menu-item"
+                onClick={() => {
+                  closeMenu()
+                  openPageManager()
+                }}
+              >
+                <span className="note-menu-icon">
+                  <MdiIcon path={mdiFileCogOutline} size={15} />
+                </span>
+                Manage Pages
+              </button>
+            )}
+            {selectedPdfEntries.length >= 2 && (
+              <button
+                className="note-menu-item"
+                onClick={() => {
+                  closeMenu()
+                  openMergeDialog()
+                }}
+              >
+                <span className="note-menu-icon">
+                  <MdiIcon path={mdiMerge} size={15} />
+                </span>
+                Merge PDFs
+              </button>
+            )}
             <div className="note-menu-sep" />
             <button
               className="note-menu-item danger"
@@ -933,6 +1006,34 @@ export function FileListPanel(): React.JSX.Element {
       {viewer && <ImageViewer src={viewer.src} alt={viewer.alt} onClose={() => setViewer(null)} />}
       {pdfViewer && (
         <PdfViewer src={pdfViewer.src} name={pdfViewer.name} onClose={() => setPdfViewer(null)} />
+      )}
+      {pageManager && activeProject && (
+        <PdfPageManager
+          project={activeProject}
+          path={pageManager.path}
+          name={pageManager.name}
+          onClose={() => setPageManager(null)}
+          onSaved={(newPath) => {
+            setPageManager(null)
+            setSelected([newPath])
+            void loadExplorer()
+            void refreshFiles()
+          }}
+        />
+      )}
+      {mergeDialog && activeProject && (
+        <PdfMergeDialog
+          project={activeProject}
+          entries={mergeDialog}
+          destSubpath={cwd}
+          onClose={() => setMergeDialog(null)}
+          onMerged={(newPath) => {
+            setMergeDialog(null)
+            setSelected([newPath])
+            void loadExplorer()
+            void refreshFiles()
+          }}
+        />
       )}
       {fileViewer && (
         <FileViewer

@@ -13,6 +13,7 @@ Write notes, track tasks, plan schedules, and chat with an AI assistant — all 
 - **Browser toolset** — optional in-app MCP-powered browser control (Chrome / Edge; toggle in **Settings → Toolsets**). The assistant can navigate pages, click, type, take screenshots, and evaluate JavaScript. Headful by default; headless requires your confirmation. Chat-only (never in modules).
 - **Skills** — teach the assistant reusable instructions: named markdown documents (global or per-project) listed in its system prompt and loaded on demand via the `read_skill` tool, with per-skill enable/disable toggles. Managed from **Settings → Skills**.
 - **File attachments** — drag & drop files into the chat; supported files (any text file, PDFs, or Excel workbooks, detected by content) are copied locally to the project and can be reused via `#` mentions. The assistant reads them locally with the `read_file` tool.
+- **Files & PDF tools** — a per-project **Files** explorer (folder tree, file list, drag & drop import, image/markdown/PDF viewers). PDFs get extra tools: **Manage Pages** shows page thumbnails with drag reorder, per-page rotation and delete — saving always writes a **new** `name (pages).pdf` — and **Merge PDFs** combines the selected PDFs in a drag-ordered dialog into a new file. Original files are never modified.
 - **Chat mentions** — type `@` to insert a note, `!` to insert a kanban card, `#` to attach a project file; the AI can link to your notes and kanban cards with clickable `[name](note:name)` / `[name](kanban:name)` links.
 - **Slash commands** — type `/` in the chat to open a command + skill picker: `/new` starts a new chat, `/models` opens AI settings, and any **enabled skill** becomes a command (`/skillname my prompt`) that the assistant loads via `read_skill` and applies. **Tab** autocompletes the command, **Enter** runs it.
 - **Chat history** — each session is auto-saved to a JSON file; **New Chat** archives the current thread and a history picker lets you reopen, rename, or delete old sessions.
@@ -30,7 +31,8 @@ Write notes, track tasks, plan schedules, and chat with an AI assistant — all 
 - TipTap v3 for the WYSIWYG markdown editor
 - `openai` SDK (OpenAI-compatible endpoints) for the AI chat and modules
 - `@modelcontextprotocol/sdk` + `playwright-core` for in-process MCP browser toolset (Chrome/Edge)
-- `pdfjs-dist` for extracting text from PDFs (chat files, modules)
+- `pdfjs-dist` for extracting text from PDFs (chat files, modules) and rendering page thumbnails (Files ▸ Manage Pages)
+- `pdf-lib` for PDF page rebuild/merge (Files ▸ Manage Pages / Merge PDFs)
 - `pptxgenjs` for generating PowerPoint deliverables (modules)
 - `docx` for generating Word document deliverables (modules)
 - Chart.js + `@napi-rs/canvas` for in-process chart rendering (modules)
