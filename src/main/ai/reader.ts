@@ -1,10 +1,10 @@
 import { promises as fs } from 'fs'
 import { extname } from 'path'
-import { PDFParse } from 'pdf-parse'
 import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
 import * as cheerio from 'cheerio'
 import type { Element } from 'domhandler'
+import { extractPdfText } from './pdfText'
 import type { PdfExtractResult } from '@shared/types'
 
 export const MAX_PDF_CHARS = 240_000
@@ -70,29 +70,20 @@ export async function readFileAsText(
 
 export async function extractPdf(path: string, page?: number): Promise<PdfExtractResult> {
   const buffer = await fs.readFile(path)
-  const parser = new PDFParse({ data: buffer })
-  try {
-    const result = await parser.getText(
-      page !== undefined ? { first: page, last: page } : undefined
+  const { text, total } = await extractPdfText(buffer, page)
+  if (page !== undefined && (page < 1 || page > total)) {
+    throw new Error(
+      `Page ${page} is out of range: this PDF has ${total} ${total === 1 ? 'page' : 'pages'}.`
     )
-    const text = result.text ?? ''
-    const total = result.total ?? 0
-    if (page !== undefined && (page < 1 || page > total)) {
-      throw new Error(
-        `Page ${page} is out of range: this PDF has ${total} ${total === 1 ? 'page' : 'pages'}.`
-      )
-    }
-    const truncated = text.length > MAX_PDF_CHARS
-    return {
-      text: truncated ? text.slice(0, MAX_PDF_CHARS) : text,
-      pageCount: total,
-      charCount: text.length,
-      truncated,
-      ...(page !== undefined ? { page } : {}),
-      totalPages: total
-    }
-  } finally {
-    await parser.destroy().catch(() => {})
+  }
+  const truncated = text.length > MAX_PDF_CHARS
+  return {
+    text: truncated ? text.slice(0, MAX_PDF_CHARS) : text,
+    pageCount: total,
+    charCount: text.length,
+    truncated,
+    ...(page !== undefined ? { page } : {}),
+    totalPages: total
   }
 }
 

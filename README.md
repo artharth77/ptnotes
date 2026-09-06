@@ -30,7 +30,7 @@ Write notes, track tasks, plan schedules, and chat with an AI assistant — all 
 - TipTap v3 for the WYSIWYG markdown editor
 - `openai` SDK (OpenAI-compatible endpoints) for the AI chat and modules
 - `@modelcontextprotocol/sdk` + `playwright-core` for in-process MCP browser toolset (Chrome/Edge)
-- `pdf-parse` for extracting text from PDFs (chat files, modules)
+- `pdfjs-dist` for extracting text from PDFs (chat files, modules)
 - `pptxgenjs` for generating PowerPoint deliverables (modules)
 - `docx` for generating Word document deliverables (modules)
 - Chart.js + `@napi-rs/canvas` for in-process chart rendering (modules)

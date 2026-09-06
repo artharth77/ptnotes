@@ -8,20 +8,15 @@ const ROOT = '/tmp/ptnotes-pdf-test-root'
 
 let FAKE_TEXT = 'Hello PDF content'
 let FAKE_PAGES = 3
-let FAKE_LAST_PARAMS: { first?: number; last?: number } | undefined
+let FAKE_PAGE: number | undefined
 
-class FakePDFParse {
-  async getText(params?: {
-    first?: number
-    last?: number
-  }): Promise<{ text: string; total: number; pages: unknown[] }> {
-    FAKE_LAST_PARAMS = params
-    const label = params?.first !== undefined ? ` (page ${params.first})` : ''
-    return { text: FAKE_TEXT + label, total: FAKE_PAGES, pages: [] }
-  }
-  async destroy(): Promise<void> {
-    return
-  }
+async function fakeExtractPdfText(
+  _data: Uint8Array,
+  page?: number
+): Promise<{ text: string; total: number }> {
+  FAKE_PAGE = page
+  const label = page !== undefined ? ` (page ${page})` : ''
+  return { text: FAKE_TEXT + label, total: FAKE_PAGES }
 }
 
 class FakeOpenAI {
@@ -63,8 +58,8 @@ const origLoad = (Module as { _load: (r: string, p: unknown, m: boolean) => unkn
       shell: { showItemInFolder: () => {} }
     }
   }
-  if (request === 'pdf-parse') {
-    return { PDFParse: FakePDFParse }
+  if (request === './pdfText' || request.endsWith('/pdfText')) {
+    return { extractPdfText: fakeExtractPdfText }
   }
   if (request === 'openai') {
     return FakeOpenAI
@@ -103,19 +98,19 @@ assert.equal(res.charCount, MAX_PDF_CHARS + 500)
 // ---- extractPdf: page parameter ----
 FAKE_TEXT = 'Hello PDF content'
 FAKE_PAGES = 3
-FAKE_LAST_PARAMS = undefined
+FAKE_PAGE = undefined
 res = await extractPdf(pdfPath, 2)
 assert.equal(res.text, 'Hello PDF content (page 2)')
 assert.equal(res.page, 2)
 assert.equal(res.totalPages, 3)
 assert.equal(res.truncated, false)
-assert.deepEqual(FAKE_LAST_PARAMS, { first: 2, last: 2 })
-FAKE_LAST_PARAMS = undefined
+assert.equal(FAKE_PAGE, 2)
+FAKE_PAGE = undefined
 res = await extractPdf(pdfPath)
 assert.equal(res.text, 'Hello PDF content')
 assert.equal(res.page, undefined)
 assert.equal(res.totalPages, 3)
-assert.equal(FAKE_LAST_PARAMS, undefined, 'no page params passed when page is omitted')
+assert.equal(FAKE_PAGE, undefined, 'no page passed when page is omitted')
 await assert.rejects(() => extractPdf(pdfPath, 99), /out of range: this PDF has 3 pages/)
 await assert.rejects(() => extractPdf(pdfPath, 0), /out of range/)
 

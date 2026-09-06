@@ -19,6 +19,7 @@
 
 ### Changed
 
+- **AI: PDF text extraction uses `pdfjs-dist` directly** — the AI's local PDF text extraction no longer goes through the `pdf-parse` wrapper; it now uses the legacy `pdfjs-dist` build directly in the main process while preserving the previous extracted-text formatting.
 - **UI: kanban Active/Archived toggle uses the shared view-toggle pill** — the kanban panel's Active/Archived switch now uses the generic `.view-toggle` style (the same pill as the planner Grid/Gantt toggle) instead of the shared-border segmented control.
 - **UI: appearance segmented controls get their own style** — the Theme / Font size / UI density / Editor font controls in Settings ▸ Appearance use a dedicated generic segmented control (`.seg`) with a fixed 32px button height instead of borrowing the kanban segmented style.
 - **UI: chat bubble font size follows the appearance font size** — chat bubbles (1:1 and group chat, including their markdown content) now scale with the Appearance ▸ Font size setting (small 13px / default 14px / large 15px / xlarge 16px) instead of being fixed at 13px. Kanban card comments and the raw AI trace viewer keep their fixed 13px.
