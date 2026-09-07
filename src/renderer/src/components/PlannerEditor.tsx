@@ -1436,7 +1436,8 @@ export function PlannerEditor(): React.JSX.Element {
         scheduleName: sc.name,
         overallPercent: overallPercentComplete(sc.tasks),
         columns,
-        rows: exportRows
+        rows: exportRows,
+        calendar: cal
       })
       if (!result.ok && !result.canceled) window.alert(friendlyError(result.error))
     } catch (err) {

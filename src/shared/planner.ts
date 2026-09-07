@@ -562,6 +562,8 @@ export interface PlannerExportPayload {
   overallPercent: number
   columns: PlannerExportColumn[]
   rows: PlannerExportRow[]
+  /** Working-day config for the exported Gantt's non-working-day shading. */
+  calendar: ProjectCalendar
 }
 
 /** Result of `planner:exportExcel`. */

@@ -65,6 +65,7 @@ await fs.rm(OUT2, { force: true })
 const payload: PlannerExportPayload = {
   scheduleName: 'Roadmap',
   overallPercent: 55,
+  calendar: { weekStart: 1, weekEnd: 5, holidays: [] },
   columns: [
     { key: 'no', label: 'No.' },
     { key: 'title', label: 'Title' },
@@ -196,7 +197,7 @@ assert.equal(
 )
 assert.equal(cells.H9, '2026-09-18T00:00:00.000Z', 'plan end stored at UTC midnight')
 
-const styles = await readStyles(OUT, 'Roadmap', 'A1..K13')
+const styles = await readStyles(OUT, 'Roadmap', 'A1..AK13')
 assert.ok(styles.ok, `readStyles ok: ${styles.ok ? '' : styles.error}`)
 const st = styles.sheets.Roadmap?.cells ?? {}
 
@@ -259,6 +260,48 @@ assert.equal(st.K9?.border?.top?.color, 'FFFFFFFF', 'right margin (+1 col) borde
 assert.equal(st.B13?.border?.top?.color, 'FFFFFFFF', 'bottom margin (+1 row) border white')
 assert.equal(st.A1?.border?.top?.color, 'FFFFFFFF', 'A1 border white')
 
+// Gantt: starts two columns right of the table (margin col K at tableRight+1, days from L)
+// Timeline: min plan start 2026-09-07 − 7 = Aug 31 (Mon), max plan end 2026-09-18 + 7 = Sep 25
+// → 26 day columns L..AK (cols 12..37)
+assert.equal(cells.L5, 'Aug', 'gantt month label Aug (single day, unmerged)')
+assert.equal(cells.M5, 'Sep', 'gantt month label Sep')
+assert.equal(st.L5?.alignment?.horizontal, 'left', 'month label left-aligned')
+assert.equal(st.M5?.alignment?.horizontal, 'left', 'merged month label left-aligned')
+assert.equal(cells.L6, 'M', 'gantt weekday letter for Mon Aug 31')
+assert.equal(cells.M6, 'T', 'gantt weekday letter for Tue Sep 1')
+assert.equal(cells.L7, 31, 'gantt day-of-month 31')
+assert.equal(cells.M7, 1, 'gantt day-of-month 1')
+assert.equal(cells.L8, 'PLAN', 'gantt PLAN banner on the table header row')
+assert.equal(st.L8?.fill?.fgColor, 'FF203864', 'PLAN banner fill = header fill')
+assert.equal(st.L8?.font?.color, 'FFFFFFFF', 'PLAN banner white bold font')
+assert.equal(st.L8?.font?.bold, true, 'PLAN banner bold')
+assert.equal(st.L6?.font?.size, 8, 'weekday letter compact 8pt font')
+assert.equal(st.L6?.font?.bold, true, 'weekday letter bold')
+assert.equal(st.L7?.font?.size, 8, 'day-of-month compact 8pt font')
+
+// Task bars: Accent 5 for rows with children, lighter Accent 5 for leaves
+assert.equal(st.S9?.fill?.fgColor, 'FF5B9BD5', 'Root bar starts at Sep 7 (col S)')
+assert.equal(st.AD9?.fill?.fgColor, 'FF5B9BD5', 'Root bar ends at Sep 18 (col AD)')
+assert.equal(st.X9?.fill?.fgColor, 'FF5B9BD5', 'bar paints over the Sep 12 weekend')
+assert.equal(st.S10?.fill?.fgColor, 'FF5B9BD5', 'Child A (has children) bar Accent 5')
+assert.equal(st.W10?.fill?.fgColor, 'FF5B9BD5', 'Child A bar ends at Sep 11 (col W)')
+assert.equal(st.V11?.fill?.fgColor, 'FFBDD7EE', 'leaf bar lighter blue (Grandchild, col V)')
+assert.equal(st.Z12?.fill?.fgColor, 'FFBDD7EE', 'leaf Child B bar lighter blue (col Z)')
+
+// Non-working-day shading on empty cells (Sat Sep 5 = col Q, Sun Sep 6 = col R)
+assert.equal(st.Q9?.fill?.fgColor, 'FFF2F2F2', 'empty cell on Saturday shaded')
+assert.equal(st.R12?.fill?.fgColor, 'FFF2F2F2', 'empty cell on Sunday shaded')
+assert.equal(st.Q6?.fill?.fgColor, 'FFF2F2F2', 'weekend weekday header cell shaded')
+assert.equal(st.Q7?.fill?.fgColor, 'FFF2F2F2', 'weekend day-of-month header cell shaded')
+assert.equal(st.L9?.fill, undefined, 'empty cell on a working day has no fill')
+assert.equal(st.L10?.fill?.fgColor, undefined, 'leaf-row empty working-day cell unfilled')
+
+// Gantt grid borders + column widths
+assert.equal(st.L9?.border?.top?.color, 'FFD9D9D9', 'gantt grid border White Darker 15%')
+assert.equal(st.AK12?.border?.right?.color, 'FFD9D9D9', 'gantt last day column bordered')
+assert.equal(colWidth('L'), 2.6, 'gantt day column 2.6 wide')
+assert.equal(colWidth('AK'), 2.6, 'gantt last day column 2.6 wide')
+
 // Calibri 11 applied across the styled area (margin cells included)
 assert.equal(st.A1?.font?.name, 'Calibri', 'margin cell font Calibri')
 assert.equal(st.A1?.font?.size, 11, 'margin cell font size 11')
@@ -278,6 +321,9 @@ const cellXml = (xml: string, ref: string): string =>
   xml.match(new RegExp(`<c r="${ref}"[^>]*>[\\s\\S]*?</c>`))?.[0] ?? ''
 
 const xml = await sheetXml(OUT)
+assert.ok(xml.includes('<mergeCell ref="M5:AK5"/>'), 'Sep month band merged across its days')
+assert.ok(xml.includes('<mergeCell ref="L8:AK8"/>'), 'PLAN banner merged across the gantt')
+assert.ok(!xml.includes('<mergeCell ref="L5:'), 'single-day Aug band is not merged')
 const i9 = cellXml(xml, 'I9')
 assert.ok(i9, 'I9 cell present')
 assert.ok(i9.includes('<f>'), 'I9 (root with children) is a formula cell')

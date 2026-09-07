@@ -16,6 +16,11 @@ function isExportPayload(p: unknown): p is PlannerExportPayload {
   if (typeof o.scheduleName !== 'string') return false
   if (typeof o.overallPercent !== 'number' || !Number.isFinite(o.overallPercent)) return false
   if (!Array.isArray(o.columns) || !Array.isArray(o.rows)) return false
+  const cal = o.calendar
+  if (typeof cal !== 'object' || cal === null) return false
+  const cc = cal as Record<string, unknown>
+  if (typeof cc.weekStart !== 'number' || typeof cc.weekEnd !== 'number') return false
+  if (!Array.isArray(cc.holidays) || cc.holidays.some((h) => typeof h !== 'string')) return false
   for (const c of o.columns as unknown[]) {
     if (typeof c !== 'object' || c === null) return false
     const cc = c as Record<string, unknown>
