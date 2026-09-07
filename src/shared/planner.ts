@@ -316,6 +316,31 @@ export function rollupScheduleTasks(
   return tasks.map((t) => rollupTask(t, calendar))
 }
 
+/**
+ * Estimated %complete of a task tree as of `estimateDate` (`YYYY-MM-DD`):
+ * a leaf counts as 100 when it is already 100% or its `planEnd` is on/before the date,
+ * otherwise it keeps its user-filled value (also when `planEnd` is missing). Parents and the
+ * root level are the duration-weighted mean of their children's estimates — the same weights
+ * as `rollupChildren`.
+ */
+export function estimatePercentComplete(tasks: ScheduleTask[], estimateDate: string): number {
+  const estimate = (task: ScheduleTask): number => {
+    if (task.children.length === 0) {
+      if (task.percentComplete >= 100) return 100
+      if (task.planEnd && task.planEnd <= estimateDate) return 100
+      return task.percentComplete
+    }
+    return rollupChildren(
+      task.children.map((c) => ({ ...c, percentComplete: estimate(c) })),
+      defaultCalendar()
+    ).percentComplete
+  }
+  return rollupChildren(
+    tasks.map((t) => ({ ...t, percentComplete: estimate(t) })),
+    defaultCalendar()
+  ).percentComplete
+}
+
 /** Depth-first search for the first task whose title matches (case-insensitive). */
 export function findTaskByTitle(tasks: ScheduleTask[], title: string): ScheduleTask | null {
   const needle = title.trim().toLowerCase()

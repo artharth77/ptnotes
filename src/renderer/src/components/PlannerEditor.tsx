@@ -17,6 +17,7 @@ import {
   mdiMagnifyMinus,
   mdiMagnifyPlus,
   mdiPencil,
+  mdiPercent,
   mdiPlaylistPlus,
   mdiPlus,
   mdiRedo,
@@ -32,6 +33,7 @@ import { Modal, PromptModal } from './Modal'
 import { friendlyError } from '../errors'
 import { CalendarModal } from './CalendarModal'
 import { PlannerColumnModal } from './PlannerColumnModal'
+import { PlannerEstimateModal } from './PlannerEstimateModal'
 import {
   GanttChart,
   GANTT_DAY_WIDTH_DEFAULT,
@@ -418,6 +420,7 @@ export function PlannerEditor(): React.JSX.Element {
 
   const [calendarOpen, setCalendarOpen] = useState(false)
   const [columnsOpen, setColumnsOpen] = useState(false)
+  const [estimateOpen, setEstimateOpen] = useState(false)
   const [view, setView] = useState<'table' | 'gantt'>('table')
   const [ganttDayWidth, setGanttDayWidth] = useState(GANTT_DAY_WIDTH_DEFAULT)
   const [renaming, setRenaming] = useState(false)
@@ -1797,6 +1800,16 @@ export function PlannerEditor(): React.JSX.Element {
         <div className="planner-toolbar-group">
           <button
             className="icon-btn"
+            title="Estimate %Completed"
+            onClick={() => setEstimateOpen(true)}
+          >
+            <MdiIcon path={mdiPercent} size={16} />
+          </button>
+        </div>
+        <span className="planner-toolbar-divider" />
+        <div className="planner-toolbar-group">
+          <button
+            className="icon-btn"
             title="View columns"
             disabled={ganttMode}
             onClick={() => setColumnsOpen(true)}
@@ -2135,6 +2148,8 @@ export function PlannerEditor(): React.JSX.Element {
       )}
 
       {calendarOpen && <CalendarModal onClose={() => setCalendarOpen(false)} />}
+
+      {estimateOpen && <PlannerEstimateModal onClose={() => setEstimateOpen(false)} />}
 
       {renaming && (
         <PromptModal

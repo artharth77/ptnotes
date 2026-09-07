@@ -2041,6 +2041,12 @@ fieldset.kanban-form {
   line-height: 1.5;
 }
 
+.estimate-value {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
 .form-error {
   color: var(--danger);
   font-size: 12px;

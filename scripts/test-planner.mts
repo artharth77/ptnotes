@@ -27,6 +27,7 @@ const {
   deriveStatus,
   deriveTaskNo,
   emptyTask,
+  estimatePercentComplete,
   findTaskByTitle,
   nextWorkingDayString,
   normalizeCalendar,
@@ -375,6 +376,65 @@ assert.deepEqual(
     'percent'
   ],
   'duplicates deduped'
+)
+
+// ---- estimate percent ----
+
+assert.equal(estimatePercentComplete([], today), 0, 'empty tree')
+assert.equal(
+  estimatePercentComplete([mk('a', 100, '2024-01-01', '2024-02-01')], today),
+  100,
+  'leaf already 100 stays 100'
+)
+assert.equal(
+  estimatePercentComplete([mk('b', 40, '2024-01-01', '2024-01-05')], today),
+  100,
+  'leaf planEnd before estimate date -> 100'
+)
+assert.equal(
+  estimatePercentComplete([mk('c', 40, '2024-01-01', '2024-01-10')], today),
+  100,
+  'leaf planEnd on estimate date -> 100'
+)
+assert.equal(
+  estimatePercentComplete([mk('d', 40, '2024-01-01', '2024-01-15')], today),
+  40,
+  'leaf planEnd after estimate date keeps filled value'
+)
+assert.equal(
+  estimatePercentComplete([mk('e', 30, null, null)], today),
+  30,
+  'leaf without planEnd keeps filled value'
+)
+
+const estC1 = mk('c1', 0, '2024-01-01', '2024-01-05') // 5 working days, est 100
+const estC2 = mk('c2', 50, '2024-01-08', '2024-01-12') // 5 working days, est 50
+const estParent = { ...emptyTask(), id: 'p', children: [estC1, estC2] }
+assert.equal(
+  estimatePercentComplete([estParent], today),
+  75,
+  'parent is duration-weighted mean of estimates'
+)
+assert.equal(
+  estimatePercentComplete([{ ...emptyTask(), id: 'g', children: [estParent] }], today),
+  75,
+  'nested rollup'
+)
+assert.equal(
+  estimatePercentComplete(
+    [{ ...emptyTask(), id: 'p2', children: [mk('c3', 100, null, null), mk('c4', 20, null, null)] }],
+    today
+  ),
+  60,
+  'no durations -> plain mean'
+)
+assert.equal(
+  estimatePercentComplete(
+    [mk('r1', 0, '2024-01-01', '2024-01-05'), mk('r2', 50, '2024-01-08', '2024-01-11')],
+    today
+  ),
+  78,
+  'multiple roots weighted (100*5 + 50*4) / 9'
 )
 
 // ---- search / count / validate ----

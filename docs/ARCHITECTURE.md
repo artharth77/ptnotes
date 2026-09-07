@@ -585,6 +585,10 @@ JSON in `<project>/planner/<slug>.json`; the whole feature is pure data — no m
   `duration` = working days between them, `%Complete` = duration-weighted mean (plain average when
   children have no durations), `status` = derived (on-hold preserved). `rollupScheduleTasks` recurses
   bottom-up; the editor and AI tools recompute the whole tree after every edit.
+- **Estimate** (`estimatePercentComplete`): the projected root `%Complete` as of a date — a leaf
+  counts as 100 when it is already 100% or its `planEnd` is on/before the estimate date, otherwise
+  it keeps its user-filled value (also when `planEnd` is missing); parents and the root level use
+  the same duration-weighted mean as the rollup. Read-only — never written back.
 - **Leaf fields are manual**: title, owner, duration, plan dates, actuals, %complete, note. Parent
   plan/duration/% fields are read-only in the UI (show the rolled-up values); title/owner/actuals/
   note and status (for on-hold) remain editable.
@@ -628,6 +632,10 @@ JSON in `<project>/planner/<slug>.json`; the whole feature is pure data — no m
   `normalizeColumnOrder` and persisted with `columnVisibility` on dialog close (one undo step).
   The grid template, header, and rows all derive from the same ordered key list. A **Reset**
   button in the dialog restores the default visibility and order.
+- **Estimate %Completed**: toolbar button (between the move group and the View-columns group,
+  separated by a divider; works in both views) opens a read-only modal showing the current root
+  `%Complete`, an estimate date picker (default today), and the live-computed estimated
+  `%Complete` for that date via `estimatePercentComplete`.
 
 ### Gantt view (GanttChart)
 
