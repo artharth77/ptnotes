@@ -203,6 +203,22 @@ export function deriveStatus(percent: number, currentStatus: ScheduleStatus): Sc
   return 'in-progress'
 }
 
+/** Display label for a status (grid, Gantt, Excel export). */
+export function statusLabel(status: ScheduleStatus): string {
+  switch (status) {
+    case 'pending':
+      return 'Pending'
+    case 'on-hold':
+      return 'On Hold'
+    case 'completed':
+      return 'Completed'
+    case 'in-progress':
+      return 'In Progress'
+    default:
+      return 'Not Started'
+  }
+}
+
 /** Fill state of the Plan Indicator strip, derived at render time (never persisted). */
 export type PlanIndicator = 'green' | 'yellow' | 'red' | 'none'
 
@@ -314,6 +330,27 @@ export function rollupScheduleTasks(
   calendar: ProjectCalendar
 ): ScheduleTask[] {
   return tasks.map((t) => rollupTask(t, calendar))
+}
+
+/**
+ * Overall %complete of a schedule: duration-weighted mean of the top-level tasks'
+ * `percentComplete` (same weights as `rollupChildren`; plain mean when none have a
+ * duration). 0 for an empty schedule.
+ */
+export function overallPercentComplete(tasks: ScheduleTask[]): number {
+  if (tasks.length === 0) return 0
+  let weightTotal = 0
+  let weightedPercent = 0
+  let plainTotal = 0
+  for (const task of tasks) {
+    const weight = task.duration && task.duration > 0 ? task.duration : 0
+    weightTotal += weight
+    weightedPercent += task.percentComplete * weight
+    plainTotal += task.percentComplete
+  }
+  return weightTotal > 0
+    ? Math.round(weightedPercent / weightTotal)
+    : Math.round(plainTotal / tasks.length)
 }
 
 /**
@@ -492,4 +529,48 @@ export function emptyTask(): ScheduleTask {
     note: '',
     children: []
   }
+}
+
+// ---- Excel export ----
+
+/** One exported column: the planner column key + its display label. */
+export interface PlannerExportColumn {
+  key: string
+  label: string
+}
+
+/** One exported row: a flattened task with its tree position. */
+export interface PlannerExportRow {
+  no: string
+  title: string
+  status: ScheduleStatus
+  owner: string
+  duration: number | null
+  planStart: string | null
+  planEnd: string | null
+  actualStart: string | null
+  actualEnd: string | null
+  percentComplete: number
+  note: string
+  depth: number
+  hasChildren: boolean
+}
+
+/** Everything the main process needs to build the .xlsx (no file access in the renderer). */
+export interface PlannerExportPayload {
+  scheduleName: string
+  overallPercent: number
+  columns: PlannerExportColumn[]
+  rows: PlannerExportRow[]
+}
+
+/** Result of `planner:exportExcel`. */
+export interface PlannerExportResult {
+  ok: boolean
+  /** True when the user dismissed the save dialog. */
+  canceled?: boolean
+  /** Absolute path of the written file (when ok). */
+  path?: string
+  /** Error message (when !ok and not canceled). */
+  error?: string
 }

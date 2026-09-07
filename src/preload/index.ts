@@ -39,6 +39,8 @@ import type {
   PdfInfo,
   PdfPageEdit,
   PdfPageThumbnail,
+  PlannerExportPayload,
+  PlannerExportResult,
   Project,
   ProjectCalendar,
   Schedule,
@@ -173,6 +175,8 @@ const api = {
       ipcRenderer.invoke('planner:getCalendar', project),
     saveCalendar: (project: string, calendar: ProjectCalendar): Promise<void> =>
       ipcRenderer.invoke('planner:saveCalendar', project, calendar),
+    exportExcel: (payload: PlannerExportPayload): Promise<PlannerExportResult> =>
+      ipcRenderer.invoke('planner:exportExcel', payload),
     setEditActive: (active: boolean): void => {
       ipcRenderer.send('planner:set-edit-active', active)
     },

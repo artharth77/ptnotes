@@ -480,6 +480,10 @@ export interface AiTraceFile {
 // ---- Planner (project schedules + calendar) ----
 
 export type {
+  PlannerExportColumn,
+  PlannerExportPayload,
+  PlannerExportResult,
+  PlannerExportRow,
   ProjectCalendar,
   RolledUpTask,
   Schedule,

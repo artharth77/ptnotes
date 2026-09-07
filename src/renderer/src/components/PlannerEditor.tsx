@@ -14,6 +14,7 @@ import {
   mdiContentCopy,
   mdiContentCut,
   mdiContentPaste,
+  mdiFileExcelOutline,
   mdiGrid,
   mdiMagnifyMinus,
   mdiMagnifyPlus,
@@ -54,26 +55,19 @@ import {
   nextWorkingDayString,
   normalizeColumnOrder,
   normalizeOwner,
+  overallPercentComplete,
   parseOwners,
   planIndicator,
-  rollupScheduleTasks
+  rollupScheduleTasks,
+  statusLabel
 } from '@shared/planner'
-import type { Schedule, ScheduleStatus, ScheduleTask } from '@shared/types'
-
-function statusLabel(status: ScheduleStatus): string {
-  switch (status) {
-    case 'pending':
-      return 'Pending'
-    case 'on-hold':
-      return 'On Hold'
-    case 'completed':
-      return 'Completed'
-    case 'in-progress':
-      return 'In Progress'
-    default:
-      return 'Not Started'
-  }
-}
+import type {
+  PlannerExportColumn,
+  PlannerExportRow,
+  Schedule,
+  ScheduleStatus,
+  ScheduleTask
+} from '@shared/types'
 
 type PlannerColumnKey =
   | 'indicator'
@@ -1417,6 +1411,39 @@ export function PlannerEditor(): React.JSX.Element {
     pendingFocus.current = { id: newTasks[0].id, col: 'title' }
   }
 
+  async function handleExportExcel(): Promise<void> {
+    const columns: PlannerExportColumn[] = columnOrder
+      .filter((k) => k !== 'indicator' && (k === 'no' || k === 'title' || visibleCols.has(k)))
+      .map((k) => ({ key: k, label: COLUMNS.find((c) => c.key === k)?.label ?? k }))
+    const allRows = flattenTasks(sc.tasks, null, 0, new Set(), [])
+    const exportRows: PlannerExportRow[] = allRows.map((r) => ({
+      no: r.no,
+      title: r.task.title,
+      status: r.task.status,
+      owner: r.task.owner,
+      duration: r.task.duration,
+      planStart: r.task.planStart,
+      planEnd: r.task.planEnd,
+      actualStart: r.task.actualStart,
+      actualEnd: r.task.actualEnd,
+      percentComplete: r.task.percentComplete,
+      note: r.task.note,
+      depth: r.depth,
+      hasChildren: r.task.children.length > 0
+    }))
+    try {
+      const result = await window.ptnotes.planner.exportExcel({
+        scheduleName: sc.name,
+        overallPercent: overallPercentComplete(sc.tasks),
+        columns,
+        rows: exportRows
+      })
+      if (!result.ok && !result.canceled) window.alert(friendlyError(result.error))
+    } catch (err) {
+      window.alert(friendlyError(err))
+    }
+  }
+
   function handleNewSubtask(): void {
     const selRows = rows.filter((r) => selected.has(r.task.id))
     const newTasks = Array.from({ length: Math.max(1, selRows.length) }, () => emptyTask())
@@ -1910,6 +1937,17 @@ export function PlannerEditor(): React.JSX.Element {
             onClick={() => setCalendarOpen(true)}
           >
             <MdiIcon path={mdiCalendarMonth} size={16} />
+          </button>
+        </div>
+        <span className="planner-toolbar-divider" />
+        <div className="planner-toolbar-group">
+          <button
+            className="icon-btn"
+            title="Export to Excel"
+            disabled={sc.tasks.length === 0}
+            onClick={() => void handleExportExcel()}
+          >
+            <MdiIcon path={mdiFileExcelOutline} size={16} />
           </button>
         </div>
       </div>
