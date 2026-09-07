@@ -6570,6 +6570,15 @@ fieldset.kanban-form {
   cursor: pointer;
   font-size: 13px;
 
+  &.fixed {
+    cursor: default;
+  }
+
+  &.selected {
+    background: var(--accent-soft);
+    border-radius: 4px;
+  }
+
   &.disabled {
     opacity: 0.6;
     cursor: default;
@@ -6578,6 +6587,12 @@ fieldset.kanban-form {
       cursor: not-allowed;
     }
   }
+}
+
+.column-move {
+  margin-right: auto;
+  display: flex;
+  gap: 2px;
 }
 
 /* ---------- Calendar modal ---------- */

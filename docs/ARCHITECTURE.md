@@ -565,6 +565,10 @@ JSON in `<project>/planner/<slug>.json`; the whole feature is pure data — no m
   derived at render time (`deriveTaskNo`), never persisted. The **Plan Indicator** strip is the
   same: `planIndicator(task, today)` derives its fill from `percentComplete` + plan dates +
   today at render time and is never persisted (only its visibility is).
+- `Schedule.columnVisibility` / `Schedule.columnOrder` (both optional) are per-schedule UI
+  preferences: which columns are shown and their left-to-right order. `normalizeColumnOrder`
+  (shared) repairs a saved order against the known keys: fixed keys first, then saved order,
+  then missing keys in default order.
 
 ### Rules
 
@@ -617,6 +621,13 @@ JSON in `<project>/planner/<slug>.json`; the whole feature is pure data — no m
 - **No. and Title are always visible**: both columns are always rendered (row/header/`colTemplate`
   guards removed) and are checked + disabled in the column modal (`disabledKeys`), so the grid
   always has a stable identity + label to anchor the Gantt view.
+- **Column reordering**: the View-columns dialog reorders the movable columns — click a row to
+  select it, then use the shared up/down buttons in the dialog footer (Plan Indicator, No., and
+  Title are pinned at the front and cannot be selected or moved — `fixedKeys`); the checkbox
+  itself toggles visibility. The order is per-schedule state initialized from `columnOrder` via
+  `normalizeColumnOrder` and persisted with `columnVisibility` on dialog close (one undo step).
+  The grid template, header, and rows all derive from the same ordered key list. A **Reset**
+  button in the dialog restores the default visibility and order.
 
 ### Gantt view (GanttChart)
 

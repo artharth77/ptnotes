@@ -42,6 +42,8 @@ export interface Schedule {
   tasks: ScheduleTask[]
   /** Per-schedule editor column visibility. Absent keys default to visible. */
   columnVisibility?: Record<string, boolean>
+  /** Per-schedule editor column order (all column keys). Absent/invalid falls back to default. */
+  columnOrder?: string[]
 }
 
 /** List-item summary of a schedule, without the task tree. */
@@ -217,6 +219,26 @@ export function planIndicator(task: ScheduleTask, today: string): PlanIndicator 
   if (!task.planStart && !task.planEnd) return 'none'
   if (task.planStart && today < task.planStart) return 'none'
   return 'yellow'
+}
+
+/**
+ * Sanitize a saved column order into a complete, valid one:
+ * `fixedKeys` first (canonical order, never movable), then the saved keys that are known and
+ * not fixed (deduped), then any remaining known keys in default order.
+ */
+export function normalizeColumnOrder(
+  saved: string[] | null | undefined,
+  allKeys: string[],
+  fixedKeys: string[]
+): string[] {
+  const out: string[] = []
+  const known = new Set(allKeys)
+  for (const k of fixedKeys) if (known.has(k) && !out.includes(k)) out.push(k)
+  for (const k of saved ?? []) {
+    if (known.has(k) && !fixedKeys.includes(k) && !out.includes(k)) out.push(k)
+  }
+  for (const k of allKeys) if (!out.includes(k)) out.push(k)
+  return out
 }
 
 /**

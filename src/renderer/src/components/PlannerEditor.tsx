@@ -47,6 +47,7 @@ import {
   emptyTask,
   formatDate,
   nextWorkingDayString,
+  normalizeColumnOrder,
   planIndicator,
   rollupScheduleTasks
 } from '@shared/planner'
@@ -111,15 +112,37 @@ const COL_WIDTHS: Record<PlannerColumnKey, string> = {
   note: 'minmax(160px, auto)'
 }
 
-function colTemplate(visible: Set<PlannerColumnKey>): string {
+/** Pinned first, never movable (Plan Indicator stays hideable; No./Title always visible). */
+const FIXED_COLUMNS: PlannerColumnKey[] = ['indicator', 'no', 'title']
+
+type MovableColumnKey = Exclude<PlannerColumnKey, 'indicator' | 'no' | 'title'>
+
+const MOVABLE_HEADERS: Record<MovableColumnKey, { label: string; className: string }> = {
+  status: { label: 'Status', className: 'planner-col-status' },
+  owner: { label: 'Owner', className: 'planner-col-owner' },
+  duration: { label: 'Dur.', className: 'planner-col-num' },
+  planStart: { label: 'Plan Start', className: 'planner-col-date' },
+  planEnd: { label: 'Plan End', className: 'planner-col-date' },
+  actualStart: { label: 'Actual Start', className: 'planner-col-date' },
+  actualEnd: { label: 'Actual End', className: 'planner-col-date' },
+  percent: { label: '%', className: 'planner-col-num' },
+  note: { label: 'Note', className: 'planner-col-note' }
+}
+
+function colTemplate(visible: Set<PlannerColumnKey>, order: PlannerColumnKey[]): string {
   const cols: string[] = ['28px']
-  if (visible.has('indicator')) cols.push(COL_WIDTHS.indicator)
-  cols.push(COL_WIDTHS.no, COL_WIDTHS.title)
-  for (const c of COLUMNS) {
-    if (c.key !== 'no' && c.key !== 'title' && c.key !== 'indicator' && visible.has(c.key))
-      cols.push(COL_WIDTHS[c.key])
+  for (const k of order) {
+    if (k === 'no' || k === 'title' || visible.has(k)) cols.push(COL_WIDTHS[k])
   }
   return cols.join(' ')
+}
+
+function initColumnOrder(saved: string[] | undefined): PlannerColumnKey[] {
+  return normalizeColumnOrder(
+    saved,
+    COLUMNS.map((c) => c.key),
+    FIXED_COLUMNS
+  ) as PlannerColumnKey[]
 }
 
 function initVisibleCols(saved: Record<string, boolean> | undefined): Set<PlannerColumnKey> {
@@ -415,10 +438,14 @@ export function PlannerEditor(): React.JSX.Element {
   const [visibleCols, setVisibleCols] = useState<Set<PlannerColumnKey>>(() =>
     initVisibleCols(schedule?.columnVisibility)
   )
+  const [columnOrder, setColumnOrder] = useState<PlannerColumnKey[]>(() =>
+    initColumnOrder(schedule?.columnOrder)
+  )
   const [prevScheduleId, setPrevScheduleId] = useState(schedule?.id)
   if (schedule?.id !== prevScheduleId) {
     setPrevScheduleId(schedule?.id)
     setVisibleCols(initVisibleCols(schedule?.columnVisibility))
+    setColumnOrder(initColumnOrder(schedule?.columnOrder))
     setView('table')
   }
   const [clipboard, setClipboard] = useState<ScheduleTask[]>([])
@@ -701,10 +728,198 @@ export function PlannerEditor(): React.JSX.Element {
   const sc: Schedule = schedule
   const cal = calendar ?? defaultCalendar()
   const rows = flattenTasks(sc.tasks, null, 0, collapsed, [])
-  const template = colTemplate(visibleCols)
+  const template = colTemplate(visibleCols, columnOrder)
   const today = formatDate(new Date())
   const noLeft = 28 + (visibleCols.has('indicator') ? 5 : 0)
   const titleLeft = noLeft + 46
+  const movableCols = columnOrder.filter(
+    (k) => !FIXED_COLUMNS.includes(k) && visibleCols.has(k)
+  ) as MovableColumnKey[]
+
+  function renderColumnCell(
+    key: MovableColumnKey,
+    task: ScheduleTask,
+    isParent: boolean
+  ): React.JSX.Element {
+    switch (key) {
+      case 'status':
+        return (
+          <div key={key} className="planner-col-status planner-cell">
+            <button
+              type="button"
+              className={`planner-status-label${
+                task.status === 'on-hold' || task.status === 'pending'
+                  ? ` planner-status-manual`
+                  : ''
+              }${task.status === 'in-progress' ? ' planner-status-inprogress' : ''}${
+                task.status === 'completed' ? ' planner-status-completed' : ''
+              }`}
+              title="Status — click to change"
+              data-cell={task.id}
+              data-col="status"
+              onClick={(e) => {
+                e.stopPropagation()
+                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                setStatusMenu({
+                  id: task.id,
+                  x: Math.min(rect.left, window.innerWidth - 160),
+                  y: rect.bottom + 2,
+                  mode:
+                    task.status === 'on-hold' || task.status === 'pending'
+                      ? task.status
+                      : 'not-started'
+                })
+              }}
+            >
+              {statusLabel(task.status)}
+            </button>
+          </div>
+        )
+      case 'owner':
+        return (
+          <div key={key} className="planner-col-owner planner-cell">
+            <input
+              className={`planner-input${!task.owner ? ' planner-value-empty' : ''}`}
+              data-cell={task.id}
+              data-col="owner"
+              value={task.owner}
+              placeholder="Owner"
+              onFocus={startEditSession}
+              onBlur={endEditSession}
+              onChange={(e) => editField(sc, task.id, 'owner', e.target.value)}
+            />
+          </div>
+        )
+      case 'duration':
+        return (
+          <div key={key} className="planner-col-num planner-cell">
+            <input
+              type="number"
+              min={1}
+              className="planner-input planner-num"
+              data-cell={task.id}
+              data-col="duration"
+              value={numberDrafts[numberDraftKey(task.id, 'duration')] ?? task.duration ?? ''}
+              readOnly={isParent}
+              disabled={isParent}
+              onFocus={startEditSession}
+              onChange={(e) => {
+                setNumberDrafts((d) => ({
+                  ...d,
+                  [numberDraftKey(task.id, 'duration')]: e.target.value
+                }))
+                commitNumber(sc, task.id, 'duration', e.target.value)
+              }}
+              onBlur={() => {
+                normalizeNumber(
+                  task.id,
+                  'duration',
+                  numberDrafts[numberDraftKey(task.id, 'duration')] ?? ''
+                )
+                endEditSession()
+              }}
+            />
+          </div>
+        )
+      case 'planStart':
+        return (
+          <div key={key} className="planner-col-date planner-cell">
+            <DateField
+              value={task.planStart}
+              readOnly={isParent}
+              disabled={isParent}
+              cellId={task.id}
+              col="planStart"
+              onChange={(v) => editField(sc, task.id, 'planStart', v)}
+            />
+          </div>
+        )
+      case 'planEnd':
+        return (
+          <div key={key} className="planner-col-date planner-cell">
+            <DateField
+              value={task.planEnd}
+              readOnly={isParent}
+              disabled={isParent}
+              cellId={task.id}
+              col="planEnd"
+              onChange={(v) => editField(sc, task.id, 'planEnd', v)}
+            />
+          </div>
+        )
+      case 'actualStart':
+        return (
+          <div key={key} className="planner-col-date planner-cell">
+            <DateField
+              value={task.actualStart}
+              cellId={task.id}
+              col="actualStart"
+              onChange={(v) => editField(sc, task.id, 'actualStart', v)}
+            />
+          </div>
+        )
+      case 'actualEnd':
+        return (
+          <div key={key} className="planner-col-date planner-cell">
+            <DateField
+              value={task.actualEnd}
+              cellId={task.id}
+              col="actualEnd"
+              onChange={(v) => editField(sc, task.id, 'actualEnd', v)}
+            />
+          </div>
+        )
+      case 'percent':
+        return (
+          <div key={key} className="planner-col-num planner-cell">
+            <input
+              type="number"
+              min={0}
+              max={100}
+              className="planner-input planner-num"
+              data-cell={task.id}
+              data-col="percent"
+              value={
+                numberDrafts[numberDraftKey(task.id, 'percentComplete')] ?? task.percentComplete
+              }
+              readOnly={isParent}
+              disabled={isParent}
+              onFocus={startEditSession}
+              onChange={(e) => {
+                setNumberDrafts((d) => ({
+                  ...d,
+                  [numberDraftKey(task.id, 'percentComplete')]: e.target.value
+                }))
+                commitNumber(sc, task.id, 'percentComplete', e.target.value)
+              }}
+              onBlur={() => {
+                normalizeNumber(
+                  task.id,
+                  'percentComplete',
+                  numberDrafts[numberDraftKey(task.id, 'percentComplete')] ?? ''
+                )
+                endEditSession()
+              }}
+            />
+          </div>
+        )
+      case 'note':
+        return (
+          <div key={key} className="planner-col-note planner-cell">
+            <input
+              className={`planner-input${!task.note ? ' planner-value-empty' : ''}`}
+              data-cell={task.id}
+              data-col="note"
+              value={task.note}
+              placeholder="Note"
+              onFocus={startEditSession}
+              onBlur={endEditSession}
+              onChange={(e) => editField(sc, task.id, 'note', e.target.value)}
+            />
+          </div>
+        )
+    }
+  }
 
   function renderRow(task: ScheduleTask, no: string, depth: number): React.JSX.Element {
     const isParent = task.children.length > 0
@@ -756,173 +971,7 @@ export function PlannerEditor(): React.JSX.Element {
             onChange={(e) => editField(sc, task.id, 'title', e.target.value)}
           />
         </div>
-        {visibleCols.has('status') && (
-          <div className="planner-col-status planner-cell">
-            <button
-              type="button"
-              className={`planner-status-label${
-                task.status === 'on-hold' || task.status === 'pending'
-                  ? ` planner-status-manual`
-                  : ''
-              }${task.status === 'in-progress' ? ' planner-status-inprogress' : ''}${
-                task.status === 'completed' ? ' planner-status-completed' : ''
-              }`}
-              title="Status — click to change"
-              data-cell={task.id}
-              data-col="status"
-              onClick={(e) => {
-                e.stopPropagation()
-                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                setStatusMenu({
-                  id: task.id,
-                  x: Math.min(rect.left, window.innerWidth - 160),
-                  y: rect.bottom + 2,
-                  mode:
-                    task.status === 'on-hold' || task.status === 'pending'
-                      ? task.status
-                      : 'not-started'
-                })
-              }}
-            >
-              {statusLabel(task.status)}
-            </button>
-          </div>
-        )}
-        {visibleCols.has('owner') && (
-          <div className="planner-col-owner planner-cell">
-            <input
-              className={`planner-input${!task.owner ? ' planner-value-empty' : ''}`}
-              data-cell={task.id}
-              data-col="owner"
-              value={task.owner}
-              placeholder="Owner"
-              onFocus={startEditSession}
-              onBlur={endEditSession}
-              onChange={(e) => editField(sc, task.id, 'owner', e.target.value)}
-            />
-          </div>
-        )}
-        {visibleCols.has('duration') && (
-          <div className="planner-col-num planner-cell">
-            <input
-              type="number"
-              min={1}
-              className="planner-input planner-num"
-              data-cell={task.id}
-              data-col="duration"
-              value={numberDrafts[numberDraftKey(task.id, 'duration')] ?? task.duration ?? ''}
-              readOnly={isParent}
-              disabled={isParent}
-              onFocus={startEditSession}
-              onChange={(e) => {
-                setNumberDrafts((d) => ({
-                  ...d,
-                  [numberDraftKey(task.id, 'duration')]: e.target.value
-                }))
-                commitNumber(sc, task.id, 'duration', e.target.value)
-              }}
-              onBlur={() => {
-                normalizeNumber(
-                  task.id,
-                  'duration',
-                  numberDrafts[numberDraftKey(task.id, 'duration')] ?? ''
-                )
-                endEditSession()
-              }}
-            />
-          </div>
-        )}
-        {visibleCols.has('planStart') && (
-          <div className="planner-col-date planner-cell">
-            <DateField
-              value={task.planStart}
-              readOnly={isParent}
-              disabled={isParent}
-              cellId={task.id}
-              col="planStart"
-              onChange={(v) => editField(sc, task.id, 'planStart', v)}
-            />
-          </div>
-        )}
-        {visibleCols.has('planEnd') && (
-          <div className="planner-col-date planner-cell">
-            <DateField
-              value={task.planEnd}
-              readOnly={isParent}
-              disabled={isParent}
-              cellId={task.id}
-              col="planEnd"
-              onChange={(v) => editField(sc, task.id, 'planEnd', v)}
-            />
-          </div>
-        )}
-        {visibleCols.has('actualStart') && (
-          <div className="planner-col-date planner-cell">
-            <DateField
-              value={task.actualStart}
-              cellId={task.id}
-              col="actualStart"
-              onChange={(v) => editField(sc, task.id, 'actualStart', v)}
-            />
-          </div>
-        )}
-        {visibleCols.has('actualEnd') && (
-          <div className="planner-col-date planner-cell">
-            <DateField
-              value={task.actualEnd}
-              cellId={task.id}
-              col="actualEnd"
-              onChange={(v) => editField(sc, task.id, 'actualEnd', v)}
-            />
-          </div>
-        )}
-        {visibleCols.has('percent') && (
-          <div className="planner-col-num planner-cell">
-            <input
-              type="number"
-              min={0}
-              max={100}
-              className="planner-input planner-num"
-              data-cell={task.id}
-              data-col="percent"
-              value={
-                numberDrafts[numberDraftKey(task.id, 'percentComplete')] ?? task.percentComplete
-              }
-              readOnly={isParent}
-              disabled={isParent}
-              onFocus={startEditSession}
-              onChange={(e) => {
-                setNumberDrafts((d) => ({
-                  ...d,
-                  [numberDraftKey(task.id, 'percentComplete')]: e.target.value
-                }))
-                commitNumber(sc, task.id, 'percentComplete', e.target.value)
-              }}
-              onBlur={() => {
-                normalizeNumber(
-                  task.id,
-                  'percentComplete',
-                  numberDrafts[numberDraftKey(task.id, 'percentComplete')] ?? ''
-                )
-                endEditSession()
-              }}
-            />
-          </div>
-        )}
-        {visibleCols.has('note') && (
-          <div className="planner-col-note planner-cell">
-            <input
-              className={`planner-input${!task.note ? ' planner-value-empty' : ''}`}
-              data-cell={task.id}
-              data-col="note"
-              value={task.note}
-              placeholder="Note"
-              onFocus={startEditSession}
-              onBlur={endEditSession}
-              onChange={(e) => editField(sc, task.id, 'note', e.target.value)}
-            />
-          </div>
-        )}
+        {movableCols.map((key) => renderColumnCell(key, task, isParent))}
       </div>
     )
   }
@@ -1794,33 +1843,11 @@ export function PlannerEditor(): React.JSX.Element {
                   <div className="planner-col-title planner-cell" style={{ left: titleLeft }}>
                     Title
                   </div>
-                  {visibleCols.has('status') && (
-                    <div className="planner-col-status planner-cell">Status</div>
-                  )}
-                  {visibleCols.has('owner') && (
-                    <div className="planner-col-owner planner-cell">Owner</div>
-                  )}
-                  {visibleCols.has('duration') && (
-                    <div className="planner-col-num planner-cell">Dur.</div>
-                  )}
-                  {visibleCols.has('planStart') && (
-                    <div className="planner-col-date planner-cell">Plan Start</div>
-                  )}
-                  {visibleCols.has('planEnd') && (
-                    <div className="planner-col-date planner-cell">Plan End</div>
-                  )}
-                  {visibleCols.has('actualStart') && (
-                    <div className="planner-col-date planner-cell">Actual Start</div>
-                  )}
-                  {visibleCols.has('actualEnd') && (
-                    <div className="planner-col-date planner-cell">Actual End</div>
-                  )}
-                  {visibleCols.has('percent') && (
-                    <div className="planner-col-num planner-cell">%</div>
-                  )}
-                  {visibleCols.has('note') && (
-                    <div className="planner-col-note planner-cell">Note</div>
-                  )}
+                  {movableCols.map((key) => (
+                    <div key={key} className={`${MOVABLE_HEADERS[key].className} planner-cell`}>
+                      {MOVABLE_HEADERS[key].label}
+                    </div>
+                  ))}
                 </div>
                 <div className="planner-grid-body">{renderTaskTree(sc.tasks, null, 0)}</div>
               </div>
@@ -2074,18 +2101,34 @@ export function PlannerEditor(): React.JSX.Element {
           columns={COLUMNS}
           visible={visibleCols}
           disabledKeys={new Set(['no', 'title'])}
+          order={columnOrder}
+          fixedKeys={new Set(FIXED_COLUMNS)}
+          onMove={(key, dir) => {
+            setColumnOrder((prev) => {
+              const i = prev.indexOf(key)
+              const j = i + dir
+              if (i === -1 || j < 0 || j >= prev.length) return prev
+              const next = [...prev]
+              ;[next[i], next[j]] = [next[j], next[i]]
+              return next
+            })
+          }}
           onToggle={(key) => {
             const next = new Set(visibleCols)
             if (next.has(key)) next.delete(key)
             else next.add(key)
             setVisibleCols(next)
           }}
+          onReset={() => {
+            setVisibleCols(initVisibleCols(undefined))
+            setColumnOrder(initColumnOrder(undefined))
+          }}
           onClose={() => {
             const visibility = { ...(sc.columnVisibility ?? {}) }
             for (const c of COLUMNS) visibility[c.key] = visibleCols.has(c.key)
             visibility.no = true
             visibility.title = true
-            commit(sc, sc.tasks, { columnVisibility: visibility })
+            commit(sc, sc.tasks, { columnVisibility: visibility, columnOrder })
             setColumnsOpen(false)
           }}
         />

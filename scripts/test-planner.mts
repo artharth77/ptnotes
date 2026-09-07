@@ -30,6 +30,7 @@ const {
   findTaskByTitle,
   nextWorkingDayString,
   normalizeCalendar,
+  normalizeColumnOrder,
   planIndicator,
   rollupScheduleTasks,
   validateScheduleId
@@ -244,6 +245,136 @@ assert.equal(
   planIndicator(mk('l', 50, null, '2024-01-09'), today),
   'red',
   'only planEnd, today past it'
+)
+
+// ---- column order ----
+
+const allCols = [
+  'indicator',
+  'no',
+  'title',
+  'status',
+  'owner',
+  'duration',
+  'planStart',
+  'planEnd',
+  'actualStart',
+  'actualEnd',
+  'percent',
+  'note'
+]
+const fixedCols = ['indicator', 'no', 'title']
+
+assert.deepEqual(
+  normalizeColumnOrder(undefined, allCols, fixedCols),
+  allCols,
+  'no saved order -> default'
+)
+assert.deepEqual(
+  normalizeColumnOrder(
+    [
+      'indicator',
+      'no',
+      'title',
+      'note',
+      'status',
+      'owner',
+      'duration',
+      'planStart',
+      'planEnd',
+      'actualStart',
+      'actualEnd',
+      'percent'
+    ],
+    allCols,
+    fixedCols
+  ),
+  [
+    'indicator',
+    'no',
+    'title',
+    'note',
+    'status',
+    'owner',
+    'duration',
+    'planStart',
+    'planEnd',
+    'actualStart',
+    'actualEnd',
+    'percent'
+  ],
+  'custom order kept'
+)
+assert.deepEqual(
+  normalizeColumnOrder(
+    [
+      'no',
+      'status',
+      'indicator',
+      'title',
+      'owner',
+      'duration',
+      'planStart',
+      'planEnd',
+      'actualStart',
+      'actualEnd',
+      'percent',
+      'note'
+    ],
+    allCols,
+    fixedCols
+  ),
+  [
+    'indicator',
+    'no',
+    'title',
+    'status',
+    'owner',
+    'duration',
+    'planStart',
+    'planEnd',
+    'actualStart',
+    'actualEnd',
+    'percent',
+    'note'
+  ],
+  'fixed keys forced to the front in canonical order'
+)
+assert.deepEqual(
+  normalizeColumnOrder(['bogus', 'status', 'note'], allCols, fixedCols),
+  [
+    'indicator',
+    'no',
+    'title',
+    'status',
+    'note',
+    'owner',
+    'duration',
+    'planStart',
+    'planEnd',
+    'actualStart',
+    'actualEnd',
+    'percent'
+  ],
+  'unknown keys dropped, missing keys appended in default order'
+)
+assert.deepEqual(
+  normalizeColumnOrder(['status', 'status', 'note'], allCols, fixedCols),
+  [
+    'indicator',
+    'no',
+    'title',
+    'status',
+    'note',
+    'owner',
+    'duration',
+    'planStart',
+    'planEnd',
+    'actualStart',
+    'actualEnd',
+    'percent'
+  ],
+  'duplicates deduped'
 )
 
 // ---- search / count / validate ----
