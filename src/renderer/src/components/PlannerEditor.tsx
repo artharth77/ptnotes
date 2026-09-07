@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
+  mdiAccountGroup,
   mdiArrowDownCircleOutline,
   mdiArrowLeftCircleOutline,
   mdiArrowRightCircleOutline,
@@ -34,6 +35,7 @@ import { friendlyError } from '../errors'
 import { CalendarModal } from './CalendarModal'
 import { PlannerColumnModal } from './PlannerColumnModal'
 import { PlannerEstimateModal } from './PlannerEstimateModal'
+import { PlannerResourcesModal } from './PlannerResourcesModal'
 import {
   GanttChart,
   GANTT_DAY_WIDTH_DEFAULT,
@@ -42,6 +44,7 @@ import {
 } from './GanttChart'
 import {
   applyDateRule,
+  collectOwners,
   computeDuration,
   computeEndDate,
   defaultCalendar,
@@ -50,6 +53,8 @@ import {
   formatDate,
   nextWorkingDayString,
   normalizeColumnOrder,
+  normalizeOwner,
+  parseOwners,
   planIndicator,
   rollupScheduleTasks
 } from '@shared/planner'
@@ -421,6 +426,7 @@ export function PlannerEditor(): React.JSX.Element {
   const [calendarOpen, setCalendarOpen] = useState(false)
   const [columnsOpen, setColumnsOpen] = useState(false)
   const [estimateOpen, setEstimateOpen] = useState(false)
+  const [resourcesOpen, setResourcesOpen] = useState(false)
   const [view, setView] = useState<'table' | 'gantt'>('table')
   const [ganttDayWidth, setGanttDayWidth] = useState(GANTT_DAY_WIDTH_DEFAULT)
   const [renaming, setRenaming] = useState(false)
@@ -434,6 +440,7 @@ export function PlannerEditor(): React.JSX.Element {
   } | null>(null)
   const [gridMenu, setGridMenu] = useState<{ x: number; y: number; id: string } | null>(null)
   const [gridPercent, setGridPercent] = useState(0)
+  const [ownerMenu, setOwnerMenu] = useState<{ id: string; x: number; y: number } | null>(null)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [numberDrafts, setNumberDrafts] = useState<Record<string, string>>({})
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -450,6 +457,7 @@ export function PlannerEditor(): React.JSX.Element {
     setVisibleCols(initVisibleCols(schedule?.columnVisibility))
     setColumnOrder(initColumnOrder(schedule?.columnOrder))
     setView('table')
+    setOwnerMenu(null)
   }
   const [clipboard, setClipboard] = useState<ScheduleTask[]>([])
   const [clipboardMode, setClipboardMode] = useState<'copy' | 'cut' | null>(null)
@@ -459,6 +467,7 @@ export function PlannerEditor(): React.JSX.Element {
   const pendingScrollTop = useRef<number | null>(null)
   const statusMenuRef = useRef<HTMLDivElement>(null)
   const gridMenuRef = useRef<HTMLDivElement>(null)
+  const ownerMenuRef = useRef<HTMLDivElement>(null)
   const gridPercentBase = useRef<Schedule | null>(null)
   const pendingFocus = useRef<{ id: string; col: string } | null>(null)
   const saveTimer = useRef<number | null>(null)
@@ -619,6 +628,7 @@ export function PlannerEditor(): React.JSX.Element {
 
   function switchView(next: 'table' | 'gantt'): void {
     if (next === view) return
+    setOwnerMenu(null)
     endEditSession()
     const current = useAppStore.getState().scheduleContent
     if (current) useAppStore.getState().plannerClearHistory(current.id)
@@ -701,6 +711,29 @@ export function PlannerEditor(): React.JSX.Element {
     el.style.top = `${top}px`
   }, [gridMenu])
 
+  useLayoutEffect(() => {
+    if (!ownerMenu) return
+    const el = ownerMenuRef.current
+    if (!el) return
+    const margin = 8
+    const width = el.offsetWidth
+    const height = el.offsetHeight
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const left = Math.max(margin, Math.min(ownerMenu.x, vw - width - margin))
+    const top = Math.max(margin, Math.min(ownerMenu.y, vh - height - margin))
+    el.style.left = `${left}px`
+    el.style.top = `${top}px`
+  }, [ownerMenu])
+
+  useEffect(() => {
+    if (!ownerMenu) return
+    const onScroll = (): void => setOwnerMenu(null)
+    const scrollEl = gridScrollRef.current
+    scrollEl?.addEventListener('scroll', onScroll, true)
+    return () => scrollEl?.removeEventListener('scroll', onScroll, true)
+  }, [ownerMenu])
+
   useEffect(() => {
     const update = (): void => {
       const el = document.activeElement as HTMLElement | null
@@ -738,6 +771,12 @@ export function PlannerEditor(): React.JSX.Element {
   const movableCols = columnOrder.filter(
     (k) => !FIXED_COLUMNS.includes(k) && visibleCols.has(k)
   ) as MovableColumnKey[]
+  const ownerCtx = ownerMenu ? findTaskCtx(sc.tasks, ownerMenu.id) : null
+  const ownerTask = ownerCtx ? ownerCtx.parent[ownerCtx.index] : null
+  const ownerNames = ownerTask ? collectOwners(sc.tasks) : []
+  const ownerChecked = new Set(
+    ownerTask ? parseOwners(ownerTask.owner).map((n) => n.toLowerCase()) : []
+  )
 
   function renderColumnCell(
     key: MovableColumnKey,
@@ -779,6 +818,20 @@ export function PlannerEditor(): React.JSX.Element {
           </div>
         )
       case 'owner':
+        if (isParent) {
+          return (
+            <div key={key} className="planner-col-owner planner-cell">
+              <input
+                className={`planner-input${!task.owner ? ' planner-value-empty' : ''}`}
+                data-cell={task.id}
+                data-col="owner"
+                value={task.owner}
+                readOnly
+                disabled
+              />
+            </div>
+          )
+        }
         return (
           <div key={key} className="planner-col-owner planner-cell">
             <input
@@ -787,8 +840,16 @@ export function PlannerEditor(): React.JSX.Element {
               data-col="owner"
               value={task.owner}
               placeholder="Owner"
-              onFocus={startEditSession}
-              onBlur={endEditSession}
+              onFocus={(e) => {
+                startEditSession()
+                const rect = e.currentTarget.getBoundingClientRect()
+                setOwnerMenu({ id: task.id, x: rect.left, y: rect.bottom + 2 })
+              }}
+              onBlur={() => {
+                applyOwnerEdit(task.id)
+                setOwnerMenu(null)
+                endEditSession()
+              }}
               onChange={(e) => editField(sc, task.id, 'owner', e.target.value)}
             />
           </div>
@@ -1039,6 +1100,29 @@ export function PlannerEditor(): React.JSX.Element {
       }
       return next
     })
+  }
+
+  function applyOwnerEdit(id: string): void {
+    const current = useAppStore.getState().scheduleContent
+    if (!current) return
+    const ctx = findTaskCtx(current.tasks, id)
+    if (!ctx) return
+    const raw = ctx.parent[ctx.index].owner
+    const normalized = normalizeOwner(raw)
+    if (normalized !== raw) editField(current, id, 'owner', normalized)
+  }
+
+  function toggleOwner(id: string, name: string): void {
+    const current = useAppStore.getState().scheduleContent
+    if (!current) return
+    const ctx = findTaskCtx(current.tasks, id)
+    if (!ctx) return
+    const names = collectOwners(current.tasks)
+    const checked = new Set(parseOwners(ctx.parent[ctx.index].owner).map((n) => n.toLowerCase()))
+    const key = name.toLowerCase()
+    if (checked.has(key)) checked.delete(key)
+    else checked.add(key)
+    editField(current, id, 'owner', names.filter((n) => checked.has(n.toLowerCase())).join(', '))
   }
 
   function handleGanttResize(
@@ -1798,6 +1882,9 @@ export function PlannerEditor(): React.JSX.Element {
         </div>
         <span className="planner-toolbar-divider" />
         <div className="planner-toolbar-group">
+          <button className="icon-btn" title="Resources" onClick={() => setResourcesOpen(true)}>
+            <MdiIcon path={mdiAccountGroup} size={16} />
+          </button>
           <button
             className="icon-btn"
             title="Estimate %Completed"
@@ -1956,6 +2043,39 @@ export function PlannerEditor(): React.JSX.Element {
             >
               On Hold
             </button>
+          </div>
+        </>
+      )}
+
+      {ownerMenu && ownerTask && (
+        <>
+          <div className="menu-overlay" onClick={() => setOwnerMenu(null)} />
+          <div
+            ref={ownerMenuRef}
+            className="note-menu planner-owner-menu"
+            style={{ left: ownerMenu.x, top: ownerMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {ownerNames.length === 0 ? (
+              <div className="planner-owner-empty">No owners yet — type a name above</div>
+            ) : (
+              ownerNames.map((name) => (
+                <div
+                  key={name.toLowerCase()}
+                  className="planner-owner-item"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => toggleOwner(ownerTask.id, name)}
+                >
+                  <input
+                    type="checkbox"
+                    checked={ownerChecked.has(name.toLowerCase())}
+                    readOnly
+                    tabIndex={-1}
+                  />
+                  <span>{name}</span>
+                </div>
+              ))
+            )}
           </div>
         </>
       )}
@@ -2150,6 +2270,8 @@ export function PlannerEditor(): React.JSX.Element {
       {calendarOpen && <CalendarModal onClose={() => setCalendarOpen(false)} />}
 
       {estimateOpen && <PlannerEstimateModal onClose={() => setEstimateOpen(false)} />}
+
+      {resourcesOpen && <PlannerResourcesModal onClose={() => setResourcesOpen(false)} />}
 
       {renaming && (
         <PromptModal

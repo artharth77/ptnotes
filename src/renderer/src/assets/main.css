@@ -6166,6 +6166,98 @@ fieldset.kanban-form {
   min-width: 130px;
 }
 
+.planner-owner-menu {
+  min-width: 180px;
+  max-width: 280px;
+}
+
+.planner-owner-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.planner-owner-item:hover {
+  background: var(--bg-hover);
+}
+
+.planner-owner-item input[type='checkbox'] {
+  margin: 0;
+  accent-color: var(--accent);
+  pointer-events: none;
+}
+
+.planner-owner-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.planner-owner-empty {
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--text-faint);
+}
+
+/* ---------- Resources modal ---------- */
+
+.modal.planner-resources-modal {
+  width: 640px;
+}
+
+.resources-grid-scroll {
+  overflow: auto;
+  max-height: 60vh;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.resources-grid {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.resources-grid th,
+.resources-grid td {
+  padding: 7px 10px;
+  text-align: left;
+}
+
+.resources-grid th:not(:first-child),
+.resources-grid td:not(:first-child) {
+  text-align: right;
+}
+
+.resources-grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-dim);
+}
+
+.resources-grid tbody td {
+  border-bottom: 1px solid var(--border);
+}
+
+.resources-grid tbody tr:last-child td {
+  border-bottom: none;
+}
+
 /* ---------- Gantt chart ---------- */
 
 .gantt-chart {

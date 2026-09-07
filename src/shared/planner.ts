@@ -373,6 +373,109 @@ export function validateScheduleId(id: string): string {
   return id
 }
 
+/** Split a free-text owner field into individual names (comma-separated). */
+export function parseOwners(value: string): string[] {
+  return value
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s !== '')
+}
+
+/**
+ * Normalize a free-text owner field: split by comma, trim, drop empties, dedupe
+ * case-insensitively (first-seen spelling wins), rejoin with ', '.
+ */
+export function normalizeOwner(value: string): string {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const name of parseOwners(value)) {
+    const key = name.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(name)
+  }
+  return out.join(', ')
+}
+
+/** Distinct owner names across a task tree, in display (DFS) order, case-insensitive. */
+export function collectOwners(tasks: ScheduleTask[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  const walk = (t: ScheduleTask): void => {
+    for (const name of parseOwners(t.owner)) {
+      const key = name.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push(name)
+    }
+    t.children.forEach(walk)
+  }
+  tasks.forEach(walk)
+  return out
+}
+
+/** Per-owner workload stats for the Resources view. */
+export interface OwnerStats {
+  name: string
+  assigned: number
+  notStarted: number
+  inProgress: number
+  completed: number
+  percentComplete: number
+}
+
+/**
+ * Per-owner stats across a task tree (DFS). Each name in a task's `owner` field is credited
+ * with that task. Names are deduped case-insensitively (first-seen spelling wins, display
+ * order). `assigned` counts every task the name appears on; `notStarted`/`inProgress`/
+ * `completed` bucket by status (`pending`/`on-hold` count toward `assigned` only).
+ * `percentComplete` is the duration-weighted mean of the name's tasks' `percentComplete`
+ * (same weights as `rollupChildren`; plain mean when none have a duration).
+ */
+export function ownerStats(tasks: ScheduleTask[]): OwnerStats[] {
+  const map = new Map<string, OwnerStats>()
+  const weightTotal = new Map<string, number>()
+  const weightedPercent = new Map<string, number>()
+  const plainTotal = new Map<string, number>()
+
+  const credit = (name: string, task: ScheduleTask): void => {
+    const key = name.toLowerCase()
+    let stats = map.get(key)
+    if (!stats) {
+      stats = { name, assigned: 0, notStarted: 0, inProgress: 0, completed: 0, percentComplete: 0 }
+      map.set(key, stats)
+      weightTotal.set(key, 0)
+      weightedPercent.set(key, 0)
+      plainTotal.set(key, 0)
+    }
+    stats.assigned++
+    if (task.status === 'not-started') stats.notStarted++
+    else if (task.status === 'in-progress') stats.inProgress++
+    else if (task.status === 'completed') stats.completed++
+    const weight = task.duration && task.duration > 0 ? task.duration : 0
+    weightTotal.set(key, (weightTotal.get(key) ?? 0) + weight)
+    weightedPercent.set(key, (weightedPercent.get(key) ?? 0) + task.percentComplete * weight)
+    plainTotal.set(key, (plainTotal.get(key) ?? 0) + task.percentComplete)
+  }
+
+  const walk = (task: ScheduleTask): void => {
+    for (const name of parseOwners(task.owner)) credit(name, task)
+    task.children.forEach(walk)
+  }
+  tasks.forEach(walk)
+
+  const out: OwnerStats[] = []
+  for (const stats of map.values()) {
+    const key = stats.name.toLowerCase()
+    const wt = weightTotal.get(key) ?? 0
+    const wp = weightedPercent.get(key) ?? 0
+    const pt = plainTotal.get(key) ?? 0
+    stats.percentComplete = wt > 0 ? Math.round(wp / wt) : Math.round(pt / stats.assigned)
+    out.push(stats)
+  }
+  return out
+}
+
 /** A fresh leaf task with empty fields (used by the editor + AI tools). */
 export function emptyTask(): ScheduleTask {
   return {

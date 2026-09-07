@@ -13,6 +13,7 @@ import {
   deriveTaskNo,
   emptyTask,
   findTaskByTitle,
+  normalizeOwner,
   rollupScheduleTasks
 } from '@shared/planner'
 import { findCardByTitle, findColumnByName } from '@shared/kanban'
@@ -1837,7 +1838,10 @@ export const tools: PTTool[] = [
                 'Optional task id, task number (e.g. 1.2) or title to insert this new task directly after. Positions within the sibling list chosen by `parent`; if `parent` is omitted, the new task becomes a sibling of the matched task (nested under the same parent). If the task is not found, the new task is appended at the top level.'
             },
             title: { type: 'string', description: 'Task title' },
-            owner: { type: 'string', description: 'Owner (optional)' },
+            owner: {
+              type: 'string',
+              description: 'Owner (optional), comma-separated for multiple owners'
+            },
             duration: {
               type: 'number',
               description: 'Duration in working days (used with planStart to compute planEnd)'
@@ -1875,7 +1879,7 @@ export const tools: PTTool[] = [
           const title = String(args.title ?? '').trim()
           task.title = title
           const owner = str(args.owner)
-          if (owner !== null) task.owner = owner
+          if (owner !== null) task.owner = normalizeOwner(owner)
           const note = str(args.note)
           if (note !== null) task.note = note
           const status = statusOf(args.status)
@@ -1964,7 +1968,10 @@ export const tools: PTTool[] = [
                 'Optional task id, task number (e.g. 1.2) or title to position this task directly after within the sibling list chosen by `parent`. If `parent` is omitted, the task becomes a sibling of the matched task (nested under the same parent). If the task is not found, the task is appended at the top level.'
             },
             title: { type: 'string', description: 'New title' },
-            owner: { type: 'string', description: 'New owner' },
+            owner: {
+              type: 'string',
+              description: 'New owner, comma-separated for multiple owners'
+            },
             duration: {
               type: 'number',
               description: 'New duration in working days'
@@ -2004,13 +2011,18 @@ export const tools: PTTool[] = [
               `Task "${task.title}" is a parent task: plan start/end and duration are derived from its children. Update the child tasks instead.`
             )
           }
+          if (task.children.length > 0 && args.owner !== undefined) {
+            throw new Error(
+              `Task "${task.title}" is a parent task: owner is not editable on parent tasks.`
+            )
+          }
           const calendar = await ctx.service.readCalendar(project)
 
           const next = { ...task } as ScheduleTask
           const title = str(args.title)
           if (title !== null) next.title = title
           const owner = str(args.owner)
-          if (owner !== null) next.owner = owner
+          if (owner !== null) next.owner = normalizeOwner(owner)
           const note = str(args.note)
           if (note !== null) next.note = note
           const status = statusOf(args.status)

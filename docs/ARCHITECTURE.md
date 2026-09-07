@@ -557,7 +557,8 @@ JSON in `<project>/planner/<slug>.json`; the whole feature is pure data — no m
 ### Data model
 
 - `ScheduleTask`: `id`, `title`, `status` (`not-started` | `in-progress` | `completed` | `on-hold`),
-  `owner`, `duration` (working days, `number|null`), `planStart`/`planEnd`/`actualStart`/`actualEnd`
+  `owner` (comma-separated multi-value), `duration` (working days, `number|null`),
+  `planStart`/`planEnd`/`actualStart`/`actualEnd`
   (`'YYYY-MM-DD'` or `null`), `percentComplete` (0–100), `note`, `children: ScheduleTask[]`.
 - `ProjectCalendar`: `weekStart`/`weekEnd` (weekday 0=Sun..6=Sat, default Mon–Fri = 1..5) +
   `holidays: string[]` — the **shared project working-day config** used for all plan math.
@@ -589,9 +590,20 @@ JSON in `<project>/planner/<slug>.json`; the whole feature is pure data — no m
   counts as 100 when it is already 100% or its `planEnd` is on/before the estimate date, otherwise
   it keeps its user-filled value (also when `planEnd` is missing); parents and the root level use
   the same duration-weighted mean as the rollup. Read-only — never written back.
+- **Owner** (`parseOwners`/`normalizeOwner`/`collectOwners`/`ownerStats`): `owner` is a
+  comma-separated multi-value string. On apply (blur/Enter in the editor, `add_task`/`update_task`
+  in the AI tools) it is normalized: split on commas, trim, drop empties, dedupe case-insensitively
+  (first-seen spelling wins), rejoin with `", "`. `collectOwners(tasks)` lists the distinct owner
+  names in a schedule (DFS order) for the owner picker. `ownerStats(tasks)` credits each name with
+  every task it appears on (case-insensitive, first-seen spelling/order) and reports per name:
+  `assigned` (all of them), `notStarted`/`inProgress`/`completed` (by status — `pending`/`on-hold`
+  count toward `assigned` only), and `percentComplete` (the duration-weighted mean of the name's
+  tasks' `%Complete`, same weights as `rollupChildren`). Owner is only editable on leaf tasks —
+  the cell is read-only on tasks with children, and `update_task` rejects owner changes on parent
+  tasks.
 - **Leaf fields are manual**: title, owner, duration, plan dates, actuals, %complete, note. Parent
-  plan/duration/% fields are read-only in the UI (show the rolled-up values); title/owner/actuals/
-  note and status (for on-hold) remain editable.
+  plan/duration/% fields are read-only in the UI (show the rolled-up values); title/actuals/note
+  and status (for on-hold) remain editable.
 
 ### Editor (PlannerEditor)
 
@@ -605,6 +617,10 @@ JSON in `<project>/planner/<slug>.json`; the whole feature is pure data — no m
   a single missing date falls back to the other date's rule). Shown by default, hideable in the
   View-columns dialog like any other column; the No./Title sticky offsets shift by its width when
   it is visible.
+- **Owner picker**: focusing the Owner cell (leaf tasks only) opens a checkbox popup listing
+  the distinct owners of the current schedule (`collectOwners`); clicking a row (checkbox or
+  name) adds/removes that name (case-insensitive match, list order preserved) and free text is
+  still allowed — the value is normalized on blur/Enter.
 - Single source of truth is the store's `scheduleContent`; every edit recomputes the tree and
   auto-saves ~800ms debounced (flushed on unmount). Calendar button opens `CalendarModal` (week
   selects + holiday date list with add/remove).
@@ -636,6 +652,10 @@ JSON in `<project>/planner/<slug>.json`; the whole feature is pure data — no m
   separated by a divider; works in both views) opens a read-only modal showing the current root
   `%Complete`, an estimate date picker (default today), and the live-computed estimated
   `%Complete` for that date via `estimatePercentComplete`.
+- **Resources**: toolbar button (`mdiAccountGroup`, immediately left of the Estimate button;
+  works in both views) opens a modal with a scrollable grid of per-owner workload from
+  `ownerStats` — columns **Name · Assigned · Not Started · In Progress · Completed · %Completed**
+  (sticky header, `max-height: 60vh`). Shows an empty-state hint when no owners are assigned.
 
 ### Gantt view (GanttChart)
 
