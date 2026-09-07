@@ -201,6 +201,24 @@ export function deriveStatus(percent: number, currentStatus: ScheduleStatus): Sc
   return 'in-progress'
 }
 
+/** Fill state of the Plan Indicator strip, derived at render time (never persisted). */
+export type PlanIndicator = 'green' | 'yellow' | 'red' | 'none'
+
+/**
+ * Plan Indicator color for a row, computed from the record and today (`YYYY-MM-DD`):
+ * - green: `percentComplete >= 100`
+ * - red: < 100 and `planEnd` set and today > `planEnd`
+ * - none: < 100 and no plan dates at all, or `planStart` set and today < `planStart`
+ * - yellow: otherwise (< 100 and today >= `planStart`, not past `planEnd`)
+ */
+export function planIndicator(task: ScheduleTask, today: string): PlanIndicator {
+  if (task.percentComplete >= 100) return 'green'
+  if (task.planEnd && today > task.planEnd) return 'red'
+  if (!task.planStart && !task.planEnd) return 'none'
+  if (task.planStart && today < task.planStart) return 'none'
+  return 'yellow'
+}
+
 /**
  * Compute a parent's fields from its (already rolled-up) children:
  * `%Complete` = duration-weighted mean, `planStart` = min, `planEnd` = max,

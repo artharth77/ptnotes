@@ -5948,6 +5948,7 @@ fieldset.kanban-form {
 }
 
 .planner-col-toggle,
+.planner-col-indicator,
 .planner-col-no,
 .planner-col-title {
   position: sticky;
@@ -5973,6 +5974,24 @@ fieldset.kanban-form {
 .planner-children-collapse-inner {
   overflow: clip;
   min-height: 0;
+}
+
+.planner-col-indicator {
+  left: 28px;
+  width: 5px;
+  padding: 0;
+}
+
+.planner-indicator-green {
+  background: var(--ok);
+}
+
+.planner-indicator-yellow {
+  background: var(--warn);
+}
+
+.planner-indicator-red {
+  background: var(--danger);
 }
 
 .planner-col-no {
@@ -6832,7 +6851,10 @@ fieldset.kanban-form {
   border-radius: 6px;
   overflow: hidden;
   cursor: grab;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    opacity 0.15s ease;
 }
 .pdf-page-card:hover {
   border-color: var(--accent);

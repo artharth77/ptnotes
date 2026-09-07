@@ -45,7 +45,9 @@ import {
   defaultCalendar,
   deriveTaskNo,
   emptyTask,
+  formatDate,
   nextWorkingDayString,
+  planIndicator,
   rollupScheduleTasks
 } from '@shared/planner'
 import type { Schedule, ScheduleStatus, ScheduleTask } from '@shared/types'
@@ -66,6 +68,7 @@ function statusLabel(status: ScheduleStatus): string {
 }
 
 type PlannerColumnKey =
+  | 'indicator'
   | 'no'
   | 'title'
   | 'status'
@@ -79,6 +82,7 @@ type PlannerColumnKey =
   | 'note'
 
 const COLUMNS: { key: PlannerColumnKey; label: string }[] = [
+  { key: 'indicator', label: 'Plan Indicator' },
   { key: 'no', label: 'No.' },
   { key: 'title', label: 'Title' },
   { key: 'status', label: 'Status' },
@@ -93,6 +97,7 @@ const COLUMNS: { key: PlannerColumnKey; label: string }[] = [
 ]
 
 const COL_WIDTHS: Record<PlannerColumnKey, string> = {
+  indicator: '5px',
   no: '46px',
   title: 'minmax(180px, 1fr)',
   status: '110px',
@@ -107,9 +112,12 @@ const COL_WIDTHS: Record<PlannerColumnKey, string> = {
 }
 
 function colTemplate(visible: Set<PlannerColumnKey>): string {
-  const cols: string[] = ['28px', COL_WIDTHS.no, COL_WIDTHS.title]
+  const cols: string[] = ['28px']
+  if (visible.has('indicator')) cols.push(COL_WIDTHS.indicator)
+  cols.push(COL_WIDTHS.no, COL_WIDTHS.title)
   for (const c of COLUMNS) {
-    if (c.key !== 'no' && c.key !== 'title' && visible.has(c.key)) cols.push(COL_WIDTHS[c.key])
+    if (c.key !== 'no' && c.key !== 'title' && c.key !== 'indicator' && visible.has(c.key))
+      cols.push(COL_WIDTHS[c.key])
   }
   return cols.join(' ')
 }
@@ -694,6 +702,9 @@ export function PlannerEditor(): React.JSX.Element {
   const cal = calendar ?? defaultCalendar()
   const rows = flattenTasks(sc.tasks, null, 0, collapsed, [])
   const template = colTemplate(visibleCols)
+  const today = formatDate(new Date())
+  const noLeft = 28 + (visibleCols.has('indicator') ? 5 : 0)
+  const titleLeft = noLeft + 46
 
   function renderRow(task: ScheduleTask, no: string, depth: number): React.JSX.Element {
     const isParent = task.children.length > 0
@@ -718,8 +729,18 @@ export function PlannerEditor(): React.JSX.Element {
             <span className="planner-toggle-spacer" />
           )}
         </div>
-        <div className="planner-col-no planner-cell">{no}</div>
-        <div className="planner-col-title planner-cell" style={{ left: '74px' }}>
+        {visibleCols.has('indicator') && (
+          <div
+            className={`planner-col-indicator planner-cell planner-indicator-${planIndicator(
+              task,
+              today
+            )}`}
+          />
+        )}
+        <div className="planner-col-no planner-cell" style={{ left: noLeft }}>
+          {no}
+        </div>
+        <div className="planner-col-title planner-cell" style={{ left: titleLeft }}>
           <input
             className="planner-input"
             data-cell={task.id}
@@ -1764,8 +1785,13 @@ export function PlannerEditor(): React.JSX.Element {
               >
                 <div className="planner-grid-head" style={{ gridTemplateColumns: template }}>
                   <div className="planner-col-toggle planner-cell"></div>
-                  <div className="planner-col-no planner-cell">No.</div>
-                  <div className="planner-col-title planner-cell" style={{ left: '74px' }}>
+                  {visibleCols.has('indicator') && (
+                    <div className="planner-col-indicator planner-cell"></div>
+                  )}
+                  <div className="planner-col-no planner-cell" style={{ left: noLeft }}>
+                    No.
+                  </div>
+                  <div className="planner-col-title planner-cell" style={{ left: titleLeft }}>
                     Title
                   </div>
                   {visibleCols.has('status') && (

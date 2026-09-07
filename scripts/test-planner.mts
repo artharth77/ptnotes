@@ -30,6 +30,7 @@ const {
   findTaskByTitle,
   nextWorkingDayString,
   normalizeCalendar,
+  planIndicator,
   rollupScheduleTasks,
   validateScheduleId
 } = await import('../src/shared/planner')
@@ -188,6 +189,62 @@ const onHoldRollup = rollupScheduleTasks(
   cal
 )
 assert.equal(onHoldRollup[0].status, 'on-hold', 'parent on-hold preserved through rollup')
+
+// ---- plan indicator ----
+
+const today = '2024-01-10'
+assert.equal(
+  planIndicator(mk('a', 100, '2024-01-01', '2024-01-05'), today),
+  'green',
+  '100% is green'
+)
+assert.equal(planIndicator(mk('b', 100, null, null), today), 'green', '100% with no dates is green')
+assert.equal(
+  planIndicator(mk('c', 50, '2024-01-01', '2024-01-15'), today),
+  'yellow',
+  'today inside plan window'
+)
+assert.equal(
+  planIndicator(mk('d', 50, '2024-01-10', '2024-01-15'), today),
+  'yellow',
+  'today == planStart'
+)
+assert.equal(
+  planIndicator(mk('e', 50, '2024-01-01', '2024-01-10'), today),
+  'yellow',
+  'today == planEnd'
+)
+assert.equal(
+  planIndicator(mk('f', 50, '2024-01-01', '2024-01-09'), today),
+  'red',
+  'today past planEnd'
+)
+assert.equal(
+  planIndicator(mk('g', 50, '2024-01-11', '2024-01-15'), today),
+  'none',
+  'today before planStart'
+)
+assert.equal(planIndicator(mk('h', 50, null, null), today), 'none', 'no plan dates')
+assert.equal(
+  planIndicator(mk('i', 50, '2024-01-01', null), today),
+  'yellow',
+  'only planStart, today on/after it'
+)
+assert.equal(
+  planIndicator(mk('j', 50, '2024-01-11', null), today),
+  'none',
+  'only planStart, today before it'
+)
+assert.equal(
+  planIndicator(mk('k', 50, null, '2024-01-15'), today),
+  'yellow',
+  'only planEnd, today on/before it'
+)
+assert.equal(
+  planIndicator(mk('l', 50, null, '2024-01-09'), today),
+  'red',
+  'only planEnd, today past it'
+)
 
 // ---- search / count / validate ----
 

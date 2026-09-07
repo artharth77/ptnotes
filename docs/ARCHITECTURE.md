@@ -562,7 +562,9 @@ JSON in `<project>/planner/<slug>.json`; the whole feature is pure data — no m
 - `ProjectCalendar`: `weekStart`/`weekEnd` (weekday 0=Sun..6=Sat, default Mon–Fri = 1..5) +
   `holidays: string[]` — the **shared project working-day config** used for all plan math.
 - Dates are stored as local `YYYY-MM-DD` strings (no timezone); the outline **No.** column is
-  derived at render time (`deriveTaskNo`), never persisted.
+  derived at render time (`deriveTaskNo`), never persisted. The **Plan Indicator** strip is the
+  same: `planIndicator(task, today)` derives its fill from `percentComplete` + plan dates +
+  today at render time and is never persisted (only its visibility is).
 
 ### Rules
 
@@ -585,9 +587,16 @@ JSON in `<project>/planner/<slug>.json`; the whole feature is pure data — no m
 
 ### Editor (PlannerEditor)
 
-- Grid with columns: **No. · Title · Status · Owner · Duration · Plan Start · Plan End · Actual
-  Start · Actual End · %Complete · Note**, plus per-row actions (add subtask, add sibling, delete —
-  deleting a parent requires a child-confirmation modal).
+- Grid with columns: **Plan Indicator · No. · Title · Status · Owner · Duration · Plan Start ·
+  Plan End · Actual Start · Actual End · %Complete · Note**, plus per-row actions (add subtask,
+  add sibling, delete — deleting a parent requires a child-confirmation modal).
+- **Plan Indicator**: a 5px color strip rendered before the No. column (sticky with it), computed
+  per row by `planIndicator(task, today)` — green when `%Complete = 100`; yellow when `< 100` and
+  today is within the plan window (between `planStart` and `planEnd`, inclusive); red when `< 100`
+  and today > `planEnd`; not filled when `< 100` and today < `planStart` (or no plan dates at all;
+  a single missing date falls back to the other date's rule). Shown by default, hideable in the
+  View-columns dialog like any other column; the No./Title sticky offsets shift by its width when
+  it is visible.
 - Single source of truth is the store's `scheduleContent`; every edit recomputes the tree and
   auto-saves ~800ms debounced (flushed on unmount). Calendar button opens `CalendarModal` (week
   selects + holiday date list with add/remove).
