@@ -1,7 +1,48 @@
-import { ipcMain } from 'electron'
-import type { IpcMainInvokeEvent } from 'electron'
+import { ipcMain, dialog, app, BrowserWindow } from 'electron'
+import type { IpcMainInvokeEvent, SaveDialogOptions } from 'electron'
+import { join } from 'path'
 import type { PTNotesService } from '../service/PTNotesService'
-import type { ProjectCalendar, Schedule } from '@shared/types'
+import { buildPlannerExportXlsx } from '../planner/exportXlsx'
+import type {
+  PlannerExportPayload,
+  PlannerExportResult,
+  ProjectCalendar,
+  Schedule
+} from '@shared/types'
+
+function isExportPayload(p: unknown): p is PlannerExportPayload {
+  if (typeof p !== 'object' || p === null) return false
+  const o = p as Record<string, unknown>
+  if (typeof o.scheduleName !== 'string') return false
+  if (typeof o.overallPercent !== 'number' || !Number.isFinite(o.overallPercent)) return false
+  if (!Array.isArray(o.columns) || !Array.isArray(o.rows)) return false
+  const cal = o.calendar
+  if (typeof cal !== 'object' || cal === null) return false
+  const cc = cal as Record<string, unknown>
+  if (typeof cc.weekStart !== 'number' || typeof cc.weekEnd !== 'number') return false
+  if (!Array.isArray(cc.holidays) || cc.holidays.some((h) => typeof h !== 'string')) return false
+  for (const c of o.columns as unknown[]) {
+    if (typeof c !== 'object' || c === null) return false
+    const cc = c as Record<string, unknown>
+    if (typeof cc.key !== 'string' || typeof cc.label !== 'string') return false
+  }
+  for (const r of o.rows as unknown[]) {
+    if (typeof r !== 'object' || r === null) return false
+    const rr = r as Record<string, unknown>
+    if (typeof rr.no !== 'string' || typeof rr.title !== 'string') return false
+    if (typeof rr.status !== 'string') return false
+    if (typeof rr.owner !== 'string') return false
+    if (rr.duration !== null && typeof rr.duration !== 'number') return false
+    for (const k of ['planStart', 'planEnd', 'actualStart', 'actualEnd'] as const) {
+      if (rr[k] !== null && typeof rr[k] !== 'string') return false
+    }
+    if (typeof rr.percentComplete !== 'number' || !Number.isFinite(rr.percentComplete)) return false
+    if (typeof rr.note !== 'string') return false
+    if (typeof rr.depth !== 'number' || !Number.isInteger(rr.depth)) return false
+    if (typeof rr.hasChildren !== 'boolean') return false
+  }
+  return true
+}
 
 export function registerPlannerIpc(service: PTNotesService): void {
   ipcMain.handle('planner:list', async (_e: IpcMainInvokeEvent, project: string) =>
@@ -39,5 +80,28 @@ export function registerPlannerIpc(service: PTNotesService): void {
     'planner:saveCalendar',
     async (_e: IpcMainInvokeEvent, project: string, calendar: ProjectCalendar) =>
       service.saveCalendar(project, calendar)
+  )
+  ipcMain.handle(
+    'planner:exportExcel',
+    async (event: IpcMainInvokeEvent, payload: unknown): Promise<PlannerExportResult> => {
+      if (!isExportPayload(payload)) return { ok: false, error: 'Invalid export payload.' }
+      const name = payload.scheduleName.trim() || 'Schedule'
+      const win = BrowserWindow.fromWebContents(event.sender)
+      const options: SaveDialogOptions = {
+        title: 'Export schedule to Excel',
+        defaultPath: join(app.getPath('downloads'), `${name}.xlsx`),
+        filters: [{ name: 'Excel Workbook', extensions: ['xlsx'] }]
+      }
+      const result = win
+        ? await dialog.showSaveDialog(win, options)
+        : await dialog.showSaveDialog(options)
+      if (result.canceled || !result.filePath) return { ok: false, canceled: true }
+      try {
+        await buildPlannerExportXlsx(payload, result.filePath)
+        return { ok: true, path: result.filePath }
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    }
   )
 }

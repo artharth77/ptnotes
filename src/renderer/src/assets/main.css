@@ -2041,6 +2041,12 @@ fieldset.kanban-form {
   line-height: 1.5;
 }
 
+.estimate-value {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
 .form-error {
   color: var(--danger);
   font-size: 12px;
@@ -5948,6 +5954,7 @@ fieldset.kanban-form {
 }
 
 .planner-col-toggle,
+.planner-col-indicator,
 .planner-col-no,
 .planner-col-title {
   position: sticky;
@@ -5973,6 +5980,24 @@ fieldset.kanban-form {
 .planner-children-collapse-inner {
   overflow: clip;
   min-height: 0;
+}
+
+.planner-col-indicator {
+  left: 28px;
+  width: 5px;
+  padding: 0;
+}
+
+.planner-indicator-green {
+  background: var(--ok);
+}
+
+.planner-indicator-yellow {
+  background: var(--warn);
+}
+
+.planner-indicator-red {
+  background: var(--danger);
 }
 
 .planner-col-no {
@@ -6139,6 +6164,98 @@ fieldset.kanban-form {
 
 .planner-status-menu {
   min-width: 130px;
+}
+
+.planner-owner-menu {
+  min-width: 180px;
+  max-width: 280px;
+}
+
+.planner-owner-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.planner-owner-item:hover {
+  background: var(--bg-hover);
+}
+
+.planner-owner-item input[type='checkbox'] {
+  margin: 0;
+  accent-color: var(--accent);
+  pointer-events: none;
+}
+
+.planner-owner-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.planner-owner-empty {
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--text-faint);
+}
+
+/* ---------- Resources modal ---------- */
+
+.modal.planner-resources-modal {
+  width: 640px;
+}
+
+.resources-grid-scroll {
+  overflow: auto;
+  max-height: 60vh;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.resources-grid {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.resources-grid th,
+.resources-grid td {
+  padding: 7px 10px;
+  text-align: left;
+}
+
+.resources-grid th:not(:first-child),
+.resources-grid td:not(:first-child) {
+  text-align: right;
+}
+
+.resources-grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-dim);
+}
+
+.resources-grid tbody td {
+  border-bottom: 1px solid var(--border);
+}
+
+.resources-grid tbody tr:last-child td {
+  border-bottom: none;
 }
 
 /* ---------- Gantt chart ---------- */
@@ -6551,6 +6668,15 @@ fieldset.kanban-form {
   cursor: pointer;
   font-size: 13px;
 
+  &.fixed {
+    cursor: default;
+  }
+
+  &.selected {
+    background: var(--accent-soft);
+    border-radius: 4px;
+  }
+
   &.disabled {
     opacity: 0.6;
     cursor: default;
@@ -6559,6 +6685,12 @@ fieldset.kanban-form {
       cursor: not-allowed;
     }
   }
+}
+
+.column-move {
+  margin-right: auto;
+  display: flex;
+  gap: 2px;
 }
 
 /* ---------- Calendar modal ---------- */
@@ -6832,7 +6964,10 @@ fieldset.kanban-form {
   border-radius: 6px;
   overflow: hidden;
   cursor: grab;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    opacity 0.15s ease;
 }
 .pdf-page-card:hover {
   border-color: var(--accent);
