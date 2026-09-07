@@ -23,6 +23,9 @@ export function registerPlannerIpc(service: PTNotesService): void {
     async (_e: IpcMainInvokeEvent, project: string, id: string, newName: string) =>
       service.renameSchedule(project, id, newName)
   )
+  ipcMain.handle('planner:duplicate', async (_e: IpcMainInvokeEvent, project: string, id: string) =>
+    service.duplicateSchedule(project, id)
+  )
   ipcMain.handle('planner:delete', async (_e: IpcMainInvokeEvent, project: string, id: string) =>
     service.deleteSchedule(project, id)
   )

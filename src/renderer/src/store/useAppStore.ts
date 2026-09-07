@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { rollupScheduleTasks } from '@shared/planner'
 import { GROUP_CHAT_PAGE_SIZE } from '@shared/bots'
+import { ancestorsOf, visibleExplorerEntries } from '@shared/filesExplorer'
 import type {
   BotGroupEvent,
   BotProfile,
@@ -38,7 +39,11 @@ import type {
   Schedule,
   ScheduleMeta,
   Tab,
-  ToolCallInfo
+  ToolCallInfo,
+  FileEntry,
+  ExplorerEntry,
+  ExplorerFolderNode,
+  ExplorerSort
 } from '@shared/types'
 
 function readKanbanCollapsed(project: string): Record<string, boolean> {
@@ -66,6 +71,7 @@ interface AppState {
   kanbanCreatingColumnId: string | null
   kanbanCollapsed: Record<string, boolean>
   projectFiles: string[]
+  projectFileEntries: FileEntry[]
   schedules: ScheduleMeta[]
   activeScheduleId: string | null
   scheduleContent: Schedule | null
@@ -106,6 +112,20 @@ interface AppState {
     'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets' | 'bots' | 'appearance'
   skillEditRequest: string | null
   sidebarVisible: boolean
+  /** File explorer location: path relative to the project files root ('' = root). */
+  explorerCwd: string
+  explorerTree: ExplorerFolderNode | null
+  explorerEntries: ExplorerEntry[]
+  explorerSelected: string[]
+  explorerLastClicked: string | null
+  /** Folder paths the user manually expanded ('' = files root). */
+  explorerExpanded: string[]
+  /** Manual collapse overrides — win over the auto-expand of the cwd's ancestor chain. */
+  explorerCollapsed: string[]
+  /** Column sort of the file list; null = default (folders first, name asc). */
+  explorerSort: ExplorerSort
+  /** Name filter of the file list ('' = no filter). */
+  explorerFilter: string
   formatHelperEnabled: boolean
   theme: 'light' | 'dark' | 'system'
   fontSize: 'small' | 'default' | 'large' | 'xlarge'
@@ -173,6 +193,7 @@ interface AppState {
   saveSchedule: (schedule: Schedule) => Promise<void>
   createSchedule: (name: string) => Promise<void>
   renameSchedule: (id: string, newName: string) => Promise<void>
+  duplicateSchedule: (id: string) => Promise<void>
   deleteSchedule: (id: string) => Promise<void>
   saveCalendar: (calendar: ProjectCalendar) => Promise<void>
   plannerPushUndo: (scheduleId: string, snapshot: Schedule) => void
@@ -235,6 +256,14 @@ interface AppState {
   openSkillEditor: (name: string) => void
   clearSkillEditRequest: () => void
   setSidebarVisible: (visible: boolean) => void
+  /** Load the explorer tree + listing for `dir` (or the current `explorerCwd`). */
+  loadExplorer: (dir?: string) => Promise<void>
+  selectExplorerFolder: (path: string) => void
+  toggleExplorerFolder: (path: string) => void
+  selectExplorerEntry: (path: string, mode: 'single' | 'toggle' | 'range') => void
+  setExplorerSelected: (paths: string[]) => void
+  setExplorerSort: (sort: ExplorerSort) => void
+  setExplorerFilter: (filter: string) => void
   setFormatHelperEnabled: (enabled: boolean) => void
   setTheme: (theme: 'light' | 'dark' | 'system') => void
   setFontSize: (size: 'small' | 'default' | 'large' | 'xlarge') => void
@@ -268,6 +297,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   kanbanCreatingColumnId: null,
   kanbanCollapsed: {},
   projectFiles: [],
+  projectFileEntries: [],
   schedules: [],
   activeScheduleId: null,
   scheduleContent: null,
@@ -304,6 +334,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   settingsCategory: 'storage',
   skillEditRequest: null,
   sidebarVisible: true,
+  explorerCwd: '',
+  explorerTree: null,
+  explorerEntries: [],
+  explorerSelected: [],
+  explorerLastClicked: null,
+  explorerExpanded: [''],
+  explorerCollapsed: [],
+  explorerSort: null,
+  explorerFilter: '',
   formatHelperEnabled: localStorage.getItem('ptnotes:formatHelper') !== '0',
   theme: (localStorage.getItem('ptnotes:theme') as 'light' | 'dark' | 'system' | null) ?? 'system',
   fontSize:
@@ -431,7 +470,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       kanbanCreatingColumnId: null,
       kanbanListView: 'active',
       loading: true,
-      moduleHistoryRunId: null
+      moduleHistoryRunId: null,
+      explorerCwd: '',
+      explorerTree: null,
+      explorerEntries: []
     })
     await Promise.all([
       get().refreshNotes(),
@@ -452,6 +494,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       return { loading: false }
     })
+    if (get().tab === 'files') await get().loadExplorer()
   },
 
   async refreshNotes() {
@@ -798,9 +841,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async refreshFiles() {
     const project = get().activeProject
-    if (!project) return set({ projectFiles: [] })
-    const projectFiles = await window.ptnotes.files.list(project)
-    set({ projectFiles })
+    if (!project) return set({ projectFiles: [], projectFileEntries: [] })
+    const projectFileEntries = await window.ptnotes.files.listEntries(project)
+    set({
+      projectFileEntries,
+      projectFiles: projectFileEntries.filter((e) => !e.isDir).map((e) => e.name)
+    })
   },
 
   async refreshSchedules() {
@@ -860,6 +906,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ activeScheduleId: meta.id })
     }
     await get().refreshSchedules()
+  },
+
+  async duplicateSchedule(id) {
+    const project = get().activeProject
+    if (!project) return
+    const meta = await window.ptnotes.planner.duplicate(project, id)
+    await get().refreshSchedules()
+    await get().selectSchedule(meta.id)
   },
 
   async deleteSchedule(id) {
@@ -1345,6 +1399,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setTab(tab) {
     set({ tab })
+    if (tab === 'files') void get().loadExplorer()
   },
 
   setChatOpen(chatOpen) {
@@ -1506,6 +1561,87 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setSidebarVisible(sidebarVisible) {
     set({ sidebarVisible })
+  },
+
+  async loadExplorer(dir) {
+    const project = get().activeProject
+    if (!project) {
+      return set({ explorerCwd: '', explorerTree: null, explorerEntries: [] })
+    }
+    const cwd = dir ?? get().explorerCwd
+    const [explorerTree, explorerEntries] = await Promise.all([
+      window.ptnotes.files.explorerTree(project),
+      window.ptnotes.files.explorerList(project, cwd)
+    ])
+    set({ explorerCwd: cwd, explorerTree, explorerEntries })
+  },
+
+  selectExplorerFolder(path) {
+    if (path === get().explorerCwd) return
+    set({
+      explorerSelected: [],
+      explorerLastClicked: null,
+      explorerCollapsed: [],
+      explorerExpanded: [...new Set([...get().explorerExpanded, path])]
+    })
+    void get().loadExplorer(path)
+  },
+
+  toggleExplorerFolder(path) {
+    const expanded = new Set(get().explorerExpanded)
+    const collapsed = new Set(get().explorerCollapsed)
+    const ancestors = new Set(ancestorsOf(get().explorerCwd))
+    const isExpanded = expanded.has(path) || (ancestors.has(path) && !collapsed.has(path))
+    if (isExpanded) {
+      expanded.delete(path)
+      collapsed.add(path)
+    } else {
+      expanded.add(path)
+      collapsed.delete(path)
+    }
+    set({ explorerExpanded: [...expanded], explorerCollapsed: [...collapsed] })
+  },
+
+  selectExplorerEntry(path, mode) {
+    const selected = new Set(get().explorerSelected)
+    const lastClicked = get().explorerLastClicked
+    if (mode === 'toggle') {
+      if (selected.has(path)) selected.delete(path)
+      else selected.add(path)
+      set({ explorerSelected: [...selected], explorerLastClicked: path })
+      return
+    }
+    if (mode === 'range' && lastClicked != null) {
+      const entries = visibleExplorerEntries(
+        get().explorerEntries,
+        get().explorerSort,
+        get().explorerFilter
+      )
+      const lo = entries.findIndex((e) => e.path === lastClicked)
+      const hi = entries.findIndex((e) => e.path === path)
+      if (hi !== -1) {
+        const from = lo === -1 ? hi : Math.min(lo, hi)
+        const to = lo === -1 ? hi : Math.max(lo, hi)
+        set({
+          explorerSelected: entries.slice(from, to + 1).map((e) => e.path),
+          explorerLastClicked: path
+        })
+        return
+      }
+    }
+    set({ explorerSelected: [path], explorerLastClicked: path })
+  },
+
+  setExplorerSelected(explorerSelected) {
+    set({ explorerSelected })
+  },
+
+  setExplorerSort(sort) {
+    set({ explorerSort: sort })
+  },
+
+  setExplorerFilter(filter) {
+    set({ explorerFilter: filter })
   },
 
   setFormatHelperEnabled(enabled) {
