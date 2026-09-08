@@ -4,6 +4,8 @@ import JSZip from 'jszip'
 
 const OUT = '/tmp/ptnotes-planner-export-test.xlsx'
 const OUT2 = '/tmp/ptnotes-planner-export-test-2.xlsx'
+const OUT3 = '/tmp/ptnotes-planner-export-test-3.xlsx'
+const OUT4 = '/tmp/ptnotes-planner-export-test-4.xlsx'
 
 const { overallPercentComplete, statusLabel } = await import('../src/shared/planner')
 const { buildPlannerExportXlsx } = await import('../src/main/planner/exportXlsx')
@@ -61,11 +63,17 @@ assert.equal(
 
 await fs.rm(OUT, { force: true })
 await fs.rm(OUT2, { force: true })
+await fs.rm(OUT3, { force: true })
+await fs.rm(OUT4, { force: true })
 
 const payload: PlannerExportPayload = {
   scheduleName: 'Roadmap',
   overallPercent: 55,
   calendar: { weekStart: 1, weekEnd: 5, holidays: [] },
+  progressDate: '2026-09-14',
+  progressMode: 'percent-plan',
+  planPercent: 60,
+  ganttMode: 'day',
   columns: [
     { key: 'no', label: 'No.' },
     { key: 'title', label: 'Title' },
@@ -150,7 +158,8 @@ const cells = vals.sheets.Roadmap?.cells ?? {}
 // Column C title block
 assert.equal(cells.C2, 'Roadmap', 'C2 schedule name')
 assert.equal(cells.C3, 'Date: 07-Sep-2026 - 18-Sep-2026', 'C3 min plan start - max plan end')
-assert.equal(cells.C4, 'Progress: 55%', 'C4 overall percent')
+assert.equal(cells.C4, 'Progress date: 14-Sep-2026', 'C4 progress date')
+assert.equal(cells.C5, 'Progress: 55% (plan 60%)', 'C5 progress line with plan percent')
 
 // Header row 8 from column B, uppercase
 assert.equal(cells.B8, 'NO.', 'header No. uppercase')
@@ -279,6 +288,11 @@ assert.equal(st.L6?.font?.size, 8, 'weekday letter compact 8pt font')
 assert.equal(st.L6?.font?.bold, true, 'weekday letter bold')
 assert.equal(st.L7?.font?.size, 8, 'day-of-month compact 8pt font')
 
+// Planner-date (as-of) column tinted light red (Sep 14 = col Z)
+assert.equal(st.Z6?.fill?.fgColor, 'FFF8CBCB', 'as-of weekday header cell tinted light red')
+assert.equal(st.Z7?.fill?.fgColor, 'FFF8CBCB', 'as-of day-of-month header cell tinted light red')
+assert.equal(st.S6?.fill, undefined, 'non-as-of working-day header cell untinted')
+
 // Task bars: Accent 5 for rows with children, lighter Accent 5 for leaves
 assert.equal(st.S9?.fill?.fgColor, 'FF5B9BD5', 'Root bar starts at Sep 7 (col S)')
 assert.equal(st.AD9?.fill?.fgColor, 'FF5B9BD5', 'Root bar ends at Sep 18 (col AD)')
@@ -306,9 +320,11 @@ assert.equal(colWidth('AK'), 2.6, 'gantt last day column 2.6 wide')
 assert.equal(st.A1?.font?.name, 'Calibri', 'margin cell font Calibri')
 assert.equal(st.A1?.font?.size, 11, 'margin cell font size 11')
 assert.equal(st.C2?.font?.name, 'Calibri', 'title block cell font Calibri')
-assert.equal(st.C2?.font?.size, 12, 'title block cell font size 12')
+assert.equal(st.C2?.font?.size, 14, 'title name font size 14')
+assert.equal(st.C2?.font?.bold, true, 'title name bold')
 assert.equal(st.C3?.font?.size, 12, 'title block date font size 12')
-assert.equal(st.C4?.font?.size, 12, 'title block progress font size 12')
+assert.equal(st.C4?.font?.size, 12, 'title block progress date font size 12')
+assert.equal(st.C5?.font?.size, 12, 'title block progress line font size 12')
 
 // Parent % cells are live formulas over their direct children (raw XML check)
 const sheetXml = async (path: string): Promise<string> => {
@@ -342,9 +358,32 @@ assert.ok(
 assert.ok(cellXml(xml, 'I12'), 'I12 cell present')
 assert.ok(!cellXml(xml, 'I12').includes('<f>'), 'I12 (leaf) stays a plain number')
 
-// Without the Duration column, parent % cells fall back to a plain AVERAGE formula
+// ganttMode 'none': no timeline columns at all; the styled sweep stops at the margin col
+const payload3: PlannerExportPayload = { ...payload, ganttMode: 'none' }
+await buildPlannerExportXlsx(payload3, OUT3)
+const vals3 = await readValues(OUT3, 'Roadmap')
+assert.ok(vals3.ok, `readValues ok: ${vals3.ok ? '' : vals3.error}`)
+const cells3 = vals3.sheets.Roadmap?.cells ?? {}
+assert.equal(cells3.C4, 'Progress date: 14-Sep-2026', 'none: C4 progress date still written')
+assert.equal(cells3.L5, undefined, 'none: no month label column')
+assert.equal(cells3.L8, undefined, 'none: no PLAN banner')
+const styles3 = await readStyles(OUT3, 'Roadmap', 'A1..AK13')
+assert.ok(styles3.ok, `readStyles ok: ${styles3.ok ? '' : styles3.error}`)
+const st3 = styles3.sheets.Roadmap?.cells ?? {}
+assert.equal(st3.L9, undefined, 'none: no gantt cell styles past the margin column')
+assert.equal(st3.K13?.border?.top?.color, 'FFFFFFFF', 'none: sweep ends at the right margin col')
+assert.equal(
+  styles3.sheets.Roadmap?.columns.find((c) => c.letter === 'L')?.width,
+  undefined,
+  'none: no gantt column widths'
+)
+
+// Without the Duration column, parent % cells fall back to a plain AVERAGE formula;
+// progressMode 'percent' drops the plan part of the progress line
 const payload2: PlannerExportPayload = {
   ...payload,
+  progressMode: 'percent',
+  planPercent: null,
   columns: payload.columns.filter((c) => c.key !== 'duration')
 }
 await buildPlannerExportXlsx(payload2, OUT2)
@@ -352,11 +391,70 @@ const vals2 = await readValues(OUT2, 'Roadmap')
 assert.ok(vals2.ok, `readValues ok: ${vals2.ok ? '' : vals2.error}`)
 const cells2 = vals2.sheets.Roadmap?.cells ?? {}
 assert.equal(cells2.H9, 50, 'no-duration export: percent cached result')
+assert.equal(cells2.C5, 'Progress: 55%', 'percent-only progress line omits the plan part')
 const xml2 = await sheetXml(OUT2)
 const h9 = cellXml(xml2, 'H9')
 assert.ok(h9, 'H9 cell present')
 assert.ok(h9.includes('AVERAGE(H10,H12)'), 'no-duration export: plain AVERAGE over direct children')
 
+// ganttMode 'week': one column per week (same width as a day column), weeks snapped to
+// the calendar's week start (Mon): Aug 31 / Sep 7 / Sep 14 / Sep 21 = cols L..O. The week
+// number resets to W1 at each new month, so Aug 31 = W1, Sep 7 = W1, Sep 14 = W2, Sep 21 = W3.
+const payload4: PlannerExportPayload = { ...payload, ganttMode: 'week' }
+await buildPlannerExportXlsx(payload4, OUT4)
+const vals4 = await readValues(OUT4, 'Roadmap')
+assert.ok(vals4.ok, `readValues ok: ${vals4.ok ? '' : vals4.error}`)
+const cells4 = vals4.sheets.Roadmap?.cells ?? {}
+assert.equal(cells4.L5, 'Aug', 'week: month label Aug (single week, unmerged)')
+assert.equal(cells4.M5, 'Sep', 'week: month label Sep')
+assert.equal(cells4.L6, 'W1', 'week: Aug week labeled W1')
+assert.equal(cells4.M6, 'W1', 'week: week number resets to W1 in the new month (Sep)')
+assert.equal(cells4.N6, 'W2', 'week: second Sep week labeled W2')
+assert.equal(cells4.O6, 'W3', 'week: third Sep week labeled W3')
+assert.equal(cells4.L7, 31, 'week: first day-of-month of week 1')
+assert.equal(cells4.M7, 7, 'week: first day-of-month of week 2')
+assert.equal(cells4.N7, 14, 'week: first day-of-month of week 3')
+assert.equal(cells4.O7, 21, 'week: first day-of-month of week 4')
+assert.equal(cells4.L8, 'PLAN', 'week: PLAN banner on the table header row')
+
+const styles4 = await readStyles(OUT4, 'Roadmap', 'A1..AK13')
+assert.ok(styles4.ok, `readStyles ok: ${styles4.ok ? '' : styles4.error}`)
+const st4 = styles4.sheets.Roadmap?.cells ?? {}
+const colWidth4 = (letter: string): number | undefined =>
+  styles4.sheets.Roadmap?.columns.find((c) => c.letter === letter)?.width
+assert.equal(colWidth4('L'), 2.6, 'week column same width as a day column')
+assert.equal(colWidth4('O'), 2.6, 'week last column same width as a day column')
+assert.equal(st4.L8?.fill?.fgColor, 'FF203864', 'week: PLAN banner fill = header fill')
+assert.equal(st4.M5?.alignment?.horizontal, 'left', 'week: merged month label left-aligned')
+
+// As-of week (Sep 14 falls in the week starting Sep 14 = col N) tinted light red
+assert.equal(st4.N6?.fill?.fgColor, 'FFF8CBCB', 'week: as-of week label tinted light red')
+assert.equal(st4.N7?.fill?.fgColor, 'FFF8CBCB', 'week: as-of week day tinted light red')
+assert.equal(st4.M6?.fill, undefined, 'week: non-as-of week header untinted')
+
+// Bars fill the week columns the task's plan range overlaps (no non-work shading)
+assert.equal(st4.M9?.fill?.fgColor, 'FF5B9BD5', 'week: Root bar in week of Sep 7')
+assert.equal(st4.N9?.fill?.fgColor, 'FF5B9BD5', 'week: Root bar in week of Sep 14')
+assert.equal(st4.L9?.fill, undefined, 'week: Root has no bar in week of Aug 31')
+assert.equal(st4.O9?.fill, undefined, 'week: Root has no bar in week of Sep 21')
+assert.equal(st4.M10?.fill?.fgColor, 'FF5B9BD5', 'week: Child A bar in week of Sep 7')
+assert.equal(st4.N10?.fill, undefined, 'week: Child A has no bar in week of Sep 14')
+assert.equal(st4.M11?.fill?.fgColor, 'FFBDD7EE', 'week: leaf Grandchild bar week of Sep 7')
+assert.equal(st4.N11?.fill?.fgColor, 'FFBDD7EE', 'week: leaf Grandchild bar week of Sep 14')
+assert.equal(st4.N12?.fill?.fgColor, 'FFBDD7EE', 'week: leaf Child B bar in week of Sep 14')
+assert.equal(st4.L10?.fill, undefined, 'week: no non-working-day shading on empty cells')
+
+// Week grid borders
+assert.equal(st4.L9?.border?.top?.color, 'FFD9D9D9', 'week: gantt grid border White Darker 15%')
+assert.equal(st4.O12?.border?.right?.color, 'FFD9D9D9', 'week: last week column bordered')
+
+const xml4 = await sheetXml(OUT4)
+assert.ok(xml4.includes('<mergeCell ref="M5:O5"/>'), 'week: Sep month band merged across its weeks')
+assert.ok(xml4.includes('<mergeCell ref="L8:O8"/>'), 'week: PLAN banner merged across the gantt')
+assert.ok(!xml4.includes('<mergeCell ref="L5:'), 'week: single-week Aug band is not merged')
+
 await fs.rm(OUT, { force: true })
 await fs.rm(OUT2, { force: true })
+await fs.rm(OUT3, { force: true })
+await fs.rm(OUT4, { force: true })
 console.log('test-planner-export: OK')

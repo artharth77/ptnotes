@@ -484,6 +484,8 @@ export type {
   PlannerExportPayload,
   PlannerExportResult,
   PlannerExportRow,
+  PlannerGanttMode,
+  PlannerProgressMode,
   ProjectCalendar,
   RolledUpTask,
   Schedule,
