@@ -41,6 +41,14 @@ function isExportPayload(p: unknown): p is PlannerExportPayload {
     if (typeof rr.depth !== 'number' || !Number.isInteger(rr.depth)) return false
     if (typeof rr.hasChildren !== 'boolean') return false
   }
+  if (typeof o.progressDate !== 'string') return false
+  if (o.progressMode !== 'percent' && o.progressMode !== 'percent-plan') return false
+  if (
+    o.planPercent !== null &&
+    (typeof o.planPercent !== 'number' || !Number.isFinite(o.planPercent))
+  )
+    return false
+  if (o.ganttMode !== 'none' && o.ganttMode !== 'day' && o.ganttMode !== 'week') return false
   return true
 }
 

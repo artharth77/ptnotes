@@ -36,6 +36,7 @@ import { friendlyError } from '../errors'
 import { CalendarModal } from './CalendarModal'
 import { PlannerColumnModal } from './PlannerColumnModal'
 import { PlannerEstimateModal } from './PlannerEstimateModal'
+import { PlannerExportModal, type PlannerExportOptions } from './PlannerExportModal'
 import { PlannerResourcesModal } from './PlannerResourcesModal'
 import {
   GanttChart,
@@ -51,6 +52,7 @@ import {
   defaultCalendar,
   deriveTaskNo,
   emptyTask,
+  estimatePercentComplete,
   formatDate,
   nextWorkingDayString,
   normalizeColumnOrder,
@@ -420,6 +422,7 @@ export function PlannerEditor(): React.JSX.Element {
   const [calendarOpen, setCalendarOpen] = useState(false)
   const [columnsOpen, setColumnsOpen] = useState(false)
   const [estimateOpen, setEstimateOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
   const [resourcesOpen, setResourcesOpen] = useState(false)
   const [view, setView] = useState<'table' | 'gantt'>('table')
   const [ganttDayWidth, setGanttDayWidth] = useState(GANTT_DAY_WIDTH_DEFAULT)
@@ -1411,7 +1414,7 @@ export function PlannerEditor(): React.JSX.Element {
     pendingFocus.current = { id: newTasks[0].id, col: 'title' }
   }
 
-  async function handleExportExcel(): Promise<void> {
+  async function handleExportExcel(opts: PlannerExportOptions): Promise<void> {
     const columns: PlannerExportColumn[] = columnOrder
       .filter((k) => k !== 'indicator' && (k === 'no' || k === 'title' || visibleCols.has(k)))
       .map((k) => ({ key: k, label: COLUMNS.find((c) => c.key === k)?.label ?? k }))
@@ -1437,7 +1440,14 @@ export function PlannerEditor(): React.JSX.Element {
         overallPercent: overallPercentComplete(sc.tasks),
         columns,
         rows: exportRows,
-        calendar: cal
+        calendar: cal,
+        progressDate: opts.progressDate,
+        progressMode: opts.progressMode,
+        planPercent:
+          opts.progressMode === 'percent-plan'
+            ? estimatePercentComplete(sc.tasks, opts.progressDate)
+            : null,
+        ganttMode: opts.ganttMode
       })
       if (!result.ok && !result.canceled) window.alert(friendlyError(result.error))
     } catch (err) {
@@ -1946,7 +1956,7 @@ export function PlannerEditor(): React.JSX.Element {
             className="icon-btn"
             title="Export to Excel"
             disabled={sc.tasks.length === 0}
-            onClick={() => void handleExportExcel()}
+            onClick={() => setExportOpen(true)}
           >
             <MdiIcon path={mdiFileExcelOutline} size={16} />
           </button>
@@ -2309,6 +2319,16 @@ export function PlannerEditor(): React.JSX.Element {
       {calendarOpen && <CalendarModal onClose={() => setCalendarOpen(false)} />}
 
       {estimateOpen && <PlannerEstimateModal onClose={() => setEstimateOpen(false)} />}
+
+      {exportOpen && (
+        <PlannerExportModal
+          onClose={() => setExportOpen(false)}
+          onExport={(opts) => {
+            setExportOpen(false)
+            void handleExportExcel(opts)
+          }}
+        />
+      )}
 
       {resourcesOpen && <PlannerResourcesModal onClose={() => setResourcesOpen(false)} />}
 

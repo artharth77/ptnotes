@@ -556,6 +556,12 @@ export interface PlannerExportRow {
   hasChildren: boolean
 }
 
+/** How the C5 progress line is written. */
+export type PlannerProgressMode = 'percent' | 'percent-plan'
+
+/** Which Gantt timeline the export embeds (none = table only). */
+export type PlannerGanttMode = 'none' | 'day' | 'week'
+
 /** Everything the main process needs to build the .xlsx (no file access in the renderer). */
 export interface PlannerExportPayload {
   scheduleName: string
@@ -564,6 +570,12 @@ export interface PlannerExportPayload {
   rows: PlannerExportRow[]
   /** Working-day config for the exported Gantt's non-working-day shading. */
   calendar: ProjectCalendar
+  /** As-of date for the progress line and the Gantt highlight (`YYYY-MM-DD`). */
+  progressDate: string
+  progressMode: PlannerProgressMode
+  /** Planned %complete as of `progressDate` (null when `progressMode` is `'percent'`). */
+  planPercent: number | null
+  ganttMode: PlannerGanttMode
 }
 
 /** Result of `planner:exportExcel`. */

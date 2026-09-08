@@ -265,7 +265,7 @@ src/
 - **Projects:** `list` (returns `pathExists` per project), `create`, `rename`, `delete`, `recreate` (rebuild folder for a project whose path is missing)
 - **Notes:** `list`, `read`, `save`, `create`, `rename`, `delete`
 - **Kanban:** `load` (board; migrates a legacy `TODO.md` on first load and deletes it); granular mutators, each returning the updated board: cards (`createCard`, `updateCard` — may replace `comments` as a whole array, `moveCard` with in-column index, `deleteCard`), comments (`addComment`, `updateComment`, `deleteComment`), columns (`addColumn` slugified + uniqueness-checked, `updateColumn` — re-slugs and remaps the column's cards, `moveColumn`, `deleteColumn` with `move`/`delete` card mode and a ≥1-column guard); archive (`loadArchive`, `archiveCard`, `restoreCard`, `deleteArchivedCard`). All mutations run under the per-project kanban lock (atomic tmp+rename).
-- **Planner:** `list` (schedule metas), `read` (full schedule or `null`), `save` (atomic tmp+rename), `create` (slugified id), `rename`, `delete`; `getCalendar` (defaults to Mon–Fri), `saveCalendar` (normalized). All ids validated with `validateScheduleId` (same rule as the note-id guard). Plus `setEditActive` (renderer→main `send`: gates the main-process `before-input-event` shortcut interception) and `onUndoRedo` (main→renderer: forwards `⌘Z`/`⇧⌘Z`/`Ctrl+Y` to the planner editor — see [Editor (PlannerEditor)](#editor-plannereditor)).
+- **Planner:** `list` (schedule metas), `read` (full schedule or `null`), `save` (atomic tmp+rename), `create` (slugified id), `rename`, `delete`; `getCalendar` (defaults to Mon–Fri), `saveCalendar` (normalized); `exportExcel` (validated `PlannerExportPayload` → native save dialog → ExcelJS workbook written in the main process, `{ ok, path?, canceled?, error? }`). All ids validated with `validateScheduleId` (same rule as the note-id guard). Plus `setEditActive` (renderer→main `send`: gates the main-process `before-input-event` shortcut interception) and `onUndoRedo` (main→renderer: forwards `⌘Z`/`⇧⌘Z`/`Ctrl+Y` to the planner editor — see [Editor (PlannerEditor)](#editor-plannereditor)).
 - **Chat history:** `list`, `read`, `write`, `delete`, `rename`, `readTrace` (raw AI trace `AiTraceFile` for a session, or `null`)
 - **AI:** `send` (message → streamed reply; takes `sessionId` so the run is traced), `getConfig`, `setConfig`, `listModels(baseUrl, apiKey)`, `generateTitle` (takes `sessionId`; the title call is traced into the session's trace file), `stop`, `clear`, `confirmResponse`, `askResponse` (human-in-the-loop answers for `ask_user`), `onStreamEvent` (token chunks + tool-call logs + confirm events)
 - **Settings:** `get` (returns `{ rootDir }`), `getAbout` (app name/version + Electron/Chromium/Node versions for the About pane), `chooseRoot` (native folder picker), `changeRoot` (moves data + persists + returns new `{ rootDir }`)
@@ -656,6 +656,31 @@ JSON in `<project>/planner/<slug>.json`; the whole feature is pure data — no m
   works in both views) opens a modal with a scrollable grid of per-owner workload from
   `ownerStats` — columns **Name · Assigned · Not Started · In Progress · Completed · %Completed**
   (sticky header, `max-height: 60vh`). Shows an empty-state hint when no owners are assigned.
+- **Export to Excel**: toolbar button (`mdiFileExcelOutline`, after a divider; disabled when the
+  schedule has no tasks) opens `PlannerExportModal` — a **planner date** picker (default today),
+  a **progress line** choice (Progress only / Progress + plan), and a **Gantt chart** choice
+  (None / Day / Week, default Day). Export sends the visible columns/rows plus
+  `progressDate` / `progressMode` / `planPercent` (the `estimatePercentComplete` projection for
+  the planner date, `null` in percent-only mode) / `ganttMode` over `planner:exportExcel`; the
+  main process writes the workbook in `src/main/planner/exportXlsx.ts` (ExcelJS) to a
+  user-chosen path via a native save dialog. Sheet layout: column-C title block (C2 schedule
+  name Calibri 14 bold, C3 `Date: <min plan start> - <max plan end>`, C4 `Progress date:
+  <planner date>`, C5 `Progress: N%` or `Progress: N% (plan M%)`, rows 3–5 Calibri 12); the
+  table from row 8 (visible columns in order, uppercased header, depth-indented titles,
+  bold rows with children, root-with-children rows Blue Accent 5 Lighter 60%, status accent
+  fills, `dd-mmm-yyyy` dates, `%`-suffixed numbers — parent % cells are live
+  duration-weighted-mean formulas over their direct children); 2.33-wide margin columns;
+  Calibri 11 + thin white borders swept across the whole styled area (the sweep stops at the
+  table's right margin column when no Gantt is exported). Gantt (when enabled) starts two
+  columns right of the table: **day** mode = one 2.6-wide column per day (min planStart − 7
+  to max planEnd + 7, planner date ± 7 when no dates) with month band / weekday letter /
+  day-of-month rows, non-working-day shading, the planner-date column tinted light red, a
+  merged "PLAN" banner, and per-task bars over planStart..planEnd (Accent 5 for parents,
+   lighter for leaves); **week** mode = one column per week at the same 2.6 width as a day
+   column (weeks run from the calendar's `weekStart`, range snapped to week boundaries) with
+   month band (month of the week's first day), a `W1`/`W2`/… row whose number resets to `W1`
+   at each new month, a first day-of-month row, the planner-date week tinted light red, and
+   bars filling the weeks a task's plan range overlaps (no non-working shading).
 
 ### Gantt view (GanttChart)
 
