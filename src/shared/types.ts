@@ -494,6 +494,8 @@ export type {
   ScheduleTask
 } from './planner'
 
+export type { SnapshotMeta } from './snapshots'
+
 export type {
   BotGroupEvent,
   BotMemoryEntry,

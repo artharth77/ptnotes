@@ -38,6 +38,7 @@ import type {
   ProjectCalendar,
   Schedule,
   ScheduleMeta,
+  SnapshotMeta,
   Tab,
   ToolCallInfo,
   FileEntry,
@@ -78,6 +79,8 @@ interface AppState {
   calendar: ProjectCalendar | null
   plannerUndo: Record<string, Schedule[]>
   plannerRedo: Record<string, Schedule[]>
+  snapshotsOpen: boolean
+  snapshotList: SnapshotMeta[]
   tab: Tab
   chatOpen: boolean
   moduleOpen: boolean
@@ -196,6 +199,11 @@ interface AppState {
   duplicateSchedule: (id: string) => Promise<void>
   deleteSchedule: (id: string) => Promise<void>
   saveCalendar: (calendar: ProjectCalendar) => Promise<void>
+  setSnapshotsOpen: (open: boolean) => void
+  refreshSnapshots: () => Promise<void>
+  restoreSnapshot: (ts: number) => Promise<void>
+  setSnapshotTag: (ts: number, tag: string | null) => Promise<void>
+  deleteSnapshot: (ts: number) => Promise<void>
   plannerPushUndo: (scheduleId: string, snapshot: Schedule) => void
   plannerClearRedo: (scheduleId: string) => void
   plannerTruncateUndo: (scheduleId: string, length: number) => void
@@ -304,6 +312,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   calendar: null,
   plannerUndo: {},
   plannerRedo: {},
+  snapshotsOpen: false,
+  snapshotList: [],
   tab: 'notes',
   chatOpen: false,
   moduleOpen: false,
@@ -947,6 +957,41 @@ export const useAppStore = create<AppState>((set, get) => ({
       await window.ptnotes.planner.save(project, recomputed)
       await get().refreshSchedules()
     }
+  },
+
+  setSnapshotsOpen(open) {
+    set({ snapshotsOpen: open, snapshotList: open ? get().snapshotList : [] })
+    if (open) void get().refreshSnapshots()
+  },
+
+  async refreshSnapshots() {
+    const { activeProject, activeScheduleId } = get()
+    if (!activeProject || !activeScheduleId) return set({ snapshotList: [] })
+    const snapshotList = await window.ptnotes.snapshots.list(activeProject, activeScheduleId)
+    set({ snapshotList })
+  },
+
+  async restoreSnapshot(ts) {
+    const { activeProject, activeScheduleId } = get()
+    if (!activeProject || !activeScheduleId) return
+    const restored = await window.ptnotes.snapshots.restore(activeProject, activeScheduleId, ts)
+    set({ scheduleContent: restored })
+    await get().refreshSchedules()
+    await get().refreshSnapshots()
+  },
+
+  async setSnapshotTag(ts, tag) {
+    const { activeProject, activeScheduleId } = get()
+    if (!activeProject || !activeScheduleId) return
+    await window.ptnotes.snapshots.setTag(activeProject, activeScheduleId, ts, tag)
+    await get().refreshSnapshots()
+  },
+
+  async deleteSnapshot(ts) {
+    const { activeProject, activeScheduleId } = get()
+    if (!activeProject || !activeScheduleId) return
+    await window.ptnotes.snapshots.delete(activeProject, activeScheduleId, ts)
+    await get().refreshSnapshots()
   },
 
   plannerPushUndo(scheduleId, snapshot) {

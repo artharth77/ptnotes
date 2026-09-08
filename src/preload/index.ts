@@ -45,6 +45,7 @@ import type {
   ProjectCalendar,
   Schedule,
   ScheduleMeta,
+  SnapshotMeta,
   SkillContent,
   SkillList,
   SkillMeta,
@@ -187,6 +188,18 @@ const api = {
         ipcRenderer.removeListener('planner:undo-redo', listener)
       }
     }
+  },
+  snapshots: {
+    list: (project: string, scheduleId: string): Promise<SnapshotMeta[]> =>
+      ipcRenderer.invoke('snapshots:list', project, scheduleId),
+    read: (project: string, scheduleId: string, ts: number): Promise<Schedule | null> =>
+      ipcRenderer.invoke('snapshots:read', project, scheduleId, ts),
+    restore: (project: string, scheduleId: string, ts: number): Promise<Schedule> =>
+      ipcRenderer.invoke('snapshots:restore', project, scheduleId, ts),
+    setTag: (project: string, scheduleId: string, ts: number, tag: string | null): Promise<void> =>
+      ipcRenderer.invoke('snapshots:setTag', project, scheduleId, ts, tag),
+    delete: (project: string, scheduleId: string, ts: number): Promise<void> =>
+      ipcRenderer.invoke('snapshots:delete', project, scheduleId, ts)
   },
   ai: {
     send: (

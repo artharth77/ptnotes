@@ -8,6 +8,7 @@ import { PTNotesService } from './service/PTNotesService'
 import { registerProjectIpc, registerNoteIpc, registerChatIpc } from './ipc'
 import { registerKanbanIpc } from './ipc/kanban'
 import { registerPlannerIpc } from './ipc/planner'
+import { registerSnapshotsIpc } from './ipc/snapshots'
 import { registerAiIpc, createSessionRegistry } from './ipc/ai'
 import { registerFilesIpc } from './ipc/files'
 import { registerSettingsIpc } from './ipc/settings'
@@ -393,6 +394,7 @@ app.whenReady().then(async () => {
   registerKanbanIpc(service)
   registerChatIpc(service)
   registerPlannerIpc(service)
+  registerSnapshotsIpc(service)
   registerAiIpc(registry, configStore, service)
   registerFilesIpc(service, registry, configStore)
   registerSettingsIpc(service, settingsStore, (newRoot) => {

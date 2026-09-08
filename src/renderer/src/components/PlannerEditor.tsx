@@ -16,6 +16,7 @@ import {
   mdiContentPaste,
   mdiFileExcelOutline,
   mdiGrid,
+  mdiHistory,
   mdiMagnifyMinus,
   mdiMagnifyPlus,
   mdiPencil,
@@ -416,6 +417,7 @@ export function PlannerEditor(): React.JSX.Element {
   const updateScheduleContent = useAppStore((s) => s.updateScheduleContent)
   const saveSchedule = useAppStore((s) => s.saveSchedule)
   const renameSchedule = useAppStore((s) => s.renameSchedule)
+  const setSnapshotsOpen = useAppStore((s) => s.setSnapshotsOpen)
   const plannerUndo = useAppStore((s) => s.plannerUndo)
   const plannerRedo = useAppStore((s) => s.plannerRedo)
 
@@ -1809,6 +1811,15 @@ export function PlannerEditor(): React.JSX.Element {
         >
           <MdiIcon path={mdiPencil} size={14} />
         </button>
+        {!ganttMode && (
+          <button
+            className="icon-btn small"
+            title="Snapshots"
+            onClick={() => setSnapshotsOpen(true)}
+          >
+            <MdiIcon path={mdiHistory} size={14} />
+          </button>
+        )}
       </div>
       <div className="planner-toolbar">
         <div className="planner-toolbar-group">

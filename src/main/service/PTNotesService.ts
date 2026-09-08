@@ -21,6 +21,7 @@ import type {
   ProjectCalendar,
   Schedule,
   ScheduleMeta,
+  SnapshotMeta,
   SkillContent,
   SkillList,
   SkillMeta,
@@ -55,6 +56,15 @@ import {
   validateScheduleId
 } from '@shared/planner'
 import { detectFileKind } from '../ai/reader'
+import {
+  captureScheduleSnapshot,
+  deleteSnapshotDir,
+  deleteSnapshotFile,
+  listSnapshotMetas,
+  moveSnapshotDir,
+  readSnapshotFile,
+  setSnapshotTag
+} from './snapshots'
 import { mergePdfs, pdfPageCount, rebuildPdfPages } from '../pdf/ops'
 import { closePdfRender, openPdfRender, renderPdfPage } from '../pdf/pdfRenderer'
 import type { SettingsStore } from '../settings'
@@ -332,6 +342,11 @@ export class PTNotesService {
 
   private calendarPath(project: string): string {
     return join(this.plannerDir(project), 'calendar.json')
+  }
+
+  /** Snapshot dir for one planner schedule (`<project>/.data/snapshots/planner/<id>`). */
+  private scheduleSnapshotDir(project: string, id: string): string {
+    return join(this.dataDir(project), 'snapshots', 'planner', validateScheduleId(id))
   }
 
   /** Global skills dir (shared across all projects), next to the project registry. */
@@ -1950,6 +1965,15 @@ export class PTNotesService {
     if (!schedule || typeof schedule.id !== 'string') throw new Error('Invalid schedule')
     await fs.mkdir(this.plannerDir(project), { recursive: true })
     await this.atomicWriteJson(this.schedulePath(project, schedule.id), schedule)
+    try {
+      await captureScheduleSnapshot(
+        this.scheduleSnapshotDir(project, schedule.id),
+        schedule,
+        Date.now()
+      )
+    } catch {
+      // snapshot failure must never fail the save
+    }
   }
 
   async createSchedule(project: string, name: string): Promise<ScheduleMeta> {
@@ -2023,6 +2047,10 @@ export class PTNotesService {
       } else {
         await fs.mkdir(this.plannerDir(project), { recursive: true })
         await this.atomicWriteJson(this.schedulePath(project, newId), schedule)
+        await moveSnapshotDir(
+          this.scheduleSnapshotDir(project, id),
+          this.scheduleSnapshotDir(project, newId)
+        )
         await fs.unlink(this.schedulePath(project, id)).catch(() => {})
       }
       return {
@@ -2060,7 +2088,62 @@ export class PTNotesService {
   async deleteSchedule(project: string, id: string): Promise<void> {
     return this.withPlannerLock(project, async () => {
       await fs.unlink(this.schedulePath(project, id)).catch(() => {})
+      await deleteSnapshotDir(this.scheduleSnapshotDir(project, id))
     })
+  }
+
+  /** Snapshot history of one schedule (newest first). */
+  async listSnapshots(project: string, scheduleId: string): Promise<SnapshotMeta[]> {
+    return listSnapshotMetas(this.scheduleSnapshotDir(project, scheduleId))
+  }
+
+  async readSnapshot(project: string, scheduleId: string, ts: number): Promise<Schedule | null> {
+    return readSnapshotFile(this.scheduleSnapshotDir(project, scheduleId), ts)
+  }
+
+  /**
+   * Restore a snapshot: writes the snapshot back through the locked save path,
+   * then captures the overwritten content forced + nudged one minute back —
+   * capturing in this order keeps both sides of the restore in separate
+   * retention buckets, so a restore is always reversible.
+   */
+  async restoreSnapshot(project: string, scheduleId: string, ts: number): Promise<Schedule> {
+    return this.withPlannerLock(project, async () => {
+      const current = await this.readSchedule(project, scheduleId)
+      if (!current) throw new Error(`Schedule "${scheduleId}" not found`)
+      const snapshot = await readSnapshotFile(this.scheduleSnapshotDir(project, scheduleId), ts)
+      if (!snapshot) throw new Error(`Snapshot not found`)
+      const restored: Schedule = { ...snapshot, id: scheduleId, updatedAt: Date.now() }
+      await this.writeSchedule(project, restored)
+      try {
+        await captureScheduleSnapshot(
+          this.scheduleSnapshotDir(project, scheduleId),
+          current,
+          Date.now() - 60_000,
+          { force: true }
+        )
+      } catch {
+        // best effort — restoring matters more than the pre-restore snapshot
+      }
+      return restored
+    })
+  }
+
+  async setSnapshotTag(
+    project: string,
+    scheduleId: string,
+    ts: number,
+    tag: string | null
+  ): Promise<void> {
+    return this.withPlannerLock(project, () =>
+      setSnapshotTag(this.scheduleSnapshotDir(project, scheduleId), ts, tag)
+    )
+  }
+
+  async deleteSnapshot(project: string, scheduleId: string, ts: number): Promise<void> {
+    return this.withPlannerLock(project, () =>
+      deleteSnapshotFile(this.scheduleSnapshotDir(project, scheduleId), ts)
+    )
   }
 
   // ---- Calendar (shared project working-day config) ----

@@ -3,6 +3,7 @@ import {
   mdiContentCopy,
   mdiDotsVertical,
   mdiFolderOpenOutline,
+  mdiHistory,
   mdiPencil,
   mdiPlus,
   mdiRefresh,
@@ -12,6 +13,7 @@ import { useAppStore } from '../store/useAppStore'
 import { friendlyError } from '../errors'
 import { Modal, TextField } from './Modal'
 import { MdiIcon } from './MdiIcon'
+import { PlannerSnapshotsModal } from './PlannerSnapshotsModal'
 
 function formatDate(ms: number): string {
   if (!ms) return ''
@@ -28,6 +30,8 @@ export function PlannerPanel(): React.JSX.Element {
   const duplicateSchedule = useAppStore((s) => s.duplicateSchedule)
   const deleteSchedule = useAppStore((s) => s.deleteSchedule)
   const refreshSchedules = useAppStore((s) => s.refreshSchedules)
+  const snapshotsOpen = useAppStore((s) => s.snapshotsOpen)
+  const setSnapshotsOpen = useAppStore((s) => s.setSnapshotsOpen)
 
   const [creating, setCreating] = useState(false)
   const [renaming, setRenaming] = useState<string | null>(null)
@@ -100,6 +104,12 @@ export function PlannerPanel(): React.JSX.Element {
     }
   }
 
+  async function openSnapshots(id: string): Promise<void> {
+    setMenuFor(null)
+    if (activeScheduleId !== id) await selectSchedule(id)
+    setSnapshotsOpen(true)
+  }
+
   function openMenu(e: React.MouseEvent, id: string): void {
     e.stopPropagation()
     if (menuFor === id) {
@@ -108,7 +118,7 @@ export function PlannerPanel(): React.JSX.Element {
     }
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     const menuW = 180
-    const menuH = 168
+    const menuH = 208
     const x = Math.min(rect.right, window.innerWidth - menuW - 8)
     const y = Math.min(rect.bottom, window.innerHeight - menuH - 8)
     setMenuPos({ x: Math.max(8, x), y: Math.max(8, y) })
@@ -217,6 +227,12 @@ export function PlannerPanel(): React.JSX.Element {
                     </span>{' '}
                     Rename
                   </button>
+                  <button className="note-menu-item" onClick={() => void openSnapshots(menuFor)}>
+                    <span className="note-menu-icon">
+                      <MdiIcon path={mdiHistory} size={15} />
+                    </span>{' '}
+                    Snapshots…
+                  </button>
                   <button className="note-menu-item" onClick={() => void handleReveal(menuFor)}>
                     <span className="note-menu-icon">
                       <MdiIcon path={mdiFolderOpenOutline} size={15} />
@@ -322,6 +338,8 @@ export function PlannerPanel(): React.JSX.Element {
           </div>
         </Modal>
       )}
+
+      {snapshotsOpen && <PlannerSnapshotsModal />}
     </div>
   )
 }
