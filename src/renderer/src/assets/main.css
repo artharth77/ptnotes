@@ -2047,6 +2047,121 @@ fieldset.kanban-form {
   color: var(--text);
 }
 
+/* ---- Planner snapshots modal ---- */
+
+.modal.snapshots-modal {
+  width: 560px;
+}
+
+.snapshot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 380px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+  background: var(--bg-hover);
+}
+
+.snapshot-item {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  padding: 4px 6px;
+}
+
+.snapshot-item.tagged {
+  border-color: var(--accent, #4a9eff);
+}
+
+.snapshot-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.snapshot-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 4px 2px;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+}
+
+.snapshot-time {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.snapshot-tag {
+  background: var(--accent, #4a9eff);
+  color: #fff;
+  font-size: 11px;
+  border-radius: 10px;
+  padding: 1px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+
+.snapshot-meta {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.snapshot-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.snapshot-tag-input {
+  width: 160px;
+  font-size: 12px;
+  padding: 3px 8px;
+}
+
+.snapshot-tag-hint {
+  margin: 2px 2px 0;
+}
+
+.snapshot-preview {
+  border-top: 1px dashed var(--border);
+  margin-top: 4px;
+  padding: 6px 4px 2px;
+}
+
+.snapshot-preview-head {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+
+.snapshot-preview-tasks {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.snapshot-preview-tasks li.task-status-completed {
+  color: var(--text-dim);
+  text-decoration: line-through;
+}
+
 .form-error {
   color: var(--danger);
   font-size: 12px;
