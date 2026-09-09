@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
+  mdiCheck,
   mdiDotsVertical,
   mdiPencil,
   mdiPlus,
@@ -260,9 +261,10 @@ function AiSettingsPane({
   onCommit: (c: AIConfig) => Promise<void>
 }): React.JSX.Element {
   const [editing, setEditing] = useState<AIProfile | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const profile = config.profiles.find((p) => p.id === config.activeProfileId) ?? config.profiles[0]
-  const profileId = profile?.id ?? ''
+  const selected = config.profiles.find((p) => p.id === selectedId) ?? profile
 
   function addProfile(): void {
     let n = config.profiles.length + 1
@@ -275,18 +277,27 @@ function AiSettingsPane({
   }
 
   function editProfile(): void {
-    if (profile) setEditing({ ...profile })
+    if (selected) setEditing({ ...selected })
   }
 
   async function deleteProfile(): Promise<void> {
     if (config.profiles.length <= 1) return
-    const rest = config.profiles.filter((p) => p.id !== profileId)
+    const targetId = selected?.id ?? ''
+    const rest = config.profiles.filter((p) => p.id !== targetId)
     const next: AIConfig = {
       ...config,
       profiles: rest,
-      activeProfileId: config.activeProfileId === profileId ? rest[0].id : config.activeProfileId
+      activeProfileId: config.activeProfileId === targetId ? rest[0].id : config.activeProfileId
     }
+    setSelectedId(null)
     await onCommit(next)
+  }
+
+  function setActive(): void {
+    if (!selectedId || selectedId === config.activeProfileId) return
+    const next = { ...config, activeProfileId: selectedId }
+    onChange(next)
+    void onCommit(next)
   }
 
   async function saveProfile(saved: AIProfile): Promise<void> {
@@ -320,37 +331,59 @@ function AiSettingsPane({
         providers; the active profile is used by the chat.
       </p>
       <div className="profile-block">
-        <label className="form-label profile-active">
-          Active profile
-          <select
-            className="text-field"
-            value={config.activeProfileId}
-            onChange={(e) => {
-              const next = { ...config, activeProfileId: e.target.value }
-              onChange(next)
-              void onCommit(next)
-            }}
-          >
-            {config.profiles.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name || p.id}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="profile-section-title">Profiles</div>
+        <div className="profile-grid" role="listbox" aria-label="Profiles">
+          <div className="profile-grid-header">
+            <span className="profile-grid-cell" />
+            <span className="profile-grid-cell">Name</span>
+            <span className="profile-grid-cell">Model</span>
+          </div>
+          {config.profiles.map((p) => {
+            const isActive = p.id === config.activeProfileId
+            const isSelected = p.id === selectedId
+            return (
+              <div
+                key={p.id}
+                className={`profile-grid-row${isActive ? ' active' : ''}${
+                  isSelected ? ' selected' : ''
+                }`}
+                role="option"
+                aria-selected={isSelected}
+                onClick={() => setSelectedId(p.id)}
+              >
+                <span className="profile-grid-cell profile-grid-check">
+                  {isActive && <MdiIcon path={mdiCheck} size={16} />}
+                </span>
+                <span className="profile-grid-cell" title={p.name || p.id}>
+                  {p.name || p.id}
+                </span>
+                <span className="profile-grid-cell" title={p.model}>
+                  {p.model || '—'}
+                </span>
+              </div>
+            )
+          })}
+        </div>
         <div className="profile-actions">
           <button className="btn" onClick={addProfile}>
-            <MdiIcon path={mdiPlus} size={16} /> New profile
+            <MdiIcon path={mdiPlus} size={16} /> New
           </button>
-          <button className="btn" onClick={editProfile} disabled={!profile}>
-            Edit profile
+          <button className="btn" onClick={editProfile} disabled={!selected}>
+            Edit
           </button>
           <button
             className="btn"
             onClick={() => void deleteProfile()}
-            disabled={!profile || config.profiles.length <= 1}
+            disabled={!selected || config.profiles.length <= 1}
           >
-            Delete profile
+            Delete
+          </button>
+          <button
+            className="btn primary"
+            onClick={setActive}
+            disabled={!selectedId || selectedId === config.activeProfileId}
+          >
+            Set active
           </button>
         </div>
       </div>
@@ -627,13 +660,13 @@ function AppearanceSettings(): React.JSX.Element {
           </p>
         </div>
       </div>
-      <div className="kanban-seg block" role="radiogroup" aria-label="Theme">
+      <div className="seg block" role="radiogroup" aria-label="Theme">
         {themeOptions.map((opt) => (
           <button
             key={opt.value}
             role="radio"
             aria-checked={theme === opt.value}
-            className={`kanban-seg-btn${theme === opt.value ? ' active' : ''}`}
+            className={`seg-btn${theme === opt.value ? ' active' : ''}`}
             onClick={() => setTheme(opt.value)}
             title={opt.desc}
           >
@@ -652,13 +685,13 @@ function AppearanceSettings(): React.JSX.Element {
           </p>
         </div>
       </div>
-      <div className="kanban-seg block" role="radiogroup" aria-label="Font size">
+      <div className="seg block" role="radiogroup" aria-label="Font size">
         {fontSizeOptions.map((opt) => (
           <button
             key={opt.value}
             role="radio"
             aria-checked={fontSize === opt.value}
-            className={`kanban-seg-btn${fontSize === opt.value ? ' active' : ''}`}
+            className={`seg-btn${fontSize === opt.value ? ' active' : ''}`}
             onClick={() => setFontSize(opt.value)}
             title={opt.desc}
           >
@@ -687,13 +720,13 @@ function AppearanceSettings(): React.JSX.Element {
           </p>
         </div>
       </div>
-      <div className="kanban-seg block" role="radiogroup" aria-label="UI density">
+      <div className="seg block" role="radiogroup" aria-label="UI density">
         {densityOptions.map((opt) => (
           <button
             key={opt.value}
             role="radio"
             aria-checked={uiDensity === opt.value}
-            className={`kanban-seg-btn${uiDensity === opt.value ? ' active' : ''}`}
+            className={`seg-btn${uiDensity === opt.value ? ' active' : ''}`}
             onClick={() => setUiDensity(opt.value)}
             title={opt.desc}
           >
@@ -712,13 +745,13 @@ function AppearanceSettings(): React.JSX.Element {
           </p>
         </div>
       </div>
-      <div className="kanban-seg block" role="radiogroup" aria-label="Editor font">
+      <div className="seg block" role="radiogroup" aria-label="Editor font">
         {editorFontOptions.map((opt) => (
           <button
             key={opt.value}
             role="radio"
             aria-checked={editorFontFamily === opt.value}
-            className={`kanban-seg-btn${editorFontFamily === opt.value ? ' active' : ''}`}
+            className={`seg-btn${editorFontFamily === opt.value ? ' active' : ''}`}
             onClick={() => setEditorFontFamily(opt.value)}
             title={opt.desc}
             style={{

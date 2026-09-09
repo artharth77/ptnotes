@@ -8,14 +8,15 @@ const ROOT = '/tmp/ptnotes-pdf-test-root'
 
 let FAKE_TEXT = 'Hello PDF content'
 let FAKE_PAGES = 3
+let FAKE_PAGE: number | undefined
 
-class FakePDFParse {
-  async getText(): Promise<{ text: string; total: number; pages: unknown[] }> {
-    return { text: FAKE_TEXT, total: FAKE_PAGES, pages: [] }
-  }
-  async destroy(): Promise<void> {
-    return
-  }
+async function fakeExtractPdfText(
+  _data: Uint8Array,
+  page?: number
+): Promise<{ text: string; total: number }> {
+  FAKE_PAGE = page
+  const label = page !== undefined ? ` (page ${page})` : ''
+  return { text: FAKE_TEXT + label, total: FAKE_PAGES }
 }
 
 class FakeOpenAI {
@@ -57,8 +58,8 @@ const origLoad = (Module as { _load: (r: string, p: unknown, m: boolean) => unkn
       shell: { showItemInFolder: () => {} }
     }
   }
-  if (request === 'pdf-parse') {
-    return { PDFParse: FakePDFParse }
+  if (request === './pdfText' || request.endsWith('/pdfText')) {
+    return { extractPdfText: fakeExtractPdfText }
   }
   if (request === 'openai') {
     return FakeOpenAI
@@ -93,6 +94,25 @@ res = await extractPdf(pdfPath)
 assert.equal(res.truncated, true)
 assert.equal(res.text.length, MAX_PDF_CHARS)
 assert.equal(res.charCount, MAX_PDF_CHARS + 500)
+
+// ---- extractPdf: page parameter ----
+FAKE_TEXT = 'Hello PDF content'
+FAKE_PAGES = 3
+FAKE_PAGE = undefined
+res = await extractPdf(pdfPath, 2)
+assert.equal(res.text, 'Hello PDF content (page 2)')
+assert.equal(res.page, 2)
+assert.equal(res.totalPages, 3)
+assert.equal(res.truncated, false)
+assert.equal(FAKE_PAGE, 2)
+FAKE_PAGE = undefined
+res = await extractPdf(pdfPath)
+assert.equal(res.text, 'Hello PDF content')
+assert.equal(res.page, undefined)
+assert.equal(res.totalPages, 3)
+assert.equal(FAKE_PAGE, undefined, 'no page passed when page is omitted')
+await assert.rejects(() => extractPdf(pdfPath, 99), /out of range: this PDF has 3 pages/)
+await assert.rejects(() => extractPdf(pdfPath, 0), /out of range/)
 
 const mdPath = `${ROOT}/notes.md`
 await fs.writeFile(mdPath, '# Notes\n\nSome markdown content')
@@ -155,6 +175,75 @@ assert.ok(resXlsxCsv.text.includes('## Sheet: Sheet1'), 'CSV contains sheet head
 assert.ok(resXlsxCsv.text.includes('Name,Value'), 'CSV contains headers')
 assert.ok(resXlsxCsv.text.includes('Test,123'), 'CSV contains data')
 
+// ---- docx: detection + extraction ----
+const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, HeadingLevel } =
+  await import('docx')
+const docxDoc = new Document({
+  sections: [
+    {
+      children: [
+        new Paragraph({
+          heading: HeadingLevel.HEADING_1,
+          children: [new TextRun('Quarterly Report')]
+        }),
+        new Paragraph({
+          children: [
+            new TextRun('Revenue grew to '),
+            new TextRun('42 million'),
+            new TextRun(' this quarter.')
+          ]
+        }),
+        new Table({
+          rows: [
+            new TableRow({
+              children: [
+                new TableCell({ children: [new Paragraph('Region')] }),
+                new TableCell({ children: [new Paragraph('Sales')] })
+              ]
+            }),
+            new TableRow({
+              children: [
+                new TableCell({ children: [new Paragraph('EMEA')] }),
+                new TableCell({ children: [new Paragraph('18')] })
+              ]
+            })
+          ]
+        })
+      ]
+    }
+  ]
+})
+const docxPath = `${ROOT}/sample.docx`
+await fs.writeFile(docxPath, Buffer.from(await Packer.toBuffer(docxDoc)))
+assert.equal(await detectFileKind(docxPath), 'docx', 'docx zip magic + ext detected')
+
+const fakeDocx = `${ROOT}/fake.docx`
+await fs.writeFile(fakeDocx, 'not a zip')
+assert.notEqual(await detectFileKind(fakeDocx), 'docx', 'not a zip is not docx')
+
+const resDocx = await readFileAsText(docxPath)
+assert.ok(resDocx.text.includes('# Quarterly Report'), 'docx heading extracted as markdown')
+assert.ok(
+  resDocx.text.includes('Revenue grew to 42 million this quarter.'),
+  'docx paragraph text extracted'
+)
+assert.ok(resDocx.text.includes('| Region | Sales |'), 'docx table header row extracted')
+assert.ok(resDocx.text.includes('| --- | --- |'), 'docx table separator row extracted')
+assert.ok(resDocx.text.includes('| EMEA | 18 |'), 'docx table data row extracted')
+assert.equal(resDocx.pageCount, 0)
+assert.equal(resDocx.truncated, false)
+assert.equal(resDocx.totalPages, 1)
+
+const resDocxPage = await readFileAsText(docxPath, 'json', undefined, 1)
+assert.equal(resDocxPage.page, 1)
+assert.equal(resDocxPage.totalPages, 1)
+assert.ok(resDocxPage.text.includes('# Quarterly Report'), 'docx page 1 window')
+await assert.rejects(
+  () => readFileAsText(docxPath, 'json', undefined, 2),
+  /out of range: this file has 1 page/,
+  'docx page beyond the single page rejected'
+)
+
 // ---- readFileAsText: workbook query (worksheet filter) ----
 const { parseWorkbookQuery } = await import('../src/main/ai/reader')
 
@@ -214,6 +303,17 @@ await assert.rejects(
   'query rejected for non-Excel files'
 )
 
+await assert.rejects(
+  () => readFileAsText(xlsxPath, 'json', undefined, 1),
+  /page parameter is not supported for Excel/,
+  'page rejected for Excel workbooks'
+)
+await assert.rejects(
+  () => readFileAsText(xlsxPath, 'json', parseWorkbookQuery('workspace=1'), 1),
+  /page parameter is not supported for Excel/,
+  'page rejected for Excel even with a valid query'
+)
+
 const longTxt = 'x'.repeat(MAX_PDF_CHARS + 100)
 const txtPath = `${ROOT}/long.txt`
 await fs.writeFile(txtPath, longTxt)
@@ -221,6 +321,25 @@ res2 = await readFileAsText(txtPath)
 assert.equal(res2.truncated, true)
 assert.equal(res2.text.length, MAX_PDF_CHARS)
 assert.equal(res2.charCount, MAX_PDF_CHARS + 100)
+assert.equal(res2.totalPages, 2)
+
+// ---- readFileAsText: page parameter (240k char windows) ----
+const longPage1 = await readFileAsText(txtPath, 'json', undefined, 1)
+assert.equal(longPage1.page, 1)
+assert.equal(longPage1.totalPages, 2)
+assert.equal(longPage1.truncated, false)
+assert.equal(longPage1.text, 'x'.repeat(MAX_PDF_CHARS), 'page 1 = first window')
+const longPage2 = await readFileAsText(txtPath, 'json', undefined, 2)
+assert.equal(longPage2.page, 2)
+assert.equal(longPage2.totalPages, 2)
+assert.equal(longPage2.truncated, false)
+assert.equal(longPage2.text, 'x'.repeat(100), 'page 2 = remainder')
+assert.equal(longPage2.charCount, MAX_PDF_CHARS + 100, 'charCount stays full-file length')
+await assert.rejects(
+  () => readFileAsText(txtPath, 'json', undefined, 3),
+  /out of range: this file has 2 pages/,
+  'text page beyond totalPages rejected'
+)
 
 // ---- copyFileToProject: .md / .txt ----
 const mdSrc = `${ROOT}/My Notes.md`
@@ -238,6 +357,13 @@ assert.equal(txtSaved, `${ROOT}/Test/files/readme.txt`)
 const xlsxSrc = `${ROOT}/sample.xlsx`
 const xlsxSaved = await service.copyFileToProject('Test', xlsxSrc, 'sample.xlsx')
 assert.equal(xlsxSaved, `${ROOT}/Test/files/sample.xlsx`)
+
+const docxSrc = `${ROOT}/My Report.docx`
+await fs.copyFile(docxPath, docxSrc)
+const docxSaved = await service.copyFileToProject('Test', docxSrc, 'My Report.docx')
+assert.equal(docxSaved, `${ROOT}/Test/files/my-report.docx`, 'docx extension preserved')
+const docxSaved2 = await service.copyFileToProject('Test', docxSrc, 'My Report.docx')
+assert.equal(docxSaved2, docxSaved, 'identical docx reuses existing copy')
 await assert.rejects(() => service.copyFileToProject('Test', binPath, 'image.png'), /binary file/)
 assert.ok((await service.listFiles('Test')).includes('my-notes.md'), 'listFiles surfaces .md')
 assert.ok((await service.listFiles('Test')).includes('readme.txt'), 'listFiles surfaces .txt')
@@ -303,6 +429,41 @@ assert.equal(
 )
 assert.equal(await service.projectFilePath('Test', '../board.json'), null, 'rejects path traversal')
 
+// ---- subfolder support: listFileEntries / projectFilePath / listFilesDeep ----
+await fs.mkdir(`${ROOT}/Test/files/docs/sub`, { recursive: true })
+await fs.writeFile(`${ROOT}/Test/files/docs/inner.md`, '# Inner note\ninside a folder')
+await fs.writeFile(`${ROOT}/Test/files/docs/sub/deep.txt`, 'deep text')
+const entriesTop = await service.listFileEntries('Test')
+assert.ok(
+  entriesTop.some((e) => e.isDir && e.name === 'docs'),
+  'top-level entries include the docs folder'
+)
+assert.ok(entriesTop.some((e) => !e.isDir && e.name === 'my-report.pdf'))
+const entriesDocs = await service.listFileEntries('Test', 'docs')
+assert.ok(
+  entriesDocs.some((e) => !e.isDir && e.name === 'inner.md'),
+  'docs entries include inner.md'
+)
+assert.ok(
+  entriesDocs.some((e) => e.isDir && e.name === 'sub'),
+  'docs entries include sub folder'
+)
+assert.deepEqual(await service.listFileEntries('Test', 'nope'), [], 'missing subfolder lists empty')
+assert.equal(
+  await service.projectFilePath('Test', 'docs/inner.md'),
+  `${ROOT}/Test/files/docs/inner.md`,
+  'resolves subfolder paths'
+)
+assert.equal(
+  await service.projectFilePath('Test', 'docs/../my-report.pdf'),
+  null,
+  'rejects traversal inside subpaths'
+)
+assert.equal(await service.projectFilePath('Test', '/etc/passwd'), null, 'rejects absolute paths')
+const deepFiles = await service.listFilesDeep('Test')
+assert.ok(deepFiles.includes('docs/inner.md'), 'listFilesDeep includes nested files')
+assert.ok(deepFiles.includes('docs/sub/deep.txt'), 'listFilesDeep includes deep nested files')
+
 FAKE_TEXT = 'Hello PDF content'
 FAKE_PAGES = 2
 const readFileTool = tools.find((t) => t.definition.function.name === 'read_file')!
@@ -314,6 +475,41 @@ assert.match(rr.text, /Hello PDF content/)
 const rrMissing = JSON.parse(await readFileTool.execute({ name: 'nope.pdf' }, ctx))
 assert.equal(rrMissing.ok, false)
 assert.match(rrMissing.error, /not found/)
+
+// ---- read_file tool: files inside subfolders ----
+const rrSub = JSON.parse(await readFileTool.execute({ name: 'docs/inner.md' }, ctx))
+assert.equal(rrSub.ok, true, 'read_file reads files inside subfolders')
+assert.match(rrSub.text, /inside a folder/)
+const rrSubMissing = JSON.parse(await readFileTool.execute({ name: 'docs/nope.md' }, ctx))
+assert.equal(rrSubMissing.ok, false)
+assert.match(rrSubMissing.error, /docs\/nope\.md/)
+assert.match(rrSubMissing.error, /docs\/inner\.md/, 'available files list includes nested paths')
+
+// ---- read_file tool: page parameter ----
+const rrPage = JSON.parse(await readFileTool.execute({ name: 'my-report.pdf', page: 2 }, ctx))
+assert.equal(rrPage.ok, true)
+assert.equal(rrPage.page, 2)
+assert.equal(rrPage.totalPages, 2)
+assert.match(rrPage.text, /Hello PDF content \(page 2\)/)
+const rrPageBad = JSON.parse(await readFileTool.execute({ name: 'my-report.pdf', page: 0 }, ctx))
+assert.equal(rrPageBad.ok, false)
+assert.match(rrPageBad.error, /positive integer/)
+const rrPageFloat = JSON.parse(
+  await readFileTool.execute({ name: 'my-report.pdf', page: 1.5 }, ctx)
+)
+assert.equal(rrPageFloat.ok, false)
+assert.match(rrPageFloat.error, /positive integer/)
+const rrPageOOR = JSON.parse(await readFileTool.execute({ name: 'my-report.pdf', page: 99 }, ctx))
+assert.equal(rrPageOOR.ok, false)
+assert.match(rrPageOOR.error, /out of range: this PDF has 2 pages/)
+const mdPage = JSON.parse(await readFileTool.execute({ name: 'my-notes.md', page: 1 }, ctx))
+assert.equal(mdPage.ok, true)
+assert.equal(mdPage.page, 1)
+assert.equal(mdPage.totalPages, 1)
+assert.match(mdPage.text, /# Hello/)
+const xlsxPage = JSON.parse(await readFileTool.execute({ name: 'sample.xlsx', page: 1 }, ctx))
+assert.equal(xlsxPage.ok, false)
+assert.match(xlsxPage.error, /page parameter is not supported for Excel/)
 
 const mdRead = JSON.parse(await readFileTool.execute({ name: 'my-notes.md' }, ctx))
 assert.equal(mdRead.ok, true)
@@ -332,6 +528,18 @@ const xlsxReadCsv = JSON.parse(
 )
 assert.equal(xlsxReadCsv.ok, true)
 assert.ok(xlsxReadCsv.text.includes('Name,Value'), 'Tool reads Excel CSV')
+
+const docxRead = JSON.parse(await readFileTool.execute({ name: 'my-report.docx' }, ctx))
+assert.equal(docxRead.ok, true)
+assert.equal(docxRead.pageCount, 0)
+assert.match(docxRead.text, /# Quarterly Report/, 'Tool reads docx heading')
+assert.match(docxRead.text, /Revenue grew to 42 million this quarter\./, 'Tool reads docx text')
+assert.match(docxRead.text, /\| EMEA \| 18 \|/, 'Tool reads docx table row')
+const qToolDocx = JSON.parse(
+  await readFileTool.execute({ name: 'my-report.docx', query: 'workspace=1' }, ctx)
+)
+assert.equal(qToolDocx.ok, false)
+assert.match(qToolDocx.error, /only supported for Excel/, 'query rejected for docx files')
 
 const multiSaved = await service.copyFileToProject('Test', multiXlsx, 'multi.xlsx')
 assert.equal(multiSaved, `${ROOT}/Test/files/multi.xlsx`)
