@@ -267,7 +267,6 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
   useEffect(() => {
     onUpdateCount.current = 0
     txCount.current = 0
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [noteId])
 
   const editor = useEditor({
@@ -314,25 +313,18 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
             }
           }
         },
-        parseMarkdown() {
-          const self = this as unknown as {
-            parent?: () => {
-              block?: string
-              getAttrs?: (tok: { lang?: string | null }) => Record<string, unknown>
-            }
+        parseMarkdown: (token, helpers) => {
+          const isFenced =
+            typeof token.raw === 'string' &&
+            (token.raw.startsWith('```') || token.raw.startsWith('~~~'))
+          if (!isFenced && token.codeBlockStyle !== 'indented') {
+            return []
           }
-          const parent = (self.parent?.() ?? {}) as {
-            block?: string
-            getAttrs?: (tok: { lang?: string | null }) => Record<string, unknown>
-          }
-          return {
-            ...parent,
-            block: parent.block || 'code',
-            getAttrs: (tok: { lang?: string | null }) => ({
-              ...(parent.getAttrs ? parent.getAttrs(tok) : {}),
-              language: safeLanguage(tok.lang ?? null)
-            })
-          }
+          return helpers.createNode(
+            'codeBlock',
+            { language: safeLanguage(token.lang ?? null) },
+            token.text ? [helpers.createTextNode(token.text)] : []
+          )
         }
       }),
       Markdown.configure({
@@ -380,7 +372,6 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
         /* ignore */
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, content])
 
   const state = useEditorState({
@@ -398,6 +389,7 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
         isTask: ed.isActive('taskList'),
         isQuote: ed.isActive('blockquote'),
         isCodeBlock: ed.isActive('codeBlock'),
+        codeBlockLang: (ed.getAttributes('codeBlock').language as string | undefined) || 'text',
         isH1: ed.isActive('heading', { level: 1 }),
         isH2: ed.isActive('heading', { level: 2 }),
         isH3: ed.isActive('heading', { level: 3 }),
@@ -912,7 +904,7 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
             <span className="code-block-lang-label">Language</span>
             <select
               aria-label="Change code block language"
-              value={(editor.getAttributes('codeBlock').language as string) || 'text'}
+              value={state?.codeBlockLang ?? 'text'}
               onMouseDown={(e) => e.stopPropagation()}
               onPointerDown={(e) => e.stopPropagation()}
               onChange={(e) => {
