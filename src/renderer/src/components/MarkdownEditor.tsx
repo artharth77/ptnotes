@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   mdiCodeBraces,
   mdiCodeTags,
@@ -16,6 +16,7 @@ import {
   mdiFormatText,
   mdiFormatUnderline,
   mdiChevronDown,
+  mdiChevronDoubleLeft,
   mdiChevronUp,
   mdiClose,
   mdiFileReplaceOutline,
@@ -55,7 +56,8 @@ import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { TableKit } from '@tiptap/extension-table'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
-import { lowlight, safeLanguage } from '../editor/lowlightRegistry'
+import { lowlight, safeLanguage, suggestLanguage } from '../editor/lowlightRegistry'
+import { toggleCodeBlockMerged } from '../editor/codeBlockToggle'
 import { SUPPORTED_LANGUAGES } from '../editor/supportedLanguages'
 import { useAppStore } from '../store/useAppStore'
 import { slugify } from '@shared/slug'
@@ -104,6 +106,38 @@ function ToolbarBtn({
 
 const bubbleMenuKey = new PluginKey('formatHelperBubble')
 const codeBlockLangMenuKey = new PluginKey('codeBlockLangBubble')
+
+function getCodeBlockAtCursor(editor: Editor): {
+  pos: number
+  text: string
+  langRaw: string | undefined
+} | null {
+  const $from = editor.state.selection.$from
+  for (let d = $from.depth; d >= 0; d--) {
+    const node = $from.node(d)
+    if (node.type.name === 'codeBlock') {
+      return {
+        pos: $from.before(d),
+        text: node.textContent,
+        langRaw: node.attrs.language as string | undefined
+      }
+    }
+  }
+  return null
+}
+
+function applyCodeBlockLang(editor: Editor, nextLang: string): void {
+  const restore = editor.state.selection
+  const block = getCodeBlockAtCursor(editor)
+  if (!block) return
+  editor
+    .chain()
+    .setNodeSelection(block.pos)
+    .updateAttributes('codeBlock', { language: nextLang })
+    .setTextSelection(restore.empty ? restore.$from.pos : { from: restore.from, to: restore.to })
+    .focus()
+    .run()
+}
 
 function internalNameFromHref(href: string, prefix: string): string {
   const raw = href.slice(prefix.length)
@@ -380,6 +414,7 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
     editor,
     selector: (ctx) => {
       const ed = ctx.editor
+      const cb = getCodeBlockAtCursor(ed)
       return {
         isBold: ed.isActive('bold'),
         isItalic: ed.isActive('italic'),
@@ -391,7 +426,8 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
         isTask: ed.isActive('taskList'),
         isQuote: ed.isActive('blockquote'),
         isCodeBlock: ed.isActive('codeBlock'),
-        codeBlockLang: (ed.getAttributes('codeBlock').language as string | undefined) || 'text',
+        codeBlockLang: cb ? (cb.langRaw ?? '') : null,
+        codeBlockText: cb ? cb.text : null,
         isH1: ed.isActive('heading', { level: 1 }),
         isH2: ed.isActive('heading', { level: 2 }),
         isH3: ed.isActive('heading', { level: 3 }),
@@ -411,6 +447,13 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
       return { count: st.results.length, index: st.index }
     }
   })
+
+  const cbLang = state?.codeBlockLang
+  const cbText = state?.codeBlockText
+  const suggestedLang = useMemo(
+    () => (cbLang === '' ? suggestLanguage(cbText ?? '') : null),
+    [cbLang, cbText]
+  )
 
   const [linkPrompt, setLinkPrompt] = useState(false)
   const [tableMenu, setTableMenu] = useState<{ x: number; y: number } | null>(null)
@@ -662,7 +705,10 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
             icon={mdiCodeBraces}
             title="Code block"
             active={state.isCodeBlock}
-            onClick={() => editor.chain().focus().toggleCodeBlock().run()}
+            onClick={() => {
+              editor.commands.focus()
+              toggleCodeBlockMerged(editor)
+            }}
           />
           <ToolbarBtn icon={mdiLinkVariant} title="Link" onClick={toggleLink} />
           <ToolbarBtn
@@ -907,30 +953,11 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
             <span className="code-block-lang-label">Language</span>
             <select
               aria-label="Change code block language"
-              value={state?.codeBlockLang ?? 'text'}
+              value={state?.codeBlockLang ? state.codeBlockLang : 'text'}
               onMouseDown={(e) => e.stopPropagation()}
               onPointerDown={(e) => e.stopPropagation()}
               onChange={(e) => {
-                const nextLang = e.target.value
-                const restore = editor.state.selection
-                const $from = restore.$from
-                let cbPos: number | null = null
-                for (let d = $from.depth; d >= 0; d--) {
-                  if ($from.node(d).type.name === 'codeBlock') {
-                    cbPos = $from.before(d)
-                    break
-                  }
-                }
-                if (cbPos === null) return
-                editor
-                  .chain()
-                  .setNodeSelection(cbPos)
-                  .updateAttributes('codeBlock', { language: nextLang })
-                  .setTextSelection(
-                    restore.empty ? restore.$from.pos : { from: restore.from, to: restore.to }
-                  )
-                  .focus()
-                  .run()
+                applyCodeBlockLang(editor, e.target.value)
               }}
             >
               {SUPPORTED_LANGUAGES.map((l) => (
@@ -939,6 +966,19 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
                 </option>
               ))}
             </select>
+            {suggestedLang && (
+              <button
+                type="button"
+                className="code-block-lang-suggest"
+                onMouseDown={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => applyCodeBlockLang(editor, suggestedLang)}
+              >
+                <MdiIcon path={mdiChevronDoubleLeft} size={16} />
+                suggest{' '}
+                {SUPPORTED_LANGUAGES.find((l) => l.key === suggestedLang)?.label ?? suggestedLang}
+              </button>
+            )}
           </div>
         </BubbleMenu>
       )}

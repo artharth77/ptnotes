@@ -3023,10 +3023,9 @@ fieldset.kanban-form {
   background: var(--code-bg, var(--bg-elev));
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 28px 14px 12px;
+  padding: 12px;
   overflow-x: auto;
   margin: 0 0 10px;
-  position: relative;
 }
 
 .tippy-box[data-code-block-lang] > .tippy-content,
@@ -3062,6 +3061,31 @@ fieldset.kanban-form {
 .code-block-lang-menu select:hover,
 .code-block-lang-menu select:focus {
   border-color: var(--accent);
+}
+
+.code-block-lang-suggest {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-hover);
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.code-block-lang-suggest:hover {
+  border-color: var(--accent);
+}
+.code-block-lang-suggest:hover,
+.code-block-lang-suggest:focus {
+  color: var(--text);
+}
+.code-block-lang-suggest svg {
+  display: block;
 }
 
 .ProseMirror pre code {

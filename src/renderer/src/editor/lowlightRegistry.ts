@@ -184,3 +184,118 @@ export function safeLanguage(raw: string | null | undefined): string {
   if (lowlight.registered('plaintext')) return 'plaintext'
   return 'text'
 }
+
+export function canonicalLanguage(key: string): string {
+  const aliased = aliasKeyTarget.get(key)
+  if (aliased && lowlight.registered(aliased)) return aliased
+  const resolved = resolveFirstAvailable(hlMap[key] ?? [])
+  if (resolved && lowlight.registered(resolved)) return resolved
+  return key
+}
+
+const SUGGESTION_SAMPLE_LIMIT = 5000
+
+function firstMeaningfulChar(line: string): string {
+  return line.trim()[0] ?? ''
+}
+
+const HTMLISH_TAGS =
+  /\b(?:html|head|body|div|span|p|a|img|ul|ol|li|table|tr|td|th|button|input|section|h[1-6]|title|script|style|form|label|nav|header|footer)\b/
+
+function isHtmlLike(sample: string): boolean {
+  if (/<!doctype/i.test(sample)) return true
+  const tagNames = [...sample.matchAll(/<\/?([a-z][\w-]*)/g)].map((m) => m[1])
+  if (tagNames.some((n) => HTMLISH_TAGS.test(` ${n} `))) return true
+  return /\b(?:class|href|src|id)\s*=/i.test(sample)
+}
+
+function markerLanguage(sample: string): string | null {
+  const first = firstMeaningfulChar(sample)
+  if ((first === '{' || first === '[') && lowlight.registered('json')) {
+    try {
+      JSON.parse(sample)
+      return 'json'
+    } catch {
+      /* not json */
+    }
+  }
+  if (
+    lowlight.registered('xml') &&
+    (/<\/?[a-z][\w:-]*[^>]*>/.test(sample) ||
+      /xmlns\s*=|<\?xml/i.test(sample) ||
+      /<\/?[A-Z][\w]*\s+[^<>]*=/.test(sample))
+  ) {
+    return isHtmlLike(sample) ? 'html' : 'xml'
+  }
+  if (
+    lowlight.registered('bash') &&
+    /(^|\n)\s*#!\s*\/?(?:usr\/bin\/(?:ba|z|)sh|bin\/(?:ba)sh)/.test(sample)
+  ) {
+    return 'bash'
+  }
+  if (lowlight.registered('sql')) {
+    const cmd =
+      /\b(?:select\b[\s\S]{0,80}?\bfrom\b|insert\s+into|update\s+\w+\s+set|delete\s+from|create\s+(?:table|view|index)|alter\s+table|drop\s+table|concat\(|group\s+by\b)/i
+    if (cmd.test(sample)) return 'sql'
+  }
+  if (lowlight.registered('java')) {
+    if (
+      /\bSystem\.out\.(?:print|println)\b|\bthrows\s+[A-Z]\w*\b|\bpublic\s+(?:final\s+)?(?:class|interface)\b|^import\s+(?:java\.|javax\.)/m.test(
+        sample
+      )
+    )
+      return 'java'
+  }
+  if (lowlight.registered('python')) {
+    if (
+      /(^|\n)(?:def\s+\w+|import\s+\w+|from\s+\w+(?:\.\w+)*\s+import\s|class\s+\w+.*:\s*$)/m.test(
+        sample
+      )
+    )
+      return 'python'
+  }
+  if (lowlight.registered('javascript')) {
+    if (
+      /\b(?:const|let|var)\s+\w+\s*=|\bfunction\s+\w*?\s*\(|=>|console\.log\(|(^|\n)(?:import\s|export\s)/m.test(
+        sample
+      )
+    )
+      return 'javascript'
+  }
+  return null
+}
+
+export function suggestLanguage(text: string | null | undefined): string | null {
+  const sample = text?.trim()
+  if (!sample) return null
+  const subset = [
+    ...new Set(
+      [...SUPPORTED_LANGUAGE_KEYS]
+        .filter((k) => k !== 'text' && k !== 'plaintext' && lowlight.registered(k))
+        .map(canonicalLanguage)
+    )
+  ].filter((k) => k !== 'text' && k !== 'plaintext' && lowlight.registered(k))
+  if (subset.length === 0) return null
+  try {
+    const clip = sample.slice(0, SUGGESTION_SAMPLE_LIMIT)
+    const marker = markerLanguage(clip)
+    const top = lowlight.highlightAuto(clip, { subset })
+    if (!marker && (top.data.relevance ?? 0) < 3) return null
+    const markerCanonical = marker ? canonicalLanguage(marker) : null
+    const useMarker =
+      marker != null &&
+      (subset.includes(marker) || (markerCanonical != null && subset.includes(markerCanonical)))
+    const chosen = useMarker && marker ? marker : top.data.language
+    if (!chosen) return null
+    const lang = safeLanguage(chosen)
+    if (lang === 'text' || lang === 'plaintext') return null
+    if (useMarker) return lang
+    const rest = subset.filter((k) => k !== lang)
+    if (rest.length === 0) return lang
+    const second = lowlight.highlightAuto(clip, { subset: rest })
+    if ((second.data.relevance ?? 0) * 1.25 > (top.data.relevance ?? 0)) return null
+    return lang
+  } catch {
+    return null
+  }
+}

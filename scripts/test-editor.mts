@@ -10,6 +10,7 @@ import { lowlight } from 'lowlight'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import StarterKit from '@tiptap/starter-kit'
 import Typography from '@tiptap/extension-typography'
+import { suggestLanguage } from '../src/renderer/src/editor/lowlightRegistry'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 
@@ -297,3 +298,151 @@ function cursorAtBlockEnd(ed: Editor): void {
 }
 
 console.log('EDITOR CODE-BLOCK LANGUAGE TESTS PASSED — mid-text, end-of-text, empty, nested')
+
+// language suggestion helper: confident code suggests, prose/plain text stays null
+{
+  const jsCode = 'const a = 1\nfunction foo() { return a }\nconst b = a * 2\nconsole.log(b)\n'
+  const longJs = jsCode.repeat(3)
+  assert.equal(suggestLanguage(''), null, 'empty text suggests nothing')
+  assert.equal(suggestLanguage(null), null, 'null text suggests nothing')
+  assert.equal(suggestLanguage('   \n\n'), null, 'whitespace-only suggests nothing')
+  assert.match(
+    String(suggestLanguage(longJs)),
+    /^javascript|typescript$/,
+    'JS suggests a JS-family language'
+  )
+  assert.equal(
+    suggestLanguage('<div id="x">hi</div>\n<p>w</p>'),
+    'html',
+    'HTML markup suggests html'
+  )
+  assert.equal(suggestLanguage('<a href="x">go</a>'), 'html', 'html with attribute suggests html')
+  assert.equal(suggestLanguage('<A HREF="#">link</A>'), 'html', 'uppercase-tag html suggests html')
+  assert.equal(suggestLanguage('<!DOCTYPE html>\n<html>\n</html>'), 'html', 'doctype suggests html')
+  assert.equal(
+    suggestLanguage('<config><item>1</item></config>'),
+    'xml',
+    'generic XML without HTML signals stays xml'
+  )
+  assert.equal(
+    suggestLanguage('<Config xmlns="t">\n  <Item>1</Item>\n</Config>'),
+    'xml',
+    'namespaced PascalCase XML stays xml'
+  )
+  assert.equal(
+    suggestLanguage('We should compare the value a with key b.\n'),
+    null,
+    'prose containing standalone a/p does not become xml'
+  )
+  assert.equal(
+    suggestLanguage('import os\ndef main():\n    pass\n'),
+    'python',
+    'python suggests python'
+  )
+  let found = false
+  for (const text of [
+    'SELECT id, name FROM users WHERE id = 1;\n',
+    'insert into t (a) values (1);'
+  ]) {
+    if (suggestLanguage(text) === 'sql') found = true
+  }
+  assert.ok(found, 'SQL suggests sql')
+  assert.equal(
+    suggestLanguage('name: build\nsteps:\n  - run: npm ci\n'),
+    'yaml',
+    'yaml suggests yaml'
+  )
+  assert.equal(suggestLanguage('{\n "name": "x",\n "n": 1\n}\n'), 'json', 'json suggests json')
+  assert.equal(suggestLanguage('#!/bin/bash\necho hi\ncd /tmp\n'), 'bash', 'shebang suggests bash')
+  assert.equal(
+    suggestLanguage('boolean test() throws Exception {\n  int a = 5;\n  return false;\n}'),
+    'java',
+    'throws suggests java'
+  )
+  assert.equal(
+    suggestLanguage('public class Hello {\n  public static void main(String[] args) {}\n}'),
+    'java',
+    'public class suggests java'
+  )
+  assert.equal(
+    suggestLanguage('import java.util.List;\nList<String> xs = List.of("a");\n'),
+    'java',
+    'java import+generics suggests java'
+  )
+  assert.equal(
+    suggestLanguage('The quick brown fox jumps over the lazy dog and some more text follows here.'),
+    null,
+    'prose suggests nothing'
+  )
+  assert.equal(
+    suggestLanguage(
+      'This is a plain English sentence about the deployment plan for next quarter and what we should do.'
+    ),
+    null,
+    'plain prose suggests nothing'
+  )
+  console.log('LANGUAGE SUGGESTION TESTS PASSED — code languages detected, prose rejected')
+}
+{
+  const { toggleCodeBlockMerged } = await import('../src/renderer/src/editor/codeBlockToggle')
+  const ed = makeEditor('Aaa\n\nBbb\n\nCcc\n')
+  const end = ed.state.doc.content.size - 1
+  ed.commands.setTextSelection({ from: 1, to: end })
+  toggleCodeBlockMerged(ed)
+  const content = ed.getJSON().content ?? []
+  const codeBlocks = content.filter((n) => n.type === 'codeBlock')
+  const nonCode = content.filter(
+    (n) => n.type !== 'codeBlock' && n.type !== 'paragraph' && (n.content?.length ?? 0) > 0
+  )
+  assert.equal(codeBlocks.length, 1, 'selection merges into a single codeBlock')
+  assert.deepEqual(nonCode.length, 0, 'no leftover non-empty non-code blocks')
+  assert.equal(
+    codeBlocks[0].content?.[0]?.text,
+    'Aaa\nBbb\nCcc',
+    'code block keeps the three lines newline-joined'
+  )
+  assert.ok(ed.getMarkdown().includes('```'), 'merged block serializes as a fence')
+  assert.ok(!ed.getMarkdown().includes('```\n\n```'), 'no triple-fence artifact')
+  ed.destroy()
+}
+
+// toggling OFF a selected codeBlock restores paragraphs (one per line)
+{
+  const { toggleCodeBlockMerged } = await import('../src/renderer/src/editor/codeBlockToggle')
+  const ed = makeEditor('```js\nlet a = 1\nlet b = 2\n```\n')
+  const end = ed.state.doc.content.size - 1
+  ed.commands.setTextSelection({ from: 1, to: end })
+  toggleCodeBlockMerged(ed)
+  const content = ed.getJSON().content ?? []
+  const remain = content.filter(
+    (n) => n.type !== 'paragraph' || ((n.content?.length ?? 0) > 0 && n.content?.[0]?.text)
+  )
+  assert.ok(remain.length > 0, 'code block splits into paragraphs')
+  assert.ok(
+    content.filter((n) => n.type === 'codeBlock').length === 0,
+    'no codeBlock remains after off-toggle'
+  )
+  assert.deepEqual(
+    content.filter((n) => n.content?.[0]?.text).map((n) => n.content?.[0]?.text),
+    ['let a = 1', 'let b = 2'],
+    'paragraphs carry each code line'
+  )
+  ed.destroy()
+}
+
+// single-block selection keeps the upstream toggle (code → paragraph, paragraph → code)
+{
+  const { toggleCodeBlockMerged } = await import('../src/renderer/src/editor/codeBlockToggle')
+  const ed = makeEditor('```js\nlet a = 1\n```\n')
+  ed.commands.setTextSelection(4)
+  toggleCodeBlockMerged(ed)
+  assert.ok(
+    (ed.getJSON().content ?? []).every((n) => n.type === 'paragraph'),
+    'empty selection toggles single code block off'
+  )
+  ed.destroy()
+}
+
+console.log(
+  'CODE-BLOCK MERGE/OFF TESTS PASSED — range selection merges one block, off splits lines'
+)
