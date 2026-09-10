@@ -6,6 +6,8 @@
 
 - **Electron 39 → 44** — upgrades the runtime to Chromium 152, Node.js 24 (ABI 149), and V8 15.2. Requires **macOS 13 (Ventura) or later** (Electron 44 dropped macOS 12 support); Windows and Linux users unaffected (Electron now ships 64-bit only). No app-facing API changes were needed: the modern `protocol.handle` API, `utilityProcess` workers, `webUtils.getPathForFile`, and `node:sqlite` usage all survived the four-major jump unchanged. `@types/node` aligned to 24.
 
+## [0.17.0] — 2026-09-10
+
 ### Added
 
 - **Editor: code-block language auto-suggest** — when the cursor is in a code block with no language, the language bubble shows a **suggest \<language\>** button beside the Language dropdown. Detection is local and offline: JSON is validated by actually parsing it, XML vs HTML is told apart by tag/attribute shape, `#!` shebangs map to bash, and SQL / Java / Python / JavaScript are recognized by characteristic syntax — layered over lowlight's `highlightAuto` run against the supported-language set. A suggestion is only offered when it is confident (relevance ≥ 3 and the top candidate leads the runner-up by more than 25%), so ambiguous or plain-text blocks show no button. Clicking it applies the suggested language to the block, keeping the caret/selection where it was.
