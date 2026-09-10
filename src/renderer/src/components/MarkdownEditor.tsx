@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   mdiCodeBraces,
   mdiCodeTags,
@@ -16,6 +16,7 @@ import {
   mdiFormatText,
   mdiFormatUnderline,
   mdiChevronDown,
+  mdiChevronDoubleLeft,
   mdiChevronUp,
   mdiClose,
   mdiFileReplaceOutline,
@@ -45,6 +46,7 @@ import Placeholder from '@tiptap/extension-placeholder'
 import Typography from '@tiptap/extension-typography'
 import Link from '@tiptap/extension-link'
 import { mergeAttributes } from '@tiptap/core'
+import type { VirtualElement } from '@floating-ui/dom'
 
 const CustomLink = Link.extend({
   renderHTML({ HTMLAttributes }) {
@@ -54,6 +56,10 @@ const CustomLink = Link.extend({
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { TableKit } from '@tiptap/extension-table'
+import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
+import { lowlight, safeLanguage, suggestLanguage } from '../editor/lowlightRegistry'
+import { toggleCodeBlockMerged } from '../editor/codeBlockToggle'
+import { SUPPORTED_LANGUAGES } from '../editor/supportedLanguages'
 import { useAppStore } from '../store/useAppStore'
 import { slugify } from '@shared/slug'
 import { PromptModal } from './Modal'
@@ -100,6 +106,63 @@ function ToolbarBtn({
 }
 
 const bubbleMenuKey = new PluginKey('formatHelperBubble')
+const codeBlockLangMenuKey = new PluginKey('codeBlockLangBubble')
+
+function getCodeBlockAtCursor(editor: Editor): {
+  pos: number
+  text: string
+  langRaw: string | undefined
+} | null {
+  const $from = editor.state.selection.$from
+  for (let d = $from.depth; d >= 0; d--) {
+    const node = $from.node(d)
+    if (node.type.name === 'codeBlock') {
+      return {
+        pos: $from.before(d),
+        text: node.textContent,
+        langRaw: node.attrs.language as string | undefined
+      }
+    }
+  }
+  return null
+}
+
+function applyCodeBlockLang(editor: Editor, nextLang: string): void {
+  const restore = editor.state.selection
+  const block = getCodeBlockAtCursor(editor)
+  if (!block) return
+  editor
+    .chain()
+    .setNodeSelection(block.pos)
+    .updateAttributes('codeBlock', { language: nextLang })
+    .setTextSelection(restore.empty ? restore.$from.pos : { from: restore.from, to: restore.to })
+    .focus()
+    .run()
+}
+
+function getLangMenuAnchor(editor: Editor): VirtualElement | null {
+  if (!editor.isActive('codeBlock')) return null
+  const block = getCodeBlockAtCursor(editor)
+  if (!block) return null
+  const resolved = editor.view.domAtPos(block.pos + 1)
+  const raw = resolved.node
+  let el: Element | null = raw instanceof Element ? raw : raw.parentElement
+  el = el?.closest('pre.code-block-wrapper') ?? el?.closest('pre') ?? el
+  if (!el) return null
+  const rect = el.getBoundingClientRect()
+  if (!rect.width && !rect.height) return null
+  const container = el.closest<HTMLElement>('.editor-content')
+  const cRect = container?.getBoundingClientRect()
+  const top = Math.max(rect.top + 12, cRect ? cRect.top + 18 : rect.top + 12)
+  const bottom = cRect ? Math.min(rect.bottom, cRect.bottom) : rect.bottom
+  const left = Math.max(rect.left - 14, cRect ? cRect.left : rect.left - 14)
+  const right = cRect ? Math.min(rect.right, cRect.right) : rect.right
+  const elementRect = new DOMRect(left, top, Math.max(right - left, 1), Math.max(bottom - top, 1))
+  return {
+    getBoundingClientRect: () => elementRect,
+    getClientRects: () => [elementRect]
+  }
+}
 
 function internalNameFromHref(href: string, prefix: string): string {
   const raw = href.slice(prefix.length)
@@ -254,13 +317,78 @@ function FormatButtons({
 
 export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.JSX.Element {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [contentEl, setContentEl] = useState<HTMLElement | null>(null)
   const appliedContent = useRef(content)
+  const onUpdateCount = useRef(0)
+  const txCount = useRef(0)
   const formatHelperEnabled = useAppStore((s) => s.formatHelperEnabled)
   const setFormatHelperEnabled = useAppStore((s) => s.setFormatHelperEnabled)
 
+  useEffect(() => {
+    onUpdateCount.current = 0
+    txCount.current = 0
+  }, [noteId])
+
   const editor = useEditor({
     extensions: [
-      StarterKit,
+      StarterKit.configure({ codeBlock: false }),
+      CodeBlockLowlight.extend({
+        addOptions() {
+          return {
+            ...this.parent?.(),
+            lowlight,
+            defaultLanguage: 'text',
+            HTMLAttributes: { class: 'code-block-wrapper' }
+          }
+        },
+        addAttributes() {
+          const parentAttrs = (this.parent?.() ?? {}) as Record<
+            string,
+            {
+              rendered?: boolean
+              default?: unknown
+              parseHTML?: (e: Element) => unknown
+              renderHTML?: (a: never) => unknown
+            }
+          >
+          const base = parentAttrs.language ?? {}
+          return {
+            ...parentAttrs,
+            language: {
+              ...base,
+              rendered: false,
+              default: '',
+              parseHTML: (element): string => {
+                const c = element.querySelector('code')
+                const lang =
+                  element.getAttribute('data-language') ||
+                  c?.className.match(/language-([\w-]+)/)?.[1] ||
+                  ''
+                if (!lang) return ''
+                return safeLanguage(lang)
+              },
+              renderHTML: (attrs) => {
+                const raw = (attrs as { language?: string }).language
+                if (!raw) return {}
+                return { 'data-language': safeLanguage(raw) }
+              }
+            }
+          }
+        },
+        parseMarkdown: (token, helpers) => {
+          const isFenced =
+            typeof token.raw === 'string' &&
+            (token.raw.startsWith('```') || token.raw.startsWith('~~~'))
+          if (!isFenced && token.codeBlockStyle !== 'indented') {
+            return []
+          }
+          return helpers.createNode(
+            'codeBlock',
+            { language: token.lang ? safeLanguage(token.lang) : '' },
+            token.text ? [helpers.createTextNode(token.text)] : []
+          )
+        }
+      }),
       Markdown.configure({
         indentation: { style: 'space', size: 2 }
       }),
@@ -278,7 +406,11 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
     ],
     content,
     contentType: 'markdown',
+    onTransaction() {
+      txCount.current += 1
+    },
     onUpdate({ editor: e }) {
+      onUpdateCount.current += 1
       if (saveTimer.current) clearTimeout(saveTimer.current)
       saveTimer.current = setTimeout(() => {
         void useAppStore.getState().saveNote(e.getMarkdown())
@@ -293,10 +425,42 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
   }, [])
 
   useEffect(() => {
+    if (!contentEl) return
+    const reposition = (): void => {
+      editor.view.dispatch(
+        editor.state.tr
+          .setMeta(codeBlockLangMenuKey, 'updatePosition')
+          .setMeta(bubbleMenuKey, 'updatePosition')
+      )
+    }
+    const onScroll = (): void => reposition()
+    contentEl.addEventListener('scroll', onScroll, true)
+    return () => contentEl.removeEventListener('scroll', onScroll, true)
+  }, [contentEl, editor])
+
+  useEffect(() => {
+    if (!contentEl) return
+    const reposition = (): void => {
+      editor.view.dispatch(
+        editor.state.tr
+          .setMeta(codeBlockLangMenuKey, 'updatePosition')
+          .setMeta(bubbleMenuKey, 'updatePosition')
+      )
+    }
+    const observer = new ResizeObserver(reposition)
+    observer.observe(contentEl)
+    return () => observer.disconnect()
+  }, [contentEl, editor])
+
+  useEffect(() => {
     if (!editor) return
     if (content !== appliedContent.current) {
       appliedContent.current = content
-      editor.commands.setContent(content, { contentType: 'markdown', emitUpdate: false })
+      try {
+        editor.commands.setContent(content, { contentType: 'markdown', emitUpdate: false })
+      } catch {
+        /* ignore */
+      }
     }
   }, [editor, content])
 
@@ -304,6 +468,7 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
     editor,
     selector: (ctx) => {
       const ed = ctx.editor
+      const cb = getCodeBlockAtCursor(ed)
       return {
         isBold: ed.isActive('bold'),
         isItalic: ed.isActive('italic'),
@@ -315,6 +480,8 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
         isTask: ed.isActive('taskList'),
         isQuote: ed.isActive('blockquote'),
         isCodeBlock: ed.isActive('codeBlock'),
+        codeBlockLang: cb ? (cb.langRaw ?? '') : null,
+        codeBlockText: cb ? cb.text : null,
         isH1: ed.isActive('heading', { level: 1 }),
         isH2: ed.isActive('heading', { level: 2 }),
         isH3: ed.isActive('heading', { level: 3 }),
@@ -334,6 +501,13 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
       return { count: st.results.length, index: st.index }
     }
   })
+
+  const cbLang = state?.codeBlockLang
+  const cbText = state?.codeBlockText
+  const suggestedLang = useMemo(
+    () => (cbLang === '' ? suggestLanguage(cbText ?? '') : null),
+    [cbLang, cbText]
+  )
 
   const [linkPrompt, setLinkPrompt] = useState(false)
   const [tableMenu, setTableMenu] = useState<{ x: number; y: number } | null>(null)
@@ -585,7 +759,10 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
             icon={mdiCodeBraces}
             title="Code block"
             active={state.isCodeBlock}
-            onClick={() => editor.chain().focus().toggleCodeBlock().run()}
+            onClick={() => {
+              editor.commands.focus()
+              toggleCodeBlockMerged(editor)
+            }}
           />
           <ToolbarBtn icon={mdiLinkVariant} title="Link" onClick={toggleLink} />
           <ToolbarBtn
@@ -759,6 +936,7 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
       ) : (
         <EditorContent
           editor={editor}
+          ref={setContentEl}
           className={`editor-content${modKeyDown ? ' mod-key-down' : ''}`}
           onContextMenu={(e) => {
             const target = e.target instanceof Element ? e.target : null
@@ -797,6 +975,7 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
           shouldShow={({ view, state }) => {
             if (state.selection.empty) return false
             if (!view.hasFocus()) return false
+            if (editor.isActive('codeBlock')) return false
             if (editor.isActive('table')) return false
             return true
           }}
@@ -811,6 +990,52 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
             >
               <MdiIcon path={mdiCloseCircle} size={16} />
             </button>
+          </div>
+        </BubbleMenu>
+      )}
+      {!rawMode && editor && (
+        <BubbleMenu
+          editor={editor}
+          pluginKey={codeBlockLangMenuKey}
+          appendTo={() => document.body}
+          updateDelay={120}
+          options={{ placement: 'top-start', offset: 0 }}
+          getReferencedVirtualElement={() => getLangMenuAnchor(editor)}
+          shouldShow={({ view }) => {
+            if (!view.hasFocus()) return false
+            return editor.isActive('codeBlock')
+          }}
+        >
+          <div className="code-block-lang-menu">
+            <span className="code-block-lang-label">Language</span>
+            <select
+              aria-label="Change code block language"
+              value={state?.codeBlockLang ? state.codeBlockLang : 'text'}
+              onMouseDown={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              onChange={(e) => {
+                applyCodeBlockLang(editor, e.target.value)
+              }}
+            >
+              {SUPPORTED_LANGUAGES.map((l) => (
+                <option key={l.key} value={l.key}>
+                  {l.label}
+                </option>
+              ))}
+            </select>
+            {suggestedLang && (
+              <button
+                type="button"
+                className="code-block-lang-suggest"
+                onMouseDown={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => applyCodeBlockLang(editor, suggestedLang)}
+              >
+                <MdiIcon path={mdiChevronDoubleLeft} size={16} />
+                suggest{' '}
+                {SUPPORTED_LANGUAGES.find((l) => l.key === suggestedLang)?.label ?? suggestedLang}
+              </button>
+            )}
           </div>
         </BubbleMenu>
       )}

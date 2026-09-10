@@ -195,6 +195,7 @@ function createWindow(windowState: WindowState): void {
     minWidth: 900,
     minHeight: 600,
     show: false,
+    backgroundColor: '#131418',
     autoHideMenuBar: true,
     title: 'PTNotes',
     ...(process.platform === 'linux' ? { icon } : {}),
@@ -216,17 +217,25 @@ function createWindow(windowState: WindowState): void {
     })
   }
 
-  mainWindow.on('close', saveWindowState)
-
-  mainWindow.on('ready-to-show', () => {
+  mainWindow.once('ready-to-show', () => {
     mainWindow?.show()
     if (windowState.isMaximized) mainWindow?.maximize()
     closeSplashWindow()
   })
-
+  mainWindow.webContents.once('did-finish-load', () => {
+    /* noop */
+  })
   mainWindow.webContents.on('did-fail-load', () => {
     closeSplashWindow()
   })
+  ;(mainWindow.webContents as unknown as { on: (ev: string, cb: () => void) => void }).on(
+    'render-process-gone',
+    () => {
+      closeSplashWindow()
+    }
+  )
+
+  mainWindow.on('close', saveWindowState)
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     openExternalSafely(details.url)

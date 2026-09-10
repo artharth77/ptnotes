@@ -4,3 +4,7 @@ out
 .DS_Store
 .eslintcache
 *.log*
+.dbg
+.trae
+debug-*.md
+*.code-workspace

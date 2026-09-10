@@ -50,7 +50,12 @@ import { TOOL_STATE_LABELS, toolDisplayState } from './moduleStatus'
 const NO_SESSIONS: ChatSessionMeta[] = []
 const NO_MODULE_RUNS: ModuleRun[] = []
 
-const IS_MAC = window.electron.process.platform === 'darwin'
+const IS_MAC =
+  (typeof window !== 'undefined' &&
+    window.electron &&
+    window.electron.process &&
+    window.electron.process.platform === 'darwin') ||
+  (typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac'))
 
 /** A row in the `#` file-mention popup: a project file or folder (`path` is relative to files/). */
 interface FileMentionItem {

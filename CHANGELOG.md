@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.17.0] — 2026-09-10
+
+### Added
+
+- **Editor: code-block language auto-suggest** — when the cursor is in a code block with no language, the language bubble shows a **suggest \<language\>** button beside the Language dropdown. Detection is local and offline: JSON is validated by actually parsing it, XML vs HTML is told apart by tag/attribute shape, `#!` shebangs map to bash, and SQL / Java / Python / JavaScript are recognized by characteristic syntax — layered over lowlight's `highlightAuto` run against the supported-language set. A suggestion is only offered when it is confident (relevance ≥ 3 and the top candidate leads the runner-up by more than 25%), so ambiguous or plain-text blocks show no button. Clicking it applies the suggested language to the block, keeping the caret/selection where it was.
+- **Editor: toolbar code-block button merges a multi-block selection** — with several blocks selected (paragraphs, headings, existing code blocks), the toolbar code-block button now merges them into **one** code block (newline-joined) instead of creating one block per paragraph; toggling off converts the block back into paragraphs (one per line). A single-block or empty selection keeps the previous toggle behavior.
+
+### Changed
+
+- **Editor: code blocks render in monospace** — code blocks (and inline code) now use a dedicated monospace font stack (`--code-font`: ui-monospace / SF Mono / Menlo / Consolas / …) instead of the editor's UI font, and the block padding is tightened (the top padding reserved for the old floating label is gone).
+- **Editor: unlabeled fences stay unlabeled** — a fence without a language no longer defaults to `text`: the block's language attribute stays empty (and `data-language` / `language-*` classes are omitted from the rendered HTML), the language bubble shows "text" as a placeholder until a language is chosen, and saving an unlabeled block writes back a plain ``` fence.
+- **Editor: language bubble anchored to the block** — the language picker bubble is anchored to the code block element itself (a virtual anchor clamped to the editor's content bounds) instead of the caret position, so it stays aligned with the block; both the language bubble and the format helper bubble are repositioned when the editor content scrolls or resizes.
+- **Dependencies: all `@tiptap/*` packages aligned to 3.31.x** — the packages were a mix of 3.29.2 and 3.31.2 (a peer-dependency mismatch); they are now all at 3.31.x with a cleanly re-resolved lockfile.
+- **Dev script is portable** — `npm run dev` no longer hardcodes `--no-sandbox`; a new `npm run dev:nosandbox` is for restricted environments (root / Docker) that need it.
+
+### Fixed
+
+- **Editor: blank screen on notes containing code blocks** — the custom code-block `parseMarkdown` override used the old TipTap v2 matcher shape (returning a config object instead of nodes), which crashed markdown parsing for any note containing a code block and blanked the editor. Replaced with a proper token-based parser that handles only fenced / indented code blocks; round-trip, language-change, suggestion and merge-toggle coverage added to `scripts/test-editor.mts` and `test-markdown.mts`.
+- **Editor: language picker stale on focus change** — the language dropdown read its value from `editor.getAttributes` at render time, so it could show the wrong language after focus moved between blocks; the value is now derived from the editor-state store, which updates on every transaction.
+- **Blank screen when the preload bridge is missing** — when `window.ptnotes` is undefined (preload not attached), the renderer now installs a no-op stub of the bridge so the app boots into an empty state instead of crashing to a blank screen.
+
 ## [0.16.0] — 2026-09-09
 
 ### Added

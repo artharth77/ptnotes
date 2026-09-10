@@ -78,7 +78,9 @@ export function KanbanBoard(): React.JSX.Element {
       ) {
         return
       }
-      if (document.querySelector('.modal-overlay, .module-history-backdrop') !== null) return
+      if (document.querySelector('.modal-overlay') !== null) return
+      const s = useAppStore.getState()
+      if (s.commandPaletteOpen || s.globalFindOpen || s.moduleHistoryRunId !== null) return
       if (
         e.key !== 'ArrowUp' &&
         e.key !== 'ArrowDown' &&

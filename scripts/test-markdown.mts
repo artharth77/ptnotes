@@ -7,6 +7,8 @@ import TaskItem from '@tiptap/extension-task-item'
 import Link from '@tiptap/extension-link'
 import Typography from '@tiptap/extension-typography'
 import { TableKit } from '@tiptap/extension-table'
+import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
+import { lowlight } from 'lowlight'
 
 const md = `# Welcome to PTNotes
 
@@ -82,3 +84,95 @@ assert.equal(
   'underline round-trips as ++..++'
 )
 console.log('MARKDOWN UNDERLINE OK — parsed + round-trips as ++..++')
+
+// Code-block notes: must not throw on parse (blank screen regression) and must round-trip
+// Uses the same custom CodeBlockLowlight config as MarkdownEditor.tsx (field-style parseMarkdown)
+const safeLanguage = (lang: string | null | undefined): string => lang || 'text'
+const CodeBlockLowlight2 = CodeBlockLowlight.extend({
+  addOptions() {
+    return {
+      ...this.parent?.(),
+      lowlight,
+      defaultLanguage: 'text'
+    }
+  },
+  parseMarkdown: (token, helpers) => {
+    const isFenced =
+      typeof token.raw === 'string' && (token.raw.startsWith('```') || token.raw.startsWith('~~~'))
+    if (!isFenced && token.codeBlockStyle !== 'indented') {
+      return []
+    }
+    return helpers.createNode(
+      'codeBlock',
+      { language: token.lang ? safeLanguage(token.lang) : '' },
+      token.text ? [helpers.createTextNode(token.text)] : []
+    )
+  }
+})
+const codeManager = new MarkdownManager({
+  extensions: [
+    StarterKit.configure({ codeBlock: false }),
+    CodeBlockLowlight2,
+    Markdown,
+    Typography,
+    Link,
+    TaskList,
+    TaskItem,
+    TableKit
+  ]
+})
+const codeMd = 'before\n\n```ts\nconst a = 1\nconsole.log(a)\n```\n\nafter\n'
+const codeJson = codeManager.parse(codeMd)
+const codeNode = codeJson.content.find((n: { type: string }) => n.type === 'codeBlock') as
+  { attrs: { language?: string }; content?: { text?: string }[] } | undefined
+assert.ok(
+  codeNode,
+  'expected a codeBlock node, got ' + codeJson.content.map((n) => n.type).join(',')
+)
+assert.equal(codeNode!.attrs.language, 'ts', 'fenced code keeps its language')
+assert.equal(codeNode!.content?.[0].text, 'const a = 1\nconsole.log(a)')
+assert.equal(
+  codeManager.serialize(codeJson).replace(/\s+/g, ' ').trim(),
+  codeMd.replace(/\s+/g, ' ').trim(),
+  'code fence round-trips'
+)
+
+const indentedJson = codeManager.parse('para:\n\n    const a = 1\n')
+const indentedNode = (indentedJson.content as { type: string }[]).find(
+  (n) => n.type === 'codeBlock'
+) as { attrs?: { language?: string } } | undefined
+assert.ok(indentedNode, 'indented code parses into a codeBlock without throwing')
+
+// Language semantics: '' = unlabeled (auto later), 'text' = explicit Plain Text, others kept
+const unlabeledJson = codeManager.parse('before\n\n```\nno lang\n```\n\nafter\n')
+const unlabeledNode = (
+  unlabeledJson.content as {
+    type: string
+    attrs?: { language?: string }
+  }[]
+).find((n) => n.type === 'codeBlock') as { attrs?: { language?: string } } | undefined
+assert.ok(unlabeledNode, 'unlabeled fence parses')
+assert.equal(
+  unlabeledNode!.attrs?.language,
+  '',
+  'unlabeled fence stores empty language (no text forcing)'
+)
+const unlabeledSer = codeManager.serialize(unlabeledJson)
+assert.ok(
+  /```\n(?:no lang\n)?```/.test(unlabeledSer.trim()) && !unlabeledSer.includes('```text'),
+  'unlabeled fence serializes without a language label'
+)
+
+const explicitTextJson = codeManager.parse('```\ntext\n```\n\nbefore\n\n```text\nfixed\n```\n')
+const textNodes = (
+  explicitTextJson.content as {
+    type: string
+    attrs?: { language?: string }
+  }[]
+).filter((n) => n.type === 'codeBlock')
+assert.equal(textNodes[1]?.attrs?.language, 'text', 'explicit ```text fence keeps text attr')
+assert.ok(
+  codeManager.serialize(explicitTextJson).includes('```text'),
+  'explicit text label survives serialization'
+)
+console.log('MARKDOWN CODE LANGUAGE OK — unlabeled is empty, explicit text preserved')
