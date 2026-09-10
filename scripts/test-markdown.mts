@@ -104,7 +104,7 @@ const CodeBlockLowlight2 = CodeBlockLowlight.extend({
     }
     return helpers.createNode(
       'codeBlock',
-      { language: safeLanguage(token.lang ?? null) },
+      { language: token.lang ? safeLanguage(token.lang) : '' },
       token.text ? [helpers.createTextNode(token.text)] : []
     )
   }
@@ -142,4 +142,37 @@ const indentedNode = (indentedJson.content as { type: string }[]).find(
   (n) => n.type === 'codeBlock'
 ) as { attrs?: { language?: string } } | undefined
 assert.ok(indentedNode, 'indented code parses into a codeBlock without throwing')
-console.log('MARKDOWN CODE OK — fenced code parses, round-trips, no throw')
+
+// Language semantics: '' = unlabeled (auto later), 'text' = explicit Plain Text, others kept
+const unlabeledJson = codeManager.parse('before\n\n```\nno lang\n```\n\nafter\n')
+const unlabeledNode = (
+  unlabeledJson.content as {
+    type: string
+    attrs?: { language?: string }
+  }[]
+).find((n) => n.type === 'codeBlock') as { attrs?: { language?: string } } | undefined
+assert.ok(unlabeledNode, 'unlabeled fence parses')
+assert.equal(
+  unlabeledNode!.attrs?.language,
+  '',
+  'unlabeled fence stores empty language (no text forcing)'
+)
+const unlabeledSer = codeManager.serialize(unlabeledJson)
+assert.ok(
+  /```\n(?:no lang\n)?```/.test(unlabeledSer.trim()) && !unlabeledSer.includes('```text'),
+  'unlabeled fence serializes without a language label'
+)
+
+const explicitTextJson = codeManager.parse('```\ntext\n```\n\nbefore\n\n```text\nfixed\n```\n')
+const textNodes = (
+  explicitTextJson.content as {
+    type: string
+    attrs?: { language?: string }
+  }[]
+).filter((n) => n.type === 'codeBlock')
+assert.equal(textNodes[1]?.attrs?.language, 'text', 'explicit ```text fence keeps text attr')
+assert.ok(
+  codeManager.serialize(explicitTextJson).includes('```text'),
+  'explicit text label survives serialization'
+)
+console.log('MARKDOWN CODE LANGUAGE OK — unlabeled is empty, explicit text preserved')

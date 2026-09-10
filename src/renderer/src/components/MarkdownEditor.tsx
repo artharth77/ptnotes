@@ -297,18 +297,20 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
             language: {
               ...base,
               rendered: false,
-              default: 'text',
+              default: '',
               parseHTML: (element): string => {
                 const c = element.querySelector('code')
                 const lang =
                   element.getAttribute('data-language') ||
                   c?.className.match(/language-([\w-]+)/)?.[1] ||
-                  'text'
+                  ''
+                if (!lang) return ''
                 return safeLanguage(lang)
               },
               renderHTML: (attrs) => {
-                const lang = safeLanguage((attrs as { language?: string }).language)
-                return { 'data-language': lang }
+                const raw = (attrs as { language?: string }).language
+                if (!raw) return {}
+                return { 'data-language': safeLanguage(raw) }
               }
             }
           }
@@ -322,7 +324,7 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
           }
           return helpers.createNode(
             'codeBlock',
-            { language: safeLanguage(token.lang ?? null) },
+            { language: token.lang ? safeLanguage(token.lang) : '' },
             token.text ? [helpers.createTextNode(token.text)] : []
           )
         }
@@ -872,6 +874,7 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
           shouldShow={({ view, state }) => {
             if (state.selection.empty) return false
             if (!view.hasFocus()) return false
+            if (editor.isActive('codeBlock')) return false
             if (editor.isActive('table')) return false
             return true
           }}
@@ -909,11 +912,24 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
               onPointerDown={(e) => e.stopPropagation()}
               onChange={(e) => {
                 const nextLang = e.target.value
+                const restore = editor.state.selection
+                const $from = restore.$from
+                let cbPos: number | null = null
+                for (let d = $from.depth; d >= 0; d--) {
+                  if ($from.node(d).type.name === 'codeBlock') {
+                    cbPos = $from.before(d)
+                    break
+                  }
+                }
+                if (cbPos === null) return
                 editor
                   .chain()
-                  .setNodeSelection(editor.state.selection.from)
+                  .setNodeSelection(cbPos)
                   .updateAttributes('codeBlock', { language: nextLang })
-                  .setTextSelection(editor.state.selection.from)
+                  .setTextSelection(
+                    restore.empty ? restore.$from.pos : { from: restore.from, to: restore.to }
+                  )
+                  .focus()
                   .run()
               }}
             >
