@@ -36,7 +36,7 @@ export type BotGroupBroadcaster = (evt: BotGroupEvent) => void
 const BOT_TASK_EXPECT =
   'A concise report: what you did, the outcome, and the paths of any notes/files/cards you created.'
 
-const LINK_RULE = `- Whenever you mention an existing note, project file, plan/schedule or kanban card in your reply, always link to it: [note name](note:note name), [file name](file:file name), [plan name](plan:plan name), [card title](kanban:card title). The link opens the item in the app. Only link items that actually exist in this project (from the conversation or your task results) — never invent names.`
+const LINK_RULE = `- Whenever you mention an existing note, project file, plan/schedule or kanban card in your reply, always link to it: [note name](note:note name), [file name](file:file name), [plan name](plan:plan name), [card title](kanban:card title). The file reference may include subfolders ([name](file:docs/report.pdf)). The link opens the item in the app. Only link items that actually exist in this project (from the conversation or your task results) — never invent names.`
 
 const TERMINAL_STATUSES = new Set(['done', 'failed', 'cancelled'])
 

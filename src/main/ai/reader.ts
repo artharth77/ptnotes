@@ -1,7 +1,10 @@
 import { promises as fs } from 'fs'
 import { extname } from 'path'
-import { PDFParse } from 'pdf-parse'
 import ExcelJS from 'exceljs'
+import JSZip from 'jszip'
+import * as cheerio from 'cheerio'
+import type { Element } from 'domhandler'
+import { extractPdfText } from './pdfText'
 import type { PdfExtractResult } from '@shared/types'
 
 export const MAX_PDF_CHARS = 240_000
@@ -9,12 +12,13 @@ export const MAX_PDF_CHARS = 240_000
 const PDF_MAGIC = '%PDF-'
 const ZIP_MAGIC = 'PK\x03\x04'
 
-export type FileKind = 'text' | 'pdf' | 'excel' | 'unsupported'
+export type FileKind = 'text' | 'pdf' | 'excel' | 'docx' | 'unsupported'
 
 /**
  * Classify a file by content rather than extension:
  * - starts with PDF magic bytes -> 'pdf'
  * - starts with ZIP magic bytes + excel extension -> 'excel'
+ * - starts with ZIP magic bytes + .docx extension -> 'docx'
  * - otherwise any other binary (NUL bytes present, not a PDF) -> 'unsupported'
  * - everything else (text, markdown, JSON, YAML, logs, etc.) -> 'text'
  */
@@ -28,6 +32,7 @@ export async function detectFileKind(path: string): Promise<FileKind> {
     if (buf.subarray(0, ZIP_MAGIC.length).toString('latin1') === ZIP_MAGIC) {
       const ext = extname(path).toLowerCase()
       if (ext === '.xlsx' || ext === '.xlsm') return 'excel'
+      if (ext === '.docx') return 'docx'
     }
     if (buf.includes(0)) return 'unsupported'
     return 'text'
@@ -39,45 +44,141 @@ export async function detectFileKind(path: string): Promise<FileKind> {
 export async function readFileAsText(
   path: string,
   format: 'json' | 'csv' = 'json',
-  query?: ExcelQuery
+  query?: ExcelQuery,
+  page?: number
 ): Promise<PdfExtractResult> {
   const kind = await detectFileKind(path)
   if (query && kind !== 'excel') {
     throw new Error('The query parameter is only supported for Excel workbooks (.xlsx/.xlsm).')
   }
-  if (kind === 'pdf') return extractPdf(path)
+  if (page !== undefined && kind === 'excel') {
+    throw new Error(
+      'The page parameter is not supported for Excel workbooks. Use the query parameter (workspace=<name|n>) to select a worksheet.'
+    )
+  }
+  if (kind === 'pdf') return extractPdf(path, page)
   if (kind === 'excel') return extractExcel(path, format, query)
+  if (kind === 'docx') return extractDocx(path, page)
   if (kind === 'unsupported') {
     throw new Error(
-      'This file is a binary file that is not a PDF or Excel workbook, so it cannot be read.'
+      'This file is a binary file that is not a PDF, Word document or Excel workbook, so it cannot be read.'
     )
   }
   const text = await fs.readFile(path, 'utf8')
+  return paginateText(text, page)
+}
+
+export async function extractPdf(path: string, page?: number): Promise<PdfExtractResult> {
+  const buffer = await fs.readFile(path)
+  const { text, total } = await extractPdfText(buffer, page)
+  if (page !== undefined && (page < 1 || page > total)) {
+    throw new Error(
+      `Page ${page} is out of range: this PDF has ${total} ${total === 1 ? 'page' : 'pages'}.`
+    )
+  }
   const truncated = text.length > MAX_PDF_CHARS
   return {
     text: truncated ? text.slice(0, MAX_PDF_CHARS) : text,
-    pageCount: 0,
+    pageCount: total,
     charCount: text.length,
-    truncated
+    truncated,
+    ...(page !== undefined ? { page } : {}),
+    totalPages: total
   }
 }
 
-export async function extractPdf(path: string): Promise<PdfExtractResult> {
-  const buffer = await fs.readFile(path)
-  const parser = new PDFParse({ data: buffer })
-  try {
-    const result = await parser.getText()
-    const text = result.text ?? ''
-    const truncated = text.length > MAX_PDF_CHARS
-    return {
-      text: truncated ? text.slice(0, MAX_PDF_CHARS) : text,
-      pageCount: result.total ?? 0,
-      charCount: text.length,
-      truncated
-    }
-  } finally {
-    await parser.destroy().catch(() => {})
+/** Window `fullText` into 240k-character pages. With `page`, returns that page's
+ * window (page 1 is the first MAX_PDF_CHARS characters); without, returns the
+ * whole text truncated at MAX_PDF_CHARS. `charCount` is always the full length. */
+function paginateText(fullText: string, page?: number): PdfExtractResult {
+  const totalPages = Math.max(1, Math.ceil(fullText.length / MAX_PDF_CHARS))
+  if (page !== undefined && (page < 1 || page > totalPages)) {
+    throw new Error(
+      `Page ${page} is out of range: this file has ${totalPages} ${
+        totalPages === 1 ? 'page' : 'pages'
+      } (${fullText.length} characters).`
+    )
   }
+  const windowed =
+    page === undefined ? fullText : fullText.slice((page - 1) * MAX_PDF_CHARS, page * MAX_PDF_CHARS)
+  const truncated = windowed.length > MAX_PDF_CHARS
+  return {
+    text: truncated ? windowed.slice(0, MAX_PDF_CHARS) : windowed,
+    pageCount: 0,
+    charCount: fullText.length,
+    truncated,
+    ...(page !== undefined ? { page } : {}),
+    totalPages
+  }
+}
+
+export async function extractDocx(path: string, page?: number): Promise<PdfExtractResult> {
+  const buffer = await fs.readFile(path)
+  let zip: JSZip
+  try {
+    zip = await JSZip.loadAsync(buffer)
+  } catch {
+    throw new Error('This file is not a valid Word document (.docx).')
+  }
+  const entry = zip.file('word/document.xml')
+  if (!entry) throw new Error('This file is not a valid Word document (.docx).')
+  const xml = await entry.async('string')
+  const $ = cheerio.load(xml, { xml: { xmlMode: true } }, false)
+  const blocks: string[] = []
+  for (const node of $('w\\:body').children().get()) {
+    if (node.type !== 'tag') continue
+    const block = docxBlockText(node, $)
+    if (block) blocks.push(block)
+  }
+  return paginateText(blocks.join('\n\n'), page)
+}
+
+function docxBlockText(el: Element, $: cheerio.CheerioAPI): string | null {
+  if (el.name === 'w:p') return docxParagraphText($(el), $)
+  if (el.name === 'w:tbl') return docxTableText($(el), $)
+  return null
+}
+
+function docxParagraphText(p: cheerio.Cheerio<Element>, $: cheerio.CheerioAPI): string {
+  let text = ''
+  for (const node of p.find('*').get()) {
+    if (node.type !== 'tag') continue
+    if (node.name === 'w:t') text += $(node).text()
+    else if (node.name === 'w:tab') text += '\t'
+    else if (node.name === 'w:br' || node.name === 'w:cr') text += '\n'
+  }
+  const trimmed = text.trim()
+  const style = p.find('w\\:pStyle').attr('w:val')
+  const heading = style ? /^Heading([1-9])$/.exec(style) : null
+  if (heading) {
+    const level = Math.min(Number(heading[1]), 6)
+    return `${'#'.repeat(level)} ${trimmed}`
+  }
+  return trimmed
+}
+
+function docxTableText(tbl: cheerio.Cheerio<Element>, $: cheerio.CheerioAPI): string {
+  const rows: string[][] = []
+  for (const tr of tbl.children('w\\:tr').get()) {
+    const cells: string[] = []
+    for (const tc of $(tr).children('w\\:tc').get()) {
+      const parts: string[] = []
+      for (const child of $(tc).children().get()) {
+        if (child.type !== 'tag') continue
+        const part = docxBlockText(child, $)
+        if (part) parts.push(part)
+      }
+      cells.push(parts.join(' '))
+    }
+    rows.push(cells)
+  }
+  const lines = rows.map(
+    (cells) => `| ${cells.map((c) => c.replace(/\|/g, '\\|').replace(/\n/g, ' ')).join(' | ')} |`
+  )
+  if (rows.length > 0) {
+    lines.splice(1, 0, `| ${rows[0].map(() => '---').join(' | ')} |`)
+  }
+  return lines.join('\n')
 }
 
 type CellValue = string | number | boolean | null

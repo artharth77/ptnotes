@@ -4,6 +4,7 @@ import {
   mdiChevronDown,
   mdiContentCopy,
   mdiFileOutline,
+  mdiFolderOpenOutline,
   mdiHistory,
   mdiKeyboardReturn,
   mdiMenuUp,
@@ -39,9 +40,11 @@ import type {
   ModuleRun,
   NoteMeta,
   SkillList,
-  KanbanCard
+  KanbanCard,
+  FileEntry
 } from '@shared/types'
 import { formatTokens, sumUsage } from '@shared/usage'
+import { fileTokenHasBareSpace, encodeFileToken, parseFileToken } from '@shared/fileMention'
 import { TOOL_STATE_LABELS, toolDisplayState } from './moduleStatus'
 
 const NO_SESSIONS: ChatSessionMeta[] = []
@@ -53,6 +56,13 @@ const IS_MAC =
     window.electron.process &&
     window.electron.process.platform === 'darwin') ||
   (typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac'))
+
+/** A row in the `#` file-mention popup: a project file or folder (`path` is relative to files/). */
+interface FileMentionItem {
+  name: string
+  path: string
+  isDir: boolean
+}
 
 function deriveLocalTitle(text: string): string {
   const clean = text.replace(/\s+/g, ' ').trim()
@@ -154,7 +164,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   const notes = useAppStore((s) => s.notes)
   const kanban = useAppStore((s) => s.kanban)
   const setActiveKanbanCard = useAppStore((s) => s.setActiveKanbanCard)
-  const projectFiles = useAppStore((s) => s.projectFiles)
+  const projectFileEntries = useAppStore((s) => s.projectFileEntries)
   const refreshFiles = useAppStore((s) => s.refreshFiles)
   const messages = useAppStore((s) =>
     s.activeProject ? s.chatMessages[s.activeProject] : undefined
@@ -223,6 +233,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     query: string
   } | null>(null)
   const [mentionIndex, setMentionIndex] = useState(0)
+  const [dirEntries, setDirEntries] = useState<Record<string, FileEntry[]>>({})
   const [dragActive, setDragActive] = useState(false)
   const [skillList, setSkillList] = useState<SkillList | null>(null)
   const [slashIndex, setSlashIndex] = useState(0)
@@ -592,14 +603,38 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     [list]
   )
 
-  const mentionItems = useMemo<(NoteMeta | KanbanCard | string)[]>(() => {
+  const fileMentionDir = mention?.kind === 'file' ? parseFileToken(mention.query).dir : null
+
+  useEffect(() => {
+    if (!fileMentionDir || !activeProject) return
+    if (dirEntries[fileMentionDir]) return
+    let cancelled = false
+    void window.ptnotes.files
+      .listEntries(activeProject, fileMentionDir)
+      .then((entries) => {
+        if (!cancelled) setDirEntries((prev) => ({ ...prev, [fileMentionDir]: entries }))
+      })
+      .catch(() => {
+        if (!cancelled) setDirEntries((prev) => ({ ...prev, [fileMentionDir]: [] }))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [fileMentionDir, activeProject, dirEntries])
+
+  const mentionItems = useMemo<(NoteMeta | KanbanCard | FileMentionItem)[]>(() => {
     if (!mention) return []
     const q = mention.query.toLowerCase()
     if (mention.kind === 'kanban') {
       return (kanban?.cards ?? []).filter((c) => c.title.toLowerCase().includes(q))
     }
     if (mention.kind === 'file') {
-      return projectFiles.filter((f) => f.toLowerCase().includes(q))
+      const { dir, filter } = parseFileToken(mention.query)
+      const q = filter.toLowerCase()
+      const entries = dir ? (dirEntries[dir] ?? []) : projectFileEntries
+      return entries
+        .filter((e) => e.name.toLowerCase().includes(q))
+        .map((e) => ({ name: e.name, path: dir ? `${dir}/${e.name}` : e.name, isDir: e.isDir }))
     }
     const filtered = notes.filter((n) => n.name.toLowerCase().includes(q))
     const active = notes.find((n) => n.id === activeNoteId)
@@ -607,10 +642,10 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
       return [active, ...filtered.filter((n) => n.id !== active.id)]
     }
     return filtered
-  }, [mention, notes, kanban, projectFiles, activeNoteId])
+  }, [mention, notes, kanban, projectFileEntries, dirEntries, activeNoteId])
 
-  const mentionName = (item: NoteMeta | KanbanCard | string): string =>
-    typeof item === 'string' ? item : 'name' in item ? item.name : item.title
+  const mentionName = (item: NoteMeta | KanbanCard | FileMentionItem): string =>
+    'name' in item ? item.name : item.title
 
   const commands = useMemo<SlashCommand[]>(
     () =>
@@ -736,13 +771,21 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
       return
     }
     const token = before.slice(last + 1)
-    if (token.includes(' ')) {
-      setMention(null)
-      return
-    }
-    if (last === at) setMention({ kind: 'note', start: last, query: token })
-    else if (last === bang) setMention({ kind: 'kanban', start: last, query: token })
-    else {
+    if (last === at || last === bang) {
+      if (token.includes(' ')) {
+        setMention(null)
+        return
+      }
+      setMention(
+        last === at
+          ? { kind: 'note', start: last, query: token }
+          : { kind: 'kanban', start: last, query: token }
+      )
+    } else {
+      if (fileTokenHasBareSpace(token)) {
+        setMention(null)
+        return
+      }
       if (!mention || mention.kind !== 'file' || mention.start !== last) {
         void refreshFiles()
       }
@@ -751,16 +794,20 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     setMentionIndex(0)
   }
 
-  function insertMention(item: NoteMeta | KanbanCard | string): void {
+  function insertMention(item: NoteMeta | KanbanCard | FileMentionItem): void {
     if (!mention) return
     const before = input.slice(0, mention.start)
     const after = input.slice(mention.start + 1 + mention.query.length)
-    const isCard = typeof item !== 'string' && !('name' in item)
+    if (mention.kind === 'file' && 'path' in item && item.isDir) {
+      drillIntoFolder(item, before, after)
+      return
+    }
+    const isCard = !('name' in item)
     const token =
       mention.kind === 'kanban'
         ? `kanban:${isCard ? item.id : mentionName(item)} `
         : mention.kind === 'file'
-          ? `file:${mentionName(item)} `
+          ? `file:${'path' in item ? item.path : mentionName(item)} `
           : `note:${mentionName(item)} `
     setInput(`${before}${token}${after}`)
     setMention(null)
@@ -770,6 +817,22 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
         const pos = before.length + token.length
         el.focus()
         el.setSelectionRange(pos, pos)
+      }
+    })
+  }
+
+  /** Replace the current `#token` with `#folder/` and keep the popup open on that folder. */
+  function drillIntoFolder(item: FileMentionItem, before: string, after: string): void {
+    const token = `#${encodeFileToken(item.path)}/`
+    const next = `${before}${token}${after}`
+    const caret = before.length + token.length
+    setInput(next)
+    updateMention(next, caret)
+    requestAnimationFrame(() => {
+      const el = textareaRef.current
+      if (el) {
+        el.focus()
+        el.setSelectionRange(caret, caret)
       }
     })
   }
@@ -897,7 +960,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
       }
       if (tokens.length === 0) {
         window.alert(
-          'No supported files added. PDFs, Excel (.xlsx/.xlsm) and text files (markdown, JSON, logs, YAML, plain text) can be added.'
+          'No supported files added. PDFs, Word (.docx), Excel (.xlsx/.xlsm) and text files (markdown, JSON, logs, YAML, plain text) can be added.'
         )
         return
       }
@@ -1083,6 +1146,14 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
       }
     }
     if (mentionItems.length > 0) {
+      if (e.key === '/' && mention?.kind === 'file') {
+        const item = mentionItems[mentionIndex]
+        if (item && 'path' in item && item.isDir) {
+          e.preventDefault()
+          insertMention(item)
+          return
+        }
+      }
       if (e.key === 'ArrowDown') {
         e.preventDefault()
         setMentionIndex((i) => (i + 1) % mentionItems.length)
@@ -1320,8 +1391,8 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
             </p>
             <p className="chat-empty-hint">
               Type / for commands and skills, @ to reference a note, ! to reference a kanban card, #
-              to reference a file. Drop PDFs, Excel (.xlsx/.xlsm) or text files (markdown, JSON,
-              logs, YAML, plain text) to add them to the project&apos;s files.
+              to reference a file. Drop PDFs, Word (.docx), Excel (.xlsx/.xlsm) or text files
+              (markdown, JSON, logs, YAML, plain text) to add them to the project&apos;s files.
             </p>
           </div>
         )}
@@ -1614,7 +1685,8 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
           <div className="mention-popup">
             {mentionItems.map((item, i) => (
               <div
-                key={typeof item === 'string' ? item : 'name' in item ? item.name : item.title}
+                key={'path' in item ? item.path : 'name' in item ? item.name : item.title}
+                title={'path' in item && item.path !== item.name ? item.path : undefined}
                 ref={(el) => {
                   if (el && i === mentionIndex) el.scrollIntoView({ block: 'nearest' })
                 }}
@@ -1628,11 +1700,15 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                 <span className="mention-icon">
                   <MdiIcon
                     path={
-                      mention?.kind === 'kanban'
-                        ? KANBAN_LINK_ICON
-                        : mention?.kind === 'file'
-                          ? mdiFileOutline
-                          : NOTE_LINK_ICON
+                      'path' in item
+                        ? item.isDir
+                          ? mdiFolderOpenOutline
+                          : mdiFileOutline
+                        : mention?.kind === 'kanban'
+                          ? KANBAN_LINK_ICON
+                          : mention?.kind === 'file'
+                            ? mdiFileOutline
+                            : NOTE_LINK_ICON
                     }
                     size={16}
                   />
@@ -1680,7 +1756,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
       {dragActive && (
         <div className="chat-drop-overlay">
           <span className="chat-drop-icon">📄</span>
-          <span>Drop PDF, Excel or text files to add to project files</span>
+          <span>Drop PDF, Word or Excel files to add to project files</span>
         </div>
       )}
       {bubbleMenu &&

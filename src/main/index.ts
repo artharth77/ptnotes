@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, Menu, ipcMain, protocol } from 'electron'
+import { app, shell, BrowserWindow, Menu, ipcMain, protocol, type WebContents } from 'electron'
 import { join, extname } from 'path'
 import { promises as fs } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -8,6 +8,7 @@ import { PTNotesService } from './service/PTNotesService'
 import { registerProjectIpc, registerNoteIpc, registerChatIpc } from './ipc'
 import { registerKanbanIpc } from './ipc/kanban'
 import { registerPlannerIpc } from './ipc/planner'
+import { registerSnapshotsIpc } from './ipc/snapshots'
 import { registerAiIpc, createSessionRegistry } from './ipc/ai'
 import { registerFilesIpc } from './ipc/files'
 import { registerSettingsIpc } from './ipc/settings'
@@ -24,6 +25,7 @@ import { buildStartModuleTool, buildWaitModulesTool } from './modules/tool'
 import { shutdownChartRenderer } from './modules/shared/chartRenderer'
 import { shutdownDiagramRenderer } from './modules/shared/diagramRenderer'
 import { shutdownInfographicRenderer } from './modules/shared/infographicRenderer'
+import { shutdownPdfRenderer } from './pdf/pdfRenderer'
 import { close as closeBrowser } from './mcp/browser'
 import type { PTTool } from './ai/tools'
 import { createPptxModule } from './modules/pptx'
@@ -49,11 +51,35 @@ protocol.registerSchemesAsPrivileged([
 let mainWindow: BrowserWindow | null = null
 let splashWindow: BrowserWindow | null = null
 let plannerEditActive = false
+let pdfViewerOpen = false
 let windowStateStore: WindowStateStore
 let moduleManager: ModuleRunManager | undefined
 /** Lets the module broadcast (created before the bots system) forward bot-task events. */
 const groupChatForwarder: { current: GroupChatManager | undefined } = { current: undefined }
 let botsStoreRef: BotsStore | undefined
+
+/**
+ * Chromium's PDF plugin runs in an out-of-process iframe that consumes
+ * keyboard input, so the renderer's window keydown listener never sees Escape
+ * once the preview iframe has focus. The renderer flags the viewer as open via
+ * `pdf-viewer:set-open`; Escape intercepted here (main frame + OOPIF guests)
+ * is forwarded to the page, which closes the viewer.
+ */
+function interceptPdfViewerEscape(webContents: WebContents): void {
+  webContents.on('before-input-event', (event, input) => {
+    if (!pdfViewerOpen || input.type !== 'keyDown' || input.key !== 'Escape') return
+    if (input.control || input.meta || input.alt) return
+    event.preventDefault()
+    mainWindow?.webContents.send('pdf-viewer:escape')
+  })
+}
+
+app.on('web-contents-created', (_event, webContents) => {
+  // OOPIF guests (the PDF preview iframe) need their own interception;
+  // 'iframe' is a runtime type Electron's typings don't declare yet
+  const type = webContents.getType() as string
+  if (type === 'iframe') interceptPdfViewerEscape(webContents)
+})
 
 function buildAppMenu(): Menu {
   const isMac = process.platform === 'darwin'
@@ -176,13 +202,10 @@ function createWindow(windowState: WindowState): void {
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
-      contextIsolation: true
+      contextIsolation: true,
+      plugins: true
     }
   })
-
-  if (windowState.isMaximized) {
-    mainWindow.maximize()
-  }
 
   const saveWindowState = (): void => {
     if (!mainWindow) return
@@ -196,6 +219,7 @@ function createWindow(windowState: WindowState): void {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show()
+    if (windowState.isMaximized) mainWindow?.maximize()
     closeSplashWindow()
   })
   mainWindow.webContents.once('did-finish-load', () => {
@@ -251,6 +275,8 @@ function createWindow(windowState: WindowState): void {
     }
   })
 
+  interceptPdfViewerEscape(mainWindow.webContents)
+
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
   } else {
@@ -263,7 +289,7 @@ app.whenReady().then(async () => {
 
   createSplashWindow()
 
-  // Handle ptfile:// protocol — serves local files for chat images
+  // Handle ptfile:// protocol — serves local files for chat images and PDF preview
   const IMAGE_MIME: Record<string, string> = {
     '.png': 'image/png',
     '.jpg': 'image/jpeg',
@@ -272,7 +298,8 @@ app.whenReady().then(async () => {
     '.svg': 'image/svg+xml',
     '.webp': 'image/webp',
     '.bmp': 'image/bmp',
-    '.ico': 'image/x-icon'
+    '.ico': 'image/x-icon',
+    '.pdf': 'application/pdf'
   }
   protocol.handle('ptfile', async (request) => {
     const rawPath = new URL(request.url).pathname
@@ -293,6 +320,10 @@ app.whenReady().then(async () => {
 
   ipcMain.on('planner:set-edit-active', (_e, active: boolean) => {
     plannerEditActive = !!active
+  })
+
+  ipcMain.on('pdf-viewer:set-open', (_e, open: boolean) => {
+    pdfViewerOpen = !!open
   })
 
   if (process.platform === 'darwin' && !app.isPackaged && app.dock) {
@@ -372,6 +403,7 @@ app.whenReady().then(async () => {
   registerKanbanIpc(service)
   registerChatIpc(service)
   registerPlannerIpc(service)
+  registerSnapshotsIpc(service)
   registerAiIpc(registry, configStore, service)
   registerFilesIpc(service, registry, configStore)
   registerSettingsIpc(service, settingsStore, (newRoot) => {
@@ -407,4 +439,5 @@ app.on('will-quit', () => {
   shutdownChartRenderer()
   shutdownDiagramRenderer()
   shutdownInfographicRenderer()
+  shutdownPdfRenderer()
 })

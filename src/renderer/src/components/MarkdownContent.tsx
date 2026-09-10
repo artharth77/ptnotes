@@ -1,9 +1,10 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useState } from 'react'
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import { slugify } from '@shared/slug'
 import { MdiIcon } from './MdiIcon'
+import { ImageViewer } from './ImageViewer'
 import {
   fileTypeIcon,
   KANBAN_LINK_ICON,
@@ -62,31 +63,6 @@ export const MarkdownContent = memo(function MarkdownContent({
   mentionColor
 }: MarkdownContentProps): React.JSX.Element {
   const [viewer, setViewer] = useState<{ src: string; alt: string } | null>(null)
-  const [closing, setClosing] = useState(false)
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const closeViewer = useCallback((): void => {
-    setClosing(true)
-    timerRef.current = setTimeout(() => {
-      setViewer(null)
-      setClosing(false)
-    }, 200)
-  }, [])
-
-  useEffect(() => {
-    if (!viewer) return
-    const onKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') closeViewer()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [viewer, closeViewer])
-
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current)
-    }
-  }, [])
 
   const safeContent = normalizeInternalLinks(content)
   return (
@@ -273,15 +249,7 @@ export const MarkdownContent = memo(function MarkdownContent({
       >
         {safeContent}
       </ReactMarkdown>
-      {viewer && (
-        <div className={`chat-img-viewer${closing ? ' closing' : ''}`} onClick={closeViewer}>
-          <button className="chat-img-viewer-close" onClick={closeViewer}>
-            ✕
-          </button>
-          <img src={viewer.src} alt={viewer.alt} />
-          {viewer.alt && <div className="chat-img-viewer-caption">{viewer.alt}</div>}
-        </div>
-      )}
+      {viewer && <ImageViewer src={viewer.src} alt={viewer.alt} onClose={() => setViewer(null)} />}
     </div>
   )
 })

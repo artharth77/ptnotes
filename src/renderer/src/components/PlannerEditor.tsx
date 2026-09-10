@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
+  mdiAccountGroup,
   mdiArrowDownCircleOutline,
   mdiArrowLeftCircleOutline,
   mdiArrowRightCircleOutline,
@@ -13,10 +14,13 @@ import {
   mdiContentCopy,
   mdiContentCut,
   mdiContentPaste,
+  mdiFileExcelOutline,
   mdiGrid,
+  mdiHistory,
   mdiMagnifyMinus,
   mdiMagnifyPlus,
   mdiPencil,
+  mdiPercent,
   mdiPlaylistPlus,
   mdiPlus,
   mdiRedo,
@@ -32,6 +36,9 @@ import { Modal, PromptModal } from './Modal'
 import { friendlyError } from '../errors'
 import { CalendarModal } from './CalendarModal'
 import { PlannerColumnModal } from './PlannerColumnModal'
+import { PlannerEstimateModal } from './PlannerEstimateModal'
+import { PlannerExportModal, type PlannerExportOptions } from './PlannerExportModal'
+import { PlannerResourcesModal } from './PlannerResourcesModal'
 import {
   GanttChart,
   GANTT_DAY_WIDTH_DEFAULT,
@@ -40,32 +47,33 @@ import {
 } from './GanttChart'
 import {
   applyDateRule,
+  collectOwners,
   computeDuration,
   computeEndDate,
   defaultCalendar,
   deriveTaskNo,
   emptyTask,
+  estimatePercentComplete,
+  formatDate,
   nextWorkingDayString,
-  rollupScheduleTasks
+  normalizeColumnOrder,
+  normalizeOwner,
+  overallPercentComplete,
+  parseOwners,
+  planIndicator,
+  rollupScheduleTasks,
+  statusLabel
 } from '@shared/planner'
-import type { Schedule, ScheduleStatus, ScheduleTask } from '@shared/types'
-
-function statusLabel(status: ScheduleStatus): string {
-  switch (status) {
-    case 'pending':
-      return 'Pending'
-    case 'on-hold':
-      return 'On Hold'
-    case 'completed':
-      return 'Completed'
-    case 'in-progress':
-      return 'In Progress'
-    default:
-      return 'Not Started'
-  }
-}
+import type {
+  PlannerExportColumn,
+  PlannerExportRow,
+  Schedule,
+  ScheduleStatus,
+  ScheduleTask
+} from '@shared/types'
 
 type PlannerColumnKey =
+  | 'indicator'
   | 'no'
   | 'title'
   | 'status'
@@ -79,6 +87,7 @@ type PlannerColumnKey =
   | 'note'
 
 const COLUMNS: { key: PlannerColumnKey; label: string }[] = [
+  { key: 'indicator', label: 'Plan Indicator' },
   { key: 'no', label: 'No.' },
   { key: 'title', label: 'Title' },
   { key: 'status', label: 'Status' },
@@ -93,6 +102,7 @@ const COLUMNS: { key: PlannerColumnKey; label: string }[] = [
 ]
 
 const COL_WIDTHS: Record<PlannerColumnKey, string> = {
+  indicator: '5px',
   no: '46px',
   title: 'minmax(180px, 1fr)',
   status: '110px',
@@ -106,12 +116,37 @@ const COL_WIDTHS: Record<PlannerColumnKey, string> = {
   note: 'minmax(160px, auto)'
 }
 
-function colTemplate(visible: Set<PlannerColumnKey>): string {
-  const cols: string[] = ['28px', COL_WIDTHS.no, COL_WIDTHS.title]
-  for (const c of COLUMNS) {
-    if (c.key !== 'no' && c.key !== 'title' && visible.has(c.key)) cols.push(COL_WIDTHS[c.key])
+/** Pinned first, never movable (Plan Indicator stays hideable; No./Title always visible). */
+const FIXED_COLUMNS: PlannerColumnKey[] = ['indicator', 'no', 'title']
+
+type MovableColumnKey = Exclude<PlannerColumnKey, 'indicator' | 'no' | 'title'>
+
+const MOVABLE_HEADERS: Record<MovableColumnKey, { label: string; className: string }> = {
+  status: { label: 'Status', className: 'planner-col-status' },
+  owner: { label: 'Owner', className: 'planner-col-owner' },
+  duration: { label: 'Dur.', className: 'planner-col-num' },
+  planStart: { label: 'Plan Start', className: 'planner-col-date' },
+  planEnd: { label: 'Plan End', className: 'planner-col-date' },
+  actualStart: { label: 'Actual Start', className: 'planner-col-date' },
+  actualEnd: { label: 'Actual End', className: 'planner-col-date' },
+  percent: { label: '%', className: 'planner-col-num' },
+  note: { label: 'Note', className: 'planner-col-note' }
+}
+
+function colTemplate(visible: Set<PlannerColumnKey>, order: PlannerColumnKey[]): string {
+  const cols: string[] = ['28px']
+  for (const k of order) {
+    if (k === 'no' || k === 'title' || visible.has(k)) cols.push(COL_WIDTHS[k])
   }
   return cols.join(' ')
+}
+
+function initColumnOrder(saved: string[] | undefined): PlannerColumnKey[] {
+  return normalizeColumnOrder(
+    saved,
+    COLUMNS.map((c) => c.key),
+    FIXED_COLUMNS
+  ) as PlannerColumnKey[]
 }
 
 function initVisibleCols(saved: Record<string, boolean> | undefined): Set<PlannerColumnKey> {
@@ -382,11 +417,15 @@ export function PlannerEditor(): React.JSX.Element {
   const updateScheduleContent = useAppStore((s) => s.updateScheduleContent)
   const saveSchedule = useAppStore((s) => s.saveSchedule)
   const renameSchedule = useAppStore((s) => s.renameSchedule)
+  const setSnapshotsOpen = useAppStore((s) => s.setSnapshotsOpen)
   const plannerUndo = useAppStore((s) => s.plannerUndo)
   const plannerRedo = useAppStore((s) => s.plannerRedo)
 
   const [calendarOpen, setCalendarOpen] = useState(false)
   const [columnsOpen, setColumnsOpen] = useState(false)
+  const [estimateOpen, setEstimateOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
+  const [resourcesOpen, setResourcesOpen] = useState(false)
   const [view, setView] = useState<'table' | 'gantt'>('table')
   const [ganttDayWidth, setGanttDayWidth] = useState(GANTT_DAY_WIDTH_DEFAULT)
   const [renaming, setRenaming] = useState(false)
@@ -400,6 +439,7 @@ export function PlannerEditor(): React.JSX.Element {
   } | null>(null)
   const [gridMenu, setGridMenu] = useState<{ x: number; y: number; id: string } | null>(null)
   const [gridPercent, setGridPercent] = useState(0)
+  const [ownerMenu, setOwnerMenu] = useState<{ id: string; x: number; y: number } | null>(null)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [numberDrafts, setNumberDrafts] = useState<Record<string, string>>({})
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -407,11 +447,16 @@ export function PlannerEditor(): React.JSX.Element {
   const [visibleCols, setVisibleCols] = useState<Set<PlannerColumnKey>>(() =>
     initVisibleCols(schedule?.columnVisibility)
   )
+  const [columnOrder, setColumnOrder] = useState<PlannerColumnKey[]>(() =>
+    initColumnOrder(schedule?.columnOrder)
+  )
   const [prevScheduleId, setPrevScheduleId] = useState(schedule?.id)
   if (schedule?.id !== prevScheduleId) {
     setPrevScheduleId(schedule?.id)
     setVisibleCols(initVisibleCols(schedule?.columnVisibility))
+    setColumnOrder(initColumnOrder(schedule?.columnOrder))
     setView('table')
+    setOwnerMenu(null)
   }
   const [clipboard, setClipboard] = useState<ScheduleTask[]>([])
   const [clipboardMode, setClipboardMode] = useState<'copy' | 'cut' | null>(null)
@@ -421,6 +466,7 @@ export function PlannerEditor(): React.JSX.Element {
   const pendingScrollTop = useRef<number | null>(null)
   const statusMenuRef = useRef<HTMLDivElement>(null)
   const gridMenuRef = useRef<HTMLDivElement>(null)
+  const ownerMenuRef = useRef<HTMLDivElement>(null)
   const gridPercentBase = useRef<Schedule | null>(null)
   const pendingFocus = useRef<{ id: string; col: string } | null>(null)
   const saveTimer = useRef<number | null>(null)
@@ -581,6 +627,7 @@ export function PlannerEditor(): React.JSX.Element {
 
   function switchView(next: 'table' | 'gantt'): void {
     if (next === view) return
+    setOwnerMenu(null)
     endEditSession()
     const current = useAppStore.getState().scheduleContent
     if (current) useAppStore.getState().plannerClearHistory(current.id)
@@ -663,6 +710,29 @@ export function PlannerEditor(): React.JSX.Element {
     el.style.top = `${top}px`
   }, [gridMenu])
 
+  useLayoutEffect(() => {
+    if (!ownerMenu) return
+    const el = ownerMenuRef.current
+    if (!el) return
+    const margin = 8
+    const width = el.offsetWidth
+    const height = el.offsetHeight
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const left = Math.max(margin, Math.min(ownerMenu.x, vw - width - margin))
+    const top = Math.max(margin, Math.min(ownerMenu.y, vh - height - margin))
+    el.style.left = `${left}px`
+    el.style.top = `${top}px`
+  }, [ownerMenu])
+
+  useEffect(() => {
+    if (!ownerMenu) return
+    const onScroll = (): void => setOwnerMenu(null)
+    const scrollEl = gridScrollRef.current
+    scrollEl?.addEventListener('scroll', onScroll, true)
+    return () => scrollEl?.removeEventListener('scroll', onScroll, true)
+  }, [ownerMenu])
+
   useEffect(() => {
     const update = (): void => {
       const el = document.activeElement as HTMLElement | null
@@ -693,50 +763,29 @@ export function PlannerEditor(): React.JSX.Element {
   const sc: Schedule = schedule
   const cal = calendar ?? defaultCalendar()
   const rows = flattenTasks(sc.tasks, null, 0, collapsed, [])
-  const template = colTemplate(visibleCols)
+  const template = colTemplate(visibleCols, columnOrder)
+  const today = formatDate(new Date())
+  const noLeft = 28 + (visibleCols.has('indicator') ? 5 : 0)
+  const titleLeft = noLeft + 46
+  const movableCols = columnOrder.filter(
+    (k) => !FIXED_COLUMNS.includes(k) && visibleCols.has(k)
+  ) as MovableColumnKey[]
+  const ownerCtx = ownerMenu ? findTaskCtx(sc.tasks, ownerMenu.id) : null
+  const ownerTask = ownerCtx ? ownerCtx.parent[ownerCtx.index] : null
+  const ownerNames = ownerTask ? collectOwners(sc.tasks) : []
+  const ownerChecked = new Set(
+    ownerTask ? parseOwners(ownerTask.owner).map((n) => n.toLowerCase()) : []
+  )
 
-  function renderRow(task: ScheduleTask, no: string, depth: number): React.JSX.Element {
-    const isParent = task.children.length > 0
-    return (
-      <div
-        className={`planner-grid-row${selected.has(task.id) ? ' planner-row-selected' : ''}`}
-        data-row={task.id}
-        style={{ gridTemplateColumns: template }}
-        onClick={(e) => handleRowClick(e, task.id)}
-        onContextMenu={(e) => handleRowContext(e, task.id)}
-      >
-        <div className="planner-col-toggle planner-cell">
-          {isParent ? (
-            <button
-              className="icon-btn small planner-toggle"
-              title={collapsed.has(task.id) ? 'Expand' : 'Collapse'}
-              onClick={() => toggleCollapse(task.id)}
-            >
-              <MdiIcon path={collapsed.has(task.id) ? mdiChevronRight : mdiChevronDown} size={15} />
-            </button>
-          ) : (
-            <span className="planner-toggle-spacer" />
-          )}
-        </div>
-        <div className="planner-col-no planner-cell">{no}</div>
-        <div className="planner-col-title planner-cell" style={{ left: '74px' }}>
-          <input
-            className="planner-input"
-            data-cell={task.id}
-            data-col="title"
-            style={{
-              paddingLeft: depth * 14,
-              fontWeight: isParent ? 600 : undefined
-            }}
-            value={task.title}
-            placeholder={isParent ? 'Group task' : 'Task title'}
-            onFocus={startEditSession}
-            onBlur={endEditSession}
-            onChange={(e) => editField(sc, task.id, 'title', e.target.value)}
-          />
-        </div>
-        {visibleCols.has('status') && (
-          <div className="planner-col-status planner-cell">
+  function renderColumnCell(
+    key: MovableColumnKey,
+    task: ScheduleTask,
+    isParent: boolean
+  ): React.JSX.Element {
+    switch (key) {
+      case 'status':
+        return (
+          <div key={key} className="planner-col-status planner-cell">
             <button
               type="button"
               className={`planner-status-label${
@@ -766,23 +815,47 @@ export function PlannerEditor(): React.JSX.Element {
               {statusLabel(task.status)}
             </button>
           </div>
-        )}
-        {visibleCols.has('owner') && (
-          <div className="planner-col-owner planner-cell">
+        )
+      case 'owner':
+        if (isParent) {
+          return (
+            <div key={key} className="planner-col-owner planner-cell">
+              <input
+                className={`planner-input${!task.owner ? ' planner-value-empty' : ''}`}
+                data-cell={task.id}
+                data-col="owner"
+                value={task.owner}
+                readOnly
+                disabled
+              />
+            </div>
+          )
+        }
+        return (
+          <div key={key} className="planner-col-owner planner-cell">
             <input
               className={`planner-input${!task.owner ? ' planner-value-empty' : ''}`}
               data-cell={task.id}
               data-col="owner"
               value={task.owner}
               placeholder="Owner"
-              onFocus={startEditSession}
-              onBlur={endEditSession}
+              onFocus={(e) => {
+                startEditSession()
+                const rect = e.currentTarget.getBoundingClientRect()
+                setOwnerMenu({ id: task.id, x: rect.left, y: rect.bottom + 2 })
+              }}
+              onBlur={() => {
+                applyOwnerEdit(task.id)
+                setOwnerMenu(null)
+                endEditSession()
+              }}
               onChange={(e) => editField(sc, task.id, 'owner', e.target.value)}
             />
           </div>
-        )}
-        {visibleCols.has('duration') && (
-          <div className="planner-col-num planner-cell">
+        )
+      case 'duration':
+        return (
+          <div key={key} className="planner-col-num planner-cell">
             <input
               type="number"
               min={1}
@@ -810,9 +883,10 @@ export function PlannerEditor(): React.JSX.Element {
               }}
             />
           </div>
-        )}
-        {visibleCols.has('planStart') && (
-          <div className="planner-col-date planner-cell">
+        )
+      case 'planStart':
+        return (
+          <div key={key} className="planner-col-date planner-cell">
             <DateField
               value={task.planStart}
               readOnly={isParent}
@@ -822,9 +896,10 @@ export function PlannerEditor(): React.JSX.Element {
               onChange={(v) => editField(sc, task.id, 'planStart', v)}
             />
           </div>
-        )}
-        {visibleCols.has('planEnd') && (
-          <div className="planner-col-date planner-cell">
+        )
+      case 'planEnd':
+        return (
+          <div key={key} className="planner-col-date planner-cell">
             <DateField
               value={task.planEnd}
               readOnly={isParent}
@@ -834,9 +909,10 @@ export function PlannerEditor(): React.JSX.Element {
               onChange={(v) => editField(sc, task.id, 'planEnd', v)}
             />
           </div>
-        )}
-        {visibleCols.has('actualStart') && (
-          <div className="planner-col-date planner-cell">
+        )
+      case 'actualStart':
+        return (
+          <div key={key} className="planner-col-date planner-cell">
             <DateField
               value={task.actualStart}
               cellId={task.id}
@@ -844,9 +920,10 @@ export function PlannerEditor(): React.JSX.Element {
               onChange={(v) => editField(sc, task.id, 'actualStart', v)}
             />
           </div>
-        )}
-        {visibleCols.has('actualEnd') && (
-          <div className="planner-col-date planner-cell">
+        )
+      case 'actualEnd':
+        return (
+          <div key={key} className="planner-col-date planner-cell">
             <DateField
               value={task.actualEnd}
               cellId={task.id}
@@ -854,9 +931,10 @@ export function PlannerEditor(): React.JSX.Element {
               onChange={(v) => editField(sc, task.id, 'actualEnd', v)}
             />
           </div>
-        )}
-        {visibleCols.has('percent') && (
-          <div className="planner-col-num planner-cell">
+        )
+      case 'percent':
+        return (
+          <div key={key} className="planner-col-num planner-cell">
             <input
               type="number"
               min={0}
@@ -887,9 +965,10 @@ export function PlannerEditor(): React.JSX.Element {
               }}
             />
           </div>
-        )}
-        {visibleCols.has('note') && (
-          <div className="planner-col-note planner-cell">
+        )
+      case 'note':
+        return (
+          <div key={key} className="planner-col-note planner-cell">
             <input
               className={`planner-input${!task.note ? ' planner-value-empty' : ''}`}
               data-cell={task.id}
@@ -901,7 +980,61 @@ export function PlannerEditor(): React.JSX.Element {
               onChange={(e) => editField(sc, task.id, 'note', e.target.value)}
             />
           </div>
+        )
+    }
+  }
+
+  function renderRow(task: ScheduleTask, no: string, depth: number): React.JSX.Element {
+    const isParent = task.children.length > 0
+    return (
+      <div
+        className={`planner-grid-row${selected.has(task.id) ? ' planner-row-selected' : ''}`}
+        data-row={task.id}
+        style={{ gridTemplateColumns: template }}
+        onClick={(e) => handleRowClick(e, task.id)}
+        onContextMenu={(e) => handleRowContext(e, task.id)}
+      >
+        <div className="planner-col-toggle planner-cell">
+          {isParent ? (
+            <button
+              className="icon-btn small planner-toggle"
+              title={collapsed.has(task.id) ? 'Expand' : 'Collapse'}
+              onClick={() => toggleCollapse(task.id)}
+            >
+              <MdiIcon path={collapsed.has(task.id) ? mdiChevronRight : mdiChevronDown} size={15} />
+            </button>
+          ) : (
+            <span className="planner-toggle-spacer" />
+          )}
+        </div>
+        {visibleCols.has('indicator') && (
+          <div
+            className={`planner-col-indicator planner-cell planner-indicator-${planIndicator(
+              task,
+              today
+            )}`}
+          />
         )}
+        <div className="planner-col-no planner-cell" style={{ left: noLeft }}>
+          {no}
+        </div>
+        <div className="planner-col-title planner-cell" style={{ left: titleLeft }}>
+          <input
+            className="planner-input"
+            data-cell={task.id}
+            data-col="title"
+            style={{
+              paddingLeft: depth * 14,
+              fontWeight: isParent ? 600 : undefined
+            }}
+            value={task.title}
+            placeholder={isParent ? 'Group task' : 'Task title'}
+            onFocus={startEditSession}
+            onBlur={endEditSession}
+            onChange={(e) => editField(sc, task.id, 'title', e.target.value)}
+          />
+        </div>
+        {movableCols.map((key) => renderColumnCell(key, task, isParent))}
       </div>
     )
   }
@@ -966,6 +1099,29 @@ export function PlannerEditor(): React.JSX.Element {
       }
       return next
     })
+  }
+
+  function applyOwnerEdit(id: string): void {
+    const current = useAppStore.getState().scheduleContent
+    if (!current) return
+    const ctx = findTaskCtx(current.tasks, id)
+    if (!ctx) return
+    const raw = ctx.parent[ctx.index].owner
+    const normalized = normalizeOwner(raw)
+    if (normalized !== raw) editField(current, id, 'owner', normalized)
+  }
+
+  function toggleOwner(id: string, name: string): void {
+    const current = useAppStore.getState().scheduleContent
+    if (!current) return
+    const ctx = findTaskCtx(current.tasks, id)
+    if (!ctx) return
+    const names = collectOwners(current.tasks)
+    const checked = new Set(parseOwners(ctx.parent[ctx.index].owner).map((n) => n.toLowerCase()))
+    const key = name.toLowerCase()
+    if (checked.has(key)) checked.delete(key)
+    else checked.add(key)
+    editField(current, id, 'owner', names.filter((n) => checked.has(n.toLowerCase())).join(', '))
   }
 
   function handleGanttResize(
@@ -1258,6 +1414,47 @@ export function PlannerEditor(): React.JSX.Element {
     setSelected(new Set(newTasks.map((t) => t.id)))
     setAnchorId(newTasks[0].id)
     pendingFocus.current = { id: newTasks[0].id, col: 'title' }
+  }
+
+  async function handleExportExcel(opts: PlannerExportOptions): Promise<void> {
+    const columns: PlannerExportColumn[] = columnOrder
+      .filter((k) => k !== 'indicator' && (k === 'no' || k === 'title' || visibleCols.has(k)))
+      .map((k) => ({ key: k, label: COLUMNS.find((c) => c.key === k)?.label ?? k }))
+    const allRows = flattenTasks(sc.tasks, null, 0, new Set(), [])
+    const exportRows: PlannerExportRow[] = allRows.map((r) => ({
+      no: r.no,
+      title: r.task.title,
+      status: r.task.status,
+      owner: r.task.owner,
+      duration: r.task.duration,
+      planStart: r.task.planStart,
+      planEnd: r.task.planEnd,
+      actualStart: r.task.actualStart,
+      actualEnd: r.task.actualEnd,
+      percentComplete: r.task.percentComplete,
+      note: r.task.note,
+      depth: r.depth,
+      hasChildren: r.task.children.length > 0
+    }))
+    try {
+      const result = await window.ptnotes.planner.exportExcel({
+        scheduleName: sc.name,
+        overallPercent: overallPercentComplete(sc.tasks),
+        columns,
+        rows: exportRows,
+        calendar: cal,
+        progressDate: opts.progressDate,
+        progressMode: opts.progressMode,
+        planPercent:
+          opts.progressMode === 'percent-plan'
+            ? estimatePercentComplete(sc.tasks, opts.progressDate)
+            : null,
+        ganttMode: opts.ganttMode
+      })
+      if (!result.ok && !result.canceled) window.alert(friendlyError(result.error))
+    } catch (err) {
+      window.alert(friendlyError(err))
+    }
   }
 
   function handleNewSubtask(): void {
@@ -1614,6 +1811,15 @@ export function PlannerEditor(): React.JSX.Element {
         >
           <MdiIcon path={mdiPencil} size={14} />
         </button>
+        {!ganttMode && (
+          <button
+            className="icon-btn small"
+            title="Snapshots"
+            onClick={() => setSnapshotsOpen(true)}
+          >
+            <MdiIcon path={mdiHistory} size={14} />
+          </button>
+        )}
       </div>
       <div className="planner-toolbar">
         <div className="planner-toolbar-group">
@@ -1725,6 +1931,19 @@ export function PlannerEditor(): React.JSX.Element {
         </div>
         <span className="planner-toolbar-divider" />
         <div className="planner-toolbar-group">
+          <button className="icon-btn" title="Resources" onClick={() => setResourcesOpen(true)}>
+            <MdiIcon path={mdiAccountGroup} size={16} />
+          </button>
+          <button
+            className="icon-btn"
+            title="Estimate %Completed"
+            onClick={() => setEstimateOpen(true)}
+          >
+            <MdiIcon path={mdiPercent} size={16} />
+          </button>
+        </div>
+        <span className="planner-toolbar-divider" />
+        <div className="planner-toolbar-group">
           <button
             className="icon-btn"
             title="View columns"
@@ -1740,6 +1959,17 @@ export function PlannerEditor(): React.JSX.Element {
             onClick={() => setCalendarOpen(true)}
           >
             <MdiIcon path={mdiCalendarMonth} size={16} />
+          </button>
+        </div>
+        <span className="planner-toolbar-divider" />
+        <div className="planner-toolbar-group">
+          <button
+            className="icon-btn"
+            title="Export to Excel"
+            disabled={sc.tasks.length === 0}
+            onClick={() => setExportOpen(true)}
+          >
+            <MdiIcon path={mdiFileExcelOutline} size={16} />
           </button>
         </div>
       </div>
@@ -1764,37 +1994,20 @@ export function PlannerEditor(): React.JSX.Element {
               >
                 <div className="planner-grid-head" style={{ gridTemplateColumns: template }}>
                   <div className="planner-col-toggle planner-cell"></div>
-                  <div className="planner-col-no planner-cell">No.</div>
-                  <div className="planner-col-title planner-cell" style={{ left: '74px' }}>
+                  {visibleCols.has('indicator') && (
+                    <div className="planner-col-indicator planner-cell"></div>
+                  )}
+                  <div className="planner-col-no planner-cell" style={{ left: noLeft }}>
+                    No.
+                  </div>
+                  <div className="planner-col-title planner-cell" style={{ left: titleLeft }}>
                     Title
                   </div>
-                  {visibleCols.has('status') && (
-                    <div className="planner-col-status planner-cell">Status</div>
-                  )}
-                  {visibleCols.has('owner') && (
-                    <div className="planner-col-owner planner-cell">Owner</div>
-                  )}
-                  {visibleCols.has('duration') && (
-                    <div className="planner-col-num planner-cell">Dur.</div>
-                  )}
-                  {visibleCols.has('planStart') && (
-                    <div className="planner-col-date planner-cell">Plan Start</div>
-                  )}
-                  {visibleCols.has('planEnd') && (
-                    <div className="planner-col-date planner-cell">Plan End</div>
-                  )}
-                  {visibleCols.has('actualStart') && (
-                    <div className="planner-col-date planner-cell">Actual Start</div>
-                  )}
-                  {visibleCols.has('actualEnd') && (
-                    <div className="planner-col-date planner-cell">Actual End</div>
-                  )}
-                  {visibleCols.has('percent') && (
-                    <div className="planner-col-num planner-cell">%</div>
-                  )}
-                  {visibleCols.has('note') && (
-                    <div className="planner-col-note planner-cell">Note</div>
-                  )}
+                  {movableCols.map((key) => (
+                    <div key={key} className={`${MOVABLE_HEADERS[key].className} planner-cell`}>
+                      {MOVABLE_HEADERS[key].label}
+                    </div>
+                  ))}
                 </div>
                 <div className="planner-grid-body">{renderTaskTree(sc.tasks, null, 0)}</div>
               </div>
@@ -1843,7 +2056,7 @@ export function PlannerEditor(): React.JSX.Element {
             </button>
           </div>
         )}
-        <div className="planner-view-toggle">
+        <div className="view-toggle">
           <button
             className={`view-btn ${view === 'table' ? 'active' : ''}`}
             onClick={() => switchView('table')}
@@ -1890,6 +2103,39 @@ export function PlannerEditor(): React.JSX.Element {
             >
               On Hold
             </button>
+          </div>
+        </>
+      )}
+
+      {ownerMenu && ownerTask && (
+        <>
+          <div className="menu-overlay" onClick={() => setOwnerMenu(null)} />
+          <div
+            ref={ownerMenuRef}
+            className="note-menu planner-owner-menu"
+            style={{ left: ownerMenu.x, top: ownerMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {ownerNames.length === 0 ? (
+              <div className="planner-owner-empty">No owners yet — type a name above</div>
+            ) : (
+              ownerNames.map((name) => (
+                <div
+                  key={name.toLowerCase()}
+                  className="planner-owner-item"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => toggleOwner(ownerTask.id, name)}
+                >
+                  <input
+                    type="checkbox"
+                    checked={ownerChecked.has(name.toLowerCase())}
+                    readOnly
+                    tabIndex={-1}
+                  />
+                  <span>{name}</span>
+                </div>
+              ))
+            )}
           </div>
         </>
       )}
@@ -2048,24 +2294,54 @@ export function PlannerEditor(): React.JSX.Element {
           columns={COLUMNS}
           visible={visibleCols}
           disabledKeys={new Set(['no', 'title'])}
+          order={columnOrder}
+          fixedKeys={new Set(FIXED_COLUMNS)}
+          onMove={(key, dir) => {
+            setColumnOrder((prev) => {
+              const i = prev.indexOf(key)
+              const j = i + dir
+              if (i === -1 || j < 0 || j >= prev.length) return prev
+              const next = [...prev]
+              ;[next[i], next[j]] = [next[j], next[i]]
+              return next
+            })
+          }}
           onToggle={(key) => {
             const next = new Set(visibleCols)
             if (next.has(key)) next.delete(key)
             else next.add(key)
             setVisibleCols(next)
           }}
+          onReset={() => {
+            setVisibleCols(initVisibleCols(undefined))
+            setColumnOrder(initColumnOrder(undefined))
+          }}
           onClose={() => {
             const visibility = { ...(sc.columnVisibility ?? {}) }
             for (const c of COLUMNS) visibility[c.key] = visibleCols.has(c.key)
             visibility.no = true
             visibility.title = true
-            commit(sc, sc.tasks, { columnVisibility: visibility })
+            commit(sc, sc.tasks, { columnVisibility: visibility, columnOrder })
             setColumnsOpen(false)
           }}
         />
       )}
 
       {calendarOpen && <CalendarModal onClose={() => setCalendarOpen(false)} />}
+
+      {estimateOpen && <PlannerEstimateModal onClose={() => setEstimateOpen(false)} />}
+
+      {exportOpen && (
+        <PlannerExportModal
+          onClose={() => setExportOpen(false)}
+          onExport={(opts) => {
+            setExportOpen(false)
+            void handleExportExcel(opts)
+          }}
+        />
+      )}
+
+      {resourcesOpen && <PlannerResourcesModal onClose={() => setResourcesOpen(false)} />}
 
       {renaming && (
         <PromptModal

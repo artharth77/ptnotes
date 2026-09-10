@@ -13,6 +13,7 @@ import {
   deriveTaskNo,
   emptyTask,
   findTaskByTitle,
+  normalizeOwner,
   rollupScheduleTasks
 } from '@shared/planner'
 import { findCardByTitle, findColumnByName } from '@shared/kanban'
@@ -717,14 +718,14 @@ export const tools: PTTool[] = [
       function: {
         name: 'read_file',
         description:
-          'Read the text content of a project file (PDF, Excel workbooks converted to JSON/CSV, or any text file such as markdown, plain text, JSON, logs or YAML; files live in the project files folder, referenced as `file:<name>`). Excel workbooks can be filtered to a single worksheet with the `query` parameter. Extracts the text locally and returns it, so the user does not need to drag and drop the file again.',
+          'Read the text content of a project file (PDF, Word documents converted to markdown, Excel workbooks converted to JSON/CSV, or any text file such as markdown, plain text, JSON, logs or YAML; files live in the project files folder, referenced as `file:<name>` or `file:<subfolder>/<name>` when the file is inside a subfolder). Excel workbooks can be filtered to a single worksheet with the `query` parameter. Extracts the text locally and returns it, so the user does not need to drag and drop the file again. Content is truncated at 240,000 characters; for long files use the `page` parameter to read further pages (the result reports `totalPages`).',
         parameters: {
           type: 'object',
           properties: {
             name: {
               type: 'string',
               description:
-                'Name of the file, e.g. report.pdf, data.xlsx, notes.md, data.json or app.log'
+                'Path of the file relative to the project files folder, e.g. report.pdf, docs/report.pdf, data.xlsx, notes.md or app.log'
             },
             format: {
               type: 'string',
@@ -735,6 +736,11 @@ export const tools: PTTool[] = [
               type: 'string',
               description:
                 'Excel workbooks only, formatted as URL-style vars "var=value&var=value" (values may be URL-encoded). Supported vars: workspace = worksheet name or 1-based worksheet number, e.g. "workspace=Sales" or "workspace=2"; list=workspace returns a JSON list of all worksheets with their 1-based index instead of content. Only supported when reading .xlsx/.xlsm files.'
+            },
+            page: {
+              type: 'number',
+              description:
+                '1-based page to read, for long files. PDF: that PDF page. Text/Word files: a ~240,000-character window (page 1 = the first 240,000 characters). Omit to read from the start (truncated at 240,000 characters). The result includes totalPages — call again with the next page to read more. Not supported for Excel workbooks (use query=workspace=... instead).'
             }
           },
           required: ['name']
@@ -747,7 +753,7 @@ export const tools: PTTool[] = [
       if (!name) return JSON.stringify({ ok: false, error: 'No file name provided' })
       const path = await ctx.service.projectFilePath(project, name)
       if (!path) {
-        const files = await ctx.service.listFiles(project)
+        const files = await ctx.service.listFilesDeep(project)
         return JSON.stringify({
           ok: false,
           error: `File "${name}" not found in this project. Available files: ${
@@ -759,10 +765,21 @@ export const tools: PTTool[] = [
         const format = (args.format as 'json' | 'csv') ?? 'json'
         const rawQuery = String(args.query ?? '').trim()
         const excelQuery = rawQuery ? parseWorkbookQuery(rawQuery) : undefined
-        const { text, pageCount, charCount, truncated } = await readFileAsText(
+        let pageNum: number | undefined
+        if (args.page !== undefined && args.page !== null && args.page !== '') {
+          pageNum = Number(args.page)
+          if (!Number.isInteger(pageNum) || pageNum < 1) {
+            return JSON.stringify({
+              ok: false,
+              error: 'The page parameter must be a positive integer (1-based page number).'
+            })
+          }
+        }
+        const { text, pageCount, charCount, truncated, page, totalPages } = await readFileAsText(
           path,
           format,
-          excelQuery
+          excelQuery,
+          pageNum
         )
         return JSON.stringify({
           ok: true,
@@ -771,6 +788,8 @@ export const tools: PTTool[] = [
           pageCount,
           charCount,
           truncated,
+          ...(page !== undefined ? { page } : {}),
+          ...(totalPages !== undefined ? { totalPages } : {}),
           text
         })
       } catch (err) {
@@ -1819,7 +1838,10 @@ export const tools: PTTool[] = [
                 'Optional task id, task number (e.g. 1.2) or title to insert this new task directly after. Positions within the sibling list chosen by `parent`; if `parent` is omitted, the new task becomes a sibling of the matched task (nested under the same parent). If the task is not found, the new task is appended at the top level.'
             },
             title: { type: 'string', description: 'Task title' },
-            owner: { type: 'string', description: 'Owner (optional)' },
+            owner: {
+              type: 'string',
+              description: 'Owner (optional), comma-separated for multiple owners'
+            },
             duration: {
               type: 'number',
               description: 'Duration in working days (used with planStart to compute planEnd)'
@@ -1857,7 +1879,7 @@ export const tools: PTTool[] = [
           const title = String(args.title ?? '').trim()
           task.title = title
           const owner = str(args.owner)
-          if (owner !== null) task.owner = owner
+          if (owner !== null) task.owner = normalizeOwner(owner)
           const note = str(args.note)
           if (note !== null) task.note = note
           const status = statusOf(args.status)
@@ -1946,7 +1968,10 @@ export const tools: PTTool[] = [
                 'Optional task id, task number (e.g. 1.2) or title to position this task directly after within the sibling list chosen by `parent`. If `parent` is omitted, the task becomes a sibling of the matched task (nested under the same parent). If the task is not found, the task is appended at the top level.'
             },
             title: { type: 'string', description: 'New title' },
-            owner: { type: 'string', description: 'New owner' },
+            owner: {
+              type: 'string',
+              description: 'New owner, comma-separated for multiple owners'
+            },
             duration: {
               type: 'number',
               description: 'New duration in working days'
@@ -1986,13 +2011,18 @@ export const tools: PTTool[] = [
               `Task "${task.title}" is a parent task: plan start/end and duration are derived from its children. Update the child tasks instead.`
             )
           }
+          if (task.children.length > 0 && args.owner !== undefined) {
+            throw new Error(
+              `Task "${task.title}" is a parent task: owner is not editable on parent tasks.`
+            )
+          }
           const calendar = await ctx.service.readCalendar(project)
 
           const next = { ...task } as ScheduleTask
           const title = str(args.title)
           if (title !== null) next.title = title
           const owner = str(args.owner)
-          if (owner !== null) next.owner = owner
+          if (owner !== null) next.owner = normalizeOwner(owner)
           const note = str(args.note)
           if (note !== null) next.note = note
           const status = statusOf(args.status)

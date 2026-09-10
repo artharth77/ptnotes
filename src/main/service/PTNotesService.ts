@@ -1,6 +1,6 @@
-import { promises as fs } from 'fs'
+import { promises as fs, type Dirent } from 'fs'
 import { createHash, randomUUID } from 'crypto'
-import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'path'
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'path'
 import { app, shell } from 'electron'
 import type {
   AiTraceEntry,
@@ -9,12 +9,19 @@ import type {
   ChatSessionMeta,
   ChatThread,
   CreateProjectResult,
+  ExplorerEntry,
+  ExplorerFolderNode,
+  FileEntry,
   NoteMeta,
   NoteSearchMatch,
+  PdfInfo,
+  PdfPageEdit,
+  PdfPageThumbnail,
   Project,
   ProjectCalendar,
   Schedule,
   ScheduleMeta,
+  SnapshotMeta,
   SkillContent,
   SkillList,
   SkillMeta,
@@ -49,12 +56,44 @@ import {
   validateScheduleId
 } from '@shared/planner'
 import { detectFileKind } from '../ai/reader'
+import {
+  captureScheduleSnapshot,
+  deleteSnapshotDir,
+  deleteSnapshotFile,
+  listSnapshotMetas,
+  moveSnapshotDir,
+  readSnapshotFile,
+  setSnapshotTag
+} from './snapshots'
+import { mergePdfs, pdfPageCount, rebuildPdfPages } from '../pdf/ops'
+import { closePdfRender, openPdfRender, renderPdfPage } from '../pdf/pdfRenderer'
 import type { SettingsStore } from '../settings'
 
 const WELCOME_ID = 'welcome'
 const REGISTRY_FILE = '.ptnotes-projects.json'
 const GLOBAL_SKILLS_DIR = '.skills'
 const BUILTIN_SKILLS_DIR = 'builtin-skills'
+const MAX_LISTED_FILES = 500
+const MAX_EXPLORER_TREE_NODES = 2000
+const MAX_EXPLORER_TREE_DEPTH = 12
+const MAX_PREVIEW_TEXT_BYTES = 2 * 1024 * 1024
+const MAX_MANAGE_PDF_BYTES = 50 * 1024 * 1024
+const MAX_MANAGE_PDF_PAGES = 500
+const MAX_MERGE_FILES = 20
+const MAX_MERGE_TOTAL_BYTES = 100 * 1024 * 1024
+const MAX_MERGE_TOTAL_PAGES = 500
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  const units = ['KB', 'MB', 'GB']
+  let v = bytes
+  let i = -1
+  do {
+    v /= 1024
+    i++
+  } while (v >= 1024 && i < units.length - 1)
+  return `${v >= 100 ? Math.round(v) : v.toFixed(1)} ${units[i]}`
+}
 const WELCOME_NOTE = `# Welcome to PTNotes
 
 This is your first note. Everything you write here is stored as markdown in:
@@ -303,6 +342,11 @@ export class PTNotesService {
 
   private calendarPath(project: string): string {
     return join(this.plannerDir(project), 'calendar.json')
+  }
+
+  /** Snapshot dir for one planner schedule (`<project>/.data/snapshots/planner/<id>`). */
+  private scheduleSnapshotDir(project: string, id: string): string {
+    return join(this.dataDir(project), 'snapshots', 'planner', validateScheduleId(id))
   }
 
   /** Global skills dir (shared across all projects), next to the project registry. */
@@ -1051,11 +1095,13 @@ export class PTNotesService {
       ext = '.pdf'
     } else if (kind === 'excel') {
       ext = originalExt.toLowerCase()
+    } else if (kind === 'docx') {
+      ext = '.docx'
     } else if (kind === 'text') {
       ext = originalExt.toLowerCase() || '.txt'
     } else {
       throw new Error(
-        `Unsupported file: "${original}" is a binary file. Only PDF, Excel (.xlsx/.xlsm) and text files can be added.`
+        `Unsupported file: "${original}" is a binary file. Only PDF, Word (.docx), Excel (.xlsx/.xlsm) and text files can be added.`
       )
     }
     const name = `${base}${ext}`
@@ -1083,23 +1129,453 @@ export class PTNotesService {
   }
 
   async listFiles(project: string): Promise<string[]> {
-    const dir = this.filesDir(project)
+    const entries = await this.listFileEntries(project)
+    return entries.filter((e) => !e.isDir).map((e) => e.name)
+  }
+
+  /**
+   * Resolve a user-supplied path (may contain `sub/folder` segments) against
+   * `<project>/files/`. Returns null for absolute paths, empty/dot segments,
+   * `..` escapes or paths that collapse back to the files root itself.
+   */
+  private resolveFilesPath(project: string, subpath: string): string | null {
+    const base = this.filesDir(project)
+    const rel = subpath.trim()
+    if (!rel) return base
+    if (isAbsolute(rel)) return null
+    const segments = rel.split(/[\\/]+/).filter((s) => s !== '' && s !== '.')
+    if (segments.length === 0 || segments.includes('..')) return null
+    const full = join(base, ...segments)
+    return full.startsWith(base + sep) ? full : null
+  }
+
+  /** One level of `<project>/files/<subpath>`: files and folders, dot-entries skipped. */
+  async listFileEntries(project: string, subpath = ''): Promise<FileEntry[]> {
+    const target = this.resolveFilesPath(project, subpath)
+    if (!target) return []
     try {
-      const entries = await fs.readdir(dir, { withFileTypes: true })
+      const entries = await fs.readdir(target, { withFileTypes: true })
       return entries
-        .filter((e) => e.isFile() && !e.name.startsWith('.'))
-        .map((e) => e.name)
-        .sort((a, b) => a.localeCompare(b))
+        .filter((e) => !e.name.startsWith('.'))
+        .map((e) => ({ name: e.name, isDir: e.isDirectory() }))
+        .sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1))
     } catch {
       return []
     }
   }
 
+  /** Every file under `<project>/files/` as a relative path (capped, for AI listings). */
+  async listFilesDeep(project: string): Promise<string[]> {
+    const out: string[] = []
+    const walk = async (dir: string, prefix: string): Promise<void> => {
+      if (out.length >= MAX_LISTED_FILES) return
+      let entries: Dirent[] = []
+      try {
+        entries = await fs.readdir(dir, { withFileTypes: true })
+      } catch {
+        return
+      }
+      for (const e of entries) {
+        if (out.length >= MAX_LISTED_FILES) return
+        if (e.name.startsWith('.')) continue
+        if (e.isDirectory()) {
+          await walk(join(dir, e.name), prefix ? `${prefix}/${e.name}` : e.name)
+        } else if (e.isFile()) {
+          out.push(prefix ? `${prefix}/${e.name}` : e.name)
+        }
+      }
+    }
+    await walk(this.filesDir(project), '')
+    return out.sort((a, b) => a.localeCompare(b))
+  }
+
   async projectFilePath(project: string, fileName: string): Promise<string | null> {
-    const base = basename(fileName)
-    if (base !== fileName) return null
-    const full = join(this.filesDir(project), base)
+    if (!fileName.trim()) return null
+    const full = this.resolveFilesPath(project, fileName)
+    if (!full) return null
     return (await this.pathExists(full)) ? full : null
+  }
+
+  // ---- Files explorer (`<project>/files/` tree + mutations, backing the explorer panel) ----
+
+  /** One level of `<project>/files/<subpath>` enriched with size/mtime for the explorer list. */
+  async listExplorerEntries(project: string, subpath = ''): Promise<ExplorerEntry[]> {
+    const target = this.resolveFilesPath(project, subpath)
+    if (!target) return []
+    const rel = subpath
+      .split(/[\\/]+/)
+      .filter((s) => s !== '' && s !== '.')
+      .join('/')
+    let entries: Dirent[]
+    try {
+      entries = await fs.readdir(target, { withFileTypes: true })
+    } catch {
+      return []
+    }
+    const out: ExplorerEntry[] = []
+    for (const e of entries) {
+      if (e.name.startsWith('.')) continue
+      let st
+      try {
+        st = await fs.stat(join(target, e.name))
+      } catch {
+        continue
+      }
+      out.push({
+        name: e.name,
+        path: rel ? `${rel}/${e.name}` : e.name,
+        isDir: e.isDirectory(),
+        size: e.isDirectory() ? null : st.size,
+        mtime: st.mtimeMs
+      })
+    }
+    return out.sort((a, b) =>
+      a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1
+    )
+  }
+
+  /** Full folder tree of `<project>/files/` (folders only, capped) for the explorer side panel. */
+  async listExplorerTree(project: string): Promise<ExplorerFolderNode> {
+    const root: ExplorerFolderNode = { name: 'files', path: '', children: [] }
+    let count = 1
+    const walk = async (
+      dir: string,
+      rel: string,
+      parent: ExplorerFolderNode,
+      depth: number
+    ): Promise<void> => {
+      if (depth > MAX_EXPLORER_TREE_DEPTH || count >= MAX_EXPLORER_TREE_NODES) return
+      let entries: Dirent[] = []
+      try {
+        entries = await fs.readdir(dir, { withFileTypes: true })
+      } catch {
+        return
+      }
+      for (const e of entries) {
+        if (!e.isDirectory() || e.name.startsWith('.') || count >= MAX_EXPLORER_TREE_NODES) continue
+        count++
+        const childRel = rel ? `${rel}/${e.name}` : e.name
+        const child: ExplorerFolderNode = { name: e.name, path: childRel, children: [] }
+        parent.children.push(child)
+        await walk(join(dir, e.name), childRel, child, depth + 1)
+      }
+      parent.children.sort((a, b) => a.name.localeCompare(b.name))
+    }
+    await walk(this.filesDir(project), '', root, 0)
+    return root
+  }
+
+  /** Validate a single entry name (create folder / rename): no separators, dots-only tricks. */
+  private validateEntryName(name: string): string {
+    const trimmed = name.trim()
+    if (!trimmed) throw new Error('Name cannot be empty')
+    if (trimmed === '.' || trimmed === '..') throw new Error(`Invalid name: "${trimmed}"`)
+    if (trimmed.includes('/') || trimmed.includes('\\')) {
+      throw new Error(`Name cannot contain path separators: "${trimmed}"`)
+    }
+    if (trimmed.startsWith('.')) throw new Error('Name cannot start with a dot')
+    if (trimmed.length > 255) throw new Error('Name is too long')
+    return trimmed
+  }
+
+  /** First available name in `dir`: `name`, then `name (2)`, `name (3)`, … */
+  private async uniqueEntryName(dir: string, name: string): Promise<string> {
+    if (!(await this.pathExists(join(dir, name)))) return name
+    const ext = extname(name)
+    const stem = ext ? name.slice(0, -ext.length) : name
+    for (let i = 2; ; i++) {
+      const candidate = `${stem} (${i})${ext}`
+      if (!(await this.pathExists(join(dir, candidate)))) return candidate
+    }
+  }
+
+  private async copyEntryRecursive(src: string, dest: string): Promise<void> {
+    const st = await fs.lstat(src)
+    if (st.isDirectory()) {
+      await fs.mkdir(dest, { recursive: true })
+      for (const entry of await fs.readdir(src, { withFileTypes: true })) {
+        await this.copyEntryRecursive(join(src, entry.name), join(dest, entry.name))
+      }
+    } else {
+      await fs.copyFile(src, dest)
+    }
+  }
+
+  async createFilesFolder(project: string, parentSubpath: string, name: string): Promise<string> {
+    const parent = this.resolveFilesPath(project, parentSubpath)
+    if (!parent) throw new Error(`Invalid folder path: "${parentSubpath}"`)
+    const clean = this.validateEntryName(name)
+    await fs.mkdir(parent, { recursive: true })
+    const finalName = await this.uniqueEntryName(parent, clean)
+    const dest = join(parent, finalName)
+    await fs.mkdir(dest)
+    return relative(this.filesDir(project), dest)
+  }
+
+  /** Resolve explorer item paths, rejecting the files root and escapes. */
+  private resolveExplorerItem(project: string, itemPath: string): string {
+    const full = this.resolveFilesPath(project, itemPath)
+    if (!full || full === this.filesDir(project)) {
+      throw new Error(`Invalid path: "${itemPath}"`)
+    }
+    return full
+  }
+
+  async copyFilesEntries(
+    project: string,
+    fromPaths: string[],
+    destSubpath: string
+  ): Promise<number> {
+    const dest = this.resolveFilesPath(project, destSubpath)
+    if (!dest) throw new Error(`Invalid destination folder: "${destSubpath}"`)
+    await fs.mkdir(dest, { recursive: true })
+    for (const from of fromPaths) {
+      const src = this.resolveExplorerItem(project, from)
+      if (dest === src || dest.startsWith(src + sep)) {
+        throw new Error(`Cannot copy "${basename(src)}" into itself`)
+      }
+      const finalName = await this.uniqueEntryName(dest, basename(src))
+      await this.copyEntryRecursive(src, join(dest, finalName))
+    }
+    return fromPaths.length
+  }
+
+  async moveFilesEntries(
+    project: string,
+    fromPaths: string[],
+    destSubpath: string
+  ): Promise<number> {
+    const dest = this.resolveFilesPath(project, destSubpath)
+    if (!dest) throw new Error(`Invalid destination folder: "${destSubpath}"`)
+    await fs.mkdir(dest, { recursive: true })
+    for (const from of fromPaths) {
+      const src = this.resolveExplorerItem(project, from)
+      if (dirname(src) === dest) continue
+      if (dest === src || dest.startsWith(src + sep)) {
+        throw new Error(`Cannot move "${basename(src)}" into itself`)
+      }
+      const finalName = await this.uniqueEntryName(dest, basename(src))
+      const target = join(dest, finalName)
+      try {
+        await fs.rename(src, target)
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'EXDEV') throw err
+        await this.copyEntryRecursive(src, target)
+        await fs.rm(src, { recursive: true })
+      }
+    }
+    return fromPaths.length
+  }
+
+  async renameFilesEntry(project: string, itemPath: string, newName: string): Promise<string> {
+    const src = this.resolveExplorerItem(project, itemPath)
+    const clean = this.validateEntryName(newName)
+    const dest = join(dirname(src), clean)
+    if (dest !== src && (await this.pathExists(dest))) {
+      throw new Error(`"${clean}" already exists`)
+    }
+    if (dest !== src) await fs.rename(src, dest)
+    return relative(this.filesDir(project), dest)
+  }
+
+  async deleteFilesEntries(project: string, itemPaths: string[]): Promise<number> {
+    for (const itemPath of itemPaths) {
+      const full = this.resolveExplorerItem(project, itemPath)
+      await fs.rm(full, { recursive: true, force: true })
+    }
+    return itemPaths.length
+  }
+
+  /** Import an externally dropped file/folder into `<project>/files/<destSubpath>` (raw copy, any type). */
+  async importDroppedFile(
+    project: string,
+    sourcePath: string,
+    destSubpath: string,
+    fileName?: string
+  ): Promise<string> {
+    const dest = this.resolveFilesPath(project, destSubpath)
+    if (!dest) throw new Error(`Invalid destination folder: "${destSubpath}"`)
+    const raw = (fileName || basename(sourcePath)).trim()
+    if (!raw || raw === '.' || raw === '..' || raw.includes('/') || raw.includes('\\')) {
+      throw new Error(`Invalid file name: "${raw}"`)
+    }
+    const st = await fs.stat(sourcePath)
+    await fs.mkdir(dest, { recursive: true })
+    const finalName = await this.uniqueEntryName(dest, raw)
+    const target = join(dest, finalName)
+    if (st.isDirectory()) {
+      await this.copyEntryRecursive(sourcePath, target)
+    } else {
+      await fs.copyFile(sourcePath, target)
+    }
+    return relative(this.filesDir(project), target)
+  }
+
+  /** Read a text file from `<project>/files/` for the explorer preview (capped size). */
+  async readFileText(project: string, subpath: string): Promise<string> {
+    const full = await this.projectFilePath(project, subpath)
+    if (!full) throw new Error(`File not found: "${subpath}"`)
+    const st = await fs.stat(full)
+    if (st.size > MAX_PREVIEW_TEXT_BYTES) {
+      throw new Error(
+        `File is too large to preview (${formatBytes(st.size)}). Limit is ${formatBytes(MAX_PREVIEW_TEXT_BYTES)}.`
+      )
+    }
+    return fs.readFile(full, 'utf8')
+  }
+
+  // ---- PDF page management + merge (`<project>/files/` PDFs) ----
+
+  /** Resolve a project file for PDF editing: traversal guards + content check + size cap. */
+  private async resolvePdfForEdit(
+    project: string,
+    subpath: string,
+    maxBytes: number
+  ): Promise<{
+    full: string
+    name: string
+    st: { size: number; mtimeMs: number }
+    buffer: Buffer
+  }> {
+    const full = await this.projectFilePath(project, subpath)
+    if (!full) throw new Error(`File not found: "${subpath}"`)
+    const st = await fs.stat(full)
+    if (st.size > maxBytes) {
+      throw new Error(
+        `"${basename(full)}" is too large (${formatBytes(st.size)}). Limit is ${formatBytes(maxBytes)}.`
+      )
+    }
+    if ((await detectFileKind(full)) !== 'pdf') {
+      throw new Error(`"${basename(full)}" is not a PDF file.`)
+    }
+    const buffer = await fs.readFile(full)
+    return { full, name: basename(full), st, buffer }
+  }
+
+  private pdfRenderKey(full: string, st: { size: number; mtimeMs: number }): string {
+    return `${full}|${st.size}|${Math.round(st.mtimeMs)}`
+  }
+
+  private async guardManagePages(session: PdfInfo, name: string, key: string): Promise<void> {
+    if (session.pages > MAX_MANAGE_PDF_PAGES) {
+      await closePdfRender(key)
+      throw new Error(
+        `"${name}" has too many pages to manage (${session.pages}). Limit is ${MAX_MANAGE_PDF_PAGES}.`
+      )
+    }
+  }
+
+  /** Page count + base rotations for the PDF page manager. */
+  async pdfInfo(project: string, subpath: string): Promise<PdfInfo> {
+    const { full, name, st, buffer } = await this.resolvePdfForEdit(
+      project,
+      subpath,
+      MAX_MANAGE_PDF_BYTES
+    )
+    const key = this.pdfRenderKey(full, st)
+    const session = await openPdfRender(key, buffer)
+    await this.guardManagePages(session, name, key)
+    return { pages: session.pages, rotations: session.rotations }
+  }
+
+  /** Render one page thumbnail for the PDF page manager (optionally rotated). */
+  async pdfRenderPage(
+    project: string,
+    subpath: string,
+    page: number,
+    rotation?: number
+  ): Promise<PdfPageThumbnail> {
+    if (!Number.isInteger(page) || page < 1) throw new Error(`Invalid page number: ${page}.`)
+    if (rotation !== undefined && ![0, 90, 180, 270].includes(rotation)) {
+      throw new Error(`Invalid rotation ${rotation}: must be 0, 90, 180 or 270.`)
+    }
+    const { full, name, st, buffer } = await this.resolvePdfForEdit(
+      project,
+      subpath,
+      MAX_MANAGE_PDF_BYTES
+    )
+    const key = this.pdfRenderKey(full, st)
+    const session = await openPdfRender(key, buffer)
+    await this.guardManagePages(session, name, key)
+    return renderPdfPage(key, buffer, page, rotation)
+  }
+
+  /** Rebuild a PDF (reorder/delete/rotate) and save it beside the source as `name (pages).pdf`. */
+  async pdfRebuild(project: string, subpath: string, edits: PdfPageEdit[]): Promise<string> {
+    const { full, name, buffer } = await this.resolvePdfForEdit(
+      project,
+      subpath,
+      MAX_MANAGE_PDF_BYTES
+    )
+    const pageCount = await pdfPageCount(buffer, name)
+    if (pageCount > MAX_MANAGE_PDF_PAGES) {
+      throw new Error(
+        `"${name}" has too many pages to manage (${pageCount}). Limit is ${MAX_MANAGE_PDF_PAGES}.`
+      )
+    }
+    const out = await rebuildPdfPages(buffer, edits, name)
+    const dir = dirname(full)
+    const ext = extname(name)
+    const stem = ext ? name.slice(0, -ext.length) : name
+    const finalName = await this.uniqueEntryName(dir, `${stem} (pages).pdf`)
+    const dest = join(dir, finalName)
+    await fs.writeFile(dest, out)
+    return relative(this.filesDir(project), dest)
+  }
+
+  /** Merge selected PDFs (in array order) into a new PDF written into `destSubpath`. */
+  async pdfMerge(
+    project: string,
+    sourceSubpaths: string[],
+    destSubpath: string,
+    destName?: string
+  ): Promise<string> {
+    if (!Array.isArray(sourceSubpaths) || sourceSubpaths.length < 2) {
+      throw new Error('Select at least two PDFs to merge.')
+    }
+    if (sourceSubpaths.length > MAX_MERGE_FILES) {
+      throw new Error(
+        `Too many PDFs selected (${sourceSubpaths.length}). Limit is ${MAX_MERGE_FILES}.`
+      )
+    }
+    const names: string[] = []
+    const buffers: Buffer[] = []
+    let totalBytes = 0
+    for (const sourceSubpath of sourceSubpaths) {
+      const { name, buffer } = await this.resolvePdfForEdit(
+        project,
+        sourceSubpath,
+        MAX_MANAGE_PDF_BYTES
+      )
+      totalBytes += buffer.length
+      if (totalBytes > MAX_MERGE_TOTAL_BYTES) {
+        throw new Error(
+          `Selected PDFs are too large in total (${formatBytes(totalBytes)}). Limit is ${formatBytes(MAX_MERGE_TOTAL_BYTES)}.`
+        )
+      }
+      names.push(name)
+      buffers.push(buffer)
+    }
+    let totalPages = 0
+    for (let i = 0; i < buffers.length; i++) {
+      totalPages += await pdfPageCount(buffers[i], names[i])
+    }
+    if (totalPages > MAX_MERGE_TOTAL_PAGES) {
+      throw new Error(
+        `Selected PDFs have too many pages in total (${totalPages}). Limit is ${MAX_MERGE_TOTAL_PAGES}.`
+      )
+    }
+    const merged = await mergePdfs(buffers, names)
+    const dest = this.resolveFilesPath(project, destSubpath)
+    if (!dest) throw new Error(`Invalid destination folder: "${destSubpath}"`)
+    const clean = this.validateEntryName(destName || 'merged.pdf')
+    const finalName = await this.uniqueEntryName(
+      dest,
+      extname(clean).toLowerCase() === '.pdf' ? clean : `${clean}.pdf`
+    )
+    const destPath = join(dest, finalName)
+    await fs.writeFile(destPath, merged)
+    return relative(this.filesDir(project), destPath)
   }
 
   // ---- Module run storage (JSON kept in <project>/.data/modules/, out of the # file picker) ----
@@ -1489,6 +1965,15 @@ export class PTNotesService {
     if (!schedule || typeof schedule.id !== 'string') throw new Error('Invalid schedule')
     await fs.mkdir(this.plannerDir(project), { recursive: true })
     await this.atomicWriteJson(this.schedulePath(project, schedule.id), schedule)
+    try {
+      await captureScheduleSnapshot(
+        this.scheduleSnapshotDir(project, schedule.id),
+        schedule,
+        Date.now()
+      )
+    } catch {
+      // snapshot failure must never fail the save
+    }
   }
 
   async createSchedule(project: string, name: string): Promise<ScheduleMeta> {
@@ -1562,6 +2047,10 @@ export class PTNotesService {
       } else {
         await fs.mkdir(this.plannerDir(project), { recursive: true })
         await this.atomicWriteJson(this.schedulePath(project, newId), schedule)
+        await moveSnapshotDir(
+          this.scheduleSnapshotDir(project, id),
+          this.scheduleSnapshotDir(project, newId)
+        )
         await fs.unlink(this.schedulePath(project, id)).catch(() => {})
       }
       return {
@@ -1573,10 +2062,88 @@ export class PTNotesService {
     })
   }
 
+  async duplicateSchedule(project: string, id: string): Promise<ScheduleMeta> {
+    return this.withPlannerLock(project, async () => {
+      const schedule = await this.readSchedule(project, id)
+      if (!schedule) throw new Error(`Schedule "${id}" not found`)
+      const base = `${schedule.name} (copy)`
+      let name = base
+      let newId = slugify(name) || 'copy'
+      for (let i = 2; await this.scheduleIdExists(project, newId); i++) {
+        name = `${base} ${i}`
+        newId = slugify(name) || `copy-${i}`
+      }
+      const now = Date.now()
+      const copy: Schedule = { ...schedule, id: newId, name, createdAt: now, updatedAt: now }
+      await this.writeSchedule(project, copy)
+      return {
+        id: newId,
+        name,
+        updatedAt: now,
+        taskCount: copy.tasks.reduce((n, t) => n + countTasks(t), 0)
+      }
+    })
+  }
+
   async deleteSchedule(project: string, id: string): Promise<void> {
     return this.withPlannerLock(project, async () => {
       await fs.unlink(this.schedulePath(project, id)).catch(() => {})
+      await deleteSnapshotDir(this.scheduleSnapshotDir(project, id))
     })
+  }
+
+  /** Snapshot history of one schedule (newest first). */
+  async listSnapshots(project: string, scheduleId: string): Promise<SnapshotMeta[]> {
+    return listSnapshotMetas(this.scheduleSnapshotDir(project, scheduleId))
+  }
+
+  async readSnapshot(project: string, scheduleId: string, ts: number): Promise<Schedule | null> {
+    return readSnapshotFile(this.scheduleSnapshotDir(project, scheduleId), ts)
+  }
+
+  /**
+   * Restore a snapshot: writes the snapshot back through the locked save path,
+   * then captures the overwritten content forced + nudged one minute back —
+   * capturing in this order keeps both sides of the restore in separate
+   * retention buckets, so a restore is always reversible.
+   */
+  async restoreSnapshot(project: string, scheduleId: string, ts: number): Promise<Schedule> {
+    return this.withPlannerLock(project, async () => {
+      const current = await this.readSchedule(project, scheduleId)
+      if (!current) throw new Error(`Schedule "${scheduleId}" not found`)
+      const snapshot = await readSnapshotFile(this.scheduleSnapshotDir(project, scheduleId), ts)
+      if (!snapshot) throw new Error(`Snapshot not found`)
+      const restored: Schedule = { ...snapshot, id: scheduleId, updatedAt: Date.now() }
+      await this.writeSchedule(project, restored)
+      try {
+        await captureScheduleSnapshot(
+          this.scheduleSnapshotDir(project, scheduleId),
+          current,
+          Date.now() - 60_000,
+          { force: true }
+        )
+      } catch {
+        // best effort — restoring matters more than the pre-restore snapshot
+      }
+      return restored
+    })
+  }
+
+  async setSnapshotTag(
+    project: string,
+    scheduleId: string,
+    ts: number,
+    tag: string | null
+  ): Promise<void> {
+    return this.withPlannerLock(project, () =>
+      setSnapshotTag(this.scheduleSnapshotDir(project, scheduleId), ts, tag)
+    )
+  }
+
+  async deleteSnapshot(project: string, scheduleId: string, ts: number): Promise<void> {
+    return this.withPlannerLock(project, () =>
+      deleteSnapshotFile(this.scheduleSnapshotDir(project, scheduleId), ts)
+    )
   }
 
   // ---- Calendar (shared project working-day config) ----

@@ -22,14 +22,21 @@ const {
   applyDateRule,
   computeDuration,
   computeEndDate,
+  collectOwners,
   countTasks,
   defaultCalendar,
   deriveStatus,
   deriveTaskNo,
   emptyTask,
+  estimatePercentComplete,
   findTaskByTitle,
   nextWorkingDayString,
   normalizeCalendar,
+  normalizeColumnOrder,
+  normalizeOwner,
+  ownerStats,
+  parseOwners,
+  planIndicator,
   rollupScheduleTasks,
   validateScheduleId
 } = await import('../src/shared/planner')
@@ -189,6 +196,251 @@ const onHoldRollup = rollupScheduleTasks(
 )
 assert.equal(onHoldRollup[0].status, 'on-hold', 'parent on-hold preserved through rollup')
 
+// ---- plan indicator ----
+
+const today = '2024-01-10'
+assert.equal(
+  planIndicator(mk('a', 100, '2024-01-01', '2024-01-05'), today),
+  'green',
+  '100% is green'
+)
+assert.equal(planIndicator(mk('b', 100, null, null), today), 'green', '100% with no dates is green')
+assert.equal(
+  planIndicator(mk('c', 50, '2024-01-01', '2024-01-15'), today),
+  'yellow',
+  'today inside plan window'
+)
+assert.equal(
+  planIndicator(mk('d', 50, '2024-01-10', '2024-01-15'), today),
+  'yellow',
+  'today == planStart'
+)
+assert.equal(
+  planIndicator(mk('e', 50, '2024-01-01', '2024-01-10'), today),
+  'yellow',
+  'today == planEnd'
+)
+assert.equal(
+  planIndicator(mk('f', 50, '2024-01-01', '2024-01-09'), today),
+  'red',
+  'today past planEnd'
+)
+assert.equal(
+  planIndicator(mk('g', 50, '2024-01-11', '2024-01-15'), today),
+  'none',
+  'today before planStart'
+)
+assert.equal(planIndicator(mk('h', 50, null, null), today), 'none', 'no plan dates')
+assert.equal(
+  planIndicator(mk('i', 50, '2024-01-01', null), today),
+  'yellow',
+  'only planStart, today on/after it'
+)
+assert.equal(
+  planIndicator(mk('j', 50, '2024-01-11', null), today),
+  'none',
+  'only planStart, today before it'
+)
+assert.equal(
+  planIndicator(mk('k', 50, null, '2024-01-15'), today),
+  'yellow',
+  'only planEnd, today on/before it'
+)
+assert.equal(
+  planIndicator(mk('l', 50, null, '2024-01-09'), today),
+  'red',
+  'only planEnd, today past it'
+)
+
+// ---- column order ----
+
+const allCols = [
+  'indicator',
+  'no',
+  'title',
+  'status',
+  'owner',
+  'duration',
+  'planStart',
+  'planEnd',
+  'actualStart',
+  'actualEnd',
+  'percent',
+  'note'
+]
+const fixedCols = ['indicator', 'no', 'title']
+
+assert.deepEqual(
+  normalizeColumnOrder(undefined, allCols, fixedCols),
+  allCols,
+  'no saved order -> default'
+)
+assert.deepEqual(
+  normalizeColumnOrder(
+    [
+      'indicator',
+      'no',
+      'title',
+      'note',
+      'status',
+      'owner',
+      'duration',
+      'planStart',
+      'planEnd',
+      'actualStart',
+      'actualEnd',
+      'percent'
+    ],
+    allCols,
+    fixedCols
+  ),
+  [
+    'indicator',
+    'no',
+    'title',
+    'note',
+    'status',
+    'owner',
+    'duration',
+    'planStart',
+    'planEnd',
+    'actualStart',
+    'actualEnd',
+    'percent'
+  ],
+  'custom order kept'
+)
+assert.deepEqual(
+  normalizeColumnOrder(
+    [
+      'no',
+      'status',
+      'indicator',
+      'title',
+      'owner',
+      'duration',
+      'planStart',
+      'planEnd',
+      'actualStart',
+      'actualEnd',
+      'percent',
+      'note'
+    ],
+    allCols,
+    fixedCols
+  ),
+  [
+    'indicator',
+    'no',
+    'title',
+    'status',
+    'owner',
+    'duration',
+    'planStart',
+    'planEnd',
+    'actualStart',
+    'actualEnd',
+    'percent',
+    'note'
+  ],
+  'fixed keys forced to the front in canonical order'
+)
+assert.deepEqual(
+  normalizeColumnOrder(['bogus', 'status', 'note'], allCols, fixedCols),
+  [
+    'indicator',
+    'no',
+    'title',
+    'status',
+    'note',
+    'owner',
+    'duration',
+    'planStart',
+    'planEnd',
+    'actualStart',
+    'actualEnd',
+    'percent'
+  ],
+  'unknown keys dropped, missing keys appended in default order'
+)
+assert.deepEqual(
+  normalizeColumnOrder(['status', 'status', 'note'], allCols, fixedCols),
+  [
+    'indicator',
+    'no',
+    'title',
+    'status',
+    'note',
+    'owner',
+    'duration',
+    'planStart',
+    'planEnd',
+    'actualStart',
+    'actualEnd',
+    'percent'
+  ],
+  'duplicates deduped'
+)
+
+// ---- estimate percent ----
+
+assert.equal(estimatePercentComplete([], today), 0, 'empty tree')
+assert.equal(
+  estimatePercentComplete([mk('a', 100, '2024-01-01', '2024-02-01')], today),
+  100,
+  'leaf already 100 stays 100'
+)
+assert.equal(
+  estimatePercentComplete([mk('b', 40, '2024-01-01', '2024-01-05')], today),
+  100,
+  'leaf planEnd before estimate date -> 100'
+)
+assert.equal(
+  estimatePercentComplete([mk('c', 40, '2024-01-01', '2024-01-10')], today),
+  100,
+  'leaf planEnd on estimate date -> 100'
+)
+assert.equal(
+  estimatePercentComplete([mk('d', 40, '2024-01-01', '2024-01-15')], today),
+  40,
+  'leaf planEnd after estimate date keeps filled value'
+)
+assert.equal(
+  estimatePercentComplete([mk('e', 30, null, null)], today),
+  30,
+  'leaf without planEnd keeps filled value'
+)
+
+const estC1 = mk('c1', 0, '2024-01-01', '2024-01-05') // 5 working days, est 100
+const estC2 = mk('c2', 50, '2024-01-08', '2024-01-12') // 5 working days, est 50
+const estParent = { ...emptyTask(), id: 'p', children: [estC1, estC2] }
+assert.equal(
+  estimatePercentComplete([estParent], today),
+  75,
+  'parent is duration-weighted mean of estimates'
+)
+assert.equal(
+  estimatePercentComplete([{ ...emptyTask(), id: 'g', children: [estParent] }], today),
+  75,
+  'nested rollup'
+)
+assert.equal(
+  estimatePercentComplete(
+    [{ ...emptyTask(), id: 'p2', children: [mk('c3', 100, null, null), mk('c4', 20, null, null)] }],
+    today
+  ),
+  60,
+  'no durations -> plain mean'
+)
+assert.equal(
+  estimatePercentComplete(
+    [mk('r1', 0, '2024-01-01', '2024-01-05'), mk('r2', 50, '2024-01-08', '2024-01-11')],
+    today
+  ),
+  78,
+  'multiple roots weighted (100*5 + 50*4) / 9'
+)
+
 // ---- search / count / validate ----
 
 const titled = (id: string, title: string, children: ScheduleTask[] = []): ScheduleTask => ({
@@ -223,6 +475,113 @@ for (const bad of ['', '.', '..', 'a/b', 'a\\b']) {
 const e = emptyTask()
 assert.ok(e.id.length > 0, 'emptyTask has an id')
 assert.equal(e.duration, 1, 'emptyTask defaults duration to 1')
+
+// ---- owners ----
+
+assert.deepEqual(parseOwners('Alice, Bob'), ['Alice', 'Bob'])
+assert.deepEqual(parseOwners('  alice ,  BOB ,, '), ['alice', 'BOB'], 'trims, drops empties')
+assert.deepEqual(parseOwners(''), [])
+assert.deepEqual(parseOwners(' , '), [])
+assert.equal(
+  normalizeOwner('alice, Alice, BOB'),
+  'alice, BOB',
+  'case-insensitive dedupe keeps first spelling'
+)
+assert.equal(normalizeOwner('Bob, Alice'), 'Bob, Alice', 'order preserved')
+assert.equal(normalizeOwner(' , '), '', 'empty segments normalize to empty')
+assert.deepEqual(
+  collectOwners([
+    { ...emptyTask(), id: 'p', owner: 'Alice', children: [mk('c1', 0, null, null, 'c1')] },
+    mk('c2', 0, null, null, 'c2')
+  ]),
+  ['Alice'],
+  'collectOwners walks the tree'
+)
+const ownerTree: ScheduleTask[] = [
+  {
+    ...emptyTask(),
+    id: 'p',
+    owner: 'Alice',
+    children: [{ ...mk('c1', 0, null, null, 'c1'), owner: 'alice' }]
+  },
+  { ...mk('c2', 0, null, null, 'c2'), owner: 'Bob' }
+]
+assert.deepEqual(
+  collectOwners(ownerTree),
+  ['Alice', 'Bob'],
+  'distinct owners, first-seen order, case-insensitive'
+)
+
+// ---- owner stats ----
+
+assert.deepEqual(ownerStats([]), [], 'no tasks -> no owners')
+
+const statsTree: ScheduleTask[] = [
+  {
+    ...emptyTask(),
+    id: 'p1',
+    owner: 'Alice, Bob',
+    status: 'in-progress',
+    percentComplete: 50,
+    duration: 2
+  },
+  {
+    ...emptyTask(),
+    id: 'l1',
+    owner: 'alice',
+    status: 'completed',
+    percentComplete: 100,
+    duration: 2
+  },
+  {
+    ...emptyTask(),
+    id: 'l2',
+    owner: 'Bob',
+    status: 'not-started',
+    percentComplete: 0,
+    duration: 1
+  },
+  {
+    ...emptyTask(),
+    id: 'l3',
+    owner: 'Carol',
+    status: 'pending',
+    percentComplete: 30,
+    duration: null
+  },
+  {
+    ...emptyTask(),
+    id: 'l4',
+    owner: 'Carol',
+    status: 'on-hold',
+    percentComplete: 10,
+    duration: null
+  }
+]
+const stats = ownerStats(statsTree)
+assert.deepEqual(
+  stats.map((s) => s.name),
+  ['Alice', 'Bob', 'Carol'],
+  'first-seen display order, case-insensitive dedupe'
+)
+const alice = stats.find((s) => s.name === 'Alice')!
+assert.equal(alice.assigned, 2, 'Alice credited on both "Alice" and "alice"')
+assert.equal(alice.inProgress, 1)
+assert.equal(alice.completed, 1)
+assert.equal(alice.percentComplete, 75, 'duration-weighted mean (50*2 + 100*2) / 4')
+
+const bob = stats.find((s) => s.name === 'Bob')!
+assert.equal(bob.assigned, 2)
+assert.equal(bob.inProgress, 1)
+assert.equal(bob.notStarted, 1)
+assert.equal(bob.percentComplete, 33, 'duration-weighted mean (50*2 + 0*1) / 3')
+
+const carol = stats.find((s) => s.name === 'Carol')!
+assert.equal(carol.assigned, 2, 'pending + on-hold both count toward assigned')
+assert.equal(carol.notStarted, 0, 'pending/on-hold are not status buckets')
+assert.equal(carol.inProgress, 0)
+assert.equal(carol.completed, 0)
+assert.equal(carol.percentComplete, 20, 'plain mean (30 + 10) / 2 when no durations')
 
 // ---- service CRUD ----
 
@@ -604,5 +963,40 @@ const dupSchedules = await Promise.all([
   call('create_schedule', { name: 'Dup' })
 ])
 assert.equal(dupSchedules.filter((x) => (x as { ok: boolean }).ok).length, 1)
+
+// add_task normalizes comma-separated owner (trim, case-insensitive dedupe)
+r = await call('add_task', {
+  schedule: 'Sprint 13',
+  title: 'Owned',
+  owner: ' alice ,  BOB , alice '
+})
+assert.equal(r.ok, true)
+sched2 = await service.readSchedule('Build', 'sprint-13')
+assert.equal(
+  sched2!.tasks.find((t) => t.title === 'Owned')!.owner,
+  'alice, BOB',
+  'owner normalized on add'
+)
+
+// update_task normalizes owner
+r = await call('update_task', { schedule: 'Sprint 13', task: 'Owned', owner: 'Bob, alice, bob' })
+assert.equal(r.ok, true)
+sched2 = await service.readSchedule('Build', 'sprint-13')
+assert.equal(
+  sched2!.tasks.find((t) => t.title === 'Owned')!.owner,
+  'Bob, alice',
+  'owner normalized on update'
+)
+
+// update_task rejects owner on parent tasks
+r = await call('update_task', { schedule: 'Sprint 13', task: 'Wireframes', owner: 'X' })
+assert.equal(r.ok, false, 'owner not editable on parent tasks')
+assert.ok(String(r.error).includes('parent'), 'error mentions parent task')
+sched2 = await service.readSchedule('Build', 'sprint-13')
+assert.equal(
+  sched2!.tasks.find((t) => t.title === 'Wireframes')!.owner,
+  '',
+  'parent owner unchanged'
+)
 
 console.log('planner tests passed')

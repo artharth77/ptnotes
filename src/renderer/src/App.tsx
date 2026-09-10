@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from './store/useAppStore'
 import { friendlyError } from './errors'
 import { TopBar } from './components/TopBar'
+import { MdiIcon } from './components/MdiIcon'
+import { mdiFolderOpenOutline, mdiFolderOutline } from '@mdi/js'
 import { NoteList } from './components/NoteList'
 import { KanbanPanel } from './components/KanbanPanel'
 import { KanbanBoard } from './components/KanbanBoard'
@@ -9,6 +11,7 @@ import { KanbanCardModal } from './components/KanbanCardModal'
 import { PlannerPanel } from './components/PlannerPanel'
 import { PlannerEditor } from './components/PlannerEditor'
 import { MarkdownEditor } from './components/MarkdownEditor'
+import { FileTreePanel, FileListPanel } from './components/FileExplorer'
 import { ChatDrawer } from './components/ChatDrawer'
 import { GroupChatPanel } from './components/GroupChatPanel'
 import { BotTasksPanel } from './components/BotTasksPanel'
@@ -38,7 +41,7 @@ function isMacPlatform(): boolean {
   return false
 }
 
-const SIDEBAR_MIN = 200
+const SIDEBAR_MIN = 240
 const SIDEBAR_MAX = 560
 const CHAT_MIN = 280
 const CHAT_MAX = 720
@@ -89,6 +92,13 @@ function SideTabs(): React.JSX.Element {
           {t === 'notes' ? 'Notes' : t === 'kanban' ? 'Kanban' : t === 'planner' ? 'Planner' : ''}
         </button>
       ))}
+      <button
+        className={`side-tab icon-only ${tab === 'files' ? 'active' : ''}`}
+        onClick={() => setTab('files')}
+        title="Files"
+      >
+        <MdiIcon path={tab === 'files' ? mdiFolderOpenOutline : mdiFolderOutline} size={18} />
+      </button>
     </div>
   )
 }
@@ -498,6 +508,7 @@ function App(): React.JSX.Element {
       state.applyModuleEvent(evt)
       if (evt.type === 'output' || evt.type === 'done') {
         void state.refreshFiles()
+        if (state.tab === 'files') void state.loadExplorer()
       }
       // Background module runs (e.g. the subagent) can mutate notes, the kanban
       // board and planner schedules; keep the UI in sync so a later save cannot
@@ -605,13 +616,17 @@ function App(): React.JSX.Element {
             style={{ width: sidebarVisible ? sidebarWidth : 0 }}
           >
             <SideTabs />
-            {tab === 'kanban' ? (
-              <KanbanPanel />
-            ) : tab === 'planner' ? (
-              <PlannerPanel />
-            ) : (
-              <NoteList />
-            )}
+            <div key={tab} className="sidebar-panel">
+              {tab === 'kanban' ? (
+                <KanbanPanel />
+              ) : tab === 'planner' ? (
+                <PlannerPanel />
+              ) : tab === 'files' ? (
+                <FileTreePanel />
+              ) : (
+                <NoteList />
+              )}
+            </div>
           </aside>
           {sidebarVisible && (
             <Resizer
@@ -623,7 +638,9 @@ function App(): React.JSX.Element {
             />
           )}
           <main className="main-area">
-            {tab === 'planner' ? (
+            {tab === 'files' ? (
+              <FileListPanel key={activeProject} />
+            ) : tab === 'planner' ? (
               activeScheduleId ? (
                 <PlannerEditor key={activeScheduleId} />
               ) : (

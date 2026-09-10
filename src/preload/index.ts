@@ -18,6 +18,9 @@ import type {
   ChatThread,
   ConfirmResponse,
   CreateProjectResult,
+  ExplorerEntry,
+  ExplorerFolderNode,
+  FileEntry,
   GroupChatData,
   GroupChatMeta,
   GroupMessagePageOpts,
@@ -33,10 +36,16 @@ import type {
   NoteMeta,
   NoteSearchMatch,
   PdfExtractResult,
+  PdfInfo,
+  PdfPageEdit,
+  PdfPageThumbnail,
+  PlannerExportPayload,
+  PlannerExportResult,
   Project,
   ProjectCalendar,
   Schedule,
   ScheduleMeta,
+  SnapshotMeta,
   SkillContent,
   SkillList,
   SkillMeta,
@@ -157,6 +166,8 @@ const api = {
       ipcRenderer.invoke('planner:create', project, name),
     rename: (project: string, id: string, newName: string): Promise<ScheduleMeta> =>
       ipcRenderer.invoke('planner:rename', project, id, newName),
+    duplicate: (project: string, id: string): Promise<ScheduleMeta> =>
+      ipcRenderer.invoke('planner:duplicate', project, id),
     delete: (project: string, id: string): Promise<void> =>
       ipcRenderer.invoke('planner:delete', project, id),
     reveal: (project: string, id: string): Promise<void> =>
@@ -165,6 +176,8 @@ const api = {
       ipcRenderer.invoke('planner:getCalendar', project),
     saveCalendar: (project: string, calendar: ProjectCalendar): Promise<void> =>
       ipcRenderer.invoke('planner:saveCalendar', project, calendar),
+    exportExcel: (payload: PlannerExportPayload): Promise<PlannerExportResult> =>
+      ipcRenderer.invoke('planner:exportExcel', payload),
     setEditActive: (active: boolean): void => {
       ipcRenderer.send('planner:set-edit-active', active)
     },
@@ -175,6 +188,18 @@ const api = {
         ipcRenderer.removeListener('planner:undo-redo', listener)
       }
     }
+  },
+  snapshots: {
+    list: (project: string, scheduleId: string): Promise<SnapshotMeta[]> =>
+      ipcRenderer.invoke('snapshots:list', project, scheduleId),
+    read: (project: string, scheduleId: string, ts: number): Promise<Schedule | null> =>
+      ipcRenderer.invoke('snapshots:read', project, scheduleId, ts),
+    restore: (project: string, scheduleId: string, ts: number): Promise<Schedule> =>
+      ipcRenderer.invoke('snapshots:restore', project, scheduleId, ts),
+    setTag: (project: string, scheduleId: string, ts: number, tag: string | null): Promise<void> =>
+      ipcRenderer.invoke('snapshots:setTag', project, scheduleId, ts, tag),
+    delete: (project: string, scheduleId: string, ts: number): Promise<void> =>
+      ipcRenderer.invoke('snapshots:delete', project, scheduleId, ts)
   },
   ai: {
     send: (
@@ -260,10 +285,63 @@ const api = {
   pdf: {
     supportsUpload: (): Promise<boolean> => ipcRenderer.invoke('pdf:supportsUpload'),
     upload: (project: string, sessionId: string, path: string, prompt: string): Promise<void> =>
-      ipcRenderer.invoke('pdf:upload', project, sessionId, path, prompt)
+      ipcRenderer.invoke('pdf:upload', project, sessionId, path, prompt),
+    info: (project: string, subpath: string): Promise<PdfInfo> =>
+      ipcRenderer.invoke('pdf:info', project, subpath),
+    setViewerOpen: (open: boolean): void => ipcRenderer.send('pdf-viewer:set-open', open),
+    onEscape: (cb: () => void): (() => void) => {
+      const listener = (): void => cb()
+      ipcRenderer.on('pdf-viewer:escape', listener)
+      return () => {
+        ipcRenderer.removeListener('pdf-viewer:escape', listener)
+      }
+    },
+    renderPage: (
+      project: string,
+      subpath: string,
+      page: number,
+      rotation?: number
+    ): Promise<PdfPageThumbnail> =>
+      ipcRenderer.invoke('pdf:renderPage', project, subpath, page, rotation),
+    rebuild: (project: string, subpath: string, edits: PdfPageEdit[]): Promise<string> =>
+      ipcRenderer.invoke('pdf:rebuild', project, subpath, edits),
+    merge: (
+      project: string,
+      sourceSubpaths: string[],
+      destSubpath: string,
+      destName?: string
+    ): Promise<string> =>
+      ipcRenderer.invoke('pdf:merge', project, sourceSubpaths, destSubpath, destName)
   },
   files: {
     list: (project: string): Promise<string[]> => ipcRenderer.invoke('files:list', project),
+    listEntries: (project: string, subpath?: string): Promise<FileEntry[]> =>
+      ipcRenderer.invoke('files:listEntries', project, subpath),
+    absPath: (project: string, fileName: string): Promise<string | null> =>
+      ipcRenderer.invoke('files:absPath', project, fileName),
+    readText: (project: string, fileName: string): Promise<string> =>
+      ipcRenderer.invoke('files:readText', project, fileName),
+    explorerList: (project: string, subpath?: string): Promise<ExplorerEntry[]> =>
+      ipcRenderer.invoke('files:explorerList', project, subpath),
+    explorerTree: (project: string): Promise<ExplorerFolderNode> =>
+      ipcRenderer.invoke('files:explorerTree', project),
+    explorerCreateFolder: (project: string, parentSubpath: string, name: string): Promise<string> =>
+      ipcRenderer.invoke('files:explorerCreateFolder', project, parentSubpath, name),
+    explorerCopy: (project: string, fromPaths: string[], destSubpath: string): Promise<number> =>
+      ipcRenderer.invoke('files:explorerCopy', project, fromPaths, destSubpath),
+    explorerMove: (project: string, fromPaths: string[], destSubpath: string): Promise<number> =>
+      ipcRenderer.invoke('files:explorerMove', project, fromPaths, destSubpath),
+    explorerRename: (project: string, itemPath: string, newName: string): Promise<string> =>
+      ipcRenderer.invoke('files:explorerRename', project, itemPath, newName),
+    explorerDelete: (project: string, itemPaths: string[]): Promise<number> =>
+      ipcRenderer.invoke('files:explorerDelete', project, itemPaths),
+    importDropped: (
+      project: string,
+      sourcePath: string,
+      destSubpath: string,
+      fileName?: string
+    ): Promise<string> =>
+      ipcRenderer.invoke('files:importDropped', project, sourcePath, destSubpath, fileName),
     getPathForFile: (file: File): string => webUtils.getPathForFile(file),
     copyToProject: (project: string, sourcePath: string, fileName?: string): Promise<string> =>
       ipcRenderer.invoke('files:copyToProject', project, sourcePath, fileName),
