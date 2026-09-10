@@ -24,23 +24,33 @@ import { Resizer } from './components/Resizer'
 import type { Tab, ToolCallInfo } from '@shared/types'
 import { addUsage, normalizeUsage } from '@shared/usage'
 
+function isMacPlatform(): boolean {
+  try {
+    if (typeof window !== 'undefined' && window.electron?.process?.platform) {
+      return window.electron.process.platform === 'darwin'
+    }
+  } catch {
+    /* ignore */
+  }
+  if (typeof navigator !== 'undefined') {
+    return navigator.userAgent.includes('Mac')
+  }
+  return false
+}
+
 const SIDEBAR_MIN = 200
 const SIDEBAR_MAX = 560
 const CHAT_MIN = 280
 const CHAT_MAX = 720
 
-const OVERLAY_SELECTOR =
-  '.modal-overlay, .command-palette-backdrop, .global-find-overlay, .module-history-backdrop'
-
 function hasOpenOverlay(): boolean {
-  return document.querySelector(OVERLAY_SELECTOR) !== null
-}
-
-function isEditableTarget(target: EventTarget | null): boolean {
-  const t = target as HTMLElement | null
-  if (!t) return false
-  const tag = t.tagName
-  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable === true
+  const s = useAppStore.getState()
+  return (
+    document.querySelector('.modal-overlay') !== null ||
+    s.commandPaletteOpen ||
+    s.globalFindOpen ||
+    s.moduleHistoryRunId !== null
+  )
 }
 
 const KANBAN_TOOLS = new Set([
@@ -318,9 +328,6 @@ function App(): React.JSX.Element {
 
   useEffect(() => {
     void init()
-  }, [init])
-
-  useEffect(() => {
     const theme = useAppStore.getState().theme
     document.documentElement.setAttribute('data-theme', theme)
     const fontSize = useAppStore.getState().fontSize
@@ -525,9 +532,7 @@ function App(): React.JSX.Element {
   // Cmd/Ctrl+Shift+G toggles the bots group chat
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent): void {
-      if (isEditableTarget(e.target)) return
-      const mod =
-        (window.electron.process.platform === 'darwin' ? e.metaKey : e.ctrlKey) && e.shiftKey
+      const mod = (isMacPlatform() ? e.metaKey : e.ctrlKey) && e.shiftKey
       if (!mod || e.altKey) return
       const key = e.key.toLowerCase()
       if (key !== 'c' && key !== 'm' && key !== 'g') return
@@ -545,8 +550,7 @@ function App(): React.JSX.Element {
   useEffect(() => {
     const toggleCommandPalette = useAppStore.getState().toggleCommandPalette
     function onKeyDown(e: KeyboardEvent): void {
-      if (isEditableTarget(e.target)) return
-      const isMac = window.electron.process.platform === 'darwin'
+      const isMac = isMacPlatform()
       const mod = isMac ? e.metaKey : e.ctrlKey
       if (!mod || e.shiftKey || e.altKey) return
       if (e.key.toLowerCase() !== 'k') return

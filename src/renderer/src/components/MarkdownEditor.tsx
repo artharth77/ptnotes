@@ -54,6 +54,9 @@ const CustomLink = Link.extend({
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { TableKit } from '@tiptap/extension-table'
+import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
+import { lowlight, safeLanguage } from '../editor/lowlightRegistry'
+import { SUPPORTED_LANGUAGES } from '../editor/supportedLanguages'
 import { useAppStore } from '../store/useAppStore'
 import { slugify } from '@shared/slug'
 import { PromptModal } from './Modal'
@@ -100,6 +103,7 @@ function ToolbarBtn({
 }
 
 const bubbleMenuKey = new PluginKey('formatHelperBubble')
+const codeBlockLangMenuKey = new PluginKey('codeBlockLangBubble')
 
 function internalNameFromHref(href: string, prefix: string): string {
   const raw = href.slice(prefix.length)
@@ -255,12 +259,82 @@ function FormatButtons({
 export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.JSX.Element {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const appliedContent = useRef(content)
+  const onUpdateCount = useRef(0)
+  const txCount = useRef(0)
   const formatHelperEnabled = useAppStore((s) => s.formatHelperEnabled)
   const setFormatHelperEnabled = useAppStore((s) => s.setFormatHelperEnabled)
 
+  useEffect(() => {
+    onUpdateCount.current = 0
+    txCount.current = 0
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [noteId])
+
   const editor = useEditor({
     extensions: [
-      StarterKit,
+      StarterKit.configure({ codeBlock: false }),
+      CodeBlockLowlight.extend({
+        addOptions() {
+          return {
+            ...this.parent?.(),
+            lowlight,
+            defaultLanguage: 'text',
+            HTMLAttributes: { class: 'code-block-wrapper' }
+          }
+        },
+        addAttributes() {
+          const parentAttrs = (this.parent?.() ?? {}) as Record<
+            string,
+            {
+              rendered?: boolean
+              default?: unknown
+              parseHTML?: (e: Element) => unknown
+              renderHTML?: (a: never) => unknown
+            }
+          >
+          const base = parentAttrs.language ?? {}
+          return {
+            ...parentAttrs,
+            language: {
+              ...base,
+              rendered: false,
+              default: 'text',
+              parseHTML: (element): string => {
+                const c = element.querySelector('code')
+                const lang =
+                  element.getAttribute('data-language') ||
+                  c?.className.match(/language-([\w-]+)/)?.[1] ||
+                  'text'
+                return safeLanguage(lang)
+              },
+              renderHTML: (attrs) => {
+                const lang = safeLanguage((attrs as { language?: string }).language)
+                return { 'data-language': lang }
+              }
+            }
+          }
+        },
+        parseMarkdown() {
+          const self = this as unknown as {
+            parent?: () => {
+              block?: string
+              getAttrs?: (tok: { lang?: string | null }) => Record<string, unknown>
+            }
+          }
+          const parent = (self.parent?.() ?? {}) as {
+            block?: string
+            getAttrs?: (tok: { lang?: string | null }) => Record<string, unknown>
+          }
+          return {
+            ...parent,
+            block: parent.block || 'code',
+            getAttrs: (tok: { lang?: string | null }) => ({
+              ...(parent.getAttrs ? parent.getAttrs(tok) : {}),
+              language: safeLanguage(tok.lang ?? null)
+            })
+          }
+        }
+      }),
       Markdown.configure({
         indentation: { style: 'space', size: 2 }
       }),
@@ -278,7 +352,11 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
     ],
     content,
     contentType: 'markdown',
+    onTransaction() {
+      txCount.current += 1
+    },
     onUpdate({ editor: e }) {
+      onUpdateCount.current += 1
       if (saveTimer.current) clearTimeout(saveTimer.current)
       saveTimer.current = setTimeout(() => {
         void useAppStore.getState().saveNote(e.getMarkdown())
@@ -296,8 +374,13 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
     if (!editor) return
     if (content !== appliedContent.current) {
       appliedContent.current = content
-      editor.commands.setContent(content, { contentType: 'markdown', emitUpdate: false })
+      try {
+        editor.commands.setContent(content, { contentType: 'markdown', emitUpdate: false })
+      } catch {
+        /* ignore */
+      }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, content])
 
   const state = useEditorState({
@@ -811,6 +894,43 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
             >
               <MdiIcon path={mdiCloseCircle} size={16} />
             </button>
+          </div>
+        </BubbleMenu>
+      )}
+      {!rawMode && editor && (
+        <BubbleMenu
+          editor={editor}
+          pluginKey={codeBlockLangMenuKey}
+          appendTo={() => document.body}
+          updateDelay={120}
+          shouldShow={({ view }) => {
+            if (!view.hasFocus()) return false
+            return editor.isActive('codeBlock')
+          }}
+        >
+          <div className="code-block-lang-menu">
+            <span className="code-block-lang-label">Language</span>
+            <select
+              aria-label="Change code block language"
+              value={(editor.getAttributes('codeBlock').language as string) || 'text'}
+              onMouseDown={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              onChange={(e) => {
+                const nextLang = e.target.value
+                editor
+                  .chain()
+                  .setNodeSelection(editor.state.selection.from)
+                  .updateAttributes('codeBlock', { language: nextLang })
+                  .setTextSelection(editor.state.selection.from)
+                  .run()
+              }}
+            >
+              {SUPPORTED_LANGUAGES.map((l) => (
+                <option key={l.key} value={l.key}>
+                  {l.label}
+                </option>
+              ))}
+            </select>
           </div>
         </BubbleMenu>
       )}

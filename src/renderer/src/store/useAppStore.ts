@@ -325,18 +325,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   globalFindLoading: false,
   loading: false,
 
-  async init() {
-    const projects = await window.ptnotes.projects.list()
-    set({ projects })
-    const saved = localStorage.getItem('ptnotes:activeProject')
-    const target = projects.find((p) => p.name === saved)?.name ?? projects[0]?.name ?? null
-    if (target) {
-      await get().selectProject(target)
-    } else {
-      set({ activeProject: null })
-    }
-  },
-
   async refreshProjects() {
     const projects = await window.ptnotes.projects.list()
     set({ projects })
@@ -1299,10 +1287,30 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ traceViewer: null })
   },
 
+  async init() {
+    try {
+      const projects = await window.ptnotes.projects.list()
+      set({ projects })
+      const saved = localStorage.getItem('ptnotes:activeProject')
+      const target = projects.find((p) => p.name === saved)?.name ?? projects[0]?.name ?? null
+      if (target) {
+        await get().selectProject(target)
+      } else {
+        set({ activeProject: null })
+      }
+    } catch {
+      /* preload IPC unavailable in isolated renderer/HMR; safe to ignore */
+    }
+  },
   async selectNote(id) {
     const project = get().activeProject
     if (!project) return
-    const content = await window.ptnotes.notes.read(project, id)
+    let content = ''
+    try {
+      content = await window.ptnotes.notes.read(project, id)
+    } catch {
+      throw new Error(`Note ${id} could not be read`)
+    }
     set({ activeNoteId: id, noteContent: content })
   },
 
