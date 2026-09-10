@@ -135,6 +135,8 @@ $ npm install
 $ npm run dev
 ```
 
+> **Note:** since Electron 42, the Electron binary is not downloaded during `npm install` — it is fetched lazily the first time Electron runs in a clone. On a fresh clone (or after an Electron version bump), if electron-vite fails with `Error: Electron uninstall`, run `npx install-electron` once to trigger the download, then `npm run dev` again.
+
 ### Build
 
 ```bash
