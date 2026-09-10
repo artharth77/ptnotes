@@ -46,6 +46,7 @@ import Placeholder from '@tiptap/extension-placeholder'
 import Typography from '@tiptap/extension-typography'
 import Link from '@tiptap/extension-link'
 import { mergeAttributes } from '@tiptap/core'
+import type { VirtualElement } from '@floating-ui/dom'
 
 const CustomLink = Link.extend({
   renderHTML({ HTMLAttributes }) {
@@ -137,6 +138,30 @@ function applyCodeBlockLang(editor: Editor, nextLang: string): void {
     .setTextSelection(restore.empty ? restore.$from.pos : { from: restore.from, to: restore.to })
     .focus()
     .run()
+}
+
+function getLangMenuAnchor(editor: Editor): VirtualElement | null {
+  if (!editor.isActive('codeBlock')) return null
+  const block = getCodeBlockAtCursor(editor)
+  if (!block) return null
+  const resolved = editor.view.domAtPos(block.pos + 1)
+  const raw = resolved.node
+  let el: Element | null = raw instanceof Element ? raw : raw.parentElement
+  el = el?.closest('pre.code-block-wrapper') ?? el?.closest('pre') ?? el
+  if (!el) return null
+  const rect = el.getBoundingClientRect()
+  if (!rect.width && !rect.height) return null
+  const container = el.closest<HTMLElement>('.editor-content')
+  const cRect = container?.getBoundingClientRect()
+  const top = Math.max(rect.top + 12, cRect ? cRect.top + 18 : rect.top + 12)
+  const bottom = cRect ? Math.min(rect.bottom, cRect.bottom) : rect.bottom
+  const left = Math.max(rect.left - 14, cRect ? cRect.left : rect.left - 14)
+  const right = cRect ? Math.min(rect.right, cRect.right) : rect.right
+  const elementRect = new DOMRect(left, top, Math.max(right - left, 1), Math.max(bottom - top, 1))
+  return {
+    getBoundingClientRect: () => elementRect,
+    getClientRects: () => [elementRect]
+  }
 }
 
 function internalNameFromHref(href: string, prefix: string): string {
@@ -292,6 +317,7 @@ function FormatButtons({
 
 export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.JSX.Element {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [contentEl, setContentEl] = useState<HTMLElement | null>(null)
   const appliedContent = useRef(content)
   const onUpdateCount = useRef(0)
   const txCount = useRef(0)
@@ -397,6 +423,34 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
       if (saveTimer.current) clearTimeout(saveTimer.current)
     }
   }, [])
+
+  useEffect(() => {
+    if (!contentEl) return
+    const reposition = (): void => {
+      editor.view.dispatch(
+        editor.state.tr
+          .setMeta(codeBlockLangMenuKey, 'updatePosition')
+          .setMeta(bubbleMenuKey, 'updatePosition')
+      )
+    }
+    const onScroll = (): void => reposition()
+    contentEl.addEventListener('scroll', onScroll, true)
+    return () => contentEl.removeEventListener('scroll', onScroll, true)
+  }, [contentEl, editor])
+
+  useEffect(() => {
+    if (!contentEl) return
+    const reposition = (): void => {
+      editor.view.dispatch(
+        editor.state.tr
+          .setMeta(codeBlockLangMenuKey, 'updatePosition')
+          .setMeta(bubbleMenuKey, 'updatePosition')
+      )
+    }
+    const observer = new ResizeObserver(reposition)
+    observer.observe(contentEl)
+    return () => observer.disconnect()
+  }, [contentEl, editor])
 
   useEffect(() => {
     if (!editor) return
@@ -882,6 +936,7 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
       ) : (
         <EditorContent
           editor={editor}
+          ref={setContentEl}
           className={`editor-content${modKeyDown ? ' mod-key-down' : ''}`}
           onContextMenu={(e) => {
             const target = e.target instanceof Element ? e.target : null
@@ -944,6 +999,8 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
           pluginKey={codeBlockLangMenuKey}
           appendTo={() => document.body}
           updateDelay={120}
+          options={{ placement: 'top-start', offset: 0 }}
+          getReferencedVirtualElement={() => getLangMenuAnchor(editor)}
           shouldShow={({ view }) => {
             if (!view.hasFocus()) return false
             return editor.isActive('codeBlock')
