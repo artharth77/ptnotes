@@ -219,8 +219,8 @@ function createWindow(windowState: WindowState): void {
   }
 
   mainWindow.once('ready-to-show', () => {
-    mainWindow?.show()
     if (windowState.isMaximized) mainWindow?.maximize()
+    mainWindow?.show()
     closeSplashWindow()
   })
   mainWindow.webContents.once('did-finish-load', () => {
