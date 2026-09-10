@@ -3,10 +3,31 @@
   <head>
     <meta charset="UTF-8" />
     <title>PTNotes</title>
+    <!-- Blocking boot: applies the stored theme before first paint (matches --bg in
+         main.css: #f6f7f9 light / #131418 dark). If you edit this script, update the
+         sha256 hash in the CSP below. -->
+    <script>
+      ;(function () {
+        var t = localStorage.getItem('ptnotes:theme') || 'system'
+        var d =
+          t === 'system'
+            ? matchMedia('(prefers-color-scheme: dark)').matches
+            : t === 'dark'
+        document.documentElement.setAttribute('data-theme', d ? 'dark' : 'light')
+      })()
+    </script>
+    <style>
+      html {
+        background: #f6f7f9;
+      }
+      html[data-theme='dark'] {
+        background: #131418;
+      }
+    </style>
     <!-- https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: ptfile:; frame-src ptfile:"
+      content="default-src 'self'; script-src 'self' 'sha256-iCe3RozmwhJmgmeAZp89+jEl8OSSPIwwfVaYy3RoY8g='; style-src 'self' 'unsafe-inline'; img-src 'self' data: ptfile:; frame-src ptfile:"
     />
   </head>
 

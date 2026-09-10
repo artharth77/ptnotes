@@ -156,6 +156,7 @@ function createSplashWindow(): void {
     fullscreenable: false,
     frame: false,
     show: false,
+    backgroundColor: '#131418',
     skipTaskbar: true,
     title: 'PTNotes',
     webPreferences: {
@@ -198,7 +199,7 @@ function createWindow(windowState: WindowState): void {
     backgroundColor: '#131418',
     autoHideMenuBar: true,
     title: 'PTNotes',
-    ...(process.platform === 'linux' ? { icon } : {}),
+    ...(process.platform === 'linux' || process.platform === 'win32' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
@@ -218,8 +219,8 @@ function createWindow(windowState: WindowState): void {
   }
 
   mainWindow.once('ready-to-show', () => {
-    mainWindow?.show()
     if (windowState.isMaximized) mainWindow?.maximize()
+    mainWindow?.show()
     closeSplashWindow()
   })
   mainWindow.webContents.once('did-finish-load', () => {
