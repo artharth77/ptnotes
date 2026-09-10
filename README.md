@@ -149,3 +149,5 @@ $ npm run build:linux
 ```
 
 Packaged artifacts are written to `dist/` (e.g. `dist/ptnotes-0.16.0.dmg`).
+
+> **Note:** PTNotes runs on Electron 44, which requires **macOS 13 (Ventura) or later** — macOS 12 (Monterey) is no longer supported. Windows and Linux requirements are unchanged.

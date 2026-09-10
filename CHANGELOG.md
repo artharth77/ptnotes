@@ -1,6 +1,10 @@
 # Changelog
 
-## [0.17.0] — 2026-09-10
+## [0.17.1] — 2026-09-11
+
+### Changed
+
+- **Electron 39 → 44** — upgrades the runtime to Chromium 152, Node.js 24 (ABI 149), and V8 15.2. Requires **macOS 13 (Ventura) or later** (Electron 44 dropped macOS 12 support); Windows and Linux users unaffected (Electron now ships 64-bit only). No app-facing API changes were needed: the modern `protocol.handle` API, `utilityProcess` workers, `webUtils.getPathForFile`, and `node:sqlite` usage all survived the four-major jump unchanged. `@types/node` aligned to 24.
 
 ### Added
 
