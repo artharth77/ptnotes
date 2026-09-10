@@ -1,5 +1,7 @@
 appId: com.ptnotes.app
 productName: PTNotes
+electronLanguages:
+  - en-US
 directories:
   buildResources: build
 files:
@@ -9,10 +11,31 @@ files:
   - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - '!**/node_modules/**/*.map'
+  - '!**/node_modules/**/*.d.ts'
+  - '!**/node_modules/**/*.d.mts'
+  - '!**/node_modules/lucide-static/font'
+  - '!**/node_modules/lucide-static/icons'
+  - '!**/node_modules/lucide-static/dist/esm'
+  - '!**/node_modules/lucide-static/sprite.svg'
+  - '!**/node_modules/lucide-static/icon-nodes.json'
+  - '!**/node_modules/mermaid/dist/mermaid.js*'
+  - '!**/node_modules/mermaid/dist/mermaid.min.js*'
+  - '!**/node_modules/mermaid/dist/mermaid.esm.mjs*'
+  - '!**/node_modules/mermaid/dist/mermaid.esm.min.mjs*'
+  - '!**/node_modules/mermaid/dist/chunks/mermaid.esm'
+  - '!**/node_modules/mermaid/dist/chunks/mermaid.esm.min'
+  - '!**/node_modules/pdfjs-dist/build'
+  - '!**/node_modules/pdfjs-dist/web'
+  - '!**/node_modules/pdfjs-dist/types'
+  - '!**/node_modules/pdfjs-dist/node_modules'
+  - '!**/node_modules/openai/src'
   - from: node_modules/@antv/layout/lib/node_modules
     to: node_modules/@antv/layout/lib/node_modules
     filter:
       - '**/*'
+      - '!**/*.map'
+      - '!**/*.d.ts'
 asarUnpack:
   - resources/**
   - '**/node_modules/@resvg/**'

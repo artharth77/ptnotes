@@ -135,6 +135,8 @@ $ npm install
 $ npm run dev
 ```
 
+> **Note:** since Electron 42, the Electron binary is not downloaded during `npm install` — it is fetched lazily the first time Electron runs in a clone. On a fresh clone (or after an Electron version bump), if electron-vite fails with `Error: Electron uninstall`, run `npx install-electron` once to trigger the download, then `npm run dev` again.
+
 ### Build
 
 ```bash
@@ -149,3 +151,5 @@ $ npm run build:linux
 ```
 
 Packaged artifacts are written to `dist/` (e.g. `dist/ptnotes-0.16.0.dmg`).
+
+> **Note:** PTNotes runs on Electron 44, which requires **macOS 13 (Ventura) or later** — macOS 12 (Monterey) is no longer supported. Windows and Linux requirements are unchanged.
