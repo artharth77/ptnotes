@@ -172,7 +172,7 @@ export function AskUserDialog(): React.JSX.Element | null {
               <div className="ask-question-full">
                 {q.secret && (
                   <span className="ask-secret-lock" title="Answer is hidden">
-                    <MdiIcon path={mdiLock} size={14} />
+                    <MdiIcon path={mdiLock} size={16} />
                   </span>
                 )}
                 {q.question}

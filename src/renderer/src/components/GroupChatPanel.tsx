@@ -1044,7 +1044,7 @@ function GroupAskBubble({
         title="Group chats"
       >
         <span className="gc-switcher-label">{title}</span>
-        <MdiIcon path={mdiChevronDown} size={14} />
+        <MdiIcon path={mdiChevronDown} size={16} />
       </button>
       {open &&
         pos &&
@@ -1066,7 +1066,7 @@ function GroupAskBubble({
                   onNewGroup()
                 }}
               >
-                <MdiIcon path={mdiPlus} size={14} />
+                <MdiIcon path={mdiPlus} size={16} />
                 New group chat
               </button>
               {groups.length === 0 && <div className="chat-history-empty">No group chats yet</div>}
@@ -1138,7 +1138,7 @@ function GroupAskBubble({
                       setRenameValue(g.title)
                     }}
                   >
-                    <MdiIcon path={mdiPencil} size={14} />
+                    <MdiIcon path={mdiPencil} size={16} />
                   </button>
                   <button
                     className="chat-history-rename-btn"
@@ -1147,14 +1147,14 @@ function GroupAskBubble({
                       openTraceViewer({ kind: 'bots', key: g.groupId, title: g.title })
                     }
                   >
-                    <MdiIcon path={mdiTimelineClockOutline} size={14} />
+                    <MdiIcon path={mdiTimelineClockOutline} size={16} />
                   </button>
                   <button
                     className="chat-history-rename-btn"
                     title="Delete group"
                     onClick={() => setDeletingId(g.groupId)}
                   >
-                    <MdiIcon path={mdiTrashCanOutline} size={14} />
+                    <MdiIcon path={mdiTrashCanOutline} size={16} />
                   </button>
                 </div>
               ))}

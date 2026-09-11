@@ -1,4 +1,4 @@
-import { lowlight } from 'lowlight'
+import { createLowlight } from 'lowlight'
 import { SUPPORTED_LANGUAGES } from './supportedLanguages'
 
 import hl_plaintext from 'highlight.js/lib/languages/plaintext'
@@ -24,6 +24,8 @@ import hl_php from 'highlight.js/lib/languages/php'
 import hl_dockerfile from 'highlight.js/lib/languages/dockerfile'
 import hl_ini from 'highlight.js/lib/languages/ini'
 import hl_diff from 'highlight.js/lib/languages/diff'
+
+const lowlight = createLowlight()
 
 export { lowlight }
 
@@ -75,7 +77,7 @@ for (const [name, fn] of BASE_ORDER) {
   }
   try {
     if (typeof fn === 'function') {
-      lowlight.registerLanguage(name, fn as never)
+      lowlight.register(name, fn as never)
       if (lowlight.registered(name)) baseRegistered.add(name)
     }
   } catch {
@@ -85,7 +87,7 @@ for (const [name, fn] of BASE_ORDER) {
 
 if (!lowlight.registered('text') && baseRegistered.has('plaintext')) {
   try {
-    lowlight.registerLanguage('text', hl_plaintext as never)
+    lowlight.register('text', hl_plaintext as never)
     if (lowlight.registered('text')) baseRegistered.add('text')
   } catch {
     registerAliasSafe('text', 'plaintext')
@@ -280,12 +282,12 @@ export function suggestLanguage(text: string | null | undefined): string | null 
     const clip = sample.slice(0, SUGGESTION_SAMPLE_LIMIT)
     const marker = markerLanguage(clip)
     const top = lowlight.highlightAuto(clip, { subset })
-    if (!marker && (top.data.relevance ?? 0) < 3) return null
+    if (!marker && (top.data?.relevance ?? 0) < 3) return null
     const markerCanonical = marker ? canonicalLanguage(marker) : null
     const useMarker =
       marker != null &&
       (subset.includes(marker) || (markerCanonical != null && subset.includes(markerCanonical)))
-    const chosen = useMarker && marker ? marker : top.data.language
+    const chosen = useMarker && marker ? marker : top.data?.language
     if (!chosen) return null
     const lang = safeLanguage(chosen)
     if (lang === 'text' || lang === 'plaintext') return null
@@ -293,7 +295,7 @@ export function suggestLanguage(text: string | null | undefined): string | null 
     const rest = subset.filter((k) => k !== lang)
     if (rest.length === 0) return lang
     const second = lowlight.highlightAuto(clip, { subset: rest })
-    if ((second.data.relevance ?? 0) * 1.25 > (top.data.relevance ?? 0)) return null
+    if ((second.data?.relevance ?? 0) * 1.25 > (top.data?.relevance ?? 0)) return null
     return lang
   } catch {
     return null

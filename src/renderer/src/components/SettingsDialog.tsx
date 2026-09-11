@@ -1103,13 +1103,13 @@ function SkillsPane(): React.JSX.Element {
                   >
                     <button className="note-menu-item" onClick={() => void openEditor(meta)}>
                       <span className="note-menu-icon">
-                        <MdiIcon path={mdiPencil} size={15} />
+                        <MdiIcon path={mdiPencil} size={16} />
                       </span>{' '}
                       Edit skill
                     </button>
                     <button className="note-menu-item" onClick={() => void moveSkill(meta)}>
                       <span className="note-menu-icon">
-                        <MdiIcon path={mdiSwapHorizontal} size={15} />
+                        <MdiIcon path={mdiSwapHorizontal} size={16} />
                       </span>{' '}
                       Move to {meta.scope === 'global' ? 'Project' : 'Global'} skills
                     </button>
@@ -1121,7 +1121,7 @@ function SkillsPane(): React.JSX.Element {
                       }}
                     >
                       <span className="note-menu-icon">
-                        <MdiIcon path={mdiTrashCanOutline} size={15} />
+                        <MdiIcon path={mdiTrashCanOutline} size={16} />
                       </span>{' '}
                       Delete skill
                     </button>

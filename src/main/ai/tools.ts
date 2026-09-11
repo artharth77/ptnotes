@@ -261,6 +261,45 @@ function clampPercent(v: number): number {
   return Math.min(100, Math.max(0, Math.round(v)))
 }
 
+function applyTaskFields(
+  target: ScheduleTask,
+  args: Record<string, unknown>,
+  isUpdate: boolean
+): boolean {
+  const owner = str(args.owner)
+  if (owner !== null) target.owner = normalizeOwner(owner)
+  const note = str(args.note)
+  if (note !== null) target.note = note
+  const status = statusOf(args.status)
+  if (status) target.status = status
+  const percent = numOrNull(args.percentComplete)
+  if (percent !== null) target.percentComplete = clampPercent(percent)
+  const planStart = dateOrNull(args.planStart)
+  if (isUpdate ? planStart !== null : planStart) target.planStart = planStart
+  const planEnd = dateOrNull(args.planEnd)
+  if (isUpdate ? planEnd !== null : planEnd) target.planEnd = planEnd
+  const duration = numOrNull(args.duration)
+  if (duration !== null) target.duration = Math.max(1, Math.round(duration))
+  const actualStart = dateOrNull(args.actualStart)
+  if (isUpdate ? actualStart !== null : actualStart) target.actualStart = actualStart
+  const actualEnd = dateOrNull(args.actualEnd)
+  if (isUpdate ? actualEnd !== null : actualEnd) target.actualEnd = actualEnd
+  return duration !== null
+}
+
+type TaskRecord = Record<string, unknown>
+
+function taskRecordArgs(args: Record<string, unknown>): {
+  batch: boolean
+  records: TaskRecord[]
+} {
+  const list = args.tasks
+  if (Array.isArray(list) && list.length > 0) {
+    return { batch: true, records: list as TaskRecord[] }
+  }
+  return { batch: false, records: [args] }
+}
+
 function taskCount(schedule: Schedule): number {
   return schedule.tasks.reduce((n, t) => n + countTasks(t), 0)
 }
@@ -1822,11 +1861,48 @@ export const tools: PTTool[] = [
       function: {
         name: 'add_task',
         description:
-          'Add a task to a project schedule. Match the schedule by id. Optionally nest it under an existing parent task (match the parent by id, task number or title) and/or position it directly after an existing task (match addAfter by id, task number or title; without `parent` the new task is placed as a sibling of the matched task). Plan dates follow the project working-day calendar: set both planStart and planEnd, or planStart + duration; the missing value is computed.',
+          'Add a task to a project schedule. Match the schedule by id. Optionally nest it under an existing parent task (match the parent by id, task number or title) and/or position it directly after an existing task (match addAfter by id, task number or title; without `parent` the new task is placed as a sibling of the matched task). Plan dates follow the project working-day calendar: set both planStart and planEnd, or planStart + duration; the missing value is computed. Batch mode: pass `tasks`, an array of task records (up to 30 records per call — split larger batches into multiple calls). Top-level fields act as defaults for every record and per-record values override; each record reports its own ok/error result.',
         parameters: {
           type: 'object',
           properties: {
             schedule: { type: 'string', description: 'Schedule id' },
+            tasks: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  title: { type: 'string', description: 'Task title' },
+                  owner: {
+                    type: 'string',
+                    description: 'Owner, comma-separated for multiple owners'
+                  },
+                  note: { type: 'string', description: 'Note' },
+                  status: {
+                    type: 'string',
+                    description: 'Status: not-started, in-progress, completed, pending, on-hold'
+                  },
+                  percentComplete: { type: 'number', description: 'Percent complete 0-100' },
+                  duration: { type: 'number', description: 'Duration in working days' },
+                  planStart: { type: 'string', description: 'Plan start date (YYYY-MM-DD)' },
+                  planEnd: { type: 'string', description: 'Plan end date (YYYY-MM-DD)' },
+                  actualStart: { type: 'string', description: 'Actual start date (YYYY-MM-DD)' },
+                  actualEnd: { type: 'string', description: 'Actual end date (YYYY-MM-DD)' },
+                  parent: {
+                    type: 'string',
+                    description: 'Parent task id, task number (e.g. 1.2) or title'
+                  },
+                  addAfter: {
+                    type: 'string',
+                    description:
+                      'Task id, task number (e.g. 1.2) or title to position this record after (may reference a task added earlier in the same batch)'
+                  }
+                },
+                required: ['title'],
+                description: 'Task record: same fields as the top-level parameters'
+              },
+              description:
+                'Batch mode — one record per task, up to 30 records per call. Top-level fields (except schedule) are defaults overridable per record.'
+            },
             parent: {
               type: 'string',
               description:
@@ -1864,7 +1940,7 @@ export const tools: PTTool[] = [
             },
             note: { type: 'string', description: 'Note (optional)' }
           },
-          required: ['schedule', 'title']
+          required: ['schedule']
         }
       }
     },
@@ -1874,53 +1950,53 @@ export const tools: PTTool[] = [
         const { meta } = await requireSchedule(ctx, project, String(args.schedule ?? ''))
         const summary = await ctx.service.withSchedule(project, meta.id, async (schedule) => {
           const calendar = await ctx.service.readCalendar(project)
+          const { batch, records } = taskRecordArgs(args)
+          let tasks = schedule.tasks
+          const results: Array<Record<string, unknown>> = []
+          for (let index = 0; index < records.length; index++) {
+            const a = batch ? { ...args, ...records[index] } : args
+            try {
+              const resolved = emptyTask()
+              const title = String(a.title ?? '').trim()
+              if (!title) throw new Error('title is required')
+              resolved.title = title
+              const explicitDuration = applyTaskFields(resolved, a, false)
 
-          const task = emptyTask()
-          const title = String(args.title ?? '').trim()
-          task.title = title
-          const owner = str(args.owner)
-          if (owner !== null) task.owner = normalizeOwner(owner)
-          const note = str(args.note)
-          if (note !== null) task.note = note
-          const status = statusOf(args.status)
-          if (status) task.status = status
-          const percent = numOrNull(args.percentComplete)
-          if (percent !== null) task.percentComplete = clampPercent(percent)
-          const planStart = dateOrNull(args.planStart)
-          if (planStart) task.planStart = planStart
-          const planEnd = dateOrNull(args.planEnd)
-          if (planEnd) task.planEnd = planEnd
-          const duration = numOrNull(args.duration)
-          const explicitDuration = duration !== null
-          if (explicitDuration) task.duration = Math.max(1, Math.round(duration))
-          const actualStart = dateOrNull(args.actualStart)
-          if (actualStart) task.actualStart = actualStart
-          const actualEnd = dateOrNull(args.actualEnd)
-          if (actualEnd) task.actualEnd = actualEnd
+              if (resolved.planStart && resolved.planEnd) {
+                resolved.duration = computeDuration(resolved.planStart, resolved.planEnd, calendar)
+              } else if (
+                explicitDuration &&
+                resolved.planStart &&
+                resolved.duration !== null &&
+                resolved.duration > 0
+              ) {
+                resolved.planEnd = computeEndDate(resolved.planStart, resolved.duration, calendar)
+              }
 
-          const resolved = { ...task }
-          if (resolved.planStart && resolved.planEnd) {
-            resolved.duration = computeDuration(resolved.planStart, resolved.planEnd, calendar)
-          } else if (
-            explicitDuration &&
-            resolved.planStart &&
-            resolved.duration !== null &&
-            resolved.duration > 0
-          ) {
-            resolved.planEnd = computeEndDate(resolved.planStart, resolved.duration, calendar)
+              const parentArg = a.parent ? findTask(tasks, String(a.parent)) : null
+              const afterArg = a.addAfter ? findTask(tasks, String(a.addAfter)) : null
+              const afterId = afterArg?.id ?? ''
+              const parent = parentArg ?? (afterArg ? findTaskParent(tasks, afterArg.id) : null)
+              if (parent) {
+                const children = insertAfterId(parent.children, afterId, resolved)
+                tasks = updateTaskNode(tasks, parent.id, (t) => ({ ...t, children }))
+              } else {
+                tasks = insertAfterId(tasks, afterId, resolved)
+              }
+              results.push({
+                index,
+                ok: true,
+                taskId: resolved.id,
+                title: resolved.title,
+                parent: parent ? parent.id : null
+              })
+            } catch (err) {
+              results.push({ index, ok: false, error: (err as Error).message })
+            }
           }
-
-          let tasks: ScheduleTask[]
-          const parentArg = args.parent ? findTask(schedule.tasks, String(args.parent)) : null
-          const afterArg = args.addAfter ? findTask(schedule.tasks, String(args.addAfter)) : null
-          const afterId = afterArg?.id ?? ''
-          const parent =
-            parentArg ?? (afterArg ? findTaskParent(schedule.tasks, afterArg.id) : null)
-          if (parent) {
-            const children = insertAfterId(parent.children, afterId, resolved)
-            tasks = updateTaskNode(schedule.tasks, parent.id, (t) => ({ ...t, children }))
-          } else {
-            tasks = insertAfterId(schedule.tasks, afterId, resolved)
+          if (!batch) {
+            const r0 = results[0]
+            if (!r0?.ok) throw new Error((r0?.error as string) ?? 'unknown error')
           }
           const saved = {
             ...schedule,
@@ -1929,11 +2005,13 @@ export const tools: PTTool[] = [
           }
           return {
             save: saved,
-            value: {
-              ...scheduleSummary(saved, project),
-              taskId: resolved.id,
-              parent: parent ? parent.id : null
-            }
+            value: batch
+              ? { ...scheduleSummary(saved, project), results }
+              : {
+                  ...scheduleSummary(saved, project),
+                  taskId: results[0]?.taskId ?? '',
+                  parent: (results[0]?.parent as string | null) ?? null
+                }
           }
         })
         return JSON.stringify(summary)
@@ -1948,11 +2026,57 @@ export const tools: PTTool[] = [
       function: {
         name: 'update_task',
         description:
-          'Update an existing task in a project schedule. Match the schedule by id and the task by id, task number (e.g. 1.2) or title. Only provided fields change. For plan dates/duration, the project working-day calendar applies: change one of planStart/planEnd/duration and the other is recomputed. For parent tasks, plan start/end, %complete and duration are derived from children — update the child tasks instead (plan-field edits on a parent are rejected). Parent status and %complete are derived from children. To move a task, set `parent` to the new parent task id, task number (e.g. 1.2) or title (pass empty to move it to the top level) and/or `addAfter` to the task it should follow; the task and its subtree move together. `addAfter` positions the task within the sibling list chosen by `parent` (defaults to append); if `parent` is omitted, the task becomes a sibling of the matched `addAfter` task.',
+          'Update an existing task in a project schedule. Match the schedule by id and the task by id, task number (e.g. 1.2) or title. Only provided fields change. For plan dates/duration, the project working-day calendar applies: change one of planStart/planEnd/duration and the other is recomputed. For parent tasks, plan start/end, %complete and duration are derived from children — update the child tasks instead (plan-field edits on a parent are rejected). Parent status and %complete are derived from children. To move a task, set `parent` to the new parent task id, task number (e.g. 1.2) or title (pass empty to move it to the top level) and/or `addAfter` to the task it should follow; the task and its subtree move together. `addAfter` positions the task within the sibling list chosen by `parent` (defaults to append); if `parent` is omitted, the task becomes a sibling of the matched `addAfter` task. Batch mode: pass `tasks`, an array of update records each with a `task` matcher (up to 30 records per call — split larger batches into multiple calls). Top-level fields act as defaults for every record and per-record values override; each record reports its own ok/error result.',
         parameters: {
           type: 'object',
           properties: {
             schedule: { type: 'string', description: 'Schedule id' },
+            tasks: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  task: {
+                    type: 'string',
+                    description: 'Task id (uuid), task number (e.g. 1.2) or title to update'
+                  },
+                  title: { type: 'string', description: 'New title' },
+                  owner: {
+                    type: 'string',
+                    description: 'New owner, comma-separated for multiple owners'
+                  },
+                  note: { type: 'string', description: 'New note' },
+                  status: {
+                    type: 'string',
+                    description: 'New status: not-started, in-progress, completed, pending, on-hold'
+                  },
+                  percentComplete: { type: 'number', description: 'New percent complete 0-100' },
+                  duration: { type: 'number', description: 'New duration in working days' },
+                  planStart: { type: 'string', description: 'New plan start date (YYYY-MM-DD)' },
+                  planEnd: { type: 'string', description: 'New plan end date (YYYY-MM-DD)' },
+                  actualStart: {
+                    type: 'string',
+                    description: 'New actual start date (YYYY-MM-DD)'
+                  },
+                  actualEnd: { type: 'string', description: 'New actual end date (YYYY-MM-DD)' },
+                  parent: {
+                    type: 'string',
+                    description:
+                      'New parent task id, task number (e.g. 1.2) or title (empty = top level)'
+                  },
+                  addAfter: {
+                    type: 'string',
+                    description:
+                      'Task id, task number (e.g. 1.2) or title to position this record after'
+                  }
+                },
+                required: ['task'],
+                description:
+                  'Update record: `task` matcher plus the same fields as the top-level parameters'
+              },
+              description:
+                'Batch mode — one record per task, up to 30 records per call. Top-level fields (except schedule) are defaults overridable per record.'
+            },
             task: {
               type: 'string',
               description: 'Task id (uuid), task number (e.g. 1.2) or title to update'
@@ -1987,7 +2111,7 @@ export const tools: PTTool[] = [
             },
             note: { type: 'string', description: 'New note' }
           },
-          required: ['schedule', 'task']
+          required: ['schedule']
         }
       }
     },
@@ -1996,79 +2120,76 @@ export const tools: PTTool[] = [
       try {
         const { meta } = await requireSchedule(ctx, project, String(args.schedule ?? ''))
         const summary = await ctx.service.withSchedule(project, meta.id, async (schedule) => {
-          const target = String(args.task ?? '')
-          const task = findTask(schedule.tasks, target)
-          if (!task) {
-            throw new Error(`Task "${target}" not found`)
-          }
-          if (
-            task.children.length > 0 &&
-            (args.planStart !== undefined ||
-              args.planEnd !== undefined ||
-              args.duration !== undefined)
-          ) {
-            throw new Error(
-              `Task "${task.title}" is a parent task: plan start/end and duration are derived from its children. Update the child tasks instead.`
-            )
-          }
-          if (task.children.length > 0 && args.owner !== undefined) {
-            throw new Error(
-              `Task "${task.title}" is a parent task: owner is not editable on parent tasks.`
-            )
-          }
           const calendar = await ctx.service.readCalendar(project)
+          const { batch, records } = taskRecordArgs(args)
+          let tasks = schedule.tasks
+          const results: Array<Record<string, unknown>> = []
+          for (let index = 0; index < records.length; index++) {
+            const a = batch ? { ...args, ...records[index] } : args
+            try {
+              const target = String(a.task ?? '')
+              const task = findTask(tasks, target)
+              if (!task) {
+                throw new Error(`Task "${target}" not found`)
+              }
+              if (
+                task.children.length > 0 &&
+                (a.planStart !== undefined || a.planEnd !== undefined || a.duration !== undefined)
+              ) {
+                throw new Error(
+                  `Task "${task.title}" is a parent task: plan start/end and duration are derived from its children. Update the child tasks instead.`
+                )
+              }
+              if (task.children.length > 0 && a.owner !== undefined) {
+                throw new Error(
+                  `Task "${task.title}" is a parent task: owner is not editable on parent tasks.`
+                )
+              }
 
-          const next = { ...task } as ScheduleTask
-          const title = str(args.title)
-          if (title !== null) next.title = title
-          const owner = str(args.owner)
-          if (owner !== null) next.owner = normalizeOwner(owner)
-          const note = str(args.note)
-          if (note !== null) next.note = note
-          const status = statusOf(args.status)
-          if (status) next.status = status
-          const percent = numOrNull(args.percentComplete)
-          if (percent !== null) next.percentComplete = clampPercent(percent)
-          const planStart = dateOrNull(args.planStart)
-          if (planStart !== null) next.planStart = planStart
-          const planEnd = dateOrNull(args.planEnd)
-          if (planEnd !== null) next.planEnd = planEnd
-          const duration = numOrNull(args.duration)
-          if (duration !== null) next.duration = Math.max(1, Math.round(duration))
-          const actualStart = dateOrNull(args.actualStart)
-          if (actualStart !== null) next.actualStart = actualStart
-          const actualEnd = dateOrNull(args.actualEnd)
-          if (actualEnd !== null) next.actualEnd = actualEnd
+              const next = { ...task } as ScheduleTask
+              applyTaskFields(next, a, true)
 
-          const resolved = applyDateRule(task, next, calendar)
+              const resolved = applyDateRule(task, next, calendar)
 
-          const parentArg = args.parent ? findTask(schedule.tasks, String(args.parent)) : null
-          const afterArg = args.addAfter ? findTask(schedule.tasks, String(args.addAfter)) : null
-          const afterId = afterArg?.id ?? ''
-          const parent =
-            parentArg ??
-            (args.parent === undefined && afterArg
-              ? findTaskParent(schedule.tasks, afterArg.id)
-              : null)
-          if (parent && (parent.id === task.id || containsTask(task, parent.id))) {
-            throw new Error(
-              `Cannot move task "${task.title}" under itself or one of its descendants.`
-            )
-          }
-          const moveRequested = args.parent !== undefined || args.addAfter !== undefined
+              const parentArg = a.parent ? findTask(tasks, String(a.parent)) : null
+              const afterArg = a.addAfter ? findTask(tasks, String(a.addAfter)) : null
+              const afterId = afterArg?.id ?? ''
+              const parent =
+                parentArg ??
+                (a.parent === undefined && afterArg ? findTaskParent(tasks, afterArg.id) : null)
+              if (parent && (parent.id === task.id || containsTask(task, parent.id))) {
+                throw new Error(
+                  `Cannot move task "${task.title}" under itself or one of its descendants.`
+                )
+              }
+              const moveRequested = a.parent !== undefined || a.addAfter !== undefined
 
-          let tasks: ScheduleTask[]
-          if (moveRequested) {
-            tasks = removeTaskNode(schedule.tasks, task.id)
-            if (parent) {
-              const parentNode = findTask(tasks, parent.id)
-              const children = insertAfterId(parentNode!.children, afterId, resolved)
-              tasks = updateTaskNode(tasks, parentNode!.id, (t) => ({ ...t, children }))
-            } else {
-              tasks = insertAfterId(tasks, afterId, resolved)
+              if (moveRequested) {
+                tasks = removeTaskNode(tasks, task.id)
+                if (parent) {
+                  const parentNode = findTask(tasks, parent.id)
+                  const children = insertAfterId(parentNode!.children, afterId, resolved)
+                  tasks = updateTaskNode(tasks, parentNode!.id, (t) => ({ ...t, children }))
+                } else {
+                  tasks = insertAfterId(tasks, afterId, resolved)
+                }
+              } else {
+                tasks = updateTaskNode(tasks, task.id, () => resolved)
+              }
+              results.push({
+                index,
+                ok: true,
+                id: task.id,
+                title: resolved.title,
+                parent: parent ? parent.id : null
+              })
+            } catch (err) {
+              results.push({ index, ok: false, error: (err as Error).message })
             }
-          } else {
-            tasks = updateTaskNode(schedule.tasks, task.id, () => resolved)
+          }
+          if (!batch) {
+            const r0 = results[0]
+            if (!r0?.ok) throw new Error((r0?.error as string) ?? 'unknown error')
           }
           const saved = {
             ...schedule,
@@ -2077,11 +2198,13 @@ export const tools: PTTool[] = [
           }
           return {
             save: saved,
-            value: {
-              ...scheduleSummary(saved, project),
-              updated: { id: task.id, title: resolved.title },
-              parent: parent ? parent.id : null
-            }
+            value: batch
+              ? { ...scheduleSummary(saved, project), results }
+              : {
+                  ...scheduleSummary(saved, project),
+                  updated: { id: results[0]?.id, title: results[0]?.title },
+                  parent: (results[0]?.parent as string | null) ?? null
+                }
           }
         })
         return JSON.stringify(summary)

@@ -80,7 +80,7 @@ export function CalendarModal({ onClose }: { onClose: () => void }): React.JSX.E
             }}
           />
           <button className="btn small" onClick={addHoliday} disabled={!newHoliday}>
-            <MdiIcon path={mdiPlus} size={14} /> Add
+            <MdiIcon path={mdiPlus} size={16} /> Add
           </button>
         </div>
         {draft.holidays.length === 0 && (

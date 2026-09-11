@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   mdiCodeBraces,
+  mdiCodeJson,
   mdiCodeTags,
   mdiCloseCircle,
   mdiFormatBold,
@@ -34,7 +35,8 @@ import {
   mdiTableRowPlusAfter,
   mdiTableRowPlusBefore,
   mdiTableRowRemove,
-  mdiUndoVariant
+  mdiUndoVariant,
+  mdiXml
 } from '@mdi/js'
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react'
 import type { Editor } from '@tiptap/react'
@@ -59,6 +61,8 @@ import { TableKit } from '@tiptap/extension-table'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import { lowlight, safeLanguage, suggestLanguage } from '../editor/lowlightRegistry'
 import { toggleCodeBlockMerged } from '../editor/codeBlockToggle'
+import { isJsonText, prettyJsonInCodeBlock } from '../editor/jsonFormat'
+import { isMarkupText, prettyMarkupInCodeBlock, type MarkupMode } from '../editor/markupFormat'
 import { SUPPORTED_LANGUAGES } from '../editor/supportedLanguages'
 import { useAppStore } from '../store/useAppStore'
 import { slugify } from '@shared/slug'
@@ -508,6 +512,17 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
     () => (cbLang === '' ? suggestLanguage(cbText ?? '') : null),
     [cbLang, cbText]
   )
+  const showPrettyJson =
+    cbLang === 'json' || (cbLang === '' && suggestedLang === 'json' && isJsonText(cbText ?? ''))
+  const markupMode: MarkupMode | null =
+    cbLang === 'html'
+      ? 'html'
+      : cbLang === 'xml'
+        ? 'xml'
+        : cbLang === '' && (suggestedLang === 'html' || suggestedLang === 'xml')
+          ? (suggestedLang as MarkupMode)
+          : null
+  const showPrettyMarkup = markupMode != null && isMarkupText(cbText ?? '', markupMode)
 
   const [linkPrompt, setLinkPrompt] = useState(false)
   const [tableMenu, setTableMenu] = useState<{ x: number; y: number } | null>(null)
@@ -1036,6 +1051,32 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
                 {SUPPORTED_LANGUAGES.find((l) => l.key === suggestedLang)?.label ?? suggestedLang}
               </button>
             )}
+            {showPrettyJson && (
+              <button
+                type="button"
+                className="code-block-lang-pretty"
+                title="Pretty JSON"
+                onMouseDown={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => prettyJsonInCodeBlock(editor)}
+              >
+                <MdiIcon path={mdiCodeJson} size={16} />
+                Pretty JSON
+              </button>
+            )}
+            {showPrettyMarkup && markupMode && (
+              <button
+                type="button"
+                className="code-block-lang-pretty"
+                title={`Pretty ${markupMode === 'html' ? 'HTML' : 'XML'}`}
+                onMouseDown={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => prettyMarkupInCodeBlock(editor, markupMode)}
+              >
+                <MdiIcon path={mdiXml} size={16} />
+                Pretty {markupMode === 'html' ? 'HTML' : 'XML'}
+              </button>
+            )}
           </div>
         </BubbleMenu>
       )}
@@ -1058,7 +1099,7 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
             title="Format helper"
             onClick={() => setFormatHelperEnabled(!formatHelperEnabled)}
           >
-            <MdiIcon path={mdiFormatText} size={14} />
+            <MdiIcon path={mdiFormatText} size={16} />
           </button>
         </div>
       </div>

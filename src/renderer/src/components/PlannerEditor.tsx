@@ -1001,7 +1001,7 @@ export function PlannerEditor(): React.JSX.Element {
               title={collapsed.has(task.id) ? 'Expand' : 'Collapse'}
               onClick={() => toggleCollapse(task.id)}
             >
-              <MdiIcon path={collapsed.has(task.id) ? mdiChevronRight : mdiChevronDown} size={15} />
+              <MdiIcon path={collapsed.has(task.id) ? mdiChevronRight : mdiChevronDown} size={16} />
             </button>
           ) : (
             <span className="planner-toggle-spacer" />
@@ -1809,7 +1809,7 @@ export function PlannerEditor(): React.JSX.Element {
             setRenaming(true)
           }}
         >
-          <MdiIcon path={mdiPencil} size={14} />
+          <MdiIcon path={mdiPencil} size={16} />
         </button>
         {!ganttMode && (
           <button
@@ -1817,7 +1817,7 @@ export function PlannerEditor(): React.JSX.Element {
             title="Snapshots"
             onClick={() => setSnapshotsOpen(true)}
           >
-            <MdiIcon path={mdiHistory} size={14} />
+            <MdiIcon path={mdiHistory} size={16} />
           </button>
         )}
       </div>
@@ -2036,7 +2036,7 @@ export function PlannerEditor(): React.JSX.Element {
               aria-label="Zoom out"
               onClick={() => setGanttDayWidth((w) => Math.max(GANTT_DAY_WIDTH_MIN, w - 4))}
             >
-              <MdiIcon path={mdiMagnifyMinus} size={14} />
+              <MdiIcon path={mdiMagnifyMinus} size={16} />
             </button>
             <input
               type="range"
@@ -2052,7 +2052,7 @@ export function PlannerEditor(): React.JSX.Element {
               aria-label="Zoom in"
               onClick={() => setGanttDayWidth((w) => Math.min(GANTT_DAY_WIDTH_MAX, w + 4))}
             >
-              <MdiIcon path={mdiMagnifyPlus} size={14} />
+              <MdiIcon path={mdiMagnifyPlus} size={16} />
             </button>
           </div>
         )}
@@ -2061,13 +2061,13 @@ export function PlannerEditor(): React.JSX.Element {
             className={`view-btn ${view === 'table' ? 'active' : ''}`}
             onClick={() => switchView('table')}
           >
-            <MdiIcon path={mdiGrid} size={14} /> Grid View
+            <MdiIcon path={mdiGrid} size={16} /> Grid View
           </button>
           <button
             className={`view-btn ${view === 'gantt' ? 'active' : ''}`}
             onClick={() => switchView('gantt')}
           >
-            <MdiIcon path={mdiChartTimeline} size={14} /> Gantt Chart View
+            <MdiIcon path={mdiChartTimeline} size={16} /> Gantt Chart View
           </button>
         </div>
       </div>
@@ -2150,32 +2150,32 @@ export function PlannerEditor(): React.JSX.Element {
           >
             <button type="button" className="note-menu-item" onClick={handleGridInsertBefore}>
               <span className="note-menu-icon">
-                <MdiIcon path={mdiTableRowPlusBefore} size={15} />
+                <MdiIcon path={mdiTableRowPlusBefore} size={16} />
               </span>
               Insert Before
             </button>
             <button type="button" className="note-menu-item" onClick={handleGridInsertAfter}>
               <span className="note-menu-icon">
-                <MdiIcon path={mdiTableRowPlusAfter} size={15} />
+                <MdiIcon path={mdiTableRowPlusAfter} size={16} />
               </span>
               Insert After
             </button>
             <button type="button" className="note-menu-item" onClick={handleGridInsertSubtask}>
               <span className="note-menu-icon">
-                <MdiIcon path={mdiPlaylistPlus} size={15} />
+                <MdiIcon path={mdiPlaylistPlus} size={16} />
               </span>
               Insert Sub Task
             </button>
             <div className="note-menu-sep" />
             <button type="button" className="note-menu-item" onClick={handleGridCopy}>
               <span className="note-menu-icon">
-                <MdiIcon path={mdiContentCopy} size={15} />
+                <MdiIcon path={mdiContentCopy} size={16} />
               </span>
               Copy
             </button>
             <button type="button" className="note-menu-item" onClick={handleGridCut}>
               <span className="note-menu-icon">
-                <MdiIcon path={mdiContentCut} size={15} />
+                <MdiIcon path={mdiContentCut} size={16} />
               </span>
               Cut
             </button>
@@ -2186,7 +2186,7 @@ export function PlannerEditor(): React.JSX.Element {
               onClick={handleGridPasteBefore}
             >
               <span className="note-menu-icon">
-                <MdiIcon path={mdiContentPaste} size={15} />
+                <MdiIcon path={mdiContentPaste} size={16} />
               </span>
               Paste Before
             </button>
@@ -2197,7 +2197,7 @@ export function PlannerEditor(): React.JSX.Element {
               onClick={handleGridPasteAfter}
             >
               <span className="note-menu-icon">
-                <MdiIcon path={mdiContentPaste} size={15} />
+                <MdiIcon path={mdiContentPaste} size={16} />
               </span>
               Paste After
             </button>
@@ -2211,13 +2211,13 @@ export function PlannerEditor(): React.JSX.Element {
                   onClick={handleGridAutoPlan}
                 >
                   <span className="note-menu-icon">
-                    <MdiIcon path={mdiCalendarClock} size={15} />
+                    <MdiIcon path={mdiCalendarClock} size={16} />
                   </span>
                   Auto Plan Date
                 </button>
                 <button type="button" className="note-menu-item" onClick={handleGridClearPlan}>
                   <span className="note-menu-icon">
-                    <MdiIcon path={mdiCalendarRemove} size={15} />
+                    <MdiIcon path={mdiCalendarRemove} size={16} />
                   </span>
                   Clear Plan Date
                 </button>
@@ -2247,7 +2247,7 @@ export function PlannerEditor(): React.JSX.Element {
             <div className="note-menu-sep" />
             <button type="button" className="note-menu-item danger" onClick={handleGridDelete}>
               <span className="note-menu-icon">
-                <MdiIcon path={mdiTrashCan} size={15} />
+                <MdiIcon path={mdiTrashCan} size={16} />
               </span>
               Delete
             </button>

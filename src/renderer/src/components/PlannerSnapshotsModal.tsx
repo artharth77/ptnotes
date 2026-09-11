@@ -237,7 +237,7 @@ function SnapshotRow({
               title={snapshot.tag ? 'Edit tag' : 'Add tag'}
               onClick={onStartTag}
             >
-              <MdiIcon path={mdiTagOutline} size={15} />
+              <MdiIcon path={mdiTagOutline} size={16} />
             </button>
           )}
           <button
@@ -246,7 +246,7 @@ function SnapshotRow({
             disabled={busy || matchesLatest}
             onClick={onRestore}
           >
-            <MdiIcon path={mdiRestore} size={15} />
+            <MdiIcon path={mdiRestore} size={16} />
           </button>
           <button
             className="icon-btn small danger"
@@ -254,7 +254,7 @@ function SnapshotRow({
             disabled={busy || matchesLatest}
             onClick={onRequestDelete}
           >
-            <MdiIcon path={mdiTrashCanOutline} size={15} />
+            <MdiIcon path={mdiTrashCanOutline} size={16} />
           </button>
         </span>
       </div>

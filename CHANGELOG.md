@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.17.2] — 2026-09-11
+
+### Added
+
+- **Planner: batch `add_task` / `update_task` for the AI chat** — both tools accept an optional `tasks` array (up to 30 records per call — larger batches are split into multiple calls) so the AI can create or update many tasks in one tool call: each record carries its own fields plus per-record `parent`/`addAfter` (`update_task` records carry their own `task` matcher and move arguments), while the top-level fields act as defaults overridable per record. Records resolve sequentially inside one locked `withSchedule` pass, so a record may reference a task added earlier in the same batch, and each record reports its own ok/error result — successful records persist when siblings fail (parent-field rejections, unknown tasks and cycle guards are reported per record, not fatal to the batch). Single-record calls are unchanged, and there is no code-enforced record limit for internal/background use. Covered in `scripts/test-planner.mts`.
+- **Files: Preview / Open and open-any-file** — the file explorer gains Open in Preview (Space, or double-click / Enter on files without an in-app previewer) and Open items in the toolbar, context menu and keyboard shortcuts: files that cannot be previewed in-app (e.g. `.rtf`, spreadsheets, unknown formats) now open with the OS default app via a new `files:openExternal` IPC; previously they could only be revealed in the folder.
+
+### Changed
+
+- **UI: small icons normalized to 16px** — scattered small icons (toolbar buttons, menu rows, modal headers, list row icons) across dialogs, panels and the editor now use a consistent 16px size instead of a mix of ad-hoc sizes; view-toggle padding adjusted to match.
+- **Editor: Pretty JSON / HTML / XML in the code-block language overlay** — the language bubble gains a **Pretty** action: Pretty JSON for JSON blocks (syntax-aware re-indentation) and Pretty HTML / Pretty XML for markup blocks; formatting replaces the block's content in place.
+
 ## [0.17.1] — 2026-09-11
 
 ### Changed

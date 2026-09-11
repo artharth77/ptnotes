@@ -381,7 +381,7 @@ export function GanttChart({
                   title={isCollapsed ? 'Expand' : 'Collapse'}
                   onClick={() => onToggle(task.id)}
                 >
-                  <MdiIcon path={isCollapsed ? mdiChevronRight : mdiChevronDown} size={15} />
+                  <MdiIcon path={isCollapsed ? mdiChevronRight : mdiChevronDown} size={16} />
                 </button>
               ) : (
                 <span className="planner-toggle-spacer" />
@@ -523,7 +523,7 @@ export function GanttChart({
               {popupTask.title || (popupTask.children.length > 0 ? 'Group task' : 'Task title')}
             </span>
             <button className="icon-btn small" onClick={() => setPopup(null)}>
-              <MdiIcon path={mdiClose} size={14} />
+              <MdiIcon path={mdiClose} size={16} />
             </button>
           </div>
           <div className="gantt-popup-row">
@@ -549,7 +549,7 @@ export function GanttChart({
                   setPopup(null)
                 }}
               >
-                <MdiIcon path={mdiCalendarRemove} size={14} /> Clear Plan
+                <MdiIcon path={mdiCalendarRemove} size={16} /> Clear Plan
               </button>
             </div>
           )}

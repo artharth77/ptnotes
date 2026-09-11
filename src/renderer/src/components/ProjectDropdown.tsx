@@ -136,7 +136,7 @@ export function ProjectDropdown(): React.JSX.Element {
                     setRenaming(p.name)
                   }}
                 >
-                  <MdiIcon path={mdiPencil} size={14} />
+                  <MdiIcon path={mdiPencil} size={16} />
                 </button>
                 <button
                   className="icon-btn small danger"
@@ -146,7 +146,7 @@ export function ProjectDropdown(): React.JSX.Element {
                     setDeleting(p.name)
                   }}
                 >
-                  <MdiIcon path={mdiTrashCanOutline} size={14} />
+                  <MdiIcon path={mdiTrashCanOutline} size={16} />
                 </button>
               </span>
             </div>

@@ -70,7 +70,7 @@ export function PlannerColumnModal<K extends string>({
               disabled={!canUp}
               onClick={() => selected && onMove(selected, -1)}
             >
-              <MdiIcon path={mdiArrowUp} size={14} />
+              <MdiIcon path={mdiArrowUp} size={16} />
             </button>
             <button
               type="button"
@@ -79,7 +79,7 @@ export function PlannerColumnModal<K extends string>({
               disabled={!canDown}
               onClick={() => selected && onMove(selected, 1)}
             >
-              <MdiIcon path={mdiArrowDown} size={14} />
+              <MdiIcon path={mdiArrowDown} size={16} />
             </button>
           </span>
         )}

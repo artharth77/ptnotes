@@ -208,7 +208,7 @@ export function KanbanFilterBar({
             setPopupQuery('')
           }}
         >
-          <MdiIcon path={mdiLabelOutline} size={14} />
+          <MdiIcon path={mdiLabelOutline} size={16} />
           {filter.labels.length === 0
             ? 'No selected labels'
             : filter.labels.length === 1

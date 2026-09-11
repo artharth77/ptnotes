@@ -1314,7 +1314,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                           }}
                         >
                           <span className="note-menu-icon">
-                            <MdiIcon path={mdiPencil} size={14} />
+                            <MdiIcon path={mdiPencil} size={16} />
                           </span>
                         </button>
                         <button
@@ -1324,7 +1324,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                             openTraceViewer({ kind: 'chat', key: s.sessionId, title: s.title })
                           }
                         >
-                          <MdiIcon path={mdiTimelineClockOutline} size={14} />
+                          <MdiIcon path={mdiTimelineClockOutline} size={16} />
                         </button>
                         <button
                           className="chat-history-rename-btn"
@@ -1334,7 +1334,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                             if (renamingId === s.sessionId) setRenamingId(null)
                           }}
                         >
-                          <MdiIcon path={mdiTrashCanOutline} size={14} />
+                          <MdiIcon path={mdiTrashCanOutline} size={16} />
                         </button>
                       </div>
                     ))}
@@ -1591,18 +1591,18 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                 aria-label="Switch profile"
                 onClick={openProfileMenu}
               >
-                <MdiIcon path={mdiMenuUp} size={14} />
+                <MdiIcon path={mdiMenuUp} size={16} />
               </button>
             </span>
           )}
           {usageTotal && (
             <>
               <span className="chat-statusbar-usage" title="Total input tokens for this chat">
-                <MdiIcon path={mdiTrayArrowDown} size={14} />
+                <MdiIcon path={mdiTrayArrowDown} size={16} />
                 {formatTokens(usageTotal.input)}
               </span>
               <span className="chat-statusbar-usage" title="Total output tokens for this chat">
-                <MdiIcon path={mdiTrayArrowUp} size={14} />
+                <MdiIcon path={mdiTrayArrowUp} size={16} />
                 {formatTokens(usageTotal.output)}
               </span>
               {usageTotal.cached !== undefined && (
@@ -1610,7 +1610,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
                   className="chat-statusbar-usage"
                   title="Total cached input tokens for this chat"
                 >
-                  <MdiIcon path={mdiTrayFull} size={14} />
+                  <MdiIcon path={mdiTrayFull} size={16} />
                   {formatTokens(usageTotal.cached)}
                 </span>
               )}

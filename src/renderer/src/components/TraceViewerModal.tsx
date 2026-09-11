@@ -421,7 +421,7 @@ function Block({
               title={raw ? 'Render as markdown' : 'Show raw markdown'}
               onClick={() => setRaw((v) => !v)}
             >
-              <MdiIcon path={raw ? mdiLanguageMarkdown : mdiCodeTags} size={13} />
+              <MdiIcon path={raw ? mdiLanguageMarkdown : mdiCodeTags} size={16} />
             </button>
           )}
           {copyText != null && copyText !== '' && (
@@ -457,7 +457,7 @@ function CopyIconButton({ text, title }: { text: string; title?: string }): Reac
         void onCopy()
       }}
     >
-      <MdiIcon path={copied ? mdiCheck : mdiContentCopy} size={13} />
+      <MdiIcon path={copied ? mdiCheck : mdiContentCopy} size={16} />
     </button>
   )
 }

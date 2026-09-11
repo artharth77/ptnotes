@@ -22,6 +22,7 @@
   --card-pad: 16px;
   --btn-pad-v: 8px;
   --btn-pad-h: 14px;
+  --menu-icon-size: 16px;
   --editor-font:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --code-font:
@@ -344,7 +345,7 @@ body {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 2px;
+  padding: 4px;
 }
 
 .view-toggle .view-btn {
@@ -983,10 +984,15 @@ body {
 }
 
 .note-menu-icon {
-  width: 18px;
+  width: var(--menu-icon-size);
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.note-menu-icon svg {
+  width: var(--menu-icon-size);
+  height: var(--menu-icon-size);
 }
 
 .note-menu-toggle {
@@ -3085,6 +3091,31 @@ fieldset.kanban-form {
   color: var(--text);
 }
 .code-block-lang-suggest svg {
+  display: block;
+}
+
+.code-block-lang-pretty {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-hover);
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.code-block-lang-pretty:hover {
+  border-color: var(--accent);
+}
+.code-block-lang-pretty:hover,
+.code-block-lang-pretty:focus {
+  color: var(--text);
+}
+.code-block-lang-pretty svg {
   display: block;
 }
 

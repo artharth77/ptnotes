@@ -197,7 +197,7 @@ function ModuleHistoryPanel({
                 openTraceViewer({ kind: 'module', key: runId, title: run?.title ?? runId })
               }
             >
-              <MdiIcon path={mdiTimelineClockOutline} size={14} />
+              <MdiIcon path={mdiTimelineClockOutline} size={16} />
             </button>
             <button className="module-history-close" title="Close (Esc)" onClick={onClose}>
               ✕

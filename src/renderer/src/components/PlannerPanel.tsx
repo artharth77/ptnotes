@@ -223,19 +223,19 @@ export function PlannerPanel(): React.JSX.Element {
                     }}
                   >
                     <span className="note-menu-icon">
-                      <MdiIcon path={mdiPencil} size={15} />
+                      <MdiIcon path={mdiPencil} size={16} />
                     </span>{' '}
                     Rename
                   </button>
                   <button className="note-menu-item" onClick={() => void openSnapshots(menuFor)}>
                     <span className="note-menu-icon">
-                      <MdiIcon path={mdiHistory} size={15} />
+                      <MdiIcon path={mdiHistory} size={16} />
                     </span>{' '}
                     Snapshots…
                   </button>
                   <button className="note-menu-item" onClick={() => void handleReveal(menuFor)}>
                     <span className="note-menu-icon">
-                      <MdiIcon path={mdiFolderOpenOutline} size={15} />
+                      <MdiIcon path={mdiFolderOpenOutline} size={16} />
                     </span>{' '}
                     Show in Folder
                   </button>
@@ -247,7 +247,7 @@ export function PlannerPanel(): React.JSX.Element {
                     }}
                   >
                     <span className="note-menu-icon">
-                      <MdiIcon path={mdiContentCopy} size={15} />
+                      <MdiIcon path={mdiContentCopy} size={16} />
                     </span>{' '}
                     Duplicate
                   </button>
@@ -259,7 +259,7 @@ export function PlannerPanel(): React.JSX.Element {
                     }}
                   >
                     <span className="note-menu-icon">
-                      <MdiIcon path={mdiTrashCanOutline} size={15} />
+                      <MdiIcon path={mdiTrashCanOutline} size={16} />
                     </span>{' '}
                     Delete
                   </button>

@@ -123,6 +123,15 @@ export function registerFilesIpc(
     }
   )
 
+  ipcMain.handle(
+    'files:openExternal',
+    async (_e: IpcMainInvokeEvent, project: string, fileName: string): Promise<string> => {
+      const full = await service.projectFilePath(project, fileName)
+      if (!full) return 'File not found'
+      return shell.openPath(full)
+    }
+  )
+
   ipcMain.handle('pdf:supportsUpload', async (): Promise<boolean> => {
     const config = await configStore.load()
     return config.uploadPdfEnabled ?? true
