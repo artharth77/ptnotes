@@ -454,6 +454,13 @@ const api = {
     return () => {
       ipcRenderer.removeListener('global:open-find', listener)
     }
+  },
+  onSelectAll: (callback: () => void): (() => void) => {
+    const listener = (): void => callback()
+    ipcRenderer.on('global:select-all', listener)
+    return () => {
+      ipcRenderer.removeListener('global:select-all', listener)
+    }
   }
 }
 

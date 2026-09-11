@@ -1,4 +1,5 @@
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
+import type { Editor } from '@tiptap/core'
 import { lowlight, safeLanguage } from './lowlightRegistry'
 
 export type MermaidMode = 'edit' | 'split' | 'preview'
@@ -87,5 +88,35 @@ export function createMermaidCodeBlock(nodeView?: unknown): typeof CodeBlockLowl
     }
   }
   if (nodeView) config.addNodeView = nodeView as ExtensionField
+  config.addKeyboardShortcuts = function (this: ExtensionThis) {
+    return {
+      ...this.parent?.(),
+      'Mod-a': ({ editor }: { editor: Editor }): boolean => codeBlockSelectAll(editor)
+    }
+  } as unknown as ExtensionField
   return CodeBlockLowlight.extend(config as never)
+}
+
+/**
+ * Mod/Cmd+A semantics for the note editor: with the caret inside a code block
+ * (and the selection not crossing its boundary) select only that block's text;
+ * otherwise fall through (returns false) so the default select-all applies.
+ */
+export function codeBlockSelectAll(editor: Editor): boolean {
+  const { selection } = editor.state
+  const $from = selection.$from
+  let depth = -1
+  for (let d = $from.depth; d >= 0; d--) {
+    if ($from.node(d).type.name === 'codeBlock') {
+      depth = d
+      break
+    }
+  }
+  if (depth < 0) return false
+  const start = $from.before(depth) + 1
+  const end = $from.after(depth) - 1
+  if (selection.from < start || selection.to > end) return false
+  if (start >= end) return false
+  editor.commands.setTextSelection({ from: start, to: end })
+  return true
 }

@@ -106,14 +106,17 @@ function buildAppMenu(): Menu {
         ...(isMac
           ? ([
               { role: 'pasteAndMatchStyle' },
-              { role: 'delete' },
-              { role: 'selectAll' }
+              { role: 'delete' }
             ] as Electron.MenuItemConstructorOptions[])
-          : ([
-              { role: 'delete' },
-              { type: 'separator' },
-              { role: 'selectAll' }
-            ] as Electron.MenuItemConstructorOptions[]))
+          : ([{ role: 'delete' }, { type: 'separator' }] as Electron.MenuItemConstructorOptions[])),
+        {
+          label: 'Select All',
+          accelerator: 'CmdOrCtrl+A',
+          click: (_item, win) => {
+            const target = win as Electron.BrowserWindow | undefined
+            target?.webContents.send('global:select-all')
+          }
+        }
       ]
     },
     {

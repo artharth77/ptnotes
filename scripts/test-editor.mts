@@ -745,6 +745,67 @@ console.log(
   ed.destroy()
 }
 
+// Mod/Cmd+A scoping: caret inside a code block selects only that block's text
+{
+  const { codeBlockSelectAll } = await import('../src/renderer/src/editor/mermaidCodeBlock')
+  const ed = makeEditor('before\n\n```mermaid\nflowchart TD\n  A --> B\n```\n\nafter\n')
+  let start = -1
+  let end = -1
+  ed.state.doc.descendants((node, pos) => {
+    if (node.type.name === 'codeBlock') {
+      start = pos + 1
+      end = pos + node.nodeSize - 1
+      return false
+    }
+    return true
+  })
+  // collapsed cursor mid-text
+  ed.commands.setTextSelection(start + 8)
+  assert.equal(codeBlockSelectAll(ed), true, 'caret in block runs the block select-all')
+  assert.deepEqual(
+    [ed.state.selection.from, ed.state.selection.to],
+    [start, end],
+    'block text selected exactly'
+  )
+  assert.equal(
+    ed.state.doc.textBetween(ed.state.selection.from, ed.state.selection.to, '\n'),
+    'flowchart TD\n  A --> B',
+    'selection covers only the block content'
+  )
+  // range fully inside the block expands to the block
+  ed.commands.setTextSelection({ from: start, to: start + 5 })
+  assert.equal(codeBlockSelectAll(ed), true, 'partial in-block selection expands')
+  assert.deepEqual([ed.state.selection.from, ed.state.selection.to], [start, end])
+  // selection crossing the block boundary falls through (default select-all)
+  ed.commands.setTextSelection({ from: 1, to: start + 3 })
+  assert.equal(codeBlockSelectAll(ed), false, 'crossing selection falls back')
+  // caret outside any code block falls through
+  ed.commands.setTextSelection(1)
+  assert.equal(codeBlockSelectAll(ed), false, 'caret in paragraph falls through')
+  // empty block: nothing to select, falls through
+  {
+    const edEmpty = makeEditor('before\n\n```\n\n```\n\nafter\n')
+    let emptyStart = -1
+    let emptyEnd = -1
+    edEmpty.state.doc.descendants((n, pos) => {
+      if (n.type.name === 'codeBlock') {
+        emptyStart = pos + 1
+        emptyEnd = pos + n.nodeSize - 1
+        return false
+      }
+      return true
+    })
+    edEmpty.commands.setTextSelection(emptyStart)
+    assert.equal(
+      codeBlockSelectAll(edEmpty),
+      false,
+      'empty block has no text to select, falls through'
+    )
+    edEmpty.destroy()
+  }
+  ed.destroy()
+}
+
 // mermaid suggestion markers
 {
   assert.equal(

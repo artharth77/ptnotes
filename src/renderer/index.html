@@ -9,10 +9,7 @@
     <script>
       ;(function () {
         var t = localStorage.getItem('ptnotes:theme') || 'system'
-        var d =
-          t === 'system'
-            ? matchMedia('(prefers-color-scheme: dark)').matches
-            : t === 'dark'
+        var d = t === 'system' ? matchMedia('(prefers-color-scheme: dark)').matches : t === 'dark'
         document.documentElement.setAttribute('data-theme', d ? 'dark' : 'light')
       })()
     </script>

@@ -59,6 +59,7 @@ import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { TableKit } from '@tiptap/extension-table'
 import { suggestLanguage } from '../editor/lowlightRegistry'
+import { codeBlockSelectAll } from '../editor/mermaidCodeBlock'
 import { MermaidCodeBlock } from '../editor/mermaidNodeView'
 import { toggleCodeBlockMerged } from '../editor/codeBlockToggle'
 import { isJsonText, prettyJsonInCodeBlock } from '../editor/jsonFormat'
@@ -577,6 +578,17 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
     if (!editor) return
     if (!findOpen) clearFind(editor)
   }, [editor, findOpen])
+
+  // Menu Select All routing: caret inside a code block selects that block only,
+  // everything else falls back to the native select-all behavior.
+  useEffect(() => {
+    if (!editor) return
+    const off = window.ptnotes.onSelectAll(() => {
+      if (!rawMode && editor.view.hasFocus() && codeBlockSelectAll(editor)) return
+      document.execCommand('selectAll')
+    })
+    return off
+  }, [editor, rawMode])
 
   useEffect(() => {
     if (findOpen && !rawMode) findInputRef.current?.focus()
