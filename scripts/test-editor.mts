@@ -6,13 +6,15 @@ import { JSDOM } from 'jsdom'
 import assert from 'node:assert/strict'
 import { Editor } from '@tiptap/core'
 import { Markdown } from '@tiptap/markdown'
-import { lowlight } from 'lowlight'
+import { createLowlight } from 'lowlight'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import StarterKit from '@tiptap/starter-kit'
 import Typography from '@tiptap/extension-typography'
 import { suggestLanguage } from '../src/renderer/src/editor/lowlightRegistry'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
+
+const lowlight = createLowlight()
 
 // ---- jsdom globals (mirrors MarkdownEditor's browser deps) ----
 const dom = new JSDOM('<!doctype html><body></body>')

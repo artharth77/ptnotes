@@ -8,7 +8,9 @@ import Link from '@tiptap/extension-link'
 import Typography from '@tiptap/extension-typography'
 import { TableKit } from '@tiptap/extension-table'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
-import { lowlight } from 'lowlight'
+import { createLowlight } from 'lowlight'
+
+const lowlight = createLowlight()
 
 const md = `# Welcome to PTNotes
 
