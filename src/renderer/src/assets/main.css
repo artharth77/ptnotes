@@ -22,6 +22,7 @@
   --card-pad: 16px;
   --btn-pad-v: 8px;
   --btn-pad-h: 14px;
+  --menu-icon-size: 16px;
   --editor-font:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --code-font:
@@ -344,7 +345,7 @@ body {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 2px;
+  padding: 4px;
 }
 
 .view-toggle .view-btn {
@@ -983,10 +984,15 @@ body {
 }
 
 .note-menu-icon {
-  width: 18px;
+  width: var(--menu-icon-size);
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.note-menu-icon svg {
+  width: var(--menu-icon-size);
+  height: var(--menu-icon-size);
 }
 
 .note-menu-toggle {

@@ -150,7 +150,7 @@ export function BotsSettingsPane(): React.JSX.Element {
           onClick={() => setEditing({ ...EMPTY_FORM })}
           disabled={!!editing}
         >
-          <MdiIcon path={mdiPlus} size={14} /> New bot
+          <MdiIcon path={mdiPlus} size={16} /> New bot
         </button>
       </div>
       <div className="bots-lib-list">
@@ -178,14 +178,14 @@ export function BotsSettingsPane(): React.JSX.Element {
                   })
                 }
               >
-                <MdiIcon path={mdiPencil} size={14} />
+                <MdiIcon path={mdiPencil} size={16} />
               </button>
               <button
                 className="icon-btn"
                 title="Delete bot"
                 onClick={() => void openDeleteConfirm(b.id)}
               >
-                <MdiIcon path={mdiTrashCanOutline} size={14} />
+                <MdiIcon path={mdiTrashCanOutline} size={16} />
               </button>
             </div>
           </div>
@@ -306,7 +306,7 @@ export function BotsSettingsPane(): React.JSX.Element {
                             })
                         }}
                       >
-                        <MdiIcon path={mdiTrashCanOutline} size={14} />
+                        <MdiIcon path={mdiTrashCanOutline} size={16} />
                       </button>
                     </div>
                   ))}

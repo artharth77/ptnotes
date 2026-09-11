@@ -469,7 +469,7 @@ export function KanbanCardModal(): React.JSX.Element {
                     title="Remove label"
                     onClick={() => removeLabel(l)}
                   >
-                    <MdiIcon path={mdiClose} size={12} />
+                    <MdiIcon path={mdiClose} size={16} />
                   </button>
                 </span>
               ))}
@@ -580,14 +580,14 @@ export function KanbanCardModal(): React.JSX.Element {
                                 setCommentDraft(c.comment)
                               }}
                             >
-                              <MdiIcon path={mdiPencil} size={14} />
+                              <MdiIcon path={mdiPencil} size={16} />
                             </button>
                             <button
                               className="icon-btn small danger"
                               title="Delete comment"
                               onClick={() => setConfirmCommentDelete(c.id)}
                             >
-                              <MdiIcon path={mdiTrashCanOutline} size={14} />
+                              <MdiIcon path={mdiTrashCanOutline} size={16} />
                             </button>
                           </>
                         ))}
@@ -631,7 +631,7 @@ export function KanbanCardModal(): React.JSX.Element {
                 title="Add attribute"
                 onClick={() => setAttrs([...attrs, { key: '', value: '', secret: false }])}
               >
-                <MdiIcon path={mdiPlus} size={14} />
+                <MdiIcon path={mdiPlus} size={16} />
               </button>
             )}
           </div>
@@ -683,7 +683,7 @@ export function KanbanCardModal(): React.JSX.Element {
                       setAttrs(attrs.map((x, j) => (j === i ? { ...x, secret: !x.secret } : x)))
                     }
                   >
-                    <MdiIcon path={mdiKey} size={14} />
+                    <MdiIcon path={mdiKey} size={16} />
                   </button>
                   {!readOnly && (
                     <button
@@ -691,7 +691,7 @@ export function KanbanCardModal(): React.JSX.Element {
                       title="Remove attribute"
                       onClick={() => setAttrs(attrs.filter((_, j) => j !== i))}
                     >
-                      <MdiIcon path={mdiTrashCanOutline} size={14} />
+                      <MdiIcon path={mdiTrashCanOutline} size={16} />
                     </button>
                   )}
                 </div>

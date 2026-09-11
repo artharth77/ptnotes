@@ -122,7 +122,7 @@ export function GlobalFind(): React.JSX.Element | null {
                   setOpen(false)
                 }}
               >
-                <MdiIcon path={mdiFileDocumentOutline} size={14} />
+                <MdiIcon path={mdiFileDocumentOutline} size={16} />
                 <span>{list[0].name}</span>
                 <span className="search-match-count">{list.length}</span>
               </button>

@@ -275,7 +275,7 @@ export function NoteList(): React.JSX.Element {
                       >
                         <span className="note-menu-icon">
                           {active ? (
-                            <MdiIcon path={mdiCheck} size={14} />
+                            <MdiIcon path={mdiCheck} size={16} />
                           ) : (
                             <span style={{ display: 'inline-block', width: 14 }} />
                           )}
@@ -291,7 +291,7 @@ export function NoteList(): React.JSX.Element {
                           >
                             <MdiIcon
                               path={notesSortDir === 'asc' ? mdiArrowUp : mdiArrowDown}
-                              size={13}
+                              size={16}
                               style={{ color: 'var(--text-dim)' }}
                             />
                           </span>
@@ -325,7 +325,7 @@ export function NoteList(): React.JSX.Element {
                       >
                         <span className="note-menu-icon">
                           {active ? (
-                            <MdiIcon path={mdiCheck} size={14} />
+                            <MdiIcon path={mdiCheck} size={16} />
                           ) : (
                             <span style={{ display: 'inline-block', width: 14 }} />
                           )}
@@ -419,7 +419,7 @@ export function NoteList(): React.JSX.Element {
                     }}
                   >
                     <span className="note-menu-icon">
-                      <MdiIcon path={note?.starred ? mdiStar : mdiStarOutline} size={15} />
+                      <MdiIcon path={note?.starred ? mdiStar : mdiStarOutline} size={16} />
                     </span>{' '}
                     {note?.starred ? 'Unpin' : 'Pin / Star'}
                   </button>
@@ -433,13 +433,13 @@ export function NoteList(): React.JSX.Element {
                     }}
                   >
                     <span className="note-menu-icon">
-                      <MdiIcon path={mdiPencil} size={15} />
+                      <MdiIcon path={mdiPencil} size={16} />
                     </span>{' '}
                     Rename
                   </button>
                   <button className="note-menu-item" onClick={() => void handleReveal(menuFor)}>
                     <span className="note-menu-icon">
-                      <MdiIcon path={mdiFolderOpenOutline} size={15} />
+                      <MdiIcon path={mdiFolderOpenOutline} size={16} />
                     </span>{' '}
                     Show in Folder
                   </button>
@@ -448,7 +448,7 @@ export function NoteList(): React.JSX.Element {
                     onClick={() => void handleDelete(menuFor)}
                   >
                     <span className="note-menu-icon">
-                      <MdiIcon path={mdiTrashCanOutline} size={15} />
+                      <MdiIcon path={mdiTrashCanOutline} size={16} />
                     </span>{' '}
                     Delete
                   </button>

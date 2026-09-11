@@ -297,7 +297,7 @@ export function KanbanBoard(): React.JSX.Element {
                     endDrag()
                   }}
                 >
-                  <MdiIcon path={mdiPlus} size={14} />
+                  <MdiIcon path={mdiPlus} size={16} />
                   Add card
                 </button>
               </div>
@@ -451,7 +451,7 @@ function CardView({
             className={`kanban-priority kanban-priority-${card.priority}`}
             title={`Priority: ${card.priority}`}
           >
-            <MdiIcon path={PRIORITY_ICONS[card.priority]} size={12} />
+            <MdiIcon path={PRIORITY_ICONS[card.priority]} size={16} />
           </span>
         )}
         {card.dueDate && (
@@ -463,13 +463,13 @@ function CardView({
         )}
         {card.storyPoints != null && (
           <span className="kanban-pts">
-            <MdiIcon path={mdiPlusCircleOutline} size={14} />
+            <MdiIcon path={mdiPlusCircleOutline} size={16} />
             {card.storyPoints} pts
           </span>
         )}
         {card.assignee && (
           <span className="kanban-assignee">
-            <MdiIcon path={mdiAccountCircleOutline} size={14} />
+            <MdiIcon path={mdiAccountCircleOutline} size={16} />
             {card.assignee}
           </span>
         )}

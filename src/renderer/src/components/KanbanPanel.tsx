@@ -276,7 +276,7 @@ export function KanbanPanel(): React.JSX.Element {
                 >
                   <MdiIcon
                     path={collapsed ? mdiChevronRight : mdiChevronDown}
-                    size={14}
+                    size={16}
                     className="kanban-col-chevron"
                   />
                   {col.color && (
@@ -299,7 +299,7 @@ export function KanbanPanel(): React.JSX.Element {
                       setOverColId(null)
                     }}
                   >
-                    <MdiIcon path={mdiDrag} size={14} />
+                    <MdiIcon path={mdiDrag} size={16} />
                   </span>
                 </div>
                 {!collapsed &&
@@ -323,7 +323,7 @@ export function KanbanPanel(): React.JSX.Element {
                           className={`kanban-priority kanban-priority-${card.priority}`}
                           title={`Priority: ${card.priority}`}
                         >
-                          <MdiIcon path={PRIORITY_ICONS[card.priority]} size={12} />
+                          <MdiIcon path={PRIORITY_ICONS[card.priority]} size={16} />
                         </span>
                       )}
                       <span className="kanban-card-row-title">{card.title}</span>

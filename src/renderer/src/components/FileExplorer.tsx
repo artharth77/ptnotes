@@ -180,12 +180,12 @@ export function FileTreePanel(): React.JSX.Element {
             aria-label={isExpanded ? 'Collapse' : 'Expand'}
           >
             {node.children.length ? (
-              <MdiIcon path={isExpanded ? mdiChevronDown : mdiChevronRight} size={14} />
+              <MdiIcon path={isExpanded ? mdiChevronDown : mdiChevronRight} size={16} />
             ) : null}
           </button>
           <MdiIcon
             path={isCwd ? mdiFolderOpenOutline : mdiFolderOutline}
-            size={15}
+            size={16}
             className="file-explorer-folder-icon"
           />
           <span className="file-explorer-tree-name">{isRoot ? 'files' : node.name}</span>
@@ -800,7 +800,7 @@ export function FileListPanel(): React.JSX.Element {
         <span className="file-explorer-statusbar-sep" />
         <MdiIcon
           path={mdiFolderOutline}
-          size={14}
+          size={16}
           className="file-explorer-entry-icon file-explorer-crumb-icon"
         />
         {crumbs.map((path, i) => (
@@ -843,7 +843,7 @@ export function FileListPanel(): React.JSX.Element {
               }}
             >
               <span className="note-menu-icon">
-                <MdiIcon path={mdiFolderPlusOutline} size={15} />
+                <MdiIcon path={mdiFolderPlusOutline} size={16} />
               </span>
               New Folder
             </button>
@@ -857,7 +857,7 @@ export function FileListPanel(): React.JSX.Element {
               }}
             >
               <span className="note-menu-icon">
-                <MdiIcon path={mdiContentCopy} size={15} />
+                <MdiIcon path={mdiContentCopy} size={16} />
               </span>
               Copy
             </button>
@@ -870,7 +870,7 @@ export function FileListPanel(): React.JSX.Element {
               }}
             >
               <span className="note-menu-icon">
-                <MdiIcon path={mdiContentCut} size={15} />
+                <MdiIcon path={mdiContentCut} size={16} />
               </span>
               Cut
             </button>
@@ -883,7 +883,7 @@ export function FileListPanel(): React.JSX.Element {
               }}
             >
               <span className="note-menu-icon">
-                <MdiIcon path={mdiContentPaste} size={15} />
+                <MdiIcon path={mdiContentPaste} size={16} />
               </span>
               Paste
             </button>
@@ -897,7 +897,7 @@ export function FileListPanel(): React.JSX.Element {
               }}
             >
               <span className="note-menu-icon">
-                <MdiIcon path={mdiPencil} size={15} />
+                <MdiIcon path={mdiPencil} size={16} />
               </span>
               Rename
             </button>
@@ -910,7 +910,7 @@ export function FileListPanel(): React.JSX.Element {
               }}
             >
               <span className="note-menu-icon">
-                <MdiIcon path={mdiFolderSearchOutline} size={15} />
+                <MdiIcon path={mdiFolderSearchOutline} size={16} />
               </span>
               Show in Folder
             </button>
@@ -923,7 +923,7 @@ export function FileListPanel(): React.JSX.Element {
                 }}
               >
                 <span className="note-menu-icon">
-                  <MdiIcon path={mdiFileCogOutline} size={15} />
+                  <MdiIcon path={mdiFileCogOutline} size={16} />
                 </span>
                 Manage Pages
               </button>
@@ -937,7 +937,7 @@ export function FileListPanel(): React.JSX.Element {
                 }}
               >
                 <span className="note-menu-icon">
-                  <MdiIcon path={mdiMerge} size={15} />
+                  <MdiIcon path={mdiMerge} size={16} />
                 </span>
                 Merge PDFs
               </button>
@@ -952,7 +952,7 @@ export function FileListPanel(): React.JSX.Element {
               }}
             >
               <span className="note-menu-icon">
-                <MdiIcon path={mdiTrashCanOutline} size={15} />
+                <MdiIcon path={mdiTrashCanOutline} size={16} />
               </span>
               Delete
             </button>

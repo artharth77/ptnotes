@@ -96,7 +96,7 @@ export function PdfMergeDialog({
           >
             <span className="pdf-merge-order">{index + 1}</span>
             <span className="pdf-merge-grip">
-              <MdiIcon path={mdiDragVertical} size={14} />
+              <MdiIcon path={mdiDragVertical} size={16} />
             </span>
             <span className="pdf-merge-name">{entry.name}</span>
           </li>
