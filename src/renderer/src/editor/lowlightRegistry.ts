@@ -29,6 +29,16 @@ const lowlight = createLowlight()
 
 export { lowlight }
 
+/** Minimal no-op grammar so the `mermaid` language tag round-trips (no highlighting). */
+function hl_mermaid(): { name: string; contains: never[] } {
+  return { name: 'Mermaid', contains: [] }
+}
+try {
+  if (!lowlight.registered('mermaid')) lowlight.register('mermaid', hl_mermaid as never)
+} catch {
+  // ignore
+}
+
 const BASE_ORDER: Array<[string, unknown]> = [
   ['plaintext', hl_plaintext],
   ['javascript', hl_javascript],
@@ -127,7 +137,8 @@ const hlMap: Record<string, string[]> = {
   dockerfile: ['dockerfile'],
   toml: ['ini'],
   ini: ['ini'],
-  diff: ['diff']
+  diff: ['diff'],
+  mermaid: ['mermaid']
 }
 
 function resolveFirstAvailable(preferred: string[]): string | null {
@@ -211,6 +222,9 @@ function isHtmlLike(sample: string): boolean {
   return /\b(?:class|href|src|id)\s*=/i.test(sample)
 }
 
+const MERMAID_MARKER =
+  /^\s*(?:flowchart|graph\s+(?:[TB]D|[RL]B)|sequenceDiagram|stateDiagram(?:-v2)?|classDiagram|erDiagram|pie|gantt|mindmap|timeline|quadrantChart|gitGraph)\b/
+
 function markerLanguage(sample: string): string | null {
   const first = firstMeaningfulChar(sample)
   if ((first === '{' || first === '[') && lowlight.registered('json')) {
@@ -264,6 +278,7 @@ function markerLanguage(sample: string): string | null {
     )
       return 'javascript'
   }
+  if (lowlight.registered('mermaid') && MERMAID_MARKER.test(sample)) return 'mermaid'
   return null
 }
 

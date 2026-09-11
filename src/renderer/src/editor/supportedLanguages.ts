@@ -35,5 +35,6 @@ export const SUPPORTED_LANGUAGES: SupportedLang[] = [
   { key: 'dockerfile', label: 'Dockerfile' },
   { key: 'toml', label: 'TOML' },
   { key: 'ini', label: 'INI' },
-  { key: 'diff', label: 'Diff' }
+  { key: 'diff', label: 'Diff' },
+  { key: 'mermaid', label: 'Mermaid' }
 ]

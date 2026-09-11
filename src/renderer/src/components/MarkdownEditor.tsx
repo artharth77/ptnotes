@@ -58,8 +58,8 @@ const CustomLink = Link.extend({
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { TableKit } from '@tiptap/extension-table'
-import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
-import { lowlight, safeLanguage, suggestLanguage } from '../editor/lowlightRegistry'
+import { suggestLanguage } from '../editor/lowlightRegistry'
+import { MermaidCodeBlock } from '../editor/mermaidNodeView'
 import { toggleCodeBlockMerged } from '../editor/codeBlockToggle'
 import { isJsonText, prettyJsonInCodeBlock } from '../editor/jsonFormat'
 import { isMarkupText, prettyMarkupInCodeBlock, type MarkupMode } from '../editor/markupFormat'
@@ -336,63 +336,7 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ codeBlock: false }),
-      CodeBlockLowlight.extend({
-        addOptions() {
-          return {
-            ...this.parent?.(),
-            lowlight,
-            defaultLanguage: 'text',
-            HTMLAttributes: { class: 'code-block-wrapper' }
-          }
-        },
-        addAttributes() {
-          const parentAttrs = (this.parent?.() ?? {}) as Record<
-            string,
-            {
-              rendered?: boolean
-              default?: unknown
-              parseHTML?: (e: Element) => unknown
-              renderHTML?: (a: never) => unknown
-            }
-          >
-          const base = parentAttrs.language ?? {}
-          return {
-            ...parentAttrs,
-            language: {
-              ...base,
-              rendered: false,
-              default: '',
-              parseHTML: (element): string => {
-                const c = element.querySelector('code')
-                const lang =
-                  element.getAttribute('data-language') ||
-                  c?.className.match(/language-([\w-]+)/)?.[1] ||
-                  ''
-                if (!lang) return ''
-                return safeLanguage(lang)
-              },
-              renderHTML: (attrs) => {
-                const raw = (attrs as { language?: string }).language
-                if (!raw) return {}
-                return { 'data-language': safeLanguage(raw) }
-              }
-            }
-          }
-        },
-        parseMarkdown: (token, helpers) => {
-          const isFenced =
-            typeof token.raw === 'string' &&
-            (token.raw.startsWith('```') || token.raw.startsWith('~~~'))
-          if (!isFenced && token.codeBlockStyle !== 'indented') {
-            return []
-          }
-          return helpers.createNode(
-            'codeBlock',
-            { language: token.lang ? safeLanguage(token.lang) : '' },
-            token.text ? [helpers.createTextNode(token.text)] : []
-          )
-        }
-      }),
+      MermaidCodeBlock,
       Markdown.configure({
         indentation: { style: 'space', size: 2 }
       }),

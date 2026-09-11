@@ -178,6 +178,16 @@ export interface PdfExtractResult {
   totalPages?: number
 }
 
+/** Result of rendering a mermaid diagram source for the note editor preview. */
+export interface MermaidRenderResult {
+  ok: boolean
+  svg?: string
+  diagramType?: string
+  width?: number
+  height?: number
+  error?: string
+}
+
 /** Base page info for the PDF page manager (1-based page order). */
 export interface PdfInfo {
   pages: number

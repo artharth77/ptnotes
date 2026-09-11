@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased] — editor dev
+
+### Added
+
+- **Editor: mermaid diagram code blocks with Edit / Split / Preview** — ```mermaid fenced blocks now render live: each block gets a header with a three-way mode switch — **Edit** (plain code, the default), **Split** (code left, rendered diagram right in a fixed 50/50 grid; stacks vertically when the editor is narrow) and **Preview** (diagram replaces the code pane, source kept in the document). While split/preview is on, edits re-render automatically, debounced ~500 ms; parse errors show inline and the last good diagram is kept. The mode is a per-block, session-only attribute updated with `addToHistory: false` (never serialized into the markdown and outside undo history); saved notes still contain the plain mermaid fence. Rendering goes through the new `diagrams:render` IPC, which uses the same isolated mermaid utility-process renderer as the module tools (SVG only, no PNG), and the SVG is embedded as a base64 data-URI `<img>` (XSS-safe, CSP already allows `img-src data:`). `mermaid` was added to the code-block language list (no-op highlight grammar so the label round-trips through save/reload) and mermaid markers (`flowchart`, `sequenceDiagram`, `stateDiagram`, `classDiagram`, `erDiagram`, `pie`, `gantt`, …) feed the language auto-suggest. Covered in `scripts/test-editor.mts`.
+
 ## [0.17.2] — 2026-09-11
 
 ### Added

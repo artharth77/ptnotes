@@ -128,7 +128,7 @@ Run `npm run typecheck` and `npm run lint` after any change.
 
 ## Architecture
 
-```
+````
 src/
 ├── main/                # Electron main process — ALL filesystem + network access
 │   ├── index.ts         # window creation, app lifecycle
@@ -205,6 +205,7 @@ src/
 │   │   │   ├── GanttChart.tsx       # planner Gantt view (day-grid timeline, draggable bars, bar popup)
 │   │   │   ├── CalendarModal.tsx    # project working-day calendar editor (week + holidays)
 │   │   │   ├── MarkdownEditor.tsx   # TipTap WYSIWYG + markdown sync + auto-save
+│   │   │   ├── mermaidNodeView.tsx  # mermaid ```code-block node view: Edit / Split / Preview modes, debounced live render via diagrams:render
 │   │   │   ├── MarkdownContent.tsx  # react-markdown chat rendering + note:/skill: link handling
 │   │   │   ├── ChatDrawer.tsx       # right drawer, streaming, mentions, history, titles
 │   │   │   ├── GroupChatPanel.tsx   # bots group chat view (roster, badges, timestamps, @bot mentions, typing indicator, group modal/history)
@@ -219,7 +220,7 @@ src/
     ├── kanban.ts        # kanban board types + pure helpers (normalize, lookups, due-date formatting) shared by main + renderer + tests
     ├── planner.ts       # pure planner engine (dates, status rules, rollups) shared by main + renderer + tests
     └── snapshots.ts     # pure snapshot helpers (filename codec, canonical hash input, GFS prune plan) shared by main + renderer + tests
-```
+````
 
 ### Security invariants (do not break)
 
@@ -228,6 +229,7 @@ src/
 - Chat HTML is rendered via `react-markdown` with raw HTML escaped (XSS-safe); `<think>` blocks and user/error messages stay plain text.
 - Chart rasterization (Chart.js onto `@napi-rs/canvas`/skia) must stay isolated in the Electron **utility process** (`chart-render-worker.js`, spawned by `chartRenderer.ts`): a native segfault there must only fail the in-flight render tool, never crash the app. Module chart tools must call `renderChartIsolated`, never `renderChartPng` on the main process. The worker is a second `main` entry in `electron.vite.config.ts`; `PTNOTES_CHART_WORKER` env overrides its path for tests.
 - Diagram rendering (mermaid DSL → SVG via the jsdom/svgdom shim, rasterized by `@resvg/resvg-js`) must stay isolated in the Electron **utility process** (`diagram-render-worker.js`, spawned by `diagramRenderer.ts`): heavy DOM parsing and any native crash there must only fail the in-flight render tool, never crash the app. Module diagram tools must call `renderDiagramIsolated`, never render mermaid on the main process. The worker is a `main` entry in `electron.vite.config.ts`; `PTNOTES_DIAGRAM_WORKER` env overrides its path for tests. Mermaid is ESM-only, so it is always loaded via dynamic `import()`.
+- The note editor's mermaid code blocks (Edit / Split / Preview) reuse the same isolated renderer through the `diagrams:render` IPC (SVG only — the PNG buffer is dropped). The preview embeds the worker's SVG as a base64 data-URI `<img>` in the renderer (XML-inside-`<img>` never executes scripts, so no XSS surface; CSP `img-src data:` covers it). The block's preview **mode** is a transient node attribute (`mermaidMode`, `parseHTML` resets to `edit`) dispatched with `addToHistory: false` — it must never be serialized to markdown or enter undo history. The pure extension lives in `mermaidCodeBlock.ts` (React-free; `mermaidNodeView.tsx` wraps it with `ReactNodeViewRenderer`).
 - Infographic rendering (`@antv/infographic` SSR entry onto a `linkedom` DOM shim, rasterized by `@resvg/resvg-js`) must stay isolated in the Electron **utility process** (`infographic-render-worker.js`, spawned by `infographicRenderer.ts`): the SSR renderer installs browser-like globals (`window`/`document`/DOM classes) that it never restores, so the shared renderer snapshots/restores those globals around every render, and a heavy SSR/DOM render or native crash must only fail the in-flight render tool, never crash the app. Module infographic tools must call `renderInfographicIsolated`, never render on the main process. The worker is a `main` entry in `electron.vite.config.ts`; `PTNOTES_INFOGRAPHIC_WORKER` env overrides its path for tests. The SSR renderer only completes when the design has a `data` block. Icons are the one resource the package would otherwise fetch remotely, so only local **`mdi/<name>`** icons render (resolved from the bundled `@mdi/js` catalog by a registered `registerResourceLoader` in `loadInfographic` that always returns an inline `<symbol>` and never null); `illus` fields are always stripped, non-`mdi/` icon sources are dropped, and items that omit an icon get a matching name auto-filled from the item label — so the worker never queries the package's remote icon service.
 - PDF page rasterization (pdf.js legacy build onto `@napi-rs/canvas`) must stay isolated in the Electron **utility process** (`pdf-render-worker.js`, spawned by `pdfRenderer.ts`): a native crash or heavy render there must only fail the in-flight page render, never crash the app. File-explorer PDF tools (`pdf:info` / `pdf:renderPage`) must go through `pdfRenderer.ts`, never call `pdfRenderCore` directly on the main process. The worker is a `main` entry in `electron.vite.config.ts`; `PTNOTES_PDF_WORKER` env overrides its path for tests. The `@napi-rs/canvas` globals (`DOMMatrix`/`ImageData`/`Path2D`) are installed before the pdf.js legacy build loads so both share one native canvas module. PDF structure edits (reorder/delete/rotate/merge) are pure `pdf-lib` buffer operations in `src/main/pdf/ops.ts` — they never modify the source file; saves always write a new file.
 

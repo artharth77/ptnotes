@@ -15,6 +15,8 @@ import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 
 const lowlight = createLowlight()
+const safeLanguageMermaid = (lang: string | null | undefined): string => lang || 'text'
+const safeLanguageMermaidLowlight = createLowlight()
 
 // ---- jsdom globals (mirrors MarkdownEditor's browser deps) ----
 const dom = new JSDOM('<!doctype html><body></body>')
@@ -605,3 +607,166 @@ console.log(
 
   console.log('PRETTY-MARKUP ACTION TESTS PASSED — html/xml pretty, prose no-op, pre raw preserve')
 }
+
+// mermaid: language registry, fence round-trip, transient preview-mode attr
+{
+  const { safeLanguage, SUPPORTED_LANGUAGE_KEYS } =
+    await import('../src/renderer/src/editor/lowlightRegistry')
+  assert.equal(safeLanguage('mermaid'), 'mermaid', 'mermaid language registered in lowlight')
+  assert.ok(SUPPORTED_LANGUAGE_KEYS.has('mermaid'), 'mermaid in supported keys')
+
+  const ed = makeEditor('before\n\n```mermaid\nflowchart TD\n  A[Start] --> B[End]\n```\n\nafter\n')
+  const first = ed.getJSON().content!.find((n) => n.type === 'codeBlock') as {
+    attrs: { language?: string }
+  }
+  assert.ok(first, 'mermaid fence parses into codeBlock')
+  assert.equal(first.attrs.language, 'mermaid', 'mermaid language attr kept')
+  assert.ok(ed.getMarkdown().includes('```mermaid'), 'mermaid fence serializes back with its label')
+
+  // explicit mermaid label survives a Plain-Text→Mermaid re-label cycle (as the dropdown does)
+  let end = -1
+  ed.state.doc.descendants((node, pos) => {
+    if (node.type.name === 'codeBlock') {
+      end = pos + node.nodeSize - 1
+      return false
+    }
+    return true
+  })
+  ed.commands.setTextSelection(end)
+  assert.ok(changeLang(ed, 'mermaid'), 'lang dropdown can (re)apply mermaid')
+  assert.ok(changeLang(ed, 'text') && changeLang(ed, 'mermaid'), 'away and back relabels')
+  assert.equal(
+    ed.getJSON().content!.find((n) => n.type === 'codeBlock')!.attrs.language,
+    'mermaid',
+    'language attr is mermaid after relabeling'
+  )
+  ed.destroy()
+}
+{
+  // Mirrored from src/renderer/src/editor/mermaidCodeBlock.ts — the React node
+  // view cannot run headless, so the schema/markdown contract is tested on the
+  // same attrs/parseMarkdown config (module constants checked below).
+  const MermaidCodeBlock = CodeBlockLowlight.extend({
+    addOptions() {
+      return { ...this.parent?.(), lowlight: safeLanguageMermaidLowlight, defaultLanguage: 'text' }
+    },
+    addAttributes() {
+      const parentAttrs = (this.parent?.() ?? {}) as Record<
+        string,
+        { rendered?: boolean; default?: unknown }
+      >
+      const base = parentAttrs.language ?? {}
+      return {
+        ...parentAttrs,
+        language: { ...base, rendered: false, default: '' },
+        mermaidMode: {
+          default: 'edit',
+          rendered: false,
+          parseHTML: (element: Element): string | undefined =>
+            element.getAttribute('data-mermaid-mode') ?? undefined,
+          renderHTML: () => ({})
+        }
+      }
+    },
+    parseMarkdown: (token, helpers) => {
+      const isFenced =
+        typeof token.raw === 'string' &&
+        (token.raw.startsWith('```') || token.raw.startsWith('~~~'))
+      if (!isFenced && token.codeBlockStyle !== 'indented') return []
+      return helpers.createNode(
+        'codeBlock',
+        { language: token.lang ? safeLanguageMermaid(token.lang) : '', mermaidMode: 'edit' },
+        token.text ? [helpers.createTextNode(token.text)] : []
+      )
+    }
+  })
+  const makeMermaidEditor = (content: string): Editor =>
+    new Editor({
+      element: dom.window.document.createElement('div') as unknown as HTMLElement,
+      extensions: [
+        StarterKit.configure({ codeBlock: false, history: false }),
+        MermaidCodeBlock,
+        Markdown,
+        Typography,
+        TaskList,
+        TaskItem.configure({ nested: true })
+      ],
+      content,
+      contentType: 'markdown'
+    })
+
+  // the module's pure constants agree with the mirrored schema
+  {
+    const mod = await import('../src/renderer/src/editor/mermaidCodeBlock')
+    assert.equal(mod.DEFAULT_MERMAID_MODE, 'edit', 'module default mode is edit')
+    assert.deepEqual(
+      (mod.MERMAID_MODES as string[]).slice(),
+      ['edit', 'split', 'preview'],
+      'module modes list'
+    )
+    const ext = mod.createMermaidCodeBlock()
+    assert.equal((ext as { name?: string }).name, 'codeBlock', 'extension name is codeBlock')
+  }
+
+  // preview mode attr: settable, session-only, reset to edit on re-parse
+  const ed = makeMermaidEditor('```mermaid\nflowchart TD\n  A --> B\n```\n')
+  let cbPos = -1
+  ed.state.doc.descendants((node, pos) => {
+    if (node.type.name === 'codeBlock') {
+      cbPos = pos
+      return false
+    }
+    return true
+  })
+  ed.commands.setTextSelection(cbPos + 1)
+  ed.commands.updateAttributes('codeBlock', { mermaidMode: 'preview' })
+  const node = ed.state.doc.nodeAt(cbPos)!
+  assert.equal(node.attrs.mermaidMode, 'preview', 'preview mode attr applied')
+  assert.equal(node.attrs.language, 'mermaid', 'language preserved with mode')
+  assert.ok(!ed.getMarkdown().includes('mermaidMode'), 'preview mode never leaks into markdown')
+  ed.commands.setContent('other', { contentType: 'markdown', emitUpdate: false })
+  ed.commands.setContent('```mermaid\nflowchart TD\n  A --> B\n```\n', {
+    contentType: 'markdown',
+    emitUpdate: false
+  })
+  let cb2Pos = -1
+  ed.state.doc.descendants((node2, pos) => {
+    if (node2.type.name === 'codeBlock') {
+      cb2Pos = pos
+      return false
+    }
+    return true
+  })
+  assert.equal(
+    ed.state.doc.nodeAt(cb2Pos)!.attrs.mermaidMode,
+    'edit',
+    're-parsed block starts in edit mode'
+  )
+  ed.destroy()
+}
+
+// mermaid suggestion markers
+{
+  assert.equal(
+    suggestLanguage('flowchart TD\n  A[Start] --> B[End]\n'),
+    'mermaid',
+    'flowchart suggests mermaid'
+  )
+  assert.equal(
+    suggestLanguage('sequenceDiagram\n  Alice->>Bob: Hi\n'),
+    'mermaid',
+    'sequenceDiagram suggests mermaid'
+  )
+  assert.equal(
+    suggestLanguage('  gantt\n  title Plan\n  section S\n'),
+    'mermaid',
+    'indented gantt suggests mermaid'
+  )
+  assert.equal(
+    suggestLanguage('graph TD; A-->B;'),
+    'mermaid',
+    'legacy graph syntax suggests mermaid'
+  )
+}
+
+console.log('MERMAID TESTS PASSED — language round-trip, transient mode attr, suggestions')

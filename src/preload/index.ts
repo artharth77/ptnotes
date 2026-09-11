@@ -30,6 +30,7 @@ import type {
   ModuleRun,
   ModuleSettings,
   ModuleStartResult,
+  MermaidRenderResult,
   NewGroupInput,
   StorageSettings,
   ToolsetSettings,
@@ -442,6 +443,10 @@ const api = {
         ipcRenderer.removeListener('bots:event', listener)
       }
     }
+  },
+  diagrams: {
+    render: (source: string): Promise<MermaidRenderResult> =>
+      ipcRenderer.invoke('diagrams:render', source)
   },
   onOpenFind: (callback: () => void): (() => void) => {
     const listener = (): void => callback()
