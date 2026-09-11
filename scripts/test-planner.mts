@@ -999,4 +999,153 @@ assert.equal(
   'parent owner unchanged'
 )
 
+// ---- batch mode (tasks array) ----
+
+// batch add_task: shared defaults + per-item overrides + addAfter referencing an earlier record
+r = await call('create_schedule', { name: 'Sprint 14' })
+r = await call('add_task', {
+  schedule: 'Sprint 14',
+  owner: 'Amy',
+  title: 'defaults-title',
+  tasks: [
+    { title: 'Design', planStart: '2024-01-01', planEnd: '2024-01-05' },
+    { title: 'Build', owner: 'Bob', planStart: '2024-01-02', duration: 2 },
+    { addAfter: 'Design', title: 'Research' },
+    { parent: 'Build', title: 'Sub', planStart: '2024-01-03' },
+    { parent: 'Build', title: 'Sub2', addAfter: 'Sub' }
+  ]
+})
+assert.equal(r.ok, true)
+assert.ok(!('taskId' in r), 'batch result has no single taskId')
+assert.ok(r.results && r.results.length === 5)
+assert.ok(
+  r.results.every((x) => x.ok),
+  'all batch records applied'
+)
+sched2 = await service.readSchedule('Build', 'sprint-14')
+assert.deepEqual(
+  sched2!.tasks.map((t) => t.title),
+  ['Design', 'Research', 'Build'],
+  'addAfter placed record 2 after record 0'
+)
+assert.equal(sched2!.tasks[0].owner, 'Amy', 'top-level owner default applied')
+assert.equal(sched2!.tasks[1].owner, 'Amy', 'default owner on record 2')
+assert.equal(sched2!.tasks[1].planEnd, null, 'planStart-only batch task gets no planEnd')
+assert.equal(sched2!.tasks[2].owner, 'Bob', 'per-item owner overrides top-level default')
+assert.deepEqual(
+  sched2!.tasks[2].children.map((t) => t.title),
+  ['Sub', 'Sub2'],
+  'per-item parent nesting within the same batch'
+)
+
+// batch add_task: per-item errors are reported and do not abort other records
+r = await call('add_task', {
+  schedule: 'Sprint 14',
+  tasks: [{ title: 'Good1' }, { title: '' }, { title: 'Good2' }]
+})
+assert.equal(
+  (r as { results: Array<{ ok: boolean }> }).results.map((x) => x.ok).join(','),
+  'true,false,true'
+)
+sched2 = await service.readSchedule('Build', 'sprint-14')
+assert.deepEqual(
+  sched2!.tasks.map((t) => t.title),
+  ['Design', 'Research', 'Build', 'Good1', 'Good2'],
+  'failed batch record skipped, others persisted'
+)
+
+// batch add_task: single-record output keys are unchanged (no tasks param)
+r = await call('add_task', { schedule: 'Sprint 14', title: 'Solo', addAfter: 'Good1' })
+assert.ok('taskId' in r)
+sched2 = await service.readSchedule('Build', 'sprint-14')
+assert.equal(sched2!.tasks[4].title, 'Solo', 'single-record addAfter still works')
+
+// batch update_task: mixed hits/misses, per-item results, shared defaults
+r = await call('update_task', {
+  schedule: 'Sprint 14',
+  status: 'in-progress',
+  tasks: [
+    { task: 'Design', percentComplete: 50 },
+    { task: 'Sub2', percentComplete: 100, status: 'completed' },
+    { task: 'missing-task', percentComplete: 10 },
+    { task: 'Build', status: 'on-hold' }
+  ]
+})
+assert.equal(r.results.length, 4)
+assert.deepEqual(
+  r.results.map((x) => (x as { ok: boolean }).ok),
+  [true, true, false, true]
+)
+assert.ok(String(r.results[2].error).includes('not found'))
+sched2 = await service.readSchedule('Build', 'sprint-14')
+assert.equal(sched2!.tasks[0].percentComplete, 50)
+assert.equal(
+  sched2!.tasks[0].status,
+  'in-progress',
+  'top-level status default applied even on records that omit it'
+)
+assert.equal(
+  sched2!.tasks[2].children[1].status,
+  'completed',
+  'per-record status overrides default'
+)
+assert.equal(sched2!.tasks[2].status, 'on-hold', 'explicit top-level status on parent task')
+
+// batch update_task: parent plan-field rejection is per-item; parent status default not applied via status
+// (status on parent is allowed; plan fields are rejected per record)
+r = await call('update_task', {
+  schedule: 'Sprint 14',
+  tasks: [
+    { task: 'Build', planStart: '2024-02-01' },
+    { task: 'Sub', percentComplete: 25 }
+  ]
+})
+assert.deepEqual(
+  r.results.map((x) => (x as { ok: boolean }).ok),
+  [false, true]
+)
+assert.ok(
+  String(r.results[0].error).includes('derived'),
+  'plan-field edit on parent rejected per record'
+)
+sched2 = await service.readSchedule('Build', 'sprint-14')
+assert.equal(sched2!.tasks[2].children[0].percentComplete, 25, 'sibling record still applied')
+
+// batch update_task: moves within the batch
+r = await call('add_task', {
+  schedule: 'Sprint 14',
+  tasks: [{ title: 'Solo Batch', percentComplete: 10 }]
+})
+r = await call('update_task', {
+  schedule: 'Sprint 14',
+  tasks: [
+    { task: 'Solo Batch', parent: '' },
+    { task: 'Research', parent: 'Solo Batch' }
+  ]
+})
+assert.ok(
+  r.results.every((x) => x.ok),
+  r
+)
+sched2 = await service.readSchedule('Build', 'sprint-14')
+const soloBatch = sched2!.tasks.find((t) => t.title === 'Solo Batch')!
+assert.ok(
+  soloBatch.children.some((t) => t.title === 'Research'),
+  'batch move carried through'
+)
+
+// batch add_task: batches larger than 30 records have no hard code limit
+r = await call('create_schedule', { name: 'Big Batch' })
+r = await call('add_task', {
+  schedule: 'Big Batch',
+  tasks: Array.from({ length: 35 }, (_, i) => ({ title: `T${i}`, planStart: '2024-01-01' }))
+})
+assert.ok(r.results.length === 35 && r.results.every((x) => x.ok), '35-record batch fully applied')
+sched2 = await service.readSchedule('Build', 'big-batch')
+assert.equal(sched2!.tasks.length, 35, 'records beyond 30 persist')
+
+// add_task with an empty title in single-record mode errors
+r = await call('add_task', { schedule: 'Big Batch', title: '   ' })
+assert.equal(r.ok, false, 'empty single-record title is rejected')
+
 console.log('planner tests passed')
