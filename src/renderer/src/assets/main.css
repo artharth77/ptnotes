@@ -3088,6 +3088,31 @@ fieldset.kanban-form {
   display: block;
 }
 
+.code-block-lang-pretty {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-hover);
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.code-block-lang-pretty:hover {
+  border-color: var(--accent);
+}
+.code-block-lang-pretty:hover,
+.code-block-lang-pretty:focus {
+  color: var(--text);
+}
+.code-block-lang-pretty svg {
+  display: block;
+}
+
 .ProseMirror pre code {
   background: transparent;
   padding: 0;

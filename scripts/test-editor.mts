@@ -27,6 +27,7 @@ for (const k of [
   'Element',
   'Node',
   'HTMLElement',
+  'DOMParser',
   'getComputedStyle',
   'requestAnimationFrame',
   'cancelAnimationFrame'
@@ -448,3 +449,159 @@ console.log('EDITOR CODE-BLOCK LANGUAGE TESTS PASSED — mid-text, end-of-text, 
 console.log(
   'CODE-BLOCK MERGE/OFF TESTS PASSED — range selection merges one block, off splits lines'
 )
+
+// pretty-JSON action: prettyfies valid JSON, tags language as json; invalid JSON is a no-op
+{
+  const { prettyJsonInCodeBlock } = await import('../src/renderer/src/editor/jsonFormat')
+
+  // unlabeled block (suggested-json path): pretty output + language set to json
+  {
+    const ed = makeEditor('```\n{"b":2,"a":[1,2]}\n```\n')
+    ed.commands.setTextSelection(3)
+    assert.equal(prettyJsonInCodeBlock(ed), true, 'minified JSON block is prettyfied')
+    const first = ed.getJSON().content?.[0]
+    assert.equal(first?.type, 'codeBlock', 'block stays a codeBlock')
+    assert.equal(first?.attrs.language, 'json', 'unlabeled block gets tagged json')
+    assert.equal(
+      first?.content?.[0]?.text,
+      '{\n  "b": 2,\n  "a": [\n    1,\n    2\n  ]\n}',
+      'content is pretty-printed with 2-space indent'
+    )
+    assert.ok(ed.getMarkdown().startsWith('```json'), 'fence serializes as ```json')
+    ed.destroy()
+  }
+
+  // explicitly json block: language preserved
+  {
+    const ed = makeEditor('```json\n{"x":1,"y":{"z":true}}\n```\n')
+    ed.commands.setTextSelection(4)
+    assert.equal(prettyJsonInCodeBlock(ed), true, 'explicit json block is prettyfied')
+    const first = ed.getJSON().content?.[0]
+    assert.equal(first?.attrs.language, 'json', 'language attr preserved')
+    assert.equal(
+      first?.content?.[0]?.text,
+      '{\n  "x": 1,\n  "y": {\n    "z": true\n  }\n}',
+      'nested object pretty-printed'
+    )
+    ed.destroy()
+  }
+
+  // invalid JSON: no-op, content and language untouched
+  {
+    const ed = makeEditor('```js\nlet a = 1\n```\n')
+    ed.commands.setTextSelection(4)
+    assert.equal(prettyJsonInCodeBlock(ed), false, 'invalid JSON returns false')
+    const first = ed.getJSON().content?.[0]
+    assert.equal(first?.attrs.language, 'js', 'language unchanged')
+    assert.equal(first?.content?.[0]?.text, 'let a = 1', 'text unchanged')
+    ed.destroy()
+  }
+
+  // non-json language, even when attractive prose/json-ish text: untouched
+  {
+    const ed = makeEditor('```text\nnot json at all\n```\n')
+    ed.commands.setTextSelection(4)
+    assert.equal(prettyJsonInCodeBlock(ed), false, 'non-JSON text untouched')
+    const first = ed.getJSON().content?.[0]
+    assert.equal(first?.attrs.language, 'text', 'language unchanged')
+    assert.equal(first?.content?.[0]?.text, 'not json at all', 'text unchanged')
+    ed.destroy()
+  }
+
+  console.log('PRETTY-JSON ACTION TESTS PASSED — pretty output, json tag, invalid no-op')
+}
+
+// pretty HTML/XML action: indents markup, tags block html/xml; non-markup is a no-op
+{
+  const { prettyMarkupInCodeBlock, isMarkupText } =
+    await import('../src/renderer/src/editor/markupFormat')
+
+  // suggested markup detection mirrors the overlay's showPrettyMarkup gate
+  assert.equal(isMarkupText('plain prose\n', 'html'), false, 'prose is not markup')
+  assert.equal(
+    isMarkupText('broken < xml', 'xml'),
+    false,
+    'malformed xml fails xml-mode validation'
+  )
+  assert.ok(isMarkupText('<a><b/></a>', 'xml'), 'valid xml passes validation')
+
+  // unlabeled html block: pretty output + language tagged html
+  {
+    const ed = makeEditor('```\n<div><p>a</p><b>x</b><br>{"keep":1}</div>\n```\n')
+    ed.commands.setTextSelection(3)
+    assert.equal(prettyMarkupInCodeBlock(ed, 'html'), true, 'html block is prettyfied')
+    const first = ed.getJSON().content?.[0]
+    assert.equal(first?.attrs.language, 'html', 'unlabeled block gets tagged html')
+    assert.equal(
+      first?.content?.[0]?.text,
+      ['<div>', '  <p>a</p>', '  <b>x</b>', '  <br>', '  {"keep":1}', '</div>'].join('\n'),
+      'content indented with void element + text node on own lines'
+    )
+    assert.ok(ed.getMarkdown().startsWith('```html'), 'fence serializes as ```html')
+    ed.destroy()
+  }
+
+  // explicitly xml block: language preserved, declaration + self-closing stay neutral
+  {
+    const ed = makeEditor(
+      '```xml\n<?xml version="1.0"?><config><item id="1"/><item id="2"/></config>\n```\n'
+    )
+    ed.commands.setTextSelection(10)
+    assert.equal(prettyMarkupInCodeBlock(ed, 'xml'), true, 'xml block is prettyfied')
+    const first = ed.getJSON().content?.[0]
+    assert.equal(first?.attrs.language, 'xml', 'language attr preserved')
+    assert.equal(
+      first?.content?.[0]?.text,
+      [
+        '<?xml version="1.0"?>',
+        '<config>',
+        '  <item id="1"/>',
+        '  <item id="2"/>',
+        '</config>'
+      ].join('\n'),
+      'declaration on own line, self-closing tags indented'
+    )
+    assert.ok(ed.getMarkdown().startsWith('```xml'), 'fence serializes as ```xml')
+    ed.destroy()
+  }
+
+  // attributes preserved through reflow
+  {
+    const ed = makeEditor('```html\n<div class="a" ><span data-x="1">hi</span></div>\n```\n')
+    ed.commands.setTextSelection(10)
+    assert.equal(prettyMarkupInCodeBlock(ed, 'html'), true, 'html with attributes reformats')
+    const text = ed.getJSON().content?.[0]?.content?.[0]?.text ?? ''
+    assert.equal(
+      text,
+      ['<div class="a" >', '  <span data-x="1">hi</span>', '</div>'].join('\n'),
+      'attribute values kept verbatim'
+    )
+    ed.destroy()
+  }
+
+  // html-lang block with NO markup at all: returns false untouched
+  {
+    const ed1 = makeEditor('```html\njust some text, no tags here\n```\n')
+    ed1.commands.setTextSelection(11)
+    assert.equal(prettyMarkupInCodeBlock(ed1, 'html'), false, 'prose block untouched')
+    const first = ed1.getJSON().content?.[0]
+    assert.equal(first?.attrs.language, 'html', 'language unchanged')
+    assert.equal(first?.content?.[0]?.text, 'just some text, no tags here', 'text unchanged')
+    ed1.destroy()
+  }
+
+  // <pre> interior survives unreflowed
+  {
+    const ed = makeEditor('```\n<div><pre>  keep\n  raw</pre></div>\n```\n')
+    ed.commands.setTextSelection(3)
+    assert.equal(prettyMarkupInCodeBlock(ed, 'html'), true, 'pre block prettyfied')
+    const text = ed.getJSON().content?.[0]?.content?.[0]?.text ?? ''
+    assert.ok(text.includes('  keep'), 'pre interior whitespace preserved')
+    const lines = text.split('\n')
+    assert.equal(lines[0], '<div>', 'pre open indented from parent')
+    assert.equal(lines[lines.length - 1], '</div>', 'outer close emitted last')
+    ed.destroy()
+  }
+
+  console.log('PRETTY-MARKUP ACTION TESTS PASSED — html/xml pretty, prose no-op, pre raw preserve')
+}
