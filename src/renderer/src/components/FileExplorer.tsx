@@ -13,6 +13,7 @@ import {
   mdiContentCopy,
   mdiContentCut,
   mdiContentPaste,
+  mdiEyeOutline,
   mdiFileCogOutline,
   mdiFolderOpenOutline,
   mdiFolderOutline,
@@ -22,6 +23,7 @@ import {
   mdiMerge,
   mdiMenuDown,
   mdiMenuUp,
+  mdiOpenInNew,
   mdiPencil,
   mdiTrayArrowDown,
   mdiTrashCanOutline
@@ -228,6 +230,7 @@ export function FileListPanel(): React.JSX.Element {
   /** Raw right-click point; the menu renders hidden until its real size is measured. */
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null)
+  const [menuEntry, setMenuEntry] = useState<ExplorerEntry | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const [viewer, setViewer] = useState<{ src: string; alt: string } | null>(null)
   const [fileViewer, setFileViewer] = useState<{ path: string; name: string } | null>(null)
@@ -298,6 +301,7 @@ export function FileListPanel(): React.JSX.Element {
   function closeMenu(): void {
     setMenu(null)
     setMenuPos(null)
+    setMenuEntry(null)
   }
 
   function openMenu(e: React.MouseEvent, entry?: ExplorerEntry): void {
@@ -307,6 +311,7 @@ export function FileListPanel(): React.JSX.Element {
       setDotDotCwd(null)
       selectEntry(entry.path, 'single')
     }
+    setMenuEntry(entry ?? null)
     setMenu({ x: e.clientX, y: e.clientY })
     setMenuPos(null)
   }
@@ -346,12 +351,17 @@ export function FileListPanel(): React.JSX.Element {
     selectEntry(entry.path, mode)
   }
 
-  /** Double-click / Enter action for an entry (drill in, view image / PDF, preview text). */
-  const activateEntry = useCallback((entry: ExplorerEntry): void => {
-    if (entry.isDir) {
-      useAppStore.getState().selectExplorerFolder(entry.path)
-      return
-    }
+  /** Open a file with the OS default app (Word, Excel, anything not previewable in-app). */
+  const openExternalEntry = useCallback((entry: ExplorerEntry): void => {
+    const project = useAppStore.getState().activeProject
+    if (!project) return
+    void window.ptnotes.files.openExternal(project, entry.path).then((err) => {
+      if (err) setError(friendlyError(err))
+    })
+  }, [])
+
+  /** In-app preview: image viewer, PDF viewer, or text/markdown viewer. */
+  const previewEntry = useCallback((entry: ExplorerEntry): void => {
     const openLocalViewer = async (
       entry: ExplorerEntry,
       show: (src: string) => void
@@ -372,6 +382,22 @@ export function FileListPanel(): React.JSX.Element {
     }
     if (isTextFile(entry.name)) setFileViewer({ path: entry.path, name: entry.name })
   }, [])
+
+  /** Double-click / Enter action: preview in-app when possible, else open with the OS default app. */
+  const activateEntry = useCallback(
+    (entry: ExplorerEntry): void => {
+      if (entry.isDir) {
+        useAppStore.getState().selectExplorerFolder(entry.path)
+        return
+      }
+      if (isImageFile(entry.name) || isPdfFile(entry.name) || isTextFile(entry.name)) {
+        previewEntry(entry)
+      } else {
+        openExternalEntry(entry)
+      }
+    },
+    [previewEntry, openExternalEntry]
+  )
 
   function onRowDoubleClick(entry: ExplorerEntry): void {
     activateEntry(entry)
@@ -423,7 +449,7 @@ export function FileListPanel(): React.JSX.Element {
     setDialog({ kind: 'delete' })
   }, [setDialogError, setDialog])
 
-  // Arrow keys move the selection, Enter activates it (same as double-click).
+  // Arrow keys move the selection, Space previews and Enter opens (OS default app).
   // Inside a subfolder the virtual `..` row sits above the entries and is selectable.
   useEffect(() => {
     function moveSelection(dir: 1 | -1): void {
@@ -462,19 +488,37 @@ export function FileListPanel(): React.JSX.Element {
       scrollRowIntoView(rows[next])
     }
 
-    function activateSelected(): void {
-      if (dotDotSelected) {
-        useAppStore.getState().selectExplorerFolder(parentOf(useAppStore.getState().explorerCwd))
-        return
+    /** Space: preview in-app (directories drill in). Unknown file types do nothing. */
+    function previewSelected(): void {
+      const entry = singleSelectedEntry()
+      if (entry) previewEntry(entry)
+      else if (dotDotSelected) drillIntoParent()
+    }
+
+    /** Enter: open with the OS default app (directories drill in). */
+    function openSelected(): void {
+      const entry = singleSelectedEntry()
+      if (entry) {
+        if (entry.isDir) useAppStore.getState().selectExplorerFolder(entry.path)
+        else openExternalEntry(entry)
+      } else if (dotDotSelected) {
+        drillIntoParent()
       }
+    }
+
+    function singleSelectedEntry(): ExplorerEntry | null {
       const state = useAppStore.getState()
-      if (state.explorerSelected.length !== 1) return
-      const entry = state.explorerEntries.find((en) => en.path === state.explorerSelected[0])
-      if (entry) activateEntry(entry)
+      if (state.explorerSelected.length !== 1) return null
+      return state.explorerEntries.find((en) => en.path === state.explorerSelected[0]) ?? null
+    }
+
+    function drillIntoParent(): void {
+      useAppStore.getState().selectExplorerFolder(parentOf(useAppStore.getState().explorerCwd))
     }
 
     function onKeyDown(e: KeyboardEvent): void {
-      const navKey = e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Enter'
+      const navKey =
+        e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' '
       const modKey =
         (e.ctrlKey || e.metaKey) &&
         !e.shiftKey &&
@@ -493,7 +537,9 @@ export function FileListPanel(): React.JSX.Element {
         else paste()
       } else if (e.key === 'Enter') {
         if (tag === 'BUTTON' || tag === 'A') return
-        activateSelected()
+        openSelected()
+      } else if (e.key === ' ') {
+        previewSelected()
       } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
         moveSelection(e.key === 'ArrowDown' ? 1 : -1)
       } else {
@@ -503,7 +549,16 @@ export function FileListPanel(): React.JSX.Element {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [activateEntry, dotDotSelected, setSelected, copySelected, cutSelected, paste, openDelete])
+  }, [
+    previewEntry,
+    openExternalEntry,
+    dotDotSelected,
+    setSelected,
+    copySelected,
+    cutSelected,
+    paste,
+    openDelete
+  ])
 
   const selectedEntries = useMemo(
     () => entries.filter((e) => selected.includes(e.path)),
@@ -835,6 +890,39 @@ export function FileListPanel(): React.JSX.Element {
             }}
             onClick={(e) => e.stopPropagation()}
           >
+            {menuEntry && !menuEntry.isDir && (
+              <>
+                {(isImageFile(menuEntry.name) ||
+                  isPdfFile(menuEntry.name) ||
+                  isTextFile(menuEntry.name)) && (
+                  <button
+                    className="note-menu-item"
+                    onClick={() => {
+                      closeMenu()
+                      previewEntry(menuEntry)
+                    }}
+                  >
+                    <span className="note-menu-icon">
+                      <MdiIcon path={mdiEyeOutline} size={16} />
+                    </span>
+                    Preview
+                  </button>
+                )}
+                <button
+                  className="note-menu-item"
+                  onClick={() => {
+                    closeMenu()
+                    openExternalEntry(menuEntry)
+                  }}
+                >
+                  <span className="note-menu-icon">
+                    <MdiIcon path={mdiOpenInNew} size={16} />
+                  </span>
+                  Open
+                </button>
+                <div className="note-menu-sep" />
+              </>
+            )}
             <button
               className="note-menu-item"
               onClick={() => {

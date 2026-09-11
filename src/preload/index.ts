@@ -348,7 +348,9 @@ const api = {
     extract: (path: string): Promise<PdfExtractResult> => ipcRenderer.invoke('files:extract', path),
     reveal: (path: string): Promise<void> => ipcRenderer.invoke('files:reveal', path),
     revealByName: (project: string, fileName: string): Promise<void> =>
-      ipcRenderer.invoke('files:revealByName', project, fileName)
+      ipcRenderer.invoke('files:revealByName', project, fileName),
+    openExternal: (project: string, fileName: string): Promise<string> =>
+      ipcRenderer.invoke('files:openExternal', project, fileName)
   },
   modules: {
     list: (project: string): Promise<ModuleRun[]> => ipcRenderer.invoke('modules:list', project),
