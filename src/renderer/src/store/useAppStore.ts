@@ -239,7 +239,7 @@ interface AppState {
   loadBotTasks: (project: string) => Promise<void>
   selectNote: (id: string) => Promise<void>
   saveNote: (content: string) => Promise<void>
-  createNote: (title: string) => Promise<void>
+  createNote: (title: string, content?: string) => Promise<void>
   renameNote: (id: string, newTitle: string) => Promise<void>
   deleteNote: (id: string) => Promise<void>
   setTab: (tab: Tab) => void
@@ -1419,10 +1419,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     await window.ptnotes.notes.save(activeProject, activeNoteId, content)
   },
 
-  async createNote(title) {
+  async createNote(title, content) {
     const project = get().activeProject
     if (!project) return
     const note = await window.ptnotes.notes.create(project, title)
+    if (content !== undefined) {
+      await window.ptnotes.notes.save(project, note.id, content)
+    }
     await get().refreshNotes()
     await get().selectNote(note.id)
     set({ tab: 'notes' })
