@@ -63,6 +63,7 @@ export const MarkdownContent = memo(function MarkdownContent({
   mentionColor
 }: MarkdownContentProps): React.JSX.Element {
   const [viewer, setViewer] = useState<{ src: string; alt: string } | null>(null)
+  const [viewerBulb, setViewerBulb] = useState(false)
 
   const safeContent = normalizeInternalLinks(content)
   return (
@@ -249,7 +250,15 @@ export const MarkdownContent = memo(function MarkdownContent({
       >
         {safeContent}
       </ReactMarkdown>
-      {viewer && <ImageViewer src={viewer.src} alt={viewer.alt} onClose={() => setViewer(null)} />}
+      {viewer && (
+        <ImageViewer
+          src={viewer.src}
+          alt={viewer.alt}
+          onClose={() => setViewer(null)}
+          bulbLight={viewerBulb}
+          onBulbLight={setViewerBulb}
+        />
+      )}
     </div>
   )
 })

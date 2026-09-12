@@ -310,6 +310,95 @@ assert.ok(flowSvg.svg.trimStart().startsWith('<svg'), 'renderMermaidSvg returns 
 const flowBounds = svgBounds(flowSvg.svg)
 assert.ok(flowBounds.width > 0 && flowBounds.height > 0, 'svgBounds reads the viewBox')
 
+// Edge-label geometry: the "Get money" label must sit inside its gray box,
+// centered on the edge midpoint (svgdom getBBox drift regression).
+const labelFlowSvg = await renderMermaidSvg(
+  'flowchart TD\n    A[Christmas] -->|Get money| B(Go shopping)'
+)
+const labelEdgeSvg = /<g class="edgeLabels">[\s\S]*?<\/g><g class="nodes">/.exec(
+  labelFlowSvg.svg
+)?.[0]
+assert.ok(labelEdgeSvg?.includes('text-anchor="middle"'), 'label rewrite centers label rows')
+assert.ok(labelEdgeSvg && !labelEdgeSvg.includes('y="1.1em"'), 'label rewrite drops em-based row y')
+// The label <text> rows are explicit-numeric <text y=...> elements with the
+// theme font-size baked in, so svgdom measurement and resvg raster agree.
+const labelFontSizes = [...labelEdgeSvg!.matchAll(/font-size="16px"/g)].length
+assert.ok(labelFontSizes >= 1, 'label rows carry an explicit font-size')
+{
+  const { Resvg } = await import('@resvg/resvg-js')
+  const rnd = new Resvg(labelFlowSvg.svg, {}).render()
+  const px = rnd.pixels
+  const w = rnd.width
+  const h = rnd.height
+  // Edge label band: scan away from the vertical edge path (x ±3 of center col)
+  const box: [number, number, number, number] = [1e9, 1e9, -1, -1]
+  const ink: [number, number, number, number] = [1e9, 1e9, -1, -1]
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4
+      // solid label box: opaque #e8e8e8 (232) on white canvas
+      const isBox = px[i + 3] === 255 && px[i] === 232 && px[i + 1] === 232 && px[i + 2] === 232
+      const isText = px[i + 3] > 200 && px[i] < 120
+      if (!isBox && !isText) continue
+      box[0] = Math.min(box[0], x)
+      box[1] = Math.min(box[1], y)
+      box[2] = Math.max(box[2], x)
+      box[3] = Math.max(box[3], y)
+      if (isText) {
+        ink[0] = Math.min(ink[0], x)
+        ink[1] = Math.min(ink[1], y)
+        ink[2] = Math.max(ink[2], x)
+        ink[3] = Math.max(ink[3], y)
+      }
+    }
+  }
+  assert.ok(box[2] > box[0] && box[3] > box[1], 'edge label gray box rendered')
+  assert.ok(ink[0] >= box[0] && ink[2] <= box[2], 'label text horizontally inside gray box')
+  assert.ok(ink[1] >= box[1] && ink[3] <= box[3], 'label text vertically inside gray box')
+}
+
+// Edge anchors land on the drawn shape boundary (diamond source regression):
+// a flowchart with a diamond whose dagre dims exceed the drawn polygon must
+// still emit edge points touching the diamond's own border.
+{
+  const diamondSvg = await renderMermaidSvg('flowchart TD\n  A{Ready to check out?} --> B[Pay]')
+  const nodeA = /<g class="node [^>]*id="[^"]*flowchart-A-0"[\s\S]*?<\/g>/.exec(diamondSvg.svg)?.[0]
+  const tfm =
+    /<g class="node [^>]*flowchart-A-0[^>]*transform="translate\(([-\d.]+),\s*([-\d.]+)\)/.exec(
+      diamondSvg.svg
+    )
+  const pgeom =
+    /<polygon[^>]*points="([^"]*)"[^>]*transform="translate\(([-\d.]+),\s*([-\d.]+)\)"/.exec(
+      nodeA ?? ''
+    )
+  assert.ok(tfm && pgeom, 'diamond node + polygon geometry parsed')
+  const cy = Number(tfm![2])
+  const halfHeight = Math.max(
+    ...pgeom![1]
+      .split(/\s+/)
+      .map((pair) => Math.abs(Number(pair.split(',')[1]) + Number(pgeom![3])))
+  )
+  const edgeSeg = /<g class="edgePaths">([\s\S]*?)<\/g><g class="edgeLabels">/.exec(
+    diamondSvg.svg
+  )?.[1]
+  assert.ok(edgeSeg, 'diamond flowchart edge paths rendered')
+  let checked = 0
+  for (const m of edgeSeg!.matchAll(
+    /<path[^>]*data-id="[^"]*L_A_[^"]*"[^>]*data-points="([^"]*)"/g
+  )) {
+    const pts: Array<{ x: number; y: number }> = JSON.parse(
+      Buffer.from(m[1], 'base64').toString('utf8')
+    )
+    const dy = Math.abs(pts[0].y - cy)
+    assert.ok(
+      dy <= halfHeight + 2,
+      `edge anchored at diamond border (gap ${dy.toFixed(2)} vs half ${halfHeight.toFixed(2)})`
+    )
+    checked++
+  }
+  assert.equal(checked, 1, 'exactly one A->B edge checked')
+}
+
 const seqSrc = `sequenceDiagram
   Alice->>John: Hello John, how are you?
   John-->>Alice: Great!`
@@ -318,6 +407,21 @@ assert.ok(
   seqValidation.ok && /sequence/.test(seqValidation.diagramType),
   'sequence diagram accepted'
 )
+
+// ER entity titles keep mermaid's own placement (not label-normalized)
+{
+  const erSvg = await renderMermaidSvg(
+    'erDiagram\n  CUSTOMER {\n    string id\n    string name\n  }\n  CUSTOMER ||--o{ ORDER : places\n  ORDER {\n    string id\n  }'
+  )
+  const entityLabel =
+    /entity-CUSTOMER-0[\s\S]*?<g class="label name"[^>]*>[\s\S]{0,400}?<text y="-10.1"/.exec(
+      erSvg.svg
+    )
+  assert.ok(
+    entityLabel,
+    'er entity title keeps its mermaid header-band placement (em-based row markup untouched)'
+  )
+}
 
 const flowPng = svgToPng(flowSvg.svg)
 assert.deepEqual(
@@ -335,6 +439,55 @@ assert.deepEqual(
 )
 assert.ok(oneShot.diagramType.includes('flowchart'), 'renderMermaidPng reports the diagram type')
 assert.ok(oneShot.width > 0, 'renderMermaidPng reports width')
+
+// Ishikawa head title sits inside the half-circle (anchored to the arc middle)
+{
+  const ishSvg = await renderMermaidSvg(
+    'ishikawa-beta\n    Late Food Delivery\n    Process\n        Orders batched too long'
+  )
+  const head =
+    /<text class="ishikawa-head-label" text-anchor="middle"[^>]*transform="translate\(([-\d.]+),\s*([-\d.]+)\)"/.exec(
+      ishSvg.svg
+    )
+  assert.ok(head, 'ishikawa head label re-anchored to middle')
+  assert.ok(Number(head![1]) > 0, 'ishikawa head title moved into the half-circle')
+}
+
+// Event-modeling: block labels are inline SVG text (foreignObject dropped) so
+// rasterization and the editor <img> preview show the block words.
+{
+  const emSvg = await renderMermaidSvg('eventmodeling\n\ntf 01 ui ShopUI\ntf 02 cmd AddItemToCart')
+  assert.ok(!emSvg.svg.includes('foreignObject'), 'eventmodeling boxes carry no foreignObject')
+  assert.ok(emSvg.svg.includes('>ShopUI<'), 'eventmodeling ShopUI label present')
+  assert.ok(emSvg.svg.includes('>AddItemToCart<'), 'eventmodeling AddItemToCart label present')
+}
+
+// The label font is embedded into the rendered SVG so the editor preview
+// (<img>) draws the same glyphs the geometry was laid out for.
+{
+  const embedded = await renderMermaidSvg(flowSrc)
+  assert.ok(
+    embedded.svg.includes("@font-face{font-family:'Open Sans'") &&
+      embedded.svg.includes('data:font/ttf;base64,'),
+    'label font-face embedded as data URI'
+  )
+  assert.ok(svgToPng(embedded.svg).length > 100, 'svg with embedded font still rasterizes')
+}
+
+// Kanban item boxes grow with wrapped label rows (svgdom multi-row bbox fix)
+{
+  const kbSvg = await renderMermaidSvg(
+    "kanban\n  todo[Todo]\n    docs[Create documentation]\n    blog[Write blog post about the new diagram]@{ priority: 'Low' }"
+  )
+  const heights = [...kbSvg.svg.matchAll(/__APA__"[^>]*height="([\d.]+)"/g)].map((m) =>
+    Number(m[1])
+  )
+  assert.equal(heights.length, 2, 'both kanban items rendered')
+  assert.ok(
+    heights[0] < heights[1] - 5,
+    `2-line item taller than 1-line item (${heights[0]} vs ${heights[1]})`
+  )
+}
 
 // ---- diagram tools (preview + render) ----
 const diagramTools = Object.fromEntries(

@@ -233,6 +233,7 @@ export function FileListPanel(): React.JSX.Element {
   const [menuEntry, setMenuEntry] = useState<ExplorerEntry | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const [viewer, setViewer] = useState<{ src: string; alt: string } | null>(null)
+  const [viewerBulb, setViewerBulb] = useState(false)
   const [fileViewer, setFileViewer] = useState<{ path: string; name: string } | null>(null)
   const [pdfViewer, setPdfViewer] = useState<{ src: string; name: string } | null>(null)
   const [pageManager, setPageManager] = useState<{ path: string; name: string } | null>(null)
@@ -1091,7 +1092,15 @@ export function FileListPanel(): React.JSX.Element {
           </div>
         </Modal>
       )}
-      {viewer && <ImageViewer src={viewer.src} alt={viewer.alt} onClose={() => setViewer(null)} />}
+      {viewer && (
+        <ImageViewer
+          src={viewer.src}
+          alt={viewer.alt}
+          onClose={() => setViewer(null)}
+          bulbLight={viewerBulb}
+          onBulbLight={setViewerBulb}
+        />
+      )}
       {pdfViewer && (
         <PdfViewer src={pdfViewer.src} name={pdfViewer.name} onClose={() => setPdfViewer(null)} />
       )}

@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components -- the file exports one TipTap extension built around its (non-exported) node view component */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  mdiFullscreen,
   mdiLightbulbOn,
   mdiLightbulbOutline,
   mdiMagnifyMinus,
@@ -14,6 +15,8 @@ import {
   type ReactNodeViewProps
 } from '@tiptap/react'
 import { MdiIcon } from '../components/MdiIcon'
+import { ImageViewer } from '../components/ImageViewer'
+import { useIsDarkTheme } from '../useIsDarkTheme'
 import {
   createMermaidCodeBlock,
   DEFAULT_MERMAID_MODE,
@@ -103,39 +106,16 @@ function fitView(
   return { scale, x: (viewW - imgW * scale) / 2, y: (viewH - imgH * scale) / 2 }
 }
 
-const VIEWER_ACTIONS: { icon: string; title: string; run: 'in' | 'out' | 'reset' }[] = [
+const VIEWER_ACTIONS: {
+  icon: string
+  title: string
+  run: 'in' | 'out' | 'reset' | 'fullscreen'
+}[] = [
   { icon: mdiMagnifyMinus, title: 'Zoom out', run: 'out' },
   { icon: mdiMagnifyPlus, title: 'Zoom in', run: 'in' },
-  { icon: mdiRestore, title: 'Reset view', run: 'reset' }
+  { icon: mdiRestore, title: 'Reset view', run: 'reset' },
+  { icon: mdiFullscreen, title: 'Show enlarged preview (Esc to exit)', run: 'fullscreen' }
 ]
-
-/** Effective theme: `dark`, or `system` acquiring via the OS color-scheme. */
-function isDarkTheme(): boolean {
-  const t = document.documentElement.getAttribute('data-theme')
-  if (t === 'dark') return true
-  if (t === 'light') return false
-  return (
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia('(prefers-color-scheme: dark)').matches
-  )
-}
-
-/** Tracks theme switches (Settings toggle or OS dark/light flip). */
-function useIsDarkTheme(): boolean {
-  const [dark, setDark] = useState<boolean>(isDarkTheme)
-  useEffect(() => {
-    const sync = (): void => setDark(isDarkTheme())
-    const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    const observer = new MutationObserver(sync)
-    observer.observe(document.documentElement, { attributeFilter: ['data-theme'] })
-    mq.addEventListener('change', sync)
-    return () => {
-      observer.disconnect()
-      mq.removeEventListener('change', sync)
-    }
-  }, [])
-  return dark
-}
 
 /** Interactive diagram viewport: drag to pan, floating buttons to zoom/reset.
  *  Initially the diagram fits the pane; zoom is centered on the viewport. */
@@ -154,6 +134,7 @@ function MermaidDiagramViewer({
     null
   )
   const [view, setView] = useState<MermaidViewState | null>(null)
+  const [lightbox, setLightbox] = useState(false)
   const dark = useIsDarkTheme()
 
   const imageSize = (): { w: number; h: number } | null => {
@@ -167,6 +148,11 @@ function MermaidDiagramViewer({
     const size = imageSize()
     if (!canvas || !size) return null
     return fitView(canvas.clientWidth, canvas.clientHeight, size.w, size.h)
+  }, [])
+
+  // Open the shared lightbox (Esc / ✕ / outside click all handled there).
+  const toggleFullscreen = useCallback((): void => {
+    setLightbox(true)
   }, [])
 
   /** Zoom around the canvas center, clamping offsets so the image stays reachable. */
@@ -195,118 +181,132 @@ function MermaidDiagramViewer({
   )
 
   return (
-    <div
-      ref={canvasRef}
-      className={`mermaid-viewer${bulbLight ? ' bulb-light' : ''}`}
-      onPointerDown={(e) => {
-        if (e.button !== 0) return
-        const el = canvasRef.current
-        if (!el) return
-        e.preventDefault()
-        e.stopPropagation()
-        el.setPointerCapture(e.pointerId)
-        el.classList.add('panning')
-        // Fall back to the fitted view so a drag before the first zoom/load
-        // starts from the rendered position, not raw scale-1 top-left.
-        const current = view ?? getFit() ?? { scale: 1, x: 0, y: 0 }
-        dragRef.current = {
-          px: e.clientX,
-          py: e.clientY,
-          x: current.x,
-          y: current.y,
-          scale: current.scale
-        }
-      }}
-      onPointerMove={(e) => {
-        const drag = dragRef.current
-        const el = canvasRef.current
-        const size = imageSize()
-        if (!drag || !el || !size) return
-        const viewW = el.clientWidth
-        const viewH = el.clientHeight
-        const scale = view?.scale ?? drag.scale
-        const [xLo, xHi] = panBounds(viewW, size.w, scale)
-        const [yLo, yHi] = panBounds(viewH, size.h, scale)
-        const next = {
-          scale,
-          x: clamp(drag.x + (e.clientX - drag.px), Math.min(xLo, xHi), Math.max(xLo, xHi)),
-          y: clamp(drag.y + (e.clientY - drag.py), Math.min(yLo, yHi), Math.max(yLo, yHi))
-        }
-        setView({ scale, x: next.x, y: next.y })
-      }}
-      onPointerUp={() => {
-        dragRef.current = null
-        canvasRef.current?.classList.remove('panning')
-      }}
-      onPointerCancel={() => {
-        dragRef.current = null
-        canvasRef.current?.classList.remove('panning')
-      }}
-    >
+    <>
       <div
-        className="mermaid-viewer-layer"
-        style={{
-          transform:
-            view != null ? `translate(${view.x}px, ${view.y}px) scale(${view.scale})` : undefined
+        ref={canvasRef}
+        className={`mermaid-viewer${bulbLight ? ' bulb-light' : ''}`}
+        onPointerDown={(e) => {
+          if (e.button !== 0) return
+          const el = canvasRef.current
+          if (!el) return
+          e.preventDefault()
+          e.stopPropagation()
+          el.setPointerCapture(e.pointerId)
+          el.classList.add('panning')
+          // Fall back to the fitted view so a drag before the first zoom/load
+          // starts from the rendered position, not raw scale-1 top-left.
+          const current = view ?? getFit() ?? { scale: 1, x: 0, y: 0 }
+          dragRef.current = {
+            px: e.clientX,
+            py: e.clientY,
+            x: current.x,
+            y: current.y,
+            scale: current.scale
+          }
+        }}
+        onPointerMove={(e) => {
+          const drag = dragRef.current
+          const el = canvasRef.current
+          const size = imageSize()
+          if (!drag || !el || !size) return
+          const viewW = el.clientWidth
+          const viewH = el.clientHeight
+          const scale = view?.scale ?? drag.scale
+          const [xLo, xHi] = panBounds(viewW, size.w, scale)
+          const [yLo, yHi] = panBounds(viewH, size.h, scale)
+          const next = {
+            scale,
+            x: clamp(drag.x + (e.clientX - drag.px), Math.min(xLo, xHi), Math.max(xLo, xHi)),
+            y: clamp(drag.y + (e.clientY - drag.py), Math.min(yLo, yHi), Math.max(yLo, yHi))
+          }
+          setView({ scale, x: next.x, y: next.y })
+        }}
+        onPointerUp={() => {
+          dragRef.current = null
+          canvasRef.current?.classList.remove('panning')
+        }}
+        onPointerCancel={() => {
+          dragRef.current = null
+          canvasRef.current?.classList.remove('panning')
         }}
       >
-        <img
-          ref={imgRef}
-          className="mermaid-viewer-img"
-          src={svg}
-          alt="Mermaid diagram"
-          draggable={false}
-          onLoad={() => setView((prev) => prev ?? getFit())}
-        />
-      </div>
-      <div
-        className="mermaid-viewer-actions"
-        onPointerDown={(e) => e.stopPropagation()}
-        onMouseDown={(e) => e.preventDefault()}
-      >
-        {dark && (
+        <div
+          className="mermaid-viewer-layer"
+          style={{
+            transform:
+              view != null ? `translate(${view.x}px, ${view.y}px) scale(${view.scale})` : undefined
+          }}
+        >
+          <img
+            ref={imgRef}
+            className="mermaid-viewer-img"
+            src={svg}
+            alt="Mermaid diagram"
+            draggable={false}
+            onLoad={() => setView((prev) => prev ?? getFit())}
+          />
+        </div>
+        <div
+          className="mermaid-viewer-actions"
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          {dark && (
+            <div className="mermaid-viewer-group">
+              <button
+                type="button"
+                className={`mermaid-viewer-btn${!bulbLight ? ' active' : ''}`}
+                title="Diagram canvas in theme colors (dark)"
+                onClick={() => onBulbLight(false)}
+              >
+                <MdiIcon path={mdiLightbulbOutline} size={16} />
+              </button>
+              <button
+                type="button"
+                className={`mermaid-viewer-btn${bulbLight ? ' active' : ''}`}
+                title="Diagram canvas in white-mode colors"
+                onClick={() => onBulbLight(true)}
+              >
+                <MdiIcon path={mdiLightbulbOn} size={16} />
+              </button>
+            </div>
+          )}
           <div className="mermaid-viewer-group">
-            <button
-              type="button"
-              className={`mermaid-viewer-btn${!bulbLight ? ' active' : ''}`}
-              title="Diagram canvas in theme colors (dark)"
-              onClick={() => onBulbLight(false)}
-            >
-              <MdiIcon path={mdiLightbulbOutline} size={16} />
-            </button>
-            <button
-              type="button"
-              className={`mermaid-viewer-btn${bulbLight ? ' active' : ''}`}
-              title="Diagram canvas in white-mode colors"
-              onClick={() => onBulbLight(true)}
-            >
-              <MdiIcon path={mdiLightbulbOn} size={16} />
-            </button>
+            {VIEWER_ACTIONS.map((a) => (
+              <button
+                key={a.run}
+                type="button"
+                className="mermaid-viewer-btn"
+                title={a.title}
+                onClick={() => {
+                  if (a.run === 'in') {
+                    zoomTo((view?.scale ?? 1) * MERMAID_ZOOM_STEP)
+                  } else if (a.run === 'out') {
+                    zoomTo((view?.scale ?? 1) / MERMAID_ZOOM_STEP)
+                  } else if (a.run === 'fullscreen') {
+                    toggleFullscreen()
+                  } else {
+                    setView(getFit())
+                  }
+                }}
+              >
+                <MdiIcon path={a.icon} size={16} />
+              </button>
+            ))}
           </div>
-        )}
-        <div className="mermaid-viewer-group">
-          {VIEWER_ACTIONS.map((a) => (
-            <button
-              key={a.run}
-              type="button"
-              className="mermaid-viewer-btn"
-              title={a.title}
-              onClick={() => {
-                if (a.run === 'in') {
-                  zoomTo((view?.scale ?? 1) * MERMAID_ZOOM_STEP)
-                } else if (a.run === 'out') {
-                  zoomTo((view?.scale ?? 1) / MERMAID_ZOOM_STEP)
-                } else {
-                  setView(getFit())
-                }
-              }}
-            >
-              <MdiIcon path={a.icon} size={16} />
-            </button>
-          ))}
         </div>
       </div>
-    </div>
+      {lightbox && (
+        <ImageViewer
+          src={svg}
+          alt="Mermaid diagram"
+          onClose={() => setLightbox(false)}
+          large
+          bulbLight={bulbLight}
+          onBulbLight={onBulbLight}
+        />
+      )}
+    </>
   )
 }
 
@@ -333,22 +333,42 @@ function MermaidCodeBlockView(props: ReactNodeViewProps): React.JSX.Element {
   const requestedRef = useRef<string>('')
 
   useEffect(() => {
-    if (!isMermaid || mode === 'edit' || !source.trim()) return
+    if (!isMermaid || mode === 'edit') {
+      // No stale diagram across the code pane: an empty source or a render
+      // error leaves the pane without a preview image.
+      if (svgRef.current) {
+        svgRef.current = null
+        setPreview({ src: '', svg: null, error: null, loading: false })
+      }
+      return
+    }
+    if (!source.trim()) {
+      if (svgRef.current || preview.error || requestedRef.current) {
+        svgRef.current = null
+        requestedRef.current = ''
+        setPreview({ src: '', svg: null, error: null, loading: false })
+      }
+      return
+    }
     if (requestedRef.current === source && (svgRef.current || preview.error)) return
     const sourceText = source
     const seq = ++seqRef.current
     const timer = setTimeout(() => {
       requestedRef.current = sourceText
-      setPreview({ src: sourceText, svg: svgRef.current, error: null, loading: true })
+      // Drop the previous diagram as soon as a new render is requested so no
+      // stale image lingers behind the "Rendering…" status or the error.
+      if (svgRef.current && requestedRef.current) svgRef.current = null
+      setPreview({ src: sourceText, svg: null, error: null, loading: true })
       void window.ptnotes.diagrams.render(sourceText).then((res) => {
         if (seqRef.current !== seq) return
         if (res.ok && res.svg) {
           svgRef.current = svgToDataUri(res.svg, res.width, res.height)
           setPreview({ src: sourceText, svg: svgRef.current, error: null, loading: false })
         } else {
+          svgRef.current = null
           setPreview({
             src: sourceText,
-            svg: svgRef.current,
+            svg: null,
             error: res.error ?? 'Diagram render failed.',
             loading: false
           })
@@ -409,14 +429,9 @@ function MermaidCodeBlockView(props: ReactNodeViewProps): React.JSX.Element {
               <div className="mermaid-preview-error">Empty diagram source.</div>
             )}
             {!preview.loading && preview.error && (
-              <div className="mermaid-preview-error">
-                {preview.error}
-                {preview.svg && (
-                  <div className="mermaid-preview-note">Showing the last successful render.</div>
-                )}
-              </div>
+              <div className="mermaid-preview-error">{preview.error}</div>
             )}
-            {!preview.loading && preview.svg && (
+            {!preview.loading && !preview.error && preview.svg && (
               <MermaidDiagramViewer
                 key={preview.svg}
                 svg={preview.svg}

@@ -3271,6 +3271,20 @@ fieldset.kanban-form {
   display: flex;
   gap: 8px;
   align-items: stretch;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+
+.mermaid-viewer:hover .mermaid-viewer-actions,
+.mermaid-viewer:focus-within .mermaid-viewer-actions {
+  opacity: 0.75;
+  pointer-events: auto;
+}
+
+.mermaid-viewer:hover .mermaid-viewer-actions:hover,
+.mermaid-viewer:hover .mermaid-viewer-actions:focus-within {
+  opacity: 1;
 }
 
 .mermaid-viewer-group {
@@ -8961,4 +8975,25 @@ fieldset.kanban-form {
   text-align: center;
   color: var(--text-faint);
   font-size: 13px;
+}
+
+/* Light/dark canvas toggle next to the lightbox ✕ (same size, round). */
+.chat-img-viewer.bulb-light {
+  background: rgba(250, 250, 250, 0.92);
+}
+.chat-img-viewer.bulb-light .chat-img-viewer-caption,
+.chat-img-viewer.bulb-light .chat-img-viewer-close {
+  color: #333;
+}
+.chat-img-viewer.bulb-light .chat-img-viewer-close {
+  background: rgba(0, 0, 0, 0.12);
+}
+.chat-img-viewer.bulb-light .chat-img-viewer-close:hover {
+  background: rgba(0, 0, 0, 0.2);
+}
+.bulb-toggle {
+  right: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }

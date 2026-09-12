@@ -40,6 +40,7 @@ asarUnpack:
   - resources/**
   - '**/node_modules/@resvg/**'
   - '**/node_modules/@napi-rs/**'
+  - '**/node_modules/svgdom/fonts/**'
 win:
   executableName: ptnotes
   target:
