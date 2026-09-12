@@ -23,6 +23,7 @@ import {
   mdiFileReplaceOutline,
   mdiFindReplace,
   mdiFormatLetterCase,
+  mdiImageOutline,
   mdiLinkVariant,
   mdiMagnify,
   mdiMinus,
@@ -41,7 +42,7 @@ import {
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react'
 import type { Editor } from '@tiptap/react'
 import { BubbleMenu } from '@tiptap/react/menus'
-import { PluginKey } from '@tiptap/pm/state'
+import { PluginKey, TextSelection } from '@tiptap/pm/state'
 import StarterKit from '@tiptap/starter-kit'
 import { Markdown } from '@tiptap/markdown'
 import Placeholder from '@tiptap/extension-placeholder'
@@ -49,6 +50,7 @@ import Typography from '@tiptap/extension-typography'
 import Link from '@tiptap/extension-link'
 import { mergeAttributes } from '@tiptap/core'
 import type { VirtualElement } from '@floating-ui/dom'
+import { isImageFile } from '@shared/filesExplorer'
 
 const CustomLink = Link.extend({
   renderHTML({ HTMLAttributes }) {
@@ -61,6 +63,8 @@ import { TableKit } from '@tiptap/extension-table'
 import { suggestLanguage } from '../editor/lowlightRegistry'
 import { codeBlockSelectAll } from '../editor/mermaidCodeBlock'
 import { MermaidCodeBlock } from '../editor/mermaidNodeView'
+import { EditorImage } from '../editor/imageNodeView'
+import { GalleryModal } from './GalleryModal'
 import { toggleCodeBlockMerged } from '../editor/codeBlockToggle'
 import { isJsonText, prettyJsonInCodeBlock } from '../editor/jsonFormat'
 import { isMarkupText, prettyMarkupInCodeBlock, type MarkupMode } from '../editor/markupFormat'
@@ -231,6 +235,62 @@ function handleEditorLink(href: string): void {
   }
 }
 
+function altFromFileName(name: string): string {
+  return name.replace(/\.[^.]+$/, '')
+}
+
+function altFromGalleryName(name: string): string {
+  return altFromFileName(name.replace(/^[0-9a-f]{16}-/, ''))
+}
+
+interface InsertedImage {
+  name: string
+  alt: string
+}
+
+/** Copy image files into the project gallery; returns the stored names. */
+async function importImagesToGallery(files: File[]): Promise<InsertedImage[]> {
+  const project = useAppStore.getState().activeProject
+  if (!project) return []
+  const out: InsertedImage[] = []
+  for (const file of files) {
+    const path = window.ptnotes.files.getPathForFile(file)
+    try {
+      const name = path
+        ? await window.ptnotes.gallery.import(project, path, file.name)
+        : await window.ptnotes.gallery.importData(
+            project,
+            file.name,
+            new Uint8Array(await file.arrayBuffer())
+          )
+      out.push({ name, alt: altFromFileName(file.name) })
+    } catch {
+      // skip files the gallery rejects
+    }
+  }
+  return out
+}
+
+/** Insert image nodes at the current selection (or `coords`) in one transaction. */
+function insertImageNodes(
+  view: Editor['view'],
+  images: InsertedImage[],
+  coords?: { left: number; top: number }
+): void {
+  if (view.isDestroyed) return
+  const nodeType = view.state.schema.nodes.image
+  if (!nodeType) return
+  let tr = view.state.tr
+  if (coords) {
+    const pos = view.posAtCoords(coords)
+    if (pos) tr = tr.setSelection(TextSelection.near(view.state.doc.resolve(pos.pos)))
+  }
+  for (const img of images) {
+    tr = tr.replaceSelectionWith(nodeType.create({ src: `images/${img.name}`, alt: img.alt }))
+  }
+  view.dispatch(tr.scrollIntoView())
+}
+
 function FormatButtons({
   editor,
   state,
@@ -338,6 +398,7 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
     extensions: [
       StarterKit.configure({ codeBlock: false }),
       MermaidCodeBlock,
+      EditorImage,
       Markdown.configure({
         indentation: { style: 'space', size: 2 }
       }),
@@ -355,6 +416,30 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
     ],
     content,
     contentType: 'markdown',
+    editorProps: {
+      handleDrop: (view, event, _slice, moved) => {
+        if (moved) return false
+        const files = Array.from(event.dataTransfer?.files ?? []).filter((f) => isImageFile(f.name))
+        if (!files.length) return false
+        event.preventDefault()
+        const coords = { left: event.clientX, top: event.clientY }
+        void importImagesToGallery(files).then((images) => {
+          if (images.length) insertImageNodes(view, images, coords)
+        })
+        return true
+      },
+      handlePaste: (view, event) => {
+        const files = Array.from(event.clipboardData?.files ?? []).filter((f) =>
+          isImageFile(f.name)
+        )
+        if (!files.length) return false
+        event.preventDefault()
+        void importImagesToGallery(files).then((images) => {
+          if (images.length) insertImageNodes(view, images)
+        })
+        return true
+      }
+    },
     onTransaction() {
       txCount.current += 1
     },
@@ -482,6 +567,8 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
   const [findTerm, setFindTerm] = useState('')
   const [replaceTerm, setReplaceTerm] = useState('')
   const [matchCase, setMatchCase] = useState(false)
+  const [galleryOpen, setGalleryOpen] = useState(false)
+  const [dropActive, setDropActive] = useState(false)
   const findInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
@@ -625,6 +712,20 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
     setLinkPrompt(true)
   }
 
+  function insertGalleryNames(names: string[]): void {
+    if (!editor || !names.length) return
+    editor
+      .chain()
+      .focus()
+      .insertContent(
+        names.map((name) => ({
+          type: 'image',
+          attrs: { src: `images/${name}`, alt: altFromGalleryName(name) }
+        }))
+      )
+      .run()
+  }
+
   function toggleRaw(): void {
     if (rawMode) {
       editor.commands.setContent(rawText, { contentType: 'markdown', emitUpdate: false })
@@ -648,7 +749,23 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
   }
 
   return (
-    <div className="editor-wrap">
+    <div
+      className="editor-wrap"
+      onDragOver={(e) => {
+        if (rawMode || !e.dataTransfer.types.includes('Files')) return
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'copy'
+        setDropActive(true)
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget.contains(e.relatedTarget as Node)) return
+        setDropActive(false)
+      }}
+      onDrop={(e) => {
+        e.preventDefault()
+        setDropActive(false)
+      }}
+    >
       {!rawMode && (
         <div className="editor-toolbar">
           <ToolbarBtn
@@ -736,6 +853,11 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
             }}
           />
           <ToolbarBtn icon={mdiLinkVariant} title="Link" onClick={toggleLink} />
+          <ToolbarBtn
+            icon={mdiImageOutline}
+            title="Insert image"
+            onClick={() => setGalleryOpen(true)}
+          />
           <ToolbarBtn
             icon={mdiTablePlus}
             title="Insert table"
@@ -947,6 +1069,7 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
             if (state.selection.empty) return false
             if (!view.hasFocus()) return false
             if (editor.isActive('codeBlock')) return false
+            if (editor.isActive('image')) return false
             if (editor.isActive('table')) return false
             return true
           }}
@@ -1202,6 +1325,16 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
           }}
         />
       )}
+      {galleryOpen && (
+        <GalleryModal
+          onClose={() => setGalleryOpen(false)}
+          onInsert={(names) => {
+            setGalleryOpen(false)
+            insertGalleryNames(names)
+          }}
+        />
+      )}
+      {!rawMode && dropActive && <div className="editor-drop-overlay">Drop images to insert</div>}
       {linkTooltip && (
         <div className="editor-link-tooltip" style={{ left: linkTooltip.x, top: linkTooltip.y }}>
           {linkTooltip.label}

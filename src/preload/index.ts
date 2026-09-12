@@ -21,6 +21,7 @@ import type {
   ExplorerEntry,
   ExplorerFolderNode,
   FileEntry,
+  GalleryImage,
   GroupChatData,
   GroupChatMeta,
   GroupMessagePageOpts,
@@ -352,6 +353,16 @@ const api = {
       ipcRenderer.invoke('files:revealByName', project, fileName),
     openExternal: (project: string, fileName: string): Promise<string> =>
       ipcRenderer.invoke('files:openExternal', project, fileName)
+  },
+  gallery: {
+    list: (project: string): Promise<GalleryImage[]> => ipcRenderer.invoke('gallery:list', project),
+    import: (project: string, sourcePath: string, fileName?: string): Promise<string> =>
+      ipcRenderer.invoke('gallery:import', project, sourcePath, fileName),
+    importData: (project: string, fileName: string, data: Uint8Array): Promise<string> =>
+      ipcRenderer.invoke('gallery:importData', project, fileName, data),
+    choose: (project: string): Promise<string[]> => ipcRenderer.invoke('gallery:choose', project),
+    delete: (project: string, name: string): Promise<void> =>
+      ipcRenderer.invoke('gallery:delete', project, name)
   },
   modules: {
     list: (project: string): Promise<ModuleRun[]> => ipcRenderer.invoke('modules:list', project),

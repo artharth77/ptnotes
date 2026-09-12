@@ -2815,6 +2815,7 @@ fieldset.kanban-form {
 /* ---------- Editor ---------- */
 
 .editor-wrap {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -8996,4 +8997,224 @@ fieldset.kanban-form {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* ---------- Editor images ---------- */
+.editor-image {
+  width: fit-content;
+  max-width: 100%;
+  margin: 6px 0;
+}
+
+.editor-image-frame {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+}
+
+.editor-image img {
+  display: block;
+  max-width: 100%;
+  max-height: 480px;
+  border-radius: 4px;
+}
+
+.editor-image-frame.selected::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--accent);
+  border-radius: 6px;
+  pointer-events: none;
+}
+
+.editor-image-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 10;
+  display: flex;
+  gap: 8px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+
+.editor-image-group {
+  display: inline-flex;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.editor-image-group .editor-image-btn {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+.editor-image-group .editor-image-btn + .editor-image-btn {
+  border-left: 1px solid var(--border);
+}
+
+.editor-image:hover .editor-image-actions,
+.editor-image:focus-within .editor-image-actions {
+  opacity: 0.75;
+  pointer-events: auto;
+}
+
+.editor-image:hover .editor-image-actions:hover,
+.editor-image:hover .editor-image-actions:focus-within {
+  opacity: 1;
+}
+
+.editor-image-btn {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  color: var(--text-dim);
+  width: 28px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.editor-image-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.editor-drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 2px dashed var(--accent);
+  border-radius: 10px;
+  color: var(--accent);
+  font-weight: 600;
+  pointer-events: none;
+}
+
+/* ---------- Image gallery modal ---------- */
+.gallery-modal {
+  width: 640px;
+  max-width: 90vw;
+}
+
+.gallery-body {
+  position: relative;
+  min-height: 220px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.gallery-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.gallery-hint {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.gallery-thumb {
+  position: relative;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  background: var(--bg-elev);
+}
+.gallery-thumb.selected {
+  border-color: var(--accent);
+}
+.gallery-thumb img {
+  display: block;
+  width: 100%;
+  height: 96px;
+  object-fit: cover;
+}
+
+.gallery-thumb-name {
+  display: block;
+  padding: 4px 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gallery-thumb-delete {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 5px;
+  background: var(--bg-elev);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.gallery-thumb:hover .gallery-thumb-delete {
+  display: inline-flex;
+}
+.gallery-thumb-delete:hover {
+  background: var(--bg-hover);
+  color: var(--danger);
+}
+
+.gallery-drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 2px dashed var(--accent);
+  border-radius: 10px;
+  color: var(--accent);
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.gallery-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 32px 16px;
+  color: var(--text-faint);
+  text-align: center;
+}
+
+.gallery-empty-hint {
+  font-size: 12px;
+}
+
+.gallery-count {
+  flex: 1;
+  color: var(--text-dim);
+  font-size: 13px;
 }

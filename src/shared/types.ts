@@ -242,6 +242,14 @@ export interface ExplorerFolderNode {
   children: ExplorerFolderNode[]
 }
 
+/** One image in the project gallery (`<project>/notes/images/`). */
+export interface GalleryImage {
+  name: string
+  size: number
+  mtime: number
+  absPath: string
+}
+
 export interface ChatSessionMeta {
   sessionId: string
   project: string

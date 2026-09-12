@@ -9,6 +9,7 @@ import { Markdown } from '@tiptap/markdown'
 import { createLowlight } from 'lowlight'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import StarterKit from '@tiptap/starter-kit'
+import Image from '@tiptap/extension-image'
 import Typography from '@tiptap/extension-typography'
 import { suggestLanguage } from '../src/renderer/src/editor/lowlightRegistry'
 import TaskList from '@tiptap/extension-task-list'
@@ -77,6 +78,7 @@ function makeEditor(content: string): Editor {
     extensions: [
       StarterKit.configure({ codeBlock: false, history: false }),
       CodeBlock,
+      Image,
       Markdown,
       Typography,
       TaskList,
@@ -828,6 +830,33 @@ console.log(
     'mermaid',
     'legacy graph syntax suggests mermaid'
   )
+}
+
+// image markdown round-trip (mirrors MarkdownEditor.tsx extension list)
+{
+  const MD = 'before\n\n![alt text](images/abc123def0456789-photo.png)\n\nafter\n'
+  const ed = makeEditor(MD)
+  let found: { src: unknown; alt: unknown } | null = null
+  ed.state.doc.descendants((node) => {
+    if (node.type.name === 'image') {
+      found = node.attrs
+      return false
+    }
+    return true
+  })
+  assert.ok(found, 'image markdown parses into an image node')
+  const attrs = found as Record<string, unknown>
+  assert.equal(attrs.src, 'images/abc123def0456789-photo.png', 'image src attr')
+  assert.equal(attrs.alt, 'alt text', 'image alt attr')
+  assert.ok(
+    ed.getMarkdown().includes('![alt text](images/abc123def0456789-photo.png)'),
+    'image node serializes back to markdown'
+  )
+  // setImage command inserts a node that serializes
+  ed.commands.setTextSelection(ed.state.doc.content.size)
+  ed.commands.setImage({ src: 'images/aaa.png', alt: 'added' })
+  assert.ok(ed.getMarkdown().includes('![added](images/aaa.png)'), 'setImage serializes')
+  ed.destroy()
 }
 
 console.log('MERMAID TESTS PASSED — language round-trip, transient mode attr, suggestions')

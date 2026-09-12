@@ -5,6 +5,7 @@ import remarkBreaks from 'remark-breaks'
 import { slugify } from '@shared/slug'
 import { MdiIcon } from './MdiIcon'
 import { ImageViewer } from './ImageViewer'
+import { resolveImageSrc, useActiveProjectPath } from '../editor/imageNodeView'
 import {
   fileTypeIcon,
   KANBAN_LINK_ICON,
@@ -64,6 +65,7 @@ export const MarkdownContent = memo(function MarkdownContent({
 }: MarkdownContentProps): React.JSX.Element {
   const [viewer, setViewer] = useState<{ src: string; alt: string } | null>(null)
   const [viewerBulb, setViewerBulb] = useState(false)
+  const projectPath = useActiveProjectPath()
 
   const safeContent = normalizeInternalLinks(content)
   return (
@@ -88,16 +90,7 @@ export const MarkdownContent = memo(function MarkdownContent({
         }}
         components={{
           img: ({ src, alt, ...props }) => {
-            let resolvedSrc = src
-            if (src) {
-              if (/^[a-zA-Z]:/.test(src)) {
-                // Handle Windows paths like C:/path/to/file
-                resolvedSrc = `ptfile://local/${src}`
-              } else {
-                // Handle macOS/Linux paths like /path/to/file
-                resolvedSrc = `ptfile://local${src}`
-              }
-            }
+            const resolvedSrc = src ? resolveImageSrc(src, projectPath) : src
             if (enableImageZoom) {
               return (
                 <span

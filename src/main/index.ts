@@ -11,6 +11,7 @@ import { registerPlannerIpc } from './ipc/planner'
 import { registerSnapshotsIpc } from './ipc/snapshots'
 import { registerAiIpc, createSessionRegistry } from './ipc/ai'
 import { registerFilesIpc } from './ipc/files'
+import { registerGalleryIpc } from './ipc/gallery'
 import { registerSettingsIpc } from './ipc/settings'
 import { registerSkillsIpc } from './ipc/skills'
 import { registerModulesIpc } from './ipc/modules'
@@ -411,6 +412,7 @@ app.whenReady().then(async () => {
   registerSnapshotsIpc(service)
   registerAiIpc(registry, configStore, service)
   registerFilesIpc(service, registry, configStore)
+  registerGalleryIpc(service)
   registerSettingsIpc(service, settingsStore, (newRoot) => {
     botsStoreRef?.setRootDir(newRoot)
     groupChatForwarder.current?.closeAll()
