@@ -120,23 +120,41 @@ import './assets/main.css'
         ({
           projectId: '',
           projectName: '',
-          todayIso: '',
+          generatedAt: Date.now(),
           workload: [],
-          kanbanStats: { rows: [], total: 0 },
+          kanbanStats: {
+            rows: [],
+            totalCards: 0,
+            totalDone: 0,
+            totalActive: 0
+          },
           overdue: { overdue: [], today: [], upcoming: [], total: 0 },
           plannerHealth: {
             scheduleCount: 0,
             totalTasks: 0,
-            leafTasks: 0,
+            totalLeafTasks: 0,
             percentComplete: 0,
-            onTime: 0,
-            late: 0,
+            onTimeTasks: 0,
+            lateTasks: 0,
             ownerCount: 0,
             criticalPathDays: 0
           },
           activity: [],
           recentNotes: []
         }) as any
+    }
+    const noopDiagrams = {
+      render: async () => ({ ok: false, error: 'stub' }) as any
+    }
+    const noopPdf = {
+      supportsUpload: async () => false,
+      upload: async () => ({ ok: false }) as any,
+      info: async () => ({ ok: false }) as any,
+      setViewerOpen: noop,
+      onViewerEscape: noopUnsub,
+      renderPage: async () => ({ ok: false }) as any,
+      rebuild: async () => ({ ok: false }) as any,
+      merge: async () => ({ ok: false }) as any
     }
     const noopChat = {
       list: async () => emptyList,
@@ -181,6 +199,8 @@ import './assets/main.css'
       files: noopFiles,
       snapshots: noopSnapshots,
       dashboard: noopDashboard,
+      diagrams: noopDiagrams,
+      pdf: noopPdf,
       chat: noopChat,
       bots: noopBots,
       modules: noopModules,
@@ -188,6 +208,15 @@ import './assets/main.css'
       onOpenFind: (cb: () => void) => {
         const handler = (e: KeyboardEvent) => {
           if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') cb()
+        }
+        if (typeof window !== 'undefined') window.addEventListener('keydown', handler)
+        return () => {
+          if (typeof window !== 'undefined') window.removeEventListener('keydown', handler)
+        }
+      },
+      onSelectAll: (cb: () => void) => {
+        const handler = (e: KeyboardEvent) => {
+          if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') cb()
         }
         if (typeof window !== 'undefined') window.addEventListener('keydown', handler)
         return () => {
