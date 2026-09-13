@@ -26,7 +26,7 @@ import {
   mdiRedo,
   mdiTableRowPlusAfter,
   mdiTableRowPlusBefore,
-  mdiTrashCan,
+  mdiTrashCanOutline,
   mdiUndo,
   mdiViewColumnOutline
 } from '@mdi/js'
@@ -2061,7 +2061,7 @@ export function PlannerEditor(): React.JSX.Element {
             disabled={ganttMode || selected.size === 0}
             onClick={handleDeleteSelected}
           >
-            <MdiIcon path={mdiTrashCan} size={16} />
+            <MdiIcon path={mdiTrashCanOutline} size={16} />
           </button>
         </div>
         <span className="planner-toolbar-divider" />
@@ -2487,7 +2487,7 @@ export function PlannerEditor(): React.JSX.Element {
             <div className="note-menu-sep" />
             <button type="button" className="note-menu-item danger" onClick={handleGridDelete}>
               <span className="note-menu-icon">
-                <MdiIcon path={mdiTrashCan} size={16} />
+                <MdiIcon path={mdiTrashCanOutline} size={16} />
               </span>
               Delete
             </button>
