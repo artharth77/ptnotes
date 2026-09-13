@@ -9114,18 +9114,6 @@ fieldset.kanban-form {
   overflow-y: auto;
 }
 
-.gallery-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.gallery-hint {
-  color: var(--text-faint);
-  font-size: 12px;
-}
-
 .gallery-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));

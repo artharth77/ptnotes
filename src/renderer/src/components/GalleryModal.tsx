@@ -106,13 +106,6 @@ export function GalleryModal({ onClose, onInsert }: GalleryModalProps): React.JS
         }}
         onDrop={onDrop}
       >
-        <div className="gallery-toolbar">
-          <button className="btn" onClick={() => void choose()} disabled={busy || !project}>
-            <MdiIcon path={mdiPlus} size={16} />
-            Add images
-          </button>
-          <span className="gallery-hint">Drop image files here to add them</span>
-        </div>
         {images.length === 0 ? (
           <div className="gallery-empty">
             <MdiIcon path={mdiImageOutline} size={32} />
@@ -150,6 +143,10 @@ export function GalleryModal({ onClose, onInsert }: GalleryModalProps): React.JS
         {dragActive && <div className="gallery-drop-overlay">Drop images to add</div>}
       </div>
       <div className="modal-actions">
+        <button className="btn" onClick={() => void choose()} disabled={busy || !project}>
+          <MdiIcon path={mdiPlus} size={16} />
+          Add images
+        </button>
         <span className="gallery-count">{selectedNames ? `${selectedNames} selected` : ''}</span>
         <button className="btn" onClick={onClose}>
           Cancel
