@@ -943,7 +943,8 @@ body {
 .kanban-filter-popup,
 .mention-popup,
 .command-popup,
-.gantt-popup {
+.gantt-popup,
+.modal {
   background: var(--frost-bg);
   backdrop-filter: blur(12px) saturate(1.2);
 }
@@ -2068,7 +2069,6 @@ fieldset.kanban-form {
 .modal {
   width: 420px;
   max-width: calc(100vw - 40px);
-  background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 12px;
   box-shadow: var(--shadow);
@@ -8425,18 +8425,18 @@ fieldset.kanban-form {
 .command-palette-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.35);
+  background: transparent;
   z-index: 1000;
   display: flex;
   align-items: flex-start;
   justify-content: center;
   padding-top: 12vh;
-  backdrop-filter: blur(2px);
 }
 
 .command-palette {
   width: min(640px, 92vw);
-  background: var(--bg);
+  background: var(--frost-bg);
+  backdrop-filter: blur(12px) saturate(1.2);
   border: 1px solid var(--border);
   border-radius: 12px;
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28);
@@ -8450,7 +8450,7 @@ fieldset.kanban-form {
   gap: 10px;
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
-  background: var(--bg-elev);
+  background: var(--frost-bg);
 }
 
 .command-palette-input input {
@@ -8494,13 +8494,17 @@ fieldset.kanban-form {
   color: var(--text-dim);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 70%, rgba(255, 255, 255, 0) 100%);
-  backdrop-filter: blur(2px);
+  background: linear-gradient(
+    to bottom,
+    var(--frost-bg) 0%,
+    var(--frost-bg) 70%,
+    rgba(255, 255, 255, 0) 100%
+  );
 }
 
 :root[data-theme='dark'] .command-palette-group-header,
 :root[data-theme='system'] .command-palette-group-header {
-  background: linear-gradient(to bottom, var(--bg) 0%, var(--bg) 70%, rgba(0, 0, 0, 0) 100%);
+  background: linear-gradient(to bottom, var(--frost-bg) 0%, var(--frost-bg) 70%, rgba(0, 0, 0, 0) 100%);
 }
 
 .command-palette-group .command-palette-item {
