@@ -788,11 +788,9 @@ console.log(
   {
     const edEmpty = makeEditor('before\n\n```\n\n```\n\nafter\n')
     let emptyStart = -1
-    let emptyEnd = -1
     edEmpty.state.doc.descendants((n, pos) => {
       if (n.type.name === 'codeBlock') {
         emptyStart = pos + 1
-        emptyEnd = pos + n.nodeSize - 1
         return false
       }
       return true
