@@ -44,6 +44,14 @@ export interface Schedule {
   columnVisibility?: Record<string, boolean>
   /** Per-schedule editor column order (all column keys). Absent/invalid falls back to default. */
   columnOrder?: string[]
+  /** Per-schedule planner title-column widths (px). Absent keys use the view default. */
+  titleWidth?: ScheduleTitleWidth
+}
+
+/** Title-column width overrides for the planner grid/gantt views. */
+export interface ScheduleTitleWidth {
+  grid?: number
+  gantt?: number
 }
 
 /** List-item summary of a schedule, without the task tree. */
@@ -255,6 +263,12 @@ export function normalizeColumnOrder(
   }
   for (const k of allKeys) if (!out.includes(k)) out.push(k)
   return out
+}
+
+/** Sanitize a title-column width: finite numbers are rounded and clamped to [min, max], else null. */
+export function normalizeTitleWidth(value: unknown, min: number, max: number): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  return Math.min(max, Math.max(min, Math.round(value)))
 }
 
 /**

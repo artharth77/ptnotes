@@ -43,8 +43,12 @@ import {
   GanttChart,
   GANTT_DAY_WIDTH_DEFAULT,
   GANTT_DAY_WIDTH_MAX,
-  GANTT_DAY_WIDTH_MIN
+  GANTT_DAY_WIDTH_MIN,
+  GANTT_TITLE_WIDTH_DEFAULT,
+  GANTT_TITLE_WIDTH_MAX,
+  GANTT_TITLE_WIDTH_MIN
 } from './GanttChart'
+import { PlannerResizeHandle } from './PlannerResizeHandle'
 import {
   applyDateRule,
   collectOwners,
@@ -58,6 +62,7 @@ import {
   nextWorkingDayString,
   normalizeColumnOrder,
   normalizeOwner,
+  normalizeTitleWidth,
   overallPercentComplete,
   parseOwners,
   planIndicator,
@@ -69,7 +74,8 @@ import type {
   PlannerExportRow,
   Schedule,
   ScheduleStatus,
-  ScheduleTask
+  ScheduleTask,
+  ScheduleTitleWidth
 } from '@shared/types'
 
 type PlannerColumnKey =
@@ -119,6 +125,9 @@ const COL_WIDTHS: Record<PlannerColumnKey, string> = {
 /** Pinned first, never movable (Plan Indicator stays hideable; No./Title always visible). */
 const FIXED_COLUMNS: PlannerColumnKey[] = ['indicator', 'no', 'title']
 
+const TITLE_WIDTH_GRID_MIN = 180
+const TITLE_WIDTH_GRID_MAX = 600
+
 type MovableColumnKey = Exclude<PlannerColumnKey, 'indicator' | 'no' | 'title'>
 
 const MOVABLE_HEADERS: Record<MovableColumnKey, { label: string; className: string }> = {
@@ -133,10 +142,16 @@ const MOVABLE_HEADERS: Record<MovableColumnKey, { label: string; className: stri
   note: { label: 'Note', className: 'planner-col-note' }
 }
 
-function colTemplate(visible: Set<PlannerColumnKey>, order: PlannerColumnKey[]): string {
+function colTemplate(
+  visible: Set<PlannerColumnKey>,
+  order: PlannerColumnKey[],
+  titleWidth: number | null
+): string {
   const cols: string[] = ['28px']
   for (const k of order) {
-    if (k === 'no' || k === 'title' || visible.has(k)) cols.push(COL_WIDTHS[k])
+    if (k === 'no' || k === 'title' || visible.has(k)) {
+      cols.push(k === 'title' && titleWidth !== null ? `${titleWidth}px` : COL_WIDTHS[k])
+    }
   }
   return cols.join(' ')
 }
@@ -450,11 +465,32 @@ export function PlannerEditor(): React.JSX.Element {
   const [columnOrder, setColumnOrder] = useState<PlannerColumnKey[]>(() =>
     initColumnOrder(schedule?.columnOrder)
   )
+  const [titleWidthGrid, setTitleWidthGrid] = useState<number | null>(() =>
+    normalizeTitleWidth(schedule?.titleWidth?.grid, TITLE_WIDTH_GRID_MIN, TITLE_WIDTH_GRID_MAX)
+  )
+  const [titleWidthGantt, setTitleWidthGantt] = useState<number>(
+    () =>
+      normalizeTitleWidth(
+        schedule?.titleWidth?.gantt,
+        GANTT_TITLE_WIDTH_MIN,
+        GANTT_TITLE_WIDTH_MAX
+      ) ?? GANTT_TITLE_WIDTH_DEFAULT
+  )
   const [prevScheduleId, setPrevScheduleId] = useState(schedule?.id)
   if (schedule?.id !== prevScheduleId) {
     setPrevScheduleId(schedule?.id)
     setVisibleCols(initVisibleCols(schedule?.columnVisibility))
     setColumnOrder(initColumnOrder(schedule?.columnOrder))
+    setTitleWidthGrid(
+      normalizeTitleWidth(schedule?.titleWidth?.grid, TITLE_WIDTH_GRID_MIN, TITLE_WIDTH_GRID_MAX)
+    )
+    setTitleWidthGantt(
+      normalizeTitleWidth(
+        schedule?.titleWidth?.gantt,
+        GANTT_TITLE_WIDTH_MIN,
+        GANTT_TITLE_WIDTH_MAX
+      ) ?? GANTT_TITLE_WIDTH_DEFAULT
+    )
     setView('table')
     setOwnerMenu(null)
   }
@@ -763,7 +799,7 @@ export function PlannerEditor(): React.JSX.Element {
   const sc: Schedule = schedule
   const cal = calendar ?? defaultCalendar()
   const rows = flattenTasks(sc.tasks, null, 0, collapsed, [])
-  const template = colTemplate(visibleCols, columnOrder)
+  const template = colTemplate(visibleCols, columnOrder, titleWidthGrid)
   const today = formatDate(new Date())
   const noLeft = 28 + (visibleCols.has('indicator') ? 5 : 0)
   const titleLeft = noLeft + 46
@@ -1099,6 +1135,23 @@ export function PlannerEditor(): React.JSX.Element {
       }
       return next
     })
+  }
+
+  function persistTitleWidth(patch: { grid?: number | null; gantt?: number }): void {
+    const current = useAppStore.getState().scheduleContent
+    if (!current) return
+    const next: ScheduleTitleWidth = {}
+    const grid =
+      'grid' in patch ? (patch.grid === null ? undefined : patch.grid) : current.titleWidth?.grid
+    const gantt = 'gantt' in patch ? patch.gantt : current.titleWidth?.gantt
+    if (grid !== undefined) next.grid = grid
+    if (gantt !== undefined) next.gantt = gantt
+    commit(
+      current,
+      current.tasks,
+      { titleWidth: Object.keys(next).length > 0 ? next : undefined },
+      false
+    )
   }
 
   function applyOwnerEdit(id: string): void {
@@ -2002,6 +2055,20 @@ export function PlannerEditor(): React.JSX.Element {
                   </div>
                   <div className="planner-col-title planner-cell" style={{ left: titleLeft }}>
                     Title
+                    <PlannerResizeHandle
+                      width={titleWidthGrid}
+                      min={TITLE_WIDTH_GRID_MIN}
+                      max={TITLE_WIDTH_GRID_MAX}
+                      onResize={setTitleWidthGrid}
+                      onCommitEnd={(w) => {
+                        setTitleWidthGrid(w)
+                        persistTitleWidth({ grid: w })
+                      }}
+                      onReset={() => {
+                        setTitleWidthGrid(null)
+                        persistTitleWidth({ grid: null })
+                      }}
+                    />
                   </div>
                   {movableCols.map((key) => (
                     <div key={key} className={`${MOVABLE_HEADERS[key].className} planner-cell`}>
@@ -2017,7 +2084,14 @@ export function PlannerEditor(): React.JSX.Element {
                 calendar={cal}
                 collapsed={collapsed}
                 dayWidth={ganttDayWidth}
+                titleWidth={titleWidthGantt}
                 onToggle={toggleCollapse}
+                onTitleWidthResize={setTitleWidthGantt}
+                onTitleWidthCommit={(w) => persistTitleWidth({ gantt: w })}
+                onTitleWidthReset={() => {
+                  setTitleWidthGantt(GANTT_TITLE_WIDTH_DEFAULT)
+                  persistTitleWidth({ gantt: GANTT_TITLE_WIDTH_DEFAULT })
+                }}
                 onResize={handleGanttResize}
                 onSetDates={handleGanttSetDates}
                 onClearPlan={handleGanttClearPlan}

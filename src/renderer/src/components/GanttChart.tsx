@@ -3,22 +3,29 @@ import { mdiCalendarRemove, mdiChevronDown, mdiChevronRight, mdiClose } from '@m
 import { computeDuration, formatDate, isWorkingDay, parseDate } from '@shared/planner'
 import type { ProjectCalendar, ScheduleTask } from '@shared/types'
 import { MdiIcon } from './MdiIcon'
+import { PlannerResizeHandle } from './PlannerResizeHandle'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 export const GANTT_DAY_WIDTH_MIN = 8
 export const GANTT_DAY_WIDTH_MAX = 32
 export const GANTT_DAY_WIDTH_DEFAULT = 24
+export const GANTT_TITLE_WIDTH_DEFAULT = 220
+export const GANTT_TITLE_WIDTH_MIN = 120
+export const GANTT_TITLE_WIDTH_MAX = 600
 const PADDING_DAYS = 7
 const TOGGLE_WIDTH = 28
 const NO_WIDTH = 46
-const TITLE_WIDTH = 220
 
 interface GanttChartProps {
   tasks: ScheduleTask[]
   calendar: ProjectCalendar
   collapsed: Set<string>
   dayWidth: number
+  titleWidth: number
   onToggle: (id: string) => void
+  onTitleWidthResize: (width: number) => void
+  onTitleWidthCommit: (width: number) => void
+  onTitleWidthReset: () => void
   onResize: (
     id: string,
     start: string | null,
@@ -170,7 +177,11 @@ export function GanttChart({
   calendar,
   collapsed,
   dayWidth,
+  titleWidth,
   onToggle,
+  onTitleWidthResize,
+  onTitleWidthCommit,
+  onTitleWidthReset,
   onResize,
   onSetDates,
   onClearPlan,
@@ -179,7 +190,7 @@ export function GanttChart({
   const timeline = useMemo(() => buildTimeline(tasks), [tasks])
   const months = useMemo(() => buildMonths(timeline.days, dayWidth), [timeline, dayWidth])
   const timelineWidth = timeline.days.length * dayWidth
-  const leftWidth = TOGGLE_WIDTH + NO_WIDTH + TITLE_WIDTH
+  const leftWidth = TOGGLE_WIDTH + NO_WIDTH + titleWidth
   const todayKey = formatDate(new Date())
   const [currentMonth, setCurrentMonth] = useState(months[0].label)
   const [prevMonths, setPrevMonths] = useState(months)
@@ -471,7 +482,17 @@ export function GanttChart({
           <div className="gantt-header-left" style={{ width: leftWidth }}>
             <div className="gantt-col-toggle" />
             <div className="gantt-col-no">No.</div>
-            <div className="gantt-col-title">Title</div>
+            <div className="gantt-col-title">
+              Title
+              <PlannerResizeHandle
+                width={titleWidth}
+                min={GANTT_TITLE_WIDTH_MIN}
+                max={GANTT_TITLE_WIDTH_MAX}
+                onResize={onTitleWidthResize}
+                onCommitEnd={onTitleWidthCommit}
+                onReset={onTitleWidthReset}
+              />
+            </div>
           </div>
           <div className="gantt-header-days" style={{ width: timelineWidth }}>
             <div className="gantt-month-band">

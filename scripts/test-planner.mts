@@ -34,6 +34,7 @@ const {
   normalizeCalendar,
   normalizeColumnOrder,
   normalizeOwner,
+  normalizeTitleWidth,
   ownerStats,
   parseOwners,
   planIndicator,
@@ -381,6 +382,17 @@ assert.deepEqual(
   ],
   'duplicates deduped'
 )
+
+// ---- title column width normalization ----
+
+assert.equal(normalizeTitleWidth(undefined, 120, 600), null, 'missing width falls back to null')
+assert.equal(normalizeTitleWidth('300', 120, 600), null, 'non-number width rejected')
+assert.equal(normalizeTitleWidth(Number.NaN, 120, 600), null, 'NaN rejected')
+assert.equal(normalizeTitleWidth(Number.POSITIVE_INFINITY, 120, 600), null, 'Infinity rejected')
+assert.equal(normalizeTitleWidth(220.4, 120, 600), 220, 'fractional width rounded')
+assert.equal(normalizeTitleWidth(50, 120, 600), 120, 'below-min width clamped to min')
+assert.equal(normalizeTitleWidth(9999, 120, 600), 600, 'above-max width clamped to max')
+assert.equal(normalizeTitleWidth(300, 120, 600), 300, 'in-range width kept')
 
 // ---- estimate percent ----
 

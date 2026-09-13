@@ -509,7 +509,8 @@ export type {
   Schedule,
   ScheduleMeta,
   ScheduleStatus,
-  ScheduleTask
+  ScheduleTask,
+  ScheduleTitleWidth
 } from './planner'
 
 export type { SnapshotMeta } from './snapshots'

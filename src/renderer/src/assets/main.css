@@ -6648,6 +6648,32 @@ fieldset.kanban-form {
   min-width: 180px;
 }
 
+.planner-col-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 5;
+}
+
+.planner-col-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 20%;
+  bottom: 20%;
+  left: 3px;
+  width: 1px;
+  background: transparent;
+}
+
+.planner-col-resize-handle:hover::after,
+.planner-col-resize-handle:active::after {
+  background: var(--accent);
+}
+
 .planner-col-status {
   width: 110px;
 }
@@ -6953,6 +6979,10 @@ fieldset.kanban-form {
   text-transform: uppercase;
   letter-spacing: 0.03em;
   color: var(--text-dim);
+}
+
+.gantt-header .gantt-col-title {
+  position: relative;
 }
 
 .gantt-header-days {
