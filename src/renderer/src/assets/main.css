@@ -6439,21 +6439,72 @@ fieldset.kanban-form {
 /* ---------- Planner ---------- */
 
 .planner-editor {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
   min-width: 0;
 }
 
+/* One continuous frosted block spanning title bar + toolbar */
+.planner-editor::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: calc(var(--planner-titlebar-h, 40px) + var(--planner-toolbar-h, 48px));
+  background: color-mix(in srgb, var(--bg-elev) 60%, transparent);
+  backdrop-filter: blur(12px) saturate(1.2);
+  z-index: 18;
+  pointer-events: none;
+}
+
 .planner-statusbar {
-  position: relative;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 8px 14px;
   border-top: 1px solid var(--border);
-  background: var(--bg-elev);
-  flex-shrink: 0;
+  background: color-mix(in srgb, var(--bg-elev) 60%, transparent);
+  backdrop-filter: blur(12px) saturate(1.2);
+}
+
+.planner-hscroll {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: var(--planner-statusbar-h, 38px);
+  height: 10px;
+  z-index: 19;
+  display: flex;
+  align-items: center;
+  padding: 0 2px;
+  cursor: grab;
+}
+
+.planner-hscroll-thumb {
+  position: absolute;
+  height: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text-faint) 55%, transparent);
+  opacity: 0.35;
+  transition: opacity 0.2s ease;
+  cursor: grab;
+}
+
+.planner-hscroll:hover .planner-hscroll-thumb {
+  opacity: 1;
+  background: color-mix(in srgb, var(--text-dim) 65%, transparent);
+}
+
+.planner-hscroll:active .planner-hscroll-thumb {
+  background: var(--accent);
 }
 
 .planner-gantt-zoom {
@@ -6512,11 +6563,16 @@ fieldset.kanban-form {
 }
 
 .planner-titlebar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 10px 14px 4px;
-  flex-shrink: 0;
+  background: transparent;
 }
 
 .planner-toolbar-title {
@@ -6528,12 +6584,17 @@ fieldset.kanban-form {
 }
 
 .planner-toolbar {
+  position: absolute;
+  top: var(--planner-titlebar-h, 40px);
+  left: 0;
+  right: 0;
+  z-index: 20;
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 4px 14px 10px;
   border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
+  background: transparent;
 }
 
 .planner-toolbar-group {
@@ -6561,6 +6622,21 @@ fieldset.kanban-form {
   flex: 1;
   overflow: auto;
   min-height: 0;
+  padding-top: var(--planner-header-h, 88px);
+  padding-bottom: var(--planner-statusbar-h, 38px);
+}
+
+/* In gantt view the scroller is .gantt-body, .planner-grid-scroll merely frames it —
+   don't pad, rows must reach under the title/toolbar/status bar overlays */
+.planner-editor.planner-gantt .planner-grid-scroll {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+/* A custom slim scrollbar is rendered above the status bar; hide the native one */
+.planner-grid-scroll::-webkit-scrollbar:horizontal,
+.gantt-body::-webkit-scrollbar:horizontal {
+  display: none;
 }
 
 .planner-grid {
@@ -6577,8 +6653,24 @@ fieldset.kanban-form {
   z-index: 2;
   display: grid;
   align-items: center;
-  background: var(--bg-elev);
   border-bottom: 1px solid var(--border);
+}
+
+.planner-head-band {
+  display: grid;
+  align-items: center;
+  background: color-mix(in srgb, var(--bg-elev) 60%, transparent);
+  backdrop-filter: blur(12px) saturate(1.2);
+}
+
+.planner-head-left {
+  position: sticky;
+  left: 0;
+  z-index: 4;
+}
+
+.planner-grid-head .planner-head-band .planner-cell {
+  background: transparent;
 }
 
 .planner-grid-head .planner-cell {
@@ -6626,6 +6718,13 @@ fieldset.kanban-form {
 .planner-cell {
   overflow: hidden;
   padding: 2px 6px;
+}
+
+.planner-grid-row
+  > .planner-cell:not(.planner-col-toggle):not(.planner-col-indicator):not(.planner-col-no):not(
+    .planner-col-title
+  ) {
+  padding-left: 0;
 }
 
 .planner-children-collapse {
@@ -6963,9 +7062,8 @@ fieldset.kanban-form {
 
 .gantt-header {
   position: sticky;
-  top: 0;
+  top: var(--planner-header-h, 88px);
   z-index: 3;
-  background: var(--bg-elev);
   border-bottom: 1px solid var(--border);
 }
 
@@ -6982,6 +7080,8 @@ fieldset.kanban-form {
   left: 0;
   z-index: 4;
   align-items: center;
+  background: color-mix(in srgb, var(--bg-elev) 60%, transparent);
+  backdrop-filter: blur(12px) saturate(1.2);
 }
 
 .gantt-row-left {
@@ -7037,6 +7137,8 @@ fieldset.kanban-form {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  background: color-mix(in srgb, var(--bg-elev) 60%, transparent);
+  backdrop-filter: blur(12px) saturate(1.2);
 }
 
 .gantt-month-band {
