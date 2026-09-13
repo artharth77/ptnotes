@@ -433,7 +433,8 @@ function MermaidCodeBlockView(props: ReactNodeViewProps): React.JSX.Element {
             )}
             {!preview.loading && !preview.error && preview.svg && (
               <MermaidDiagramViewer
-                key={preview.svg}
+                // Remount on mode switch so the view resets to fit, as with the reset button.
+                key={`${mode}-${preview.svg}`}
                 svg={preview.svg}
                 bulbLight={bulbLight}
                 onBulbLight={setBulbLight}
