@@ -1,4 +1,5 @@
-import { useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   mdiArrowDown,
   mdiArrowUp,
@@ -44,6 +45,15 @@ function slugKeyInput(value: string): string {
   const slug = slugify(value)
   if (slug === 'untitled') return ''
   return /[\s_-]$/.test(value) ? `${slug}-` : slug
+}
+
+/** Fixed viewport position for the portaled suggestion menus (clamped, flips upward
+ * when the menu would overflow the bottom edge). */
+function menuPos(r: DOMRect, estHeight: number): { left: number; top: number; width: number } {
+  const left = Math.min(r.left, window.innerWidth - r.width - 8)
+  const below = r.bottom + 6
+  const top = below + estHeight > window.innerHeight - 16 ? r.top - estHeight - 6 : below
+  return { left: Math.max(8, left), top, width: r.width }
 }
 
 export function KanbanCardModal(): React.JSX.Element {
@@ -101,6 +111,39 @@ export function KanbanCardModal(): React.JSX.Element {
   const [titleError, setTitleError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const labelInputRef = useRef<HTMLInputElement>(null)
+  const assigneeInputRef = useRef<HTMLInputElement>(null)
+  const columnBtnRef = useRef<HTMLButtonElement>(null)
+  interface MenuPos {
+    left: number
+    top: number
+    width: number
+  }
+  const [assigneeMenuPos, setAssigneeMenuPos] = useState<MenuPos | null>(null)
+  const [labelMenuPos, setLabelMenuPos] = useState<MenuPos | null>(null)
+  const [columnMenuOpen, setColumnMenuOpen] = useState(false)
+  const [columnActive, setColumnActive] = useState(0)
+  const [columnMenuPos, setColumnMenuPos] = useState<MenuPos | null>(null)
+  const columnCount = kanban?.columns.length ?? 0
+
+  // Suggestion menus portal to body so they frost over app content instead of
+  // stacking frost-on-frost against the modal card (which composites opaque)
+  useLayoutEffect(() => {
+    setAssigneeMenuPos(
+      assigneeMenuOpen && assigneeInputRef.current
+        ? menuPos(assigneeInputRef.current.getBoundingClientRect(), 180)
+        : null
+    )
+    setLabelMenuPos(
+      labelMenuOpen && labelInputRef.current
+        ? menuPos(labelInputRef.current.getBoundingClientRect(), 220)
+        : null
+    )
+    setColumnMenuPos(
+      columnMenuOpen && columnBtnRef.current
+        ? menuPos(columnBtnRef.current.getBoundingClientRect(), columnCount * 30 + 8)
+        : null
+    )
+  }, [assigneeMenuOpen, labelMenuOpen, columnMenuOpen, columnCount])
 
   const attrKeyCounts = new Map<string, number>()
   for (const a of attrs) {
@@ -110,7 +153,6 @@ export function KanbanCardModal(): React.JSX.Element {
   const hasDupAttrs = Array.from(attrKeyCounts.values()).some((n) => n > 1)
 
   if (!kanban) return <></>
-
   const boardLabels = Array.from(new Set(kanban.cards.flatMap((c) => c.labels)))
     .map((l) => l.trim())
     .filter(Boolean)
@@ -215,7 +257,10 @@ export function KanbanCardModal(): React.JSX.Element {
       return
     }
     if (e.key === 'Escape') {
-      setLabelMenuOpen(false)
+      if (labelMenuOpen) {
+        e.stopPropagation()
+        setLabelMenuOpen(false)
+      }
       return
     }
     if (labelMenuOpen && options.length > 0) {
@@ -225,6 +270,36 @@ export function KanbanCardModal(): React.JSX.Element {
       } else if (e.key === 'ArrowUp') {
         e.preventDefault()
         setLabelActive((prev) => (prev - 1 + options.length) % options.length)
+      }
+    }
+  }
+
+  function chooseColumn(id: string): void {
+    setColumnId(id)
+    setColumnMenuOpen(false)
+  }
+
+  function onColumnKeyDown(e: React.KeyboardEvent<HTMLButtonElement>): void {
+    const cols = kanban?.columns ?? []
+    if (e.key === 'Escape') {
+      if (columnMenuOpen) {
+        e.stopPropagation()
+        setColumnMenuOpen(false)
+      }
+      return
+    }
+    if (e.key === 'Enter' && columnMenuOpen && cols.length > 0) {
+      e.preventDefault()
+      chooseColumn(cols[columnActive]?.id ?? columnId)
+      return
+    }
+    if (columnMenuOpen && cols.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setColumnActive((prev) => (prev + 1) % cols.length)
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setColumnActive((prev) => (prev - 1 + cols.length) % cols.length)
       }
     }
   }
@@ -245,7 +320,10 @@ export function KanbanCardModal(): React.JSX.Element {
       return
     }
     if (e.key === 'Escape') {
-      setAssigneeMenuOpen(false)
+      if (assigneeMenuOpen) {
+        e.stopPropagation()
+        setAssigneeMenuOpen(false)
+      }
       return
     }
     if (assigneeMenuOpen && options.length > 0) {
@@ -350,6 +428,7 @@ export function KanbanCardModal(): React.JSX.Element {
             <label>Assignee</label>
             <div className="kanban-assignee-input">
               <input
+                ref={assigneeInputRef}
                 className="text-field"
                 value={assignee}
                 onChange={(e) => {
@@ -362,23 +441,35 @@ export function KanbanCardModal(): React.JSX.Element {
                 onKeyDown={onAssigneeKeyDown}
                 placeholder="—"
               />
-              {assigneeMenuOpen && assigneeSuggestions.length > 0 && (
-                <div className="kanban-label-menu">
-                  {assigneeSuggestions.map((a, i) => (
-                    <button
-                      key={a}
-                      className={`kanban-label-option${i === assigneeActive ? ' active' : ''}`}
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        chooseAssignee(a)
-                      }}
-                      onMouseEnter={() => setAssigneeActive(i)}
-                    >
-                      {a}
-                    </button>
-                  ))}
-                </div>
-              )}
+              {assigneeMenuOpen &&
+                assigneeSuggestions.length > 0 &&
+                assigneeMenuPos &&
+                createPortal(
+                  <div
+                    className="kanban-label-menu floating"
+                    style={{
+                      position: 'fixed',
+                      left: assigneeMenuPos.left,
+                      top: assigneeMenuPos.top,
+                      width: assigneeMenuPos.width
+                    }}
+                  >
+                    {assigneeSuggestions.map((a, i) => (
+                      <button
+                        key={a}
+                        className={`kanban-label-option${i === assigneeActive ? ' active' : ''}`}
+                        onMouseDown={(e) => {
+                          e.preventDefault()
+                          chooseAssignee(a)
+                        }}
+                        onMouseEnter={() => setAssigneeActive(i)}
+                      >
+                        {a}
+                      </button>
+                    ))}
+                  </div>,
+                  document.body
+                )}
             </div>
           </div>
         </div>
@@ -386,17 +477,56 @@ export function KanbanCardModal(): React.JSX.Element {
         <div className="kanban-form-row">
           <div className="kanban-field grow1">
             <label>Column</label>
-            <select
-              className="text-field"
-              value={columnId}
-              onChange={(e) => setColumnId(e.target.value)}
+            <button
+              ref={columnBtnRef}
+              type="button"
+              className="text-field kanban-column-btn"
+              onClick={() => {
+                setColumnActive(kanban.columns.findIndex((c) => c.id === columnId))
+                setColumnMenuOpen((v) => !v)
+              }}
+              onKeyDown={onColumnKeyDown}
+              title={kanban.columns.find((c) => c.id === columnId)?.title}
             >
-              {kanban.columns.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.title}
-                </option>
-              ))}
-            </select>
+              <span>{kanban.columns.find((c) => c.id === columnId)?.title ?? '—'}</span>
+              <span aria-hidden>▼</span>
+            </button>
+            {columnMenuOpen &&
+              kanban.columns.length > 0 &&
+              columnMenuPos &&
+              createPortal(
+                <>
+                  <div className="menu-overlay" onClick={() => setColumnMenuOpen(false)} />
+                  <div
+                    className="kanban-label-menu floating"
+                    style={{
+                      position: 'fixed',
+                      left: columnMenuPos.left,
+                      top: columnMenuPos.top,
+                      width: columnMenuPos.width,
+                      maxHeight: 280,
+                      overflowY: 'auto'
+                    }}
+                  >
+                    {kanban.columns.map((c, i) => (
+                      <button
+                        key={c.id}
+                        className={`kanban-label-option${c.id === columnId ? ' selected' : ''}${
+                          i === columnActive ? ' active' : ''
+                        }`}
+                        onMouseDown={(e) => {
+                          e.preventDefault()
+                          chooseColumn(c.id)
+                        }}
+                        onMouseEnter={() => setColumnActive(i)}
+                      >
+                        {c.title}
+                      </button>
+                    ))}
+                  </div>
+                </>,
+                document.body
+              )}
           </div>
           <div className="kanban-field grow1">
             <label>Due date</label>
@@ -488,28 +618,40 @@ export function KanbanCardModal(): React.JSX.Element {
                 placeholder={labels.length === 0 ? 'Type to add a label…' : ''}
               />
             </div>
-            {labelMenuOpen && labelOptions.length > 0 && (
-              <div className="kanban-label-menu">
-                {labelOptions.map((l, i) => (
-                  <button
-                    key={l}
-                    className={`kanban-label-option${
-                      i === labelActive ? ' active' : ''
-                    }${i === labelOptions.length - 1 && createNew ? ' create' : ''}`}
-                    onMouseDown={(e) => {
-                      e.preventDefault()
-                      addLabel(l)
-                    }}
-                    onMouseEnter={() => setLabelActive(i)}
-                  >
-                    {l}
-                    {i === labelOptions.length - 1 && createNew && (
-                      <span className="kanban-label-new">new</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
+            {labelMenuOpen &&
+              labelOptions.length > 0 &&
+              labelMenuPos &&
+              createPortal(
+                <div
+                  className="kanban-label-menu floating"
+                  style={{
+                    position: 'fixed',
+                    left: labelMenuPos.left,
+                    top: labelMenuPos.top,
+                    width: labelMenuPos.width
+                  }}
+                >
+                  {labelOptions.map((l, i) => (
+                    <button
+                      key={l}
+                      className={`kanban-label-option${
+                        i === labelActive ? ' active' : ''
+                      }${i === labelOptions.length - 1 && createNew ? ' create' : ''}`}
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        addLabel(l)
+                      }}
+                      onMouseEnter={() => setLabelActive(i)}
+                    >
+                      {l}
+                      {i === labelOptions.length - 1 && createNew && (
+                        <span className="kanban-label-new">new</span>
+                      )}
+                    </button>
+                  ))}
+                </div>,
+                document.body
+              )}
           </div>
         </div>
 
