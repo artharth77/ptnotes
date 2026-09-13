@@ -64,6 +64,7 @@ export interface RecentNote {
   updatedAt: number
   createdAt: number
   starred: boolean
+  snippet?: string
 }
 
 export interface ActivityItem {

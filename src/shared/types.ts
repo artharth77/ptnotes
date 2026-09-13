@@ -199,6 +199,16 @@ export interface DiagramSaveResult {
   error?: string
 }
 
+export interface InfographicRenderResult {
+  ok: boolean
+  svg?: string
+  png?: string
+  template?: string
+  width?: number
+  height?: number
+  error?: string
+}
+
 /** Base page info for the PDF page manager (1-based page order). */
 export interface PdfInfo {
   pages: number

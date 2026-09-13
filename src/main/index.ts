@@ -17,6 +17,7 @@ import { registerSettingsIpc } from './ipc/settings'
 import { registerSkillsIpc } from './ipc/skills'
 import { registerModulesIpc } from './ipc/modules'
 import { registerDiagramsIpc } from './ipc/diagrams'
+import { registerInfographicIpc } from './ipc/infographic'
 import { registerToolsetsIpc } from './ipc/toolsets'
 import { registerBotsIpc } from './ipc/bots'
 import { BotsStore } from './bots/db'
@@ -424,6 +425,7 @@ app.whenReady().then(async () => {
   registerToolsetsIpc(settingsStore)
   registerBotsIpc(botsStore, groupChatManager, moduleManager!)
   registerDiagramsIpc()
+  registerInfographicIpc()
 
   windowStateStore = new WindowStateStore()
   const windowState = await windowStateStore.load()

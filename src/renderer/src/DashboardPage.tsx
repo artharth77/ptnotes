@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import type { MermaidRenderResult } from '@shared/types'
+import type { InfographicRenderResult } from '@shared/types'
 import type {
   ActivityItem,
   DashboardSnapshot,
@@ -21,8 +21,63 @@ import {
   mdiNotePlusOutline,
   mdiNotebookOutline,
   mdiPlusBoxMultipleOutline,
-  mdiRocketLaunchOutline
+  mdiRocketLaunchOutline,
+  mdiStar
 } from '@mdi/js'
+
+const MOCK_NOW = typeof Date !== 'undefined' ? Date.now() : 0
+const recentNotesMockup: (RecentNote & { mock: true; snippet: string })[] = [
+  {
+    id: 'welcome-to-ptnotes',
+    name: '👋 Welcome to PTNotes',
+    updatedAt: MOCK_NOW - 1000 * 60 * 12,
+    createdAt: MOCK_NOW - 1000 * 60 * 60 * 48,
+    starred: true,
+    snippet:
+      'Get started quickly: create notes with markdown, plan sprints in Kanban, and schedule tasks in Planner. AI chat assistant is one click away via Ask AI.',
+    mock: true
+  },
+  {
+    id: 'product-specs-v2',
+    name: 'Product Specs — Dashboard v2',
+    updatedAt: MOCK_NOW - 1000 * 60 * 60 * 2,
+    createdAt: MOCK_NOW - 1000 * 60 * 60 * 72,
+    starred: false,
+    snippet:
+      'P0 Scope: 6 core widgets (Workload table + pie, Kanban status, Overdue triage, Planner health gradient, Activity feed, Recent notes) + 5 Quick Actions. P1: Filters, save-as-template, export PNG.',
+    mock: true
+  },
+  {
+    id: 'sprint-42-retro',
+    name: 'Sprint 42 — Retro notes',
+    updatedAt: MOCK_NOW - 1000 * 60 * 60 * 26,
+    createdAt: MOCK_NOW - 1000 * 60 * 60 * 200,
+    starred: false,
+    snippet:
+      'What went well: Kanban comment sync landed; user flow for planner import from CSV is 3× faster. Improve: shorten PR cycle time; add smoke tests for the note editor.',
+    mock: true
+  },
+  {
+    id: 'rest-api-docs',
+    name: 'REST API Docs — auth & webhooks',
+    updatedAt: MOCK_NOW - 1000 * 60 * 60 * 50,
+    createdAt: MOCK_NOW - 1000 * 60 * 60 * 240,
+    starred: true,
+    snippet:
+      'POST /oauth/token, scopes read/write/admin. Webhook signature uses HMAC-SHA256 of timestamp + body with the app secret. Retry policy: 3× exponential backoff up to 60s.',
+    mock: true
+  },
+  {
+    id: 'q4-roadmap-planning',
+    name: 'Q4 Roadmap — planning notes',
+    updatedAt: MOCK_NOW - 1000 * 60 * 60 * 80,
+    createdAt: MOCK_NOW - 1000 * 60 * 60 * 300,
+    starred: false,
+    snippet:
+      'Themes: (1) shared dashboard MVP polish + exports, (2) offline mobile shell via PWA, (3) native calendar 2-way sync with Outlook/Google. Capacity: 3 devs × 12 weeks — ~36 story pts/week.',
+    mock: true
+  }
+]
 
 function agoTs(ts: number): string {
   const diff = Math.max(0, Date.now() - ts)
@@ -86,6 +141,8 @@ export function DashboardPage(): React.JSX.Element {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [workloadSvg, setWorkloadSvg] = useState<string | null>(null)
   const [kanbanPieSvg, setKanbanPieSvg] = useState<string | null>(null)
+  const [workloadChartErr, setWorkloadChartErr] = useState<string | null>(null)
+  const [kanbanChartErr, setKanbanChartErr] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -119,33 +176,53 @@ export function DashboardPage(): React.JSX.Element {
     queueMicrotask(() => {
       setWorkloadSvg(null)
       setKanbanPieSvg(null)
+      setWorkloadChartErr(null)
+      setKanbanChartErr(null)
     })
     if (!snapshot) return
     void (async (): Promise<void> => {
       if (snapshot.workload.length) {
-        const pieLines = snapshot.workload
+        const values = snapshot.workload
           .slice(0, 10)
-          .map((w) => `    "${w.owner}" : ${w.totalItems}`)
-          .join('\n')
-        const mermaid = `pie showData title Workload by Assignee\n${pieLines}\n`
+          .map((w) => ({ label: w.owner, value: w.totalItems }))
+        const infographic = {
+          template: 'chart',
+          data: { values },
+          width: 640,
+          height: 380,
+          design: { chartType: 'pie', title: 'Workload by Assignee', showLegend: true }
+        }
         try {
-          const out: MermaidRenderResult = await window.ptnotes.diagrams.render(mermaid)
+          const out: InfographicRenderResult = await window.ptnotes.infographic.render(
+            infographic,
+            640
+          )
           if (out.ok && out.svg) setWorkloadSvg(out.svg)
-        } catch {
-          // ignore chart errors; the table still renders
+          else setWorkloadChartErr(out.error ?? 'Could not render')
+        } catch (e) {
+          setWorkloadChartErr(e instanceof Error ? e.message : String(e))
         }
       }
       if (snapshot.kanbanStats.rows.some((r) => r.count > 0)) {
-        const pieLines = snapshot.kanbanStats.rows
+        const values = snapshot.kanbanStats.rows
           .filter((r) => r.count > 0)
-          .map((r) => `    "${r.title.replace(/"/g, "'")}" : ${r.count}`)
-          .join('\n')
-        const mermaid = `pie showData title Kanban Status\n${pieLines}\n`
+          .map((r) => ({ label: r.title, value: r.count }))
+        const infographic = {
+          template: 'chart',
+          data: { values },
+          width: 640,
+          height: 380,
+          design: { chartType: 'pie', title: 'Kanban Status', showLegend: true }
+        }
         try {
-          const out: MermaidRenderResult = await window.ptnotes.diagrams.render(mermaid)
+          const out: InfographicRenderResult = await window.ptnotes.infographic.render(
+            infographic,
+            640
+          )
           if (out.ok && out.svg) setKanbanPieSvg(out.svg)
-        } catch {
-          // ignore chart errors; the summary still renders
+          else setKanbanChartErr(out.error ?? 'Could not render')
+        } catch (e) {
+          setKanbanChartErr(e instanceof Error ? e.message : String(e))
         }
       }
     })()
@@ -181,6 +258,9 @@ export function DashboardPage(): React.JSX.Element {
     setRightView('chat')
     setChatOpen(true)
   }
+
+  const recentNotesToShow = snapshot?.recentNotes.length ? snapshot.recentNotes : recentNotesMockup
+  const recentNotesIsMock = !snapshot?.recentNotes.length
 
   return (
     <div className="dashboard-page" key={activeProject}>
@@ -260,6 +340,16 @@ export function DashboardPage(): React.JSX.Element {
                       className="widget-chart"
                       dangerouslySetInnerHTML={{ __html: workloadSvg }}
                     />
+                  ) : workloadChartErr ? (
+                    <ul className="widget-list kanban-legend">
+                      {snapshot.workload.slice(0, 8).map((w) => (
+                        <li key={w.owner}>
+                          <span className="color-swatch" />
+                          <span className="legend-title">{w.owner}</span>
+                          <span className="legend-count">{w.totalItems}</span>
+                        </li>
+                      ))}
+                    </ul>
                   ) : (
                     <div className="widget-empty muted">Generating chart…</div>
                   )}
@@ -311,6 +401,22 @@ export function DashboardPage(): React.JSX.Element {
               </div>
               {kanbanPieSvg ? (
                 <div className="widget-chart" dangerouslySetInnerHTML={{ __html: kanbanPieSvg }} />
+              ) : kanbanChartErr ? (
+                <ul className="widget-list kanban-legend">
+                  {snapshot.kanbanStats.rows
+                    .filter((r) => r.count > 0)
+                    .slice(0, 8)
+                    .map((r) => (
+                      <li key={r.columnId}>
+                        <span
+                          className="color-swatch"
+                          style={{ background: r.isDone ? '#2f855a' : r.color }}
+                        />
+                        <span className="legend-title">{r.title}</span>
+                        <span className="legend-count">{r.count}</span>
+                      </li>
+                    ))}
+                </ul>
               ) : snapshot.kanbanStats.rows.some((r) => r.count > 0) ? (
                 <div className="widget-empty muted">Generating chart…</div>
               ) : (
@@ -472,29 +578,50 @@ export function DashboardPage(): React.JSX.Element {
             <div className="dashboard-widget dashboard-span-2">
               <h3>
                 <MdiIcon path={mdiNotebookOutline} size={16} /> Recent Notes
+                {recentNotesIsMock && (
+                  <span className="muted small" style={{ marginLeft: 8 }}>
+                    (preview mockup — create notes to see yours)
+                  </span>
+                )}
               </h3>
-              {snapshot.recentNotes.length === 0 ? (
+              {recentNotesToShow.length === 0 ? (
                 <div className="widget-empty muted">No notes yet.</div>
               ) : (
                 <ul className="widget-list notes-list">
-                  {snapshot.recentNotes.map((n) => (
-                    <li
-                      key={n.id}
-                      className="notes-item clickable"
-                      onClick={() => {
-                        void openNote(n)
-                      }}
-                    >
-                      <MdiIcon path={mdiNotebookOutline} size={16} />
-                      <div className="notes-main">
-                        <div className="notes-title">
-                          {n.name}
-                          {n.starred && <span className="star">★</span>}
+                  {recentNotesToShow.map((n) => {
+                    const isMock = (n as { mock?: boolean }).mock
+                    const snippet = (n as { snippet?: string }).snippet
+                    return (
+                      <li
+                        key={n.id}
+                        className={`notes-item ${isMock ? '' : 'clickable'}`}
+                        onClick={() => {
+                          if (isMock) return
+                          void openNote(n)
+                        }}
+                      >
+                        <MdiIcon path={mdiNotebookOutline} size={16} />
+                        <div className="notes-main">
+                          <div className="notes-title">
+                            {n.name}
+                            {n.starred && (
+                              <span className="star">
+                                <MdiIcon path={mdiStar} size={12} />
+                              </span>
+                            )}
+                          </div>
+                          {snippet ? (
+                            <p className="notes-snippet muted small">{snippet}</p>
+                          ) : (
+                            <div className="muted small mono">{agoTs(n.updatedAt)} ago</div>
+                          )}
                         </div>
-                        <div className="muted small mono">{agoTs(n.updatedAt)} ago</div>
-                      </div>
-                    </li>
-                  ))}
+                        {!snippet && (
+                          <span className="muted small notes-ago">{agoTs(n.updatedAt)}</span>
+                        )}
+                      </li>
+                    )
+                  })}
                 </ul>
               )}
             </div>

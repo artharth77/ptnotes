@@ -33,6 +33,7 @@ import type {
   ModuleSettings,
   ModuleStartResult,
   MermaidRenderResult,
+  InfographicRenderResult,
   NewGroupInput,
   StorageSettings,
   ToolsetSettings,
@@ -470,6 +471,13 @@ const api = {
       data: Uint8Array,
       format: 'png' | 'svg'
     ): Promise<DiagramSaveResult> => ipcRenderer.invoke('diagrams:save', { name, data, format })
+  },
+  infographic: {
+    render: (
+      infographic: string | Record<string, unknown>,
+      pixelWidth?: number
+    ): Promise<InfographicRenderResult> =>
+      ipcRenderer.invoke('infographic:render', infographic, pixelWidth)
   },
   onOpenFind: (callback: () => void): (() => void) => {
     const listener = (): void => callback()

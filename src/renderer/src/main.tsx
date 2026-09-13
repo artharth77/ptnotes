@@ -146,6 +146,9 @@ import './assets/main.css'
     const noopDiagrams = {
       render: async () => ({ ok: false, error: 'stub' }) as any
     }
+    const noopInfographic = {
+      render: async () => ({ ok: false, error: 'stub' }) as any
+    }
     const noopPdf = {
       supportsUpload: async () => false,
       upload: async () => ({ ok: false }) as any,
@@ -200,6 +203,7 @@ import './assets/main.css'
       snapshots: noopSnapshots,
       dashboard: noopDashboard,
       diagrams: noopDiagrams,
+      infographic: noopInfographic,
       pdf: noopPdf,
       chat: noopChat,
       bots: noopBots,

@@ -10183,3 +10183,33 @@ fieldset.kanban-form {
   background: var(--bg-hover);
   border-color: var(--border) !important;
 }
+
+.notes-snippet {
+  margin: 2px 0 0;
+  padding: 0;
+  line-height: 1.35;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.notes-ago {
+  margin-left: 8px;
+  white-space: nowrap;
+}
+.notes-list .notes-item:not(.clickable) {
+  cursor: default;
+  border-color: color-mix(in srgb, var(--border) 80%, transparent);
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+}
+.notes-list .notes-item:not(.clickable):hover {
+  border-color: color-mix(in srgb, var(--border) 80%, transparent);
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+}
+.widget-chart svg {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
