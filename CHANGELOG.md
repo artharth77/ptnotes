@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] — editor dev
+## [0.18.0] — 2026-09-13
 
 ### Fixed
 
