@@ -9,6 +9,7 @@ import type {
 } from '@shared/dashboard'
 import { useAppStore } from './store/useAppStore'
 import { MdiIcon } from './components/MdiIcon'
+import { useIsDarkTheme } from './useIsDarkTheme'
 import {
   mdiAccountGroupOutline,
   mdiAlertCircleOutline,
@@ -26,6 +27,52 @@ import {
 } from '@mdi/js'
 
 const MOCK_NOW = typeof Date !== 'undefined' ? Date.now() : 0
+const CHART_PIXEL_WIDTH = 720
+const CHART_WIDTH = 720
+const CHART_HEIGHT = 440
+
+const darkPiePalette = [
+  '#60a5fa',
+  '#34d399',
+  '#fbbf24',
+  '#f87171',
+  '#a78bfa',
+  '#22d3ee',
+  '#fb923c',
+  '#f472b6'
+]
+const lightPiePalette = [
+  '#3b82f6',
+  '#10b981',
+  '#f59e0b',
+  '#ef4444',
+  '#8b5cf6',
+  '#06b6d4',
+  '#f97316',
+  '#ec4899'
+]
+
+const antvThemeConfig = (dark: boolean, fontSizeStep: number): Record<string, unknown> => ({
+  baseFontSize: 16 + fontSizeStep,
+  labelFontSize: 18 + fontSizeStep,
+  axisFontSize: 15 + fontSizeStep,
+  legendFontSize: 16 + fontSizeStep,
+  titleFontSize: 22 + fontSizeStep,
+  titleFontWeight: 600,
+  subtitleFontSize: 14 + fontSizeStep,
+  annotationFontSize: 15 + fontSizeStep,
+  colors: dark ? darkPiePalette : lightPiePalette,
+  backgroundColor: dark ? 'transparent' : 'transparent',
+  textColor: dark ? '#f2f4f7' : '#1f2937',
+  labelColor: dark ? '#d1d5db' : '#111827',
+  subTextColor: dark ? '#9ca3af' : '#6b7280',
+  borderColor: dark ? 'rgba(255,255,255,0.08)' : '#e5e7eb',
+  splitLineColor: dark ? 'rgba(255,255,255,0.08)' : '#e5e7eb',
+  axisLineColor: dark ? 'rgba(255,255,255,0.12)' : '#d1d5db'
+})
+
+const fontSizeStepFor = (size: 'small' | 'default' | 'large' | 'xlarge'): number =>
+  size === 'small' ? -1 : size === 'large' ? 2 : size === 'xlarge' ? 4 : 0
 
 const mockWorkloadRows: WorkloadPerAssignee[] = [
   {
@@ -186,6 +233,8 @@ export function DashboardPage(): React.JSX.Element {
   const setChatOpen = useAppStore((s) => s.setChatOpen)
   const setRightView = useAppStore((s) => s.setRightView)
   const restoreLastTab = useAppStore((s) => s.restoreLastTab)
+  const fontSize = useAppStore((s) => s.fontSize)
+  const isDark = useIsDarkTheme()
 
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null)
   const [loading, setLoading] = useState<boolean>(true)
@@ -234,6 +283,8 @@ export function DashboardPage(): React.JSX.Element {
     const kanbanRows = snapshot?.kanbanStats.rows.some((r) => r.count > 0)
       ? snapshot.kanbanStats.rows
       : mockKanbanRows
+    const theme = isDark ? 'dark' : 'light'
+    const themeConfig = antvThemeConfig(isDark, fontSizeStepFor(fontSize))
     void (async (): Promise<void> => {
       if (workloadRows.length) {
         const values = workloadRows
@@ -241,15 +292,17 @@ export function DashboardPage(): React.JSX.Element {
           .map((w) => ({ label: w.owner, value: w.totalItems }))
         const infographic = {
           template: 'chart-pie-donut-plain-text',
+          theme,
+          themeConfig,
           data: { values },
-          width: 640,
-          height: 380,
+          width: CHART_WIDTH,
+          height: CHART_HEIGHT,
           title: 'Workload by Assignee'
         }
         try {
           const out: InfographicRenderResult = await window.ptnotes.infographic.render(
             infographic,
-            640
+            CHART_PIXEL_WIDTH
           )
           if (out.ok && out.svg) setWorkloadSvg(out.svg)
           else setWorkloadChartErr(out.error ?? 'Could not render')
@@ -263,15 +316,17 @@ export function DashboardPage(): React.JSX.Element {
           .map((r) => ({ label: r.title, value: r.count }))
         const infographic = {
           template: 'chart-pie-donut-pill-badge',
+          theme,
+          themeConfig,
           data: { values },
-          width: 640,
-          height: 380,
+          width: CHART_WIDTH,
+          height: CHART_HEIGHT,
           title: 'Kanban Status'
         }
         try {
           const out: InfographicRenderResult = await window.ptnotes.infographic.render(
             infographic,
-            640
+            CHART_PIXEL_WIDTH
           )
           if (out.ok && out.svg) setKanbanPieSvg(out.svg)
           else setKanbanChartErr(out.error ?? 'Could not render')
@@ -280,7 +335,7 @@ export function DashboardPage(): React.JSX.Element {
         }
       }
     })()
-  }, [snapshot])
+  }, [snapshot, isDark, fontSize])
 
   const sortedOverdue = useMemo<OverdueItem[]>(() => {
     if (!snapshot) return []
