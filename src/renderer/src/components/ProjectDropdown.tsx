@@ -20,6 +20,7 @@ export function ProjectDropdown(): React.JSX.Element {
   const [renaming, setRenaming] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
   const [name, setName] = useState('')
+  const [cursor, setCursor] = useState(0)
   const ref = useRef<HTMLDivElement>(null)
 
   const closeTimer = useRef<number | null>(null)
@@ -39,6 +40,7 @@ export function ProjectDropdown(): React.JSX.Element {
       closeDropdown()
     } else {
       if (closeTimer.current) window.clearTimeout(closeTimer.current)
+      resetCursor()
       setOpen(true)
     }
   }
@@ -46,6 +48,57 @@ export function ProjectDropdown(): React.JSX.Element {
   useEffect(() => {
     openRef.current = open
   }, [open])
+
+  function resetCursor(): void {
+    const idx = projects.findIndex((p) => p.name === activeProject)
+    setCursor(idx >= 0 ? idx : 0)
+  }
+
+  // Escape closes the open panel; child modals handle their own Escape.
+  // Up/Down move a keyboard cursor over projects; Enter opens the cursor item.
+  useEffect(() => {
+    if (!open) return
+    function onKey(e: KeyboardEvent): void {
+      if (creating || renaming || recreating || deleting) return
+      if (document.querySelector('.modal-overlay, .menu-overlay')) return
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        closeDropdown()
+      } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        if (projects.length === 0) return
+        const delta = e.key === 'ArrowDown' ? 1 : -1
+        setCursor((c) => Math.max(0, Math.min(projects.length - 1, c + delta)))
+      } else if (e.key === 'Enter') {
+        const p = projects[cursor]
+        if (!p) return
+        e.preventDefault()
+        if (!p.pathExists) {
+          setRecreating(p.name)
+          return
+        }
+        void selectProject(p.name)
+        closeDropdown()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [
+    open,
+    creating,
+    renaming,
+    recreating,
+    deleting,
+    projects,
+    cursor,
+    closeDropdown,
+    selectProject
+  ])
+
+  useEffect(() => {
+    const el = document.querySelector('.dropdown-item.cursor')
+    el?.scrollIntoView({ block: 'nearest' })
+  }, [cursor])
 
   useEffect(() => {
     function onClick(e: MouseEvent): void {
@@ -107,11 +160,14 @@ export function ProjectDropdown(): React.JSX.Element {
         <div className={`dropdown-panel${closing ? ' closing' : ''}`}>
           <div className="dropdown-title">Projects</div>
           {projects.length === 0 && <div className="dropdown-empty">No projects yet</div>}
-          {projects.map((p) => (
+          {projects.map((p, i) => (
             <div
               key={p.name}
-              className={`dropdown-item ${p.name === activeProject ? 'active' : ''} ${!p.pathExists ? 'missing' : ''}`}
+              className={`dropdown-item ${p.name === activeProject ? 'active' : ''} ${
+                !p.pathExists ? 'missing' : ''
+              }${cursor === i ? ' cursor' : ''}`}
               title={!p.pathExists ? 'Project path missing' : undefined}
+              onMouseEnter={() => setCursor(i)}
               onClick={() => {
                 if (!p.pathExists) {
                   setRecreating(p.name)

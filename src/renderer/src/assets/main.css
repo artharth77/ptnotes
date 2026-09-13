@@ -621,6 +621,15 @@ body {
   background: var(--bg-hover);
 }
 
+.dropdown-item.cursor {
+  background: var(--bg-hover);
+}
+
+.dropdown-item.cursor.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
 .dropdown-item.active {
   background: var(--accent-soft);
   color: var(--accent);
