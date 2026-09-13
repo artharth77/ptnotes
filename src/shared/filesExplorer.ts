@@ -11,6 +11,12 @@ export function ancestorsOf(dir: string): string[] {
   return out
 }
 
+/** Parent dir of a files-explorer path; the root ('') maps to ''. */
+export function parentOf(dir: string): string {
+  const idx = dir.lastIndexOf('/')
+  return idx === -1 ? '' : dir.slice(0, idx)
+}
+
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'])
 
 /** Whether a file name looks like a viewable image (matches the ptfile:// protocol's MIME list). */

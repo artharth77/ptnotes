@@ -8844,6 +8844,10 @@ fieldset.kanban-form {
   color: var(--accent);
 }
 
+.file-explorer-tree-row.cut {
+  opacity: 0.45;
+}
+
 .file-explorer-tree-row.selected .file-explorer-folder-icon {
   color: var(--accent);
 }

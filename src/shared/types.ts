@@ -242,6 +242,18 @@ export interface ExplorerFolderNode {
   children: ExplorerFolderNode[]
 }
 
+/** File explorer clipboard: paths relative to the files root + copy/cut mode. */
+export interface ExplorerClipboard {
+  paths: string[]
+  mode: 'copy' | 'cut'
+}
+
+/** Pending file-explorer operation dialog (new folder / rename / delete confirm). */
+export type ExplorerOpsDialog =
+  | { kind: 'newFolder'; dir: string }
+  | { kind: 'rename'; path: string; name: string }
+  | { kind: 'delete'; items: { path: string; name: string }[] }
+
 /** One image in the project gallery (`<project>/notes/images/`). */
 export interface GalleryImage {
   name: string
