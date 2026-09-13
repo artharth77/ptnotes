@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.18.2] — 2026-09-14
+
+### Added
+
+- **Editor: download mermaid diagrams as PNG or SVG** — the split/preview viewer's floating buttons gain a download icon: the diagram can be saved as PNG at 900 / 1800 / 2700 px width (white background) or as the raw SVG, via an OS save dialog defaulting to Downloads (new `diagrams:save` IPC).
+- **Planner: hover tips for truncated task names** — gantt and grid titles that truncate long names now show a shared hover tip with the full name on hover; the Resources modal switches to a div-grid with `scrollbar-gutter` (no layout shift when the scrollbar appears) and a %Complete header.
+
+### Changed
+
+- **Command palette: close button in the input row** — the Esc kbd hint is replaced with a close (✕) button, and the input row's leading icon switched to the auto-fix glyph.
+- **UI: consistent delete icons** — the planner toolbar/context menu and the image node editor use the mdi `trash-can-outline` delete icon.
+- **Editor: mermaid viewer resets on mode switch** — switching between Edit / Split / Preview remounts the viewer, so the diagram refits to the pane instead of keeping the previous pan/zoom state.
+- **AI: tool descriptions mention mermaid code blocks** — `create_note` / `update_note` now note that ```mermaid fenced blocks render live, so the AI stops avoiding them.
+
+### Fixed
+
+- **Kanban: card modal assignee/labels/column dropdowns are frosted overlays** — the assignee and labels suggestion menus portal to `document.body` so they frost over the app instead of stacking frost-on-frost against the card modal (which read near-opaque); they sit above the modal layer, clamp to the viewport and flip upward on overflow. The column field's native `<select>` is replaced with a floating overlay dropdown (trigger styled like a text field, current column highlighted, ArrowUp/Down/Enter/Escape); the column menu closes on Esc without closing the modal (second Esc closes it), and the suggestion menus only swallow Esc while open.
+- **Editor: language menu and format helper stay below the chrome** — the code-block language menu anchors below the frosted toolbar (and the find bar when open) via a shared `chromeBottomFor` helper instead of a fixed content offset, and the format helper uses the same virtual-element clamp, so neither slides beneath the chrome when the line scrolls under it.
+- **Search: global-find snippet highlight offset** — match offsets were computed against the raw snippet while the snippet was whitespace-collapsed for display, so the highlight could drift; offsets are now tracked through the collapse.
+- **Chat: `traceExists` guarded against an empty session id** — with no active session the check logged "Invalid note id"; it now short-circuits to false.
+
 ## [0.18.1] — 2026-09-13
 
 ### Added

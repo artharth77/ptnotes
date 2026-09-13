@@ -149,6 +149,45 @@ function applyCodeBlockLang(editor: Editor, nextLang: string): void {
     .run()
 }
 
+function chromeBottomFor(el: Element): number {
+  const wrap = el?.closest<HTMLElement>('.editor-wrap')
+  const toolbar = wrap?.querySelector<HTMLElement>('.editor-toolbar')
+  const findBar = wrap?.querySelector<HTMLElement>('.find-bar')
+  return toolbar
+    ? toolbar.getBoundingClientRect().bottom +
+        (findBar ? findBar.getBoundingClientRect().height : 0)
+    : 0
+}
+
+function getFormatMenuAnchor(editor: Editor): VirtualElement | null {
+  const { from, to } = editor.state.selection
+  const start = editor.view.coordsAtPos(from)
+  const end = editor.view.coordsAtPos(to)
+  const left = Math.min(start.left, end.left)
+  const right = Math.max(start.left, end.left)
+  const top = Math.min(start.top, end.top)
+  const bottom = Math.max(start.bottom, end.bottom)
+  const rect = new DOMRect(left, top, Math.max(right - left, 1), Math.max(bottom - top, 1))
+  const scroller = editor.view.dom.closest<HTMLElement>('.editor-content')
+  const cRect = scroller?.getBoundingClientRect()
+  // Same chrome-aware clamp as the language menu: never slide beneath the
+  // frosted toolbar (+ find bar when open)
+  const clampTop = cRect
+    ? Math.max(cRect.top + 18, chromeBottomFor(editor.view.dom) + 18)
+    : rect.top
+  const anchorTop = Math.max(rect.top, clampTop)
+  const elementRect = new DOMRect(
+    rect.left,
+    anchorTop,
+    rect.width,
+    Math.max(rect.bottom - anchorTop, 1)
+  )
+  return {
+    getBoundingClientRect: () => elementRect,
+    getClientRects: () => [elementRect]
+  }
+}
+
 function getLangMenuAnchor(editor: Editor): VirtualElement | null {
   if (!editor.isActive('codeBlock')) return null
   const block = getCodeBlockAtCursor(editor)
@@ -162,7 +201,12 @@ function getLangMenuAnchor(editor: Editor): VirtualElement | null {
   if (!rect.width && !rect.height) return null
   const container = el.closest<HTMLElement>('.editor-content')
   const cRect = container?.getBoundingClientRect()
-  const top = Math.max(rect.top + 12, cRect ? cRect.top + 18 : rect.top + 12)
+  // The frosted toolbar (+ find bar when open) overlays the content top — the
+  // menu must never slide beneath it, so clamp below the chrome
+  const top = Math.max(
+    rect.top + 12,
+    cRect ? Math.max(cRect.top + 18, chromeBottomFor(el) + 18) : rect.top + 12
+  )
   const bottom = cRect ? Math.min(rect.bottom, cRect.bottom) : rect.bottom
   const left = Math.max(rect.left - 14, cRect ? cRect.left : rect.left - 14)
   const right = cRect ? Math.min(rect.right, cRect.right) : rect.right
@@ -1091,6 +1135,8 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
           editor={editor}
           pluginKey={bubbleMenuKey}
           appendTo={() => document.body}
+          options={{ placement: 'top', offset: 0 }}
+          getReferencedVirtualElement={() => getFormatMenuAnchor(editor)}
           shouldShow={({ view, state }) => {
             if (state.selection.empty) return false
             if (!view.hasFocus()) return false

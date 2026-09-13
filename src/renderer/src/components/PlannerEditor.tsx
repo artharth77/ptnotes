@@ -26,7 +26,7 @@ import {
   mdiRedo,
   mdiTableRowPlusAfter,
   mdiTableRowPlusBefore,
-  mdiTrashCan,
+  mdiTrashCanOutline,
   mdiUndo,
   mdiViewColumnOutline
 } from '@mdi/js'
@@ -49,6 +49,7 @@ import {
   GANTT_TITLE_WIDTH_MIN
 } from './GanttChart'
 import { PlannerResizeHandle } from './PlannerResizeHandle'
+import { nameTipFrom, NameTip, type NameTipState } from './NameTip'
 import {
   applyDateRule,
   collectOwners,
@@ -478,6 +479,8 @@ export function PlannerEditor(): React.JSX.Element {
   const [numberDrafts, setNumberDrafts] = useState<Record<string, string>>({})
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [anchorId, setAnchorId] = useState<string | null>(null)
+  const [titleEditId, setTitleEditId] = useState<string | null>(null)
+  const [titleTip, setTitleTip] = useState<NameTipState | null>(null)
   const [visibleCols, setVisibleCols] = useState<Set<PlannerColumnKey>>(() =>
     initVisibleCols(schedule?.columnVisibility)
   )
@@ -786,11 +789,11 @@ export function PlannerEditor(): React.JSX.Element {
   useEffect(() => {
     const target = pendingFocus.current
     if (!target) return
-    pendingFocus.current = null
     const el = gridRef.current?.querySelector<HTMLElement>(
       `[data-cell="${target.id}"][data-col="${target.col}"]`
     )
     if (el) {
+      pendingFocus.current = null
       el.focus()
       el.scrollIntoView({ block: 'nearest' })
     }
@@ -1150,20 +1153,53 @@ export function PlannerEditor(): React.JSX.Element {
           {no}
         </div>
         <div className="planner-col-title planner-cell" style={{ left: titleLeft }}>
-          <input
-            className="planner-input"
-            data-cell={task.id}
-            data-col="title"
-            style={{
-              paddingLeft: depth * 14,
-              fontWeight: isParent ? 600 : undefined
-            }}
-            value={task.title}
-            placeholder={isParent ? 'Group task' : 'Task title'}
-            onFocus={startEditSession}
-            onBlur={endEditSession}
-            onChange={(e) => editField(sc, task.id, 'title', e.target.value)}
-          />
+          {titleEditId === task.id ? (
+            <input
+              className="planner-input"
+              data-cell={task.id}
+              data-col="title"
+              style={{
+                paddingLeft: depth * 14,
+                fontWeight: isParent ? 600 : undefined
+              }}
+              value={task.title}
+              placeholder={isParent ? 'Group task' : 'Task title'}
+              autoFocus
+              onFocus={startEditSession}
+              onBlur={() => {
+                endEditSession()
+                setTitleEditId(null)
+              }}
+              onChange={(e) => editField(sc, task.id, 'title', e.target.value)}
+            />
+          ) : (
+            <div
+              className="planner-input planner-title-display"
+              style={{
+                paddingLeft: depth * 14,
+                fontWeight: isParent ? 600 : undefined
+              }}
+              onMouseEnter={(e) =>
+                setTitleTip(
+                  nameTipFrom(
+                    e,
+                    task.title || (isParent ? 'Group task' : 'Task title'),
+                    `planner-name-tip${isParent ? ' gantt-name-tip-parent' : ''}`,
+                    depth * 14 + 1,
+                    4
+                  )
+                )
+              }
+              onMouseLeave={() => setTitleTip(null)}
+              onClick={() => setTitleEditId(task.id)}
+            >
+              {task.title || (
+                <span className="planner-title-placeholder">
+                  {isParent ? 'Group task' : 'Task title'}
+                </span>
+              )}
+            </div>
+          )}
         </div>
         {movableCols.map((key) => renderColumnCell(key, task, isParent))}
       </div>
@@ -1728,6 +1764,15 @@ export function PlannerEditor(): React.JSX.Element {
   }
 
   function focusCell(id: string, col: string): boolean {
+    if (col === 'title') {
+      // Title inputs only render in edit mode — flip the display div, then the
+      // pending-focus effect focuses it once it mounts.
+      pendingFocus.current = { id, col }
+      setTitleEditId(id)
+      setSelected(new Set([id]))
+      setAnchorId(id)
+      return true
+    }
     const el = gridRef.current?.querySelector<HTMLElement>(`[data-cell="${id}"][data-col="${col}"]`)
     if (!el || (el as HTMLInputElement).disabled) return false
     el.focus()
@@ -1808,6 +1853,8 @@ export function PlannerEditor(): React.JSX.Element {
           commit(sc, addSibling(sc.tasks, rows[rows.length - 1].task.id, task))
           setSelected(new Set([task.id]))
           setAnchorId(task.id)
+          // The new row's title cell starts as a display div — flip it to edit mode.
+          setTitleEditId(task.id)
           pendingFocus.current = { id: task.id, col: 'title' }
         } else {
           moveFocusFrom(rowIdx, col, 1)
@@ -2014,7 +2061,7 @@ export function PlannerEditor(): React.JSX.Element {
             disabled={ganttMode || selected.size === 0}
             onClick={handleDeleteSelected}
           >
-            <MdiIcon path={mdiTrashCan} size={16} />
+            <MdiIcon path={mdiTrashCanOutline} size={16} />
           </button>
         </div>
         <span className="planner-toolbar-divider" />
@@ -2216,6 +2263,7 @@ export function PlannerEditor(): React.JSX.Element {
           </div>
         )}
       </div>
+      <NameTip tip={titleTip} onDismiss={() => setTitleTip(null)} />
       <div className="planner-hscroll" ref={hScrollBarRef} onPointerDown={handleHScrollDown}>
         <div className="planner-hscroll-thumb" ref={hScrollThumbRef} />
       </div>
@@ -2439,7 +2487,7 @@ export function PlannerEditor(): React.JSX.Element {
             <div className="note-menu-sep" />
             <button type="button" className="note-menu-item danger" onClick={handleGridDelete}>
               <span className="note-menu-icon">
-                <MdiIcon path={mdiTrashCan} size={16} />
+                <MdiIcon path={mdiTrashCanOutline} size={16} />
               </span>
               Delete
             </button>

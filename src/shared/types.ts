@@ -191,6 +191,14 @@ export interface MermaidRenderResult {
   error?: string
 }
 
+/** Result of saving a rendered diagram as PNG/SVG via the save dialog. */
+export interface DiagramSaveResult {
+  ok: boolean
+  path?: string
+  canceled?: boolean
+  error?: string
+}
+
 /** Base page info for the PDF page manager (1-based page order). */
 export interface PdfInfo {
   pages: number

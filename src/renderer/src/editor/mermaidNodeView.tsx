@@ -1,6 +1,9 @@
 /* eslint-disable react-refresh/only-export-components -- the file exports one TipTap extension built around its (non-exported) node view component */
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
+  mdiChevronDown,
+  mdiFileDownload,
   mdiFullscreen,
   mdiLightbulbOn,
   mdiLightbulbOutline,
@@ -14,8 +17,10 @@ import {
   ReactNodeViewRenderer,
   type ReactNodeViewProps
 } from '@tiptap/react'
+import { slugify } from '@shared/slug'
 import { MdiIcon } from '../components/MdiIcon'
 import { ImageViewer } from '../components/ImageViewer'
+import { useAppStore } from '../store/useAppStore'
 import { useIsDarkTheme } from '../useIsDarkTheme'
 import {
   createMermaidCodeBlock,
@@ -62,6 +67,51 @@ function svgToDataUri(svg: string, width?: number, height?: number): string {
   for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
   return `data:image/svg+xml;base64,${btoa(binary)}`
 }
+
+/** Restore the raw SVG text from the base64 data URI produced by svgToDataUri. */
+function decodeSvgDataUri(dataUri: string): string {
+  const idx = dataUri.indexOf(',')
+  if (!dataUri.startsWith('data:image/svg+xml;base64,') || idx === -1) {
+    throw new Error('Invalid diagram data.')
+  }
+  return atob(dataUri.slice(idx + 1))
+}
+
+/** Rasterize the SVG data URI to a PNG at the given pixel width on a white background. */
+async function rasterizePng(dataUri: string, width: number): Promise<Uint8Array> {
+  const img = new Image()
+  await new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve()
+    img.onerror = () => reject(new Error('Failed to rasterize the diagram.'))
+    img.src = dataUri
+  })
+  if (!img.naturalWidth || !img.naturalHeight) throw new Error('Diagram has no intrinsic size.')
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = Math.max(1, Math.round((img.naturalHeight / img.naturalWidth) * width))
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Canvas is not available.')
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
+  if (!blob) throw new Error('PNG encoding failed.')
+  return new Uint8Array(await blob.arrayBuffer())
+}
+
+/** Suggested save filename derived from the active note title. */
+function diagramFileName(ext: 'png' | 'svg'): string {
+  const s = useAppStore.getState()
+  const note = s.notes.find((n) => n.id === s.activeNoteId)
+  const base = note ? slugify(note.name) : ''
+  return `${base || 'mermaid-diagram'}-diagram.${ext}`
+}
+
+const DOWNLOAD_OPTIONS = [
+  { size: 900, label: 'Save as PNG (Small · 900px)' },
+  { size: 1800, label: 'Save as PNG (Medium · 1800px)' },
+  { size: 2700, label: 'Save as PNG (Large · 2700px)' }
+] as const
 
 function setMermaidMode(props: ReactNodeViewProps, mode: MermaidMode): void {
   const pos = typeof props.getPos === 'function' ? props.getPos() : props.getPos
@@ -135,7 +185,36 @@ function MermaidDiagramViewer({
   )
   const [view, setView] = useState<MermaidViewState | null>(null)
   const [lightbox, setLightbox] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [menuPos, setMenuPos] = useState<{ left: number; top: number } | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const downloadRef = useRef<HTMLButtonElement | null>(null)
   const dark = useIsDarkTheme()
+
+  /** Saves the rendered diagram: raster width for PNG, or the raw SVG markup. */
+  const saveDiagram = useCallback(
+    async (kind: 'png' | 'svg', size?: number): Promise<void> => {
+      setMenuOpen(false)
+      setSaveError(null)
+      try {
+        const data =
+          kind === 'svg'
+            ? new TextEncoder().encode(decodeSvgDataUri(svg))
+            : await rasterizePng(svg, size ?? 1800)
+        const res = await window.ptnotes.diagrams.saveDiagram(diagramFileName(kind), data, kind)
+        if (!res.ok && !res.canceled) setSaveError(res.error ?? 'Save failed.')
+      } catch (err) {
+        setSaveError(err instanceof Error ? err.message : String(err))
+      }
+    },
+    [svg]
+  )
+
+  const openSaveMenu = useCallback((): void => {
+    const rect = downloadRef.current?.getBoundingClientRect()
+    setMenuOpen((open) => !open)
+    if (rect) setMenuPos({ left: Math.max(8, rect.right - 220), top: rect.bottom + 4 })
+  }, [])
 
   const imageSize = (): { w: number; h: number } | null => {
     const el = imgRef.current
@@ -247,7 +326,7 @@ function MermaidDiagramViewer({
           />
         </div>
         <div
-          className="mermaid-viewer-actions"
+          className={`mermaid-viewer-actions${menuOpen ? ' open' : ''}`}
           onPointerDown={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.preventDefault()}
         >
@@ -294,8 +373,64 @@ function MermaidDiagramViewer({
               </button>
             ))}
           </div>
+          <div className="mermaid-viewer-group">
+            <button
+              ref={downloadRef}
+              type="button"
+              className="mermaid-viewer-btn"
+              title="Save as PNG (Medium · 1800px)"
+              onClick={() => void saveDiagram('png', 1800)}
+            >
+              <MdiIcon path={mdiFileDownload} size={16} />
+            </button>
+            <button
+              type="button"
+              className="mermaid-viewer-btn slim"
+              title="Save options"
+              onClick={openSaveMenu}
+            >
+              <MdiIcon path={mdiChevronDown} size={14} />
+            </button>
+          </div>
         </div>
+        {saveError && (
+          <div className="mermaid-save-error" onClick={() => setSaveError(null)}>
+            {saveError}
+          </div>
+        )}
       </div>
+      {menuOpen &&
+        menuPos &&
+        createPortal(
+          <>
+            <div className="menu-overlay" onClick={() => setMenuOpen(false)} />
+            <div
+              className="kanban-label-menu floating"
+              style={{ position: 'fixed', left: menuPos.left, top: menuPos.top, minWidth: 220 }}
+            >
+              {DOWNLOAD_OPTIONS.map((o) => (
+                <button
+                  key={o.size}
+                  type="button"
+                  className="kanban-label-option"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => void saveDiagram('png', o.size)}
+                >
+                  {o.label}
+                </button>
+              ))}
+              <button
+                type="button"
+                className="kanban-label-option"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => void saveDiagram('svg')}
+              >
+                Save as SVG
+              </button>
+            </div>
+          </>,
+          document.body
+        )}
       {lightbox && (
         <ImageViewer
           src={svg}
@@ -433,7 +568,8 @@ function MermaidCodeBlockView(props: ReactNodeViewProps): React.JSX.Element {
             )}
             {!preview.loading && !preview.error && preview.svg && (
               <MermaidDiagramViewer
-                key={preview.svg}
+                // Remount on mode switch so the view resets to fit, as with the reset button.
+                key={`${mode}-${preview.svg}`}
                 svg={preview.svg}
                 bulbLight={bulbLight}
                 onBulbLight={setBulbLight}

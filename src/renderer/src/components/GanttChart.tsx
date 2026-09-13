@@ -4,6 +4,7 @@ import { computeDuration, formatDate, isWorkingDay, parseDate } from '@shared/pl
 import type { ProjectCalendar, ScheduleTask } from '@shared/types'
 import { MdiIcon } from './MdiIcon'
 import { PlannerResizeHandle } from './PlannerResizeHandle'
+import { nameTipFrom, NameTip, type NameTipState } from './NameTip'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 export const GANTT_DAY_WIDTH_MIN = 8
@@ -207,6 +208,7 @@ export function GanttChart({
   } | null>(null)
   const popupRef = useRef<HTMLDivElement>(null)
   const dragCleanup = useRef<(() => void) | null>(null)
+  const [titleTip, setTitleTip] = useState<NameTipState | null>(null)
   const noMap = useMemo(() => {
     const m = new Map<string, string>()
     buildNoMap(tasks, null, m)
@@ -404,6 +406,20 @@ export function GanttChart({
                 canSetDates ? ' gantt-title-dim' : ''
               }`}
               style={{ paddingLeft: depth * 14 }}
+              onMouseEnter={(e) =>
+                setTitleTip(
+                  nameTipFrom(
+                    e,
+                    task.title || (isParent ? 'Group task' : 'Task title'),
+                    `planner-name-tip gantt-name-tip${isParent ? ' gantt-name-tip-parent' : ''}${
+                      canSetDates ? ' gantt-name-tip-dim' : ''
+                    }`,
+                    depth * 14,
+                    6
+                  )
+                )
+              }
+              onMouseLeave={() => setTitleTip(null)}
             >
               {task.title || (isParent ? 'Group task' : 'Task title')}
             </div>
@@ -532,6 +548,7 @@ export function GanttChart({
 
         {renderTree(tasks, null, 0)}
       </div>
+      <NameTip tip={titleTip} onDismiss={() => setTitleTip(null)} />
       {popup && popupTask && (
         <div
           ref={popupRef}

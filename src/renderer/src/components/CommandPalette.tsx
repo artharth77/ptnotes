@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import {
   mdiBrightness4,
+  mdiAutoFix,
   mdiCogOutline,
   mdiFolderOpenOutline,
   mdiMenu,
@@ -329,7 +330,7 @@ export function CommandPalette(): React.JSX.Element | null {
       >
         <div className="command-palette-input">
           <span style={{ display: 'inline-flex', color: 'var(--text-dim)' }}>
-            <MdiIcon path={mdiCogOutline} size={20} />
+            <MdiIcon path={mdiAutoFix} size={20} />
           </span>
           <input
             ref={inputRef}
@@ -338,7 +339,14 @@ export function CommandPalette(): React.JSX.Element | null {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-          <kbd className="kbd">Esc</kbd>
+          <button
+            className="icon-btn small"
+            title="Close (Esc)"
+            onClick={() => setOpen(false)}
+            style={{ marginLeft: 4 }}
+          >
+            ✕
+          </button>
         </div>
         <div className="command-palette-list">
           {filtered.length === 0 ? (

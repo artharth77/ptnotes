@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components -- the file exports one TipTap extension built around its (non-exported) node view component */
 import { useState } from 'react'
-import { mdiDeleteOutline, mdiFullscreen, mdiKeyboardReturn } from '@mdi/js'
+import { mdiTrashCanOutline, mdiFullscreen, mdiKeyboardReturn } from '@mdi/js'
 import Image from '@tiptap/extension-image'
 import { NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from '@tiptap/react'
 import { TextSelection } from '@tiptap/pm/state'
@@ -93,7 +93,7 @@ function ImageView(props: ReactNodeViewProps): React.JSX.Element {
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => deleteImage(props)}
             >
-              <MdiIcon path={mdiDeleteOutline} size={16} />
+              <MdiIcon path={mdiTrashCanOutline} size={16} />
             </button>
           </div>
           <div className="editor-image-group">
