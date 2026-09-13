@@ -8880,12 +8880,18 @@ fieldset.kanban-form {
 }
 
 .file-explorer-toolbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 3;
   display: flex;
   align-items: center;
   gap: 2px;
   padding: 6px 10px;
   border-bottom: 1px solid var(--border);
-  background: var(--bg-elev);
+  background: color-mix(in srgb, var(--bg-elev) 60%, transparent);
+  backdrop-filter: blur(12px) saturate(1.2);
   flex-shrink: 0;
 }
 
@@ -8907,21 +8913,33 @@ fieldset.kanban-form {
 }
 
 .file-explorer-error {
+  position: absolute;
+  top: var(--explorer-toolbar-h, 36px);
+  left: 0;
+  right: 0;
+  z-index: 2;
   padding: 5px 12px;
   font-size: 12px;
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 10%, transparent);
+  backdrop-filter: blur(12px) saturate(1.2);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 
 .file-explorer-statusbar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 3;
   display: flex;
   align-items: center;
   min-height: 26px;
   padding: 2px 10px;
   border-top: 1px solid var(--border);
-  background: var(--bg-elev);
+  background: color-mix(in srgb, var(--bg-elev) 60%, transparent);
+  backdrop-filter: blur(12px) saturate(1.2);
   overflow: hidden;
   flex-shrink: 0;
 }
@@ -9052,6 +9070,8 @@ fieldset.kanban-form {
   display: flex;
   flex-direction: column;
   align-content: flex-start;
+  padding-top: var(--explorer-toolbar-h, 36px);
+  padding-bottom: var(--explorer-statusbar-h, 30px);
 }
 
 .file-explorer-row {
@@ -9100,7 +9120,8 @@ fieldset.kanban-form {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-dim);
-  background: var(--bg-elev);
+  background: color-mix(in srgb, var(--bg-elev) 60%, transparent);
+  backdrop-filter: blur(12px) saturate(1.2);
   border-bottom: 1px solid var(--border);
 }
 

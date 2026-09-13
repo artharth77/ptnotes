@@ -473,6 +473,25 @@ export function FileListPanel(): React.JSX.Element {
    *  Stores the cwd it belongs to, so it implicitly resets on any navigation. */
   const [dotDotCwd, setDotDotCwd] = useState<string | null>(null)
   const dotDotSelected = dotDotCwd !== null && dotDotCwd === cwd
+  const panelRef = useRef<HTMLDivElement>(null)
+  const toolbarRef = useRef<HTMLDivElement>(null)
+  const statusbarRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const panel = panelRef.current
+    const tb = toolbarRef.current
+    const sb = statusbarRef.current
+    if (!panel || !tb || !sb) return
+    const apply = (): void => {
+      panel.style.setProperty('--explorer-toolbar-h', `${tb.offsetHeight}px`)
+      panel.style.setProperty('--explorer-statusbar-h', `${sb.offsetHeight}px`)
+    }
+    apply()
+    const ro = new ResizeObserver(apply)
+    ro.observe(tb)
+    ro.observe(sb)
+    return () => ro.disconnect()
+  }, [])
 
   const cycleSort = useCallback((key: ExplorerSortKey): void => {
     const cur = useAppStore.getState().explorerSort
@@ -809,11 +828,12 @@ export function FileListPanel(): React.JSX.Element {
   return (
     <div
       className="file-list-panel"
+      ref={panelRef}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
-      <div className="file-explorer-toolbar">
+      <div className="file-explorer-toolbar" ref={toolbarRef}>
         <button className="icon-btn" onClick={openNewFolder} title="New folder">
           <MdiIcon path={mdiFolderPlusOutline} size={16} />
           <span>New Folder</span>
@@ -1000,7 +1020,7 @@ export function FileListPanel(): React.JSX.Element {
           </div>
         )}
       </div>
-      <div className="file-explorer-statusbar">
+      <div className="file-explorer-statusbar" ref={statusbarRef}>
         <span className="file-explorer-item-count">
           {explorerFilter
             ? `${entries.length} of ${rawEntries.length} items`
