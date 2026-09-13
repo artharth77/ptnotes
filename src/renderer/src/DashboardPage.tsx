@@ -26,6 +26,57 @@ import {
 } from '@mdi/js'
 
 const MOCK_NOW = typeof Date !== 'undefined' ? Date.now() : 0
+
+const mockWorkloadRows: WorkloadPerAssignee[] = [
+  {
+    owner: 'Alice (Frontend)',
+    kanbanCards: 4,
+    kanbanStoryPoints: 13,
+    plannerTasks: 3,
+    totalItems: 7,
+    bucket: 'medium'
+  },
+  {
+    owner: 'Bob (Backend)',
+    kanbanCards: 2,
+    kanbanStoryPoints: 8,
+    plannerTasks: 5,
+    totalItems: 7,
+    bucket: 'medium'
+  },
+  {
+    owner: 'Carol (Design)',
+    kanbanCards: 1,
+    kanbanStoryPoints: 2,
+    plannerTasks: 2,
+    totalItems: 3,
+    bucket: 'low'
+  },
+  {
+    owner: 'Dan (QA)',
+    kanbanCards: 5,
+    kanbanStoryPoints: 5,
+    plannerTasks: 1,
+    totalItems: 6,
+    bucket: 'medium'
+  },
+  {
+    owner: '(unassigned)',
+    kanbanCards: 2,
+    kanbanStoryPoints: 0,
+    plannerTasks: 1,
+    totalItems: 3,
+    bucket: 'low'
+  }
+]
+
+const mockKanbanRows: (import('@shared/dashboard').KanbanPieRow & {})[] = [
+  { columnId: 'todo', title: 'To Do', color: '#a0aec0', count: 8, isDone: false },
+  { columnId: 'in-progress', title: 'In Progress', color: '#4299e1', count: 5, isDone: false },
+  { columnId: 'review', title: 'In Review', color: '#9f7aea', count: 2, isDone: false },
+  { columnId: 'done', title: 'Done', color: '#2f855a', count: 6, isDone: true }
+]
+
 const recentNotesMockup: (RecentNote & { mock: true; snippet: string })[] = [
   {
     id: 'welcome-to-ptnotes',
@@ -179,18 +230,21 @@ export function DashboardPage(): React.JSX.Element {
       setWorkloadChartErr(null)
       setKanbanChartErr(null)
     })
-    if (!snapshot) return
+    const workloadRows = snapshot?.workload.length ? snapshot.workload : mockWorkloadRows
+    const kanbanRows = snapshot?.kanbanStats.rows.some((r) => r.count > 0)
+      ? snapshot.kanbanStats.rows
+      : mockKanbanRows
     void (async (): Promise<void> => {
-      if (snapshot.workload.length) {
-        const values = snapshot.workload
+      if (workloadRows.length) {
+        const values = workloadRows
           .slice(0, 10)
           .map((w) => ({ label: w.owner, value: w.totalItems }))
         const infographic = {
-          template: 'chart',
+          template: 'chart-pie-donut-plain-text',
           data: { values },
           width: 640,
           height: 380,
-          design: { chartType: 'pie', title: 'Workload by Assignee', showLegend: true }
+          title: 'Workload by Assignee'
         }
         try {
           const out: InfographicRenderResult = await window.ptnotes.infographic.render(
@@ -203,16 +257,16 @@ export function DashboardPage(): React.JSX.Element {
           setWorkloadChartErr(e instanceof Error ? e.message : String(e))
         }
       }
-      if (snapshot.kanbanStats.rows.some((r) => r.count > 0)) {
-        const values = snapshot.kanbanStats.rows
+      if (kanbanRows.some((r) => r.count > 0)) {
+        const values = kanbanRows
           .filter((r) => r.count > 0)
           .map((r) => ({ label: r.title, value: r.count }))
         const infographic = {
-          template: 'chart',
+          template: 'chart-pie-donut-pill-badge',
           data: { values },
           width: 640,
           height: 380,
-          design: { chartType: 'pie', title: 'Kanban Status', showLegend: true }
+          title: 'Kanban Status'
         }
         try {
           const out: InfographicRenderResult = await window.ptnotes.infographic.render(
@@ -261,6 +315,20 @@ export function DashboardPage(): React.JSX.Element {
 
   const recentNotesToShow = snapshot?.recentNotes.length ? snapshot.recentNotes : recentNotesMockup
   const recentNotesIsMock = !snapshot?.recentNotes.length
+  const workloadRows = snapshot?.workload.length ? snapshot.workload : mockWorkloadRows
+  const workloadIsMock = !snapshot?.workload.length
+  const kanbanRowsSnapshot = snapshot?.kanbanStats.rows ?? []
+  const kanbanRows = kanbanRowsSnapshot.some((r) => r.count > 0)
+    ? kanbanRowsSnapshot
+    : mockKanbanRows
+  const kanbanIsMock = !kanbanRowsSnapshot.some((r) => r.count > 0)
+  const kanbanKPIs = kanbanIsMock
+    ? {
+        totalDone: kanbanRows.filter((r) => r.isDone).reduce((a, r) => a + r.count, 0),
+        totalActive: kanbanRows.filter((r) => !r.isDone).reduce((a, r) => a + r.count, 0),
+        totalCards: kanbanRows.reduce((a, r) => a + r.count, 0)
+      }
+    : snapshot!.kanbanStats
 
   return (
     <div className="dashboard-page" key={activeProject}>
@@ -330,19 +398,23 @@ export function DashboardPage(): React.JSX.Element {
             <div className="dashboard-widget">
               <h3>
                 <MdiIcon path={mdiAccountGroupOutline} size={16} /> Workload
+                {workloadIsMock && (
+                  <span className="muted small" style={{ marginLeft: 8 }}>
+                    (sample preview — add cards/tasks to see real data)
+                  </span>
+                )}
               </h3>
-              {snapshot.workload.length === 0 ? (
-                <div className="widget-empty muted">No active assignees</div>
-              ) : (
-                <>
-                  {workloadSvg ? (
-                    <div
-                      className="widget-chart"
-                      dangerouslySetInnerHTML={{ __html: workloadSvg }}
-                    />
-                  ) : workloadChartErr ? (
+              <>
+                {workloadSvg ? (
+                  <div className="widget-chart" dangerouslySetInnerHTML={{ __html: workloadSvg }} />
+                ) : workloadChartErr ? (
+                  <>
+                    <div className="widget-empty dashboard-warn">
+                      <MdiIcon path={mdiAlertCircleOutline} size={16} /> Chart unavailable:{' '}
+                      {workloadChartErr}
+                    </div>
                     <ul className="widget-list kanban-legend">
-                      {snapshot.workload.slice(0, 8).map((w) => (
+                      {workloadRows.slice(0, 8).map((w) => (
                         <li key={w.owner}>
                           <span className="color-swatch" />
                           <span className="legend-title">{w.owner}</span>
@@ -350,80 +422,91 @@ export function DashboardPage(): React.JSX.Element {
                         </li>
                       ))}
                     </ul>
-                  ) : (
-                    <div className="widget-empty muted">Generating chart…</div>
-                  )}
-                  <table className="widget-table widget-workload-table">
-                    <thead>
-                      <tr>
-                        <th>Assignee</th>
-                        <th>Cards</th>
-                        <th>Tasks</th>
-                        <th>SP</th>
-                        <th>Load</th>
+                  </>
+                ) : (
+                  <div className="widget-empty muted">Generating chart…</div>
+                )}
+                <table className="widget-table widget-workload-table">
+                  <thead>
+                    <tr>
+                      <th>Assignee</th>
+                      <th>Cards</th>
+                      <th>Tasks</th>
+                      <th>SP</th>
+                      <th>Load</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {workloadRows.slice(0, 8).map((w) => (
+                      <tr key={w.owner}>
+                        <td className="owner">{w.owner}</td>
+                        <td>{w.kanbanCards}</td>
+                        <td>{w.plannerTasks}</td>
+                        <td>{w.kanbanStoryPoints}</td>
+                        <td>
+                          <span className={workloadBucketClass(w.bucket)}>{w.bucket}</span>
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {snapshot.workload.slice(0, 8).map((w) => (
-                        <tr key={w.owner}>
-                          <td className="owner">{w.owner}</td>
-                          <td>{w.kanbanCards}</td>
-                          <td>{w.plannerTasks}</td>
-                          <td>{w.kanbanStoryPoints}</td>
-                          <td>
-                            <span className={workloadBucketClass(w.bucket)}>{w.bucket}</span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </>
-              )}
+                    ))}
+                  </tbody>
+                </table>
+              </>
             </div>
 
             <div className="dashboard-widget">
               <h3>
                 <MdiIcon path={mdiChartDonut} size={16} /> Kanban Status
+                {kanbanIsMock && (
+                  <span className="muted small" style={{ marginLeft: 8 }}>
+                    (sample preview — create a Kanban board for real data)
+                  </span>
+                )}
               </h3>
               <div className="widget-kpi-row">
                 <div className="kpi">
-                  <span className="kpi-value">{snapshot.kanbanStats.totalDone}</span>
+                  <span className="kpi-value">{kanbanKPIs.totalDone}</span>
                   <span className="kpi-label">Done</span>
                 </div>
                 <div className="kpi">
-                  <span className="kpi-value">{snapshot.kanbanStats.totalActive}</span>
+                  <span className="kpi-value">{kanbanKPIs.totalActive}</span>
                   <span className="kpi-label">Active</span>
                 </div>
                 <div className="kpi">
-                  <span className="kpi-value">{snapshot.kanbanStats.totalCards}</span>
+                  <span className="kpi-value">{kanbanKPIs.totalCards}</span>
                   <span className="kpi-label">Total</span>
                 </div>
               </div>
               {kanbanPieSvg ? (
                 <div className="widget-chart" dangerouslySetInnerHTML={{ __html: kanbanPieSvg }} />
               ) : kanbanChartErr ? (
-                <ul className="widget-list kanban-legend">
-                  {snapshot.kanbanStats.rows
-                    .filter((r) => r.count > 0)
-                    .slice(0, 8)
-                    .map((r) => (
-                      <li key={r.columnId}>
-                        <span
-                          className="color-swatch"
-                          style={{ background: r.isDone ? '#2f855a' : r.color }}
-                        />
-                        <span className="legend-title">{r.title}</span>
-                        <span className="legend-count">{r.count}</span>
-                      </li>
-                    ))}
-                </ul>
-              ) : snapshot.kanbanStats.rows.some((r) => r.count > 0) ? (
+                <>
+                  <div className="widget-empty dashboard-warn">
+                    <MdiIcon path={mdiAlertCircleOutline} size={16} /> Chart unavailable:{' '}
+                    {kanbanChartErr}
+                  </div>
+                  <ul className="widget-list kanban-legend">
+                    {kanbanRows
+                      .filter((r) => r.count > 0)
+                      .slice(0, 8)
+                      .map((r) => (
+                        <li key={r.columnId}>
+                          <span
+                            className="color-swatch"
+                            style={{ background: r.isDone ? '#2f855a' : r.color }}
+                          />
+                          <span className="legend-title">{r.title}</span>
+                          <span className="legend-count">{r.count}</span>
+                        </li>
+                      ))}
+                  </ul>
+                </>
+              ) : kanbanRows.some((r) => r.count > 0) ? (
                 <div className="widget-empty muted">Generating chart…</div>
               ) : (
                 <div className="widget-empty muted">No kanban data yet</div>
               )}
               <ul className="widget-list kanban-legend">
-                {snapshot.kanbanStats.rows
+                {kanbanRows
                   .filter((r) => r.count > 0)
                   .slice(0, 8)
                   .map((r) => (
