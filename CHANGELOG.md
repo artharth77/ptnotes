@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] (dev)
+## [0.18.1] — 2026-09-13
 
 ### Added
 
