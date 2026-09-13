@@ -944,7 +944,8 @@ body {
 .mention-popup,
 .command-popup,
 .gantt-popup,
-.modal {
+.modal,
+.file-viewer-panel {
   background: var(--frost-bg);
   backdrop-filter: blur(12px) saturate(1.2);
 }
@@ -7564,7 +7565,8 @@ fieldset.kanban-form {
 .chat-img-viewer {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.75);
+  background: var(--frost-bg);
+  backdrop-filter: blur(12px) saturate(1.2);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -7633,7 +7635,8 @@ fieldset.kanban-form {
 .pdf-viewer {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.75);
+  background: var(--frost-bg);
+  backdrop-filter: blur(12px) saturate(1.2);
   display: flex;
   flex-direction: column;
   z-index: 200;
@@ -7689,7 +7692,8 @@ fieldset.kanban-form {
 .pdf-page-manager {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.75);
+  background: var(--frost-bg);
+  backdrop-filter: blur(12px) saturate(1.2);
   display: flex;
   flex-direction: column;
   z-index: 200;
@@ -8814,7 +8818,7 @@ fieldset.kanban-form {
   position: fixed;
   inset: 0;
   z-index: 100;
-  background: rgba(0, 0, 0, 0.45);
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -8825,7 +8829,6 @@ fieldset.kanban-form {
   height: 90vh;
   display: flex;
   flex-direction: column;
-  background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: var(--shadow);
