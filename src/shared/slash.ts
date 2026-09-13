@@ -7,6 +7,8 @@ export interface SlashCommandContext {
   project: string | null
   newChat: (project: string) => Promise<void>
   openAiSettings: () => void
+  /** Open the chat's model/profile picker popup. */
+  openModelPopup: () => void
 }
 
 /**
