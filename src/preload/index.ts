@@ -18,6 +18,7 @@ import type {
   ChatThread,
   ConfirmResponse,
   CreateProjectResult,
+  DiagramSaveResult,
   ExplorerEntry,
   ExplorerFolderNode,
   FileEntry,
@@ -459,7 +460,12 @@ const api = {
   },
   diagrams: {
     render: (source: string): Promise<MermaidRenderResult> =>
-      ipcRenderer.invoke('diagrams:render', source)
+      ipcRenderer.invoke('diagrams:render', source),
+    saveDiagram: (
+      name: string,
+      data: Uint8Array,
+      format: 'png' | 'svg'
+    ): Promise<DiagramSaveResult> => ipcRenderer.invoke('diagrams:save', { name, data, format })
   },
   onOpenFind: (callback: () => void): (() => void) => {
     const listener = (): void => callback()

@@ -3415,6 +3415,32 @@ fieldset.kanban-form {
   opacity: 1;
 }
 
+/* Save menu open: keep the buttons visible even when the pointer is over the floating menu. */
+.mermaid-viewer-actions.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.mermaid-viewer-btn.slim {
+  width: 14px;
+  min-width: 14px;
+  padding: 0;
+}
+
+.mermaid-save-error {
+  position: absolute;
+  top: 40px;
+  right: 8px;
+  z-index: 12;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  color: var(--danger);
+  cursor: pointer;
+}
+
 .mermaid-viewer-group {
   display: inline-flex;
   background: var(--bg-elev);
