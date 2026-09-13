@@ -24,7 +24,7 @@ export interface NoteSearchMatch {
   matchEnd: number
 }
 
-export type Tab = 'notes' | 'kanban' | 'modules' | 'planner' | 'files'
+export type Tab = 'notes' | 'kanban' | 'planner' | 'dashboard' | 'modules' | 'files'
 
 export interface AIProviderConfig {
   baseUrl: string

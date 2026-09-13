@@ -357,6 +357,10 @@ const api = {
     openExternal: (project: string, fileName: string): Promise<string> =>
       ipcRenderer.invoke('files:openExternal', project, fileName)
   },
+  dashboard: {
+    getSnapshot: (project: string): Promise<import('@shared/dashboard').DashboardSnapshot> =>
+      ipcRenderer.invoke('dashboard:getSnapshot', project)
+  },
   gallery: {
     list: (project: string): Promise<GalleryImage[]> => ipcRenderer.invoke('gallery:list', project),
     import: (project: string, sourcePath: string, fileName?: string): Promise<string> =>

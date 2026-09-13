@@ -9,6 +9,7 @@ import { registerProjectIpc, registerNoteIpc, registerChatIpc } from './ipc'
 import { registerKanbanIpc } from './ipc/kanban'
 import { registerPlannerIpc } from './ipc/planner'
 import { registerSnapshotsIpc } from './ipc/snapshots'
+import { registerDashboardIpc } from './ipc/dashboard'
 import { registerAiIpc, createSessionRegistry } from './ipc/ai'
 import { registerFilesIpc } from './ipc/files'
 import { registerGalleryIpc } from './ipc/gallery'
@@ -410,6 +411,7 @@ app.whenReady().then(async () => {
   registerChatIpc(service)
   registerPlannerIpc(service)
   registerSnapshotsIpc(service)
+  registerDashboardIpc(service)
   registerAiIpc(registry, configStore, service)
   registerFilesIpc(service, registry, configStore)
   registerGalleryIpc(service)

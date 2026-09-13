@@ -115,6 +115,29 @@ import './assets/main.css'
       setTag: noopAsync,
       delete: noopAsync
     }
+    const noopDashboard = {
+      getSnapshot: async () =>
+        ({
+          projectId: '',
+          projectName: '',
+          todayIso: '',
+          workload: [],
+          kanbanStats: { rows: [], total: 0 },
+          overdue: { overdue: [], today: [], upcoming: [], total: 0 },
+          plannerHealth: {
+            scheduleCount: 0,
+            totalTasks: 0,
+            leafTasks: 0,
+            percentComplete: 0,
+            onTime: 0,
+            late: 0,
+            ownerCount: 0,
+            criticalPathDays: 0
+          },
+          activity: [],
+          recentNotes: []
+        }) as any
+    }
     const noopChat = {
       list: async () => emptyList,
       read: async () => ({ id: '', messages: [] }) as any,
@@ -157,6 +180,7 @@ import './assets/main.css'
       planner: noopPlanner,
       files: noopFiles,
       snapshots: noopSnapshots,
+      dashboard: noopDashboard,
       chat: noopChat,
       bots: noopBots,
       modules: noopModules,

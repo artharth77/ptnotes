@@ -3,7 +3,7 @@ import { useAppStore } from './store/useAppStore'
 import { friendlyError } from './errors'
 import { TopBar } from './components/TopBar'
 import { MdiIcon } from './components/MdiIcon'
-import { mdiFolderOpenOutline, mdiFolderOutline } from '@mdi/js'
+import { mdiFolderOpenOutline, mdiFolderOutline, mdiViewDashboardOutline } from '@mdi/js'
 import { NoteList } from './components/NoteList'
 import { KanbanPanel } from './components/KanbanPanel'
 import { KanbanBoard } from './components/KanbanBoard'
@@ -24,6 +24,7 @@ import { ModuleHistoryOverlay } from './components/ModuleHistoryOverlay'
 import { TraceViewerModal } from './components/TraceViewerModal'
 import { PromptModal, ConfirmModal } from './components/Modal'
 import { Resizer } from './components/Resizer'
+import { DashboardPage } from './DashboardPage'
 import type { Tab, ToolCallInfo } from '@shared/types'
 import { addUsage, normalizeUsage } from '@shared/usage'
 
@@ -92,6 +93,13 @@ function SideTabs(): React.JSX.Element {
           {t === 'notes' ? 'Notes' : t === 'kanban' ? 'Kanban' : t === 'planner' ? 'Planner' : ''}
         </button>
       ))}
+      <button
+        className={`side-tab icon-only ${tab === 'dashboard' ? 'active' : ''}`}
+        onClick={() => setTab('dashboard')}
+        title="Dashboard"
+      >
+        <MdiIcon path={mdiViewDashboardOutline} size={18} />
+      </button>
       <button
         className={`side-tab icon-only ${tab === 'files' ? 'active' : ''}`}
         onClick={() => setTab('files')}
@@ -624,6 +632,13 @@ function App(): React.JSX.Element {
                 <PlannerPanel />
               ) : tab === 'files' ? (
                 <FileTreePanel />
+              ) : tab === 'dashboard' ? (
+                <div className="dashboard-sidebar">
+                  <div className="dashboard-sidebar-title">Project</div>
+                  <div className="dashboard-sidebar-sub muted">
+                    Select widgets below via the main area.
+                  </div>
+                </div>
               ) : (
                 <NoteList />
               )}
@@ -639,7 +654,9 @@ function App(): React.JSX.Element {
             />
           )}
           <main className="main-area">
-            {tab === 'files' ? (
+            {tab === 'dashboard' ? (
+              <DashboardPage />
+            ) : tab === 'files' ? (
               <FileListPanel key={activeProject} />
             ) : tab === 'planner' ? (
               activeScheduleId ? (

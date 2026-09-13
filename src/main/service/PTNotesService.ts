@@ -358,6 +358,25 @@ export class PTNotesService {
     return join(this.projectDir(project), 'screenshots')
   }
 
+  /** Paths used by the project dashboard aggregator (read-only IPC layer). */
+  dashboardContext(project: string): {
+    projectDir: string
+    kanbanPath: string
+    filesDir: string
+    chatDir: string
+    notesDir: string
+    plannerDir: string
+  } {
+    return {
+      projectDir: this.projectDir(project),
+      kanbanPath: this.kanbanPath(project),
+      filesDir: this.filesDir(project),
+      chatDir: this.chatDir(project),
+      notesDir: this.notesDir(project),
+      plannerDir: this.plannerDir(project)
+    }
+  }
+
   private plannerDir(name: string): string {
     return join(this.projectDir(name), 'planner')
   }
