@@ -3,7 +3,7 @@ import { useAppStore } from './store/useAppStore'
 import { friendlyError } from './errors'
 import { TopBar } from './components/TopBar'
 import { MdiIcon } from './components/MdiIcon'
-import { mdiFolderOpenOutline, mdiFolderOutline, mdiViewDashboardOutline } from '@mdi/js'
+import { mdiFolderOpenOutline, mdiFolderOutline } from '@mdi/js'
 import { NoteList } from './components/NoteList'
 import { KanbanPanel } from './components/KanbanPanel'
 import { KanbanBoard } from './components/KanbanBoard'
@@ -93,13 +93,6 @@ function SideTabs(): React.JSX.Element {
           {t === 'notes' ? 'Notes' : t === 'kanban' ? 'Kanban' : t === 'planner' ? 'Planner' : ''}
         </button>
       ))}
-      <button
-        className={`side-tab icon-only ${tab === 'dashboard' ? 'active' : ''}`}
-        onClick={() => setTab('dashboard')}
-        title="Dashboard"
-      >
-        <MdiIcon path={mdiViewDashboardOutline} size={18} />
-      </button>
       <button
         className={`side-tab icon-only ${tab === 'files' ? 'active' : ''}`}
         onClick={() => setTab('files')}
