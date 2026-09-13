@@ -326,7 +326,8 @@ function App(): React.JSX.Element {
   const rightOpen = chatOpen || moduleOpen || botsOpen
   const setRightView = useAppStore((s) => s.setRightView)
   const settingsOpen = useAppStore((s) => s.settingsOpen)
-  const sidebarVisible = useAppStore((s) => s.sidebarVisible)
+  const storeSidebarVisible = useAppStore((s) => s.sidebarVisible)
+  const sidebarVisible = tab === 'dashboard' ? false : storeSidebarVisible
   const askRequest = useAppStore((s) => s.askRequest)
   const kanbanEditingId = useAppStore((s) => s.kanbanEditingId)
   const kanbanViewingId = useAppStore((s) => s.kanbanViewingId)

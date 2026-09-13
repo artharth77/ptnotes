@@ -10144,3 +10144,26 @@ fieldset.kanban-form {
   font-weight: 600;
   color: var(--text);
 }
+
+/* Dashboard: hide sidebar, widen main. Launch button next to project dropdown */
+.dashboard-launch-btn {
+  margin-left: 6px;
+  border: 1px solid transparent !important;
+}
+.dashboard-launch-btn:hover:not(:disabled),
+.dashboard-launch-btn.active {
+  background: var(--bg-hover);
+  border-color: var(--border) !important;
+  color: var(--accent);
+}
+.dashboard-launch-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.app-body:has(.sidebar.collapsed ~ main > .dashboard-page) .sidebar {
+  pointer-events: none;
+  opacity: 0;
+}
+.app-body:has(.sidebar.collapsed ~ main > .dashboard-page) .main-area {
+  padding-left: 0;
+}
