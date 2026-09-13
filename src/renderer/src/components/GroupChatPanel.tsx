@@ -1324,8 +1324,9 @@ function GroupModal({
         {mode === 'edit' && group && (
           <>
             <button
-              className="btn danger"
+              className={`btn${confirmClear ? ' danger' : ''}`}
               disabled={saving}
+              onMouseLeave={() => setConfirmClear(false)}
               onClick={() => {
                 if (!confirmClear) {
                   setConfirmClear(true)
@@ -1340,8 +1341,9 @@ function GroupModal({
               {confirmClear ? 'Really clear?' : 'Clear history'}
             </button>
             <button
-              className="btn danger"
+              className={`btn${confirmDelete ? ' danger' : ''}`}
               disabled={saving}
+              onMouseLeave={() => setConfirmDelete(false)}
               onClick={() => {
                 if (!confirmDelete) {
                   setConfirmDelete(true)
@@ -1355,6 +1357,7 @@ function GroupModal({
             >
               {confirmDelete ? 'Really delete?' : 'Delete group'}
             </button>
+            <span className="kanban-modal-spacer" />
           </>
         )}
         <button className="btn" onClick={onClose}>
