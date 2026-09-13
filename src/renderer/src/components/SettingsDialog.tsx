@@ -262,6 +262,7 @@ function AiSettingsPane({
 }): React.JSX.Element {
   const [editing, setEditing] = useState<AIProfile | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const profile = config.profiles.find((p) => p.id === config.activeProfileId) ?? config.profiles[0]
   const selected = config.profiles.find((p) => p.id === selectedId) ?? profile
@@ -280,6 +281,11 @@ function AiSettingsPane({
     if (selected) setEditing({ ...selected })
   }
 
+  function requestDeleteProfile(): void {
+    if (!selected || config.profiles.length <= 1) return
+    setDeleting(true)
+  }
+
   async function deleteProfile(): Promise<void> {
     if (config.profiles.length <= 1) return
     const targetId = selected?.id ?? ''
@@ -290,6 +296,7 @@ function AiSettingsPane({
       activeProfileId: config.activeProfileId === targetId ? rest[0].id : config.activeProfileId
     }
     setSelectedId(null)
+    setDeleting(false)
     await onCommit(next)
   }
 
@@ -373,7 +380,7 @@ function AiSettingsPane({
           </button>
           <button
             className="btn"
-            onClick={() => void deleteProfile()}
+            onClick={requestDeleteProfile}
             disabled={!selected || config.profiles.length <= 1}
           >
             Delete
@@ -410,6 +417,21 @@ function AiSettingsPane({
             initial={editing}
             onClose={() => setEditing(null)}
             onSave={(saved) => void saveProfile(saved)}
+          />,
+          document.body
+        )}
+      {deleting &&
+        selected &&
+        createPortal(
+          <ConfirmModal
+            title="Delete profile"
+            onClose={() => setDeleting(false)}
+            onConfirm={() => void deleteProfile()}
+            message={
+              <p className="confirm-message">
+                Delete profile &quot;{selected.name}&quot;? This cannot be undone.
+              </p>
+            }
           />,
           document.body
         )}
@@ -1089,38 +1111,43 @@ function SkillsPane(): React.JSX.Element {
               )}
               {menuFor === key && menuPos && (
                 <>
-                  <div className="menu-overlay" onClick={() => setMenuFor(null)} />
-                  <div
-                    ref={menuRef}
-                    className="note-menu"
-                    style={{ left: menuPos.x, top: menuPos.y }}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <button className="note-menu-item" onClick={() => void openEditor(meta)}>
-                      <span className="note-menu-icon">
-                        <MdiIcon path={mdiPencil} size={16} />
-                      </span>{' '}
-                      Edit skill
-                    </button>
-                    <button className="note-menu-item" onClick={() => void moveSkill(meta)}>
-                      <span className="note-menu-icon">
-                        <MdiIcon path={mdiSwapHorizontal} size={16} />
-                      </span>{' '}
-                      Move to {meta.scope === 'global' ? 'Project' : 'Global'} skills
-                    </button>
-                    <button
-                      className="note-menu-item danger"
-                      onClick={() => {
-                        setMenuFor(null)
-                        setDeleting(meta)
-                      }}
-                    >
-                      <span className="note-menu-icon">
-                        <MdiIcon path={mdiTrashCanOutline} size={16} />
-                      </span>{' '}
-                      Delete skill
-                    </button>
-                  </div>
+                  {createPortal(
+                    <>
+                      <div className="menu-overlay" onClick={() => setMenuFor(null)} />
+                      <div
+                        ref={menuRef}
+                        className="note-menu"
+                        style={{ left: menuPos.x, top: menuPos.y }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button className="note-menu-item" onClick={() => void openEditor(meta)}>
+                          <span className="note-menu-icon">
+                            <MdiIcon path={mdiPencil} size={16} />
+                          </span>{' '}
+                          Edit skill
+                        </button>
+                        <button className="note-menu-item" onClick={() => void moveSkill(meta)}>
+                          <span className="note-menu-icon">
+                            <MdiIcon path={mdiSwapHorizontal} size={16} />
+                          </span>{' '}
+                          Move to {meta.scope === 'global' ? 'Project' : 'Global'} skills
+                        </button>
+                        <button
+                          className="note-menu-item danger"
+                          onClick={() => {
+                            setMenuFor(null)
+                            setDeleting(meta)
+                          }}
+                        >
+                          <span className="note-menu-icon">
+                            <MdiIcon path={mdiTrashCanOutline} size={16} />
+                          </span>{' '}
+                          Delete skill
+                        </button>
+                      </div>
+                    </>,
+                    document.body
+                  )}
                 </>
               )}
             </div>
@@ -1169,47 +1196,54 @@ function SkillsPane(): React.JSX.Element {
             )}
         </>
       )}
-      {creating && (
-        <SkillEditorModal
-          project={activeProject}
-          initial={null}
-          onClose={() => setCreating(false)}
-          onSaved={() => {
-            setCreating(false)
-            void reload()
-          }}
-        />
-      )}
-      {editing && (
-        <SkillEditorModal
-          project={activeProject}
-          initial={editing}
-          onClose={() => setEditing(null)}
-          onSaved={() => {
-            setEditing(null)
-            void reload()
-          }}
-        />
-      )}
-      {deleting && (
-        <ConfirmModal
-          title="Delete Skill"
-          onClose={() => setDeleting(null)}
-          onConfirm={() => {
-            void window.ptnotes.skills
-              .delete(activeProject, deleting.scope, deleting.name)
-              .then(() => {
-                setDeleting(null)
-                void reload()
-              })
-          }}
-          message={
-            <>
-              Delete the {deleting.scope} skill &quot;{deleting.name}&quot;? This cannot be undone.
-            </>
-          }
-        />
-      )}
+      {creating &&
+        createPortal(
+          <SkillEditorModal
+            project={activeProject}
+            initial={null}
+            onClose={() => setCreating(false)}
+            onSaved={() => {
+              setCreating(false)
+              void reload()
+            }}
+          />,
+          document.body
+        )}
+      {editing &&
+        createPortal(
+          <SkillEditorModal
+            project={activeProject}
+            initial={editing}
+            onClose={() => setEditing(null)}
+            onSaved={() => {
+              setEditing(null)
+              void reload()
+            }}
+          />,
+          document.body
+        )}
+      {deleting &&
+        createPortal(
+          <ConfirmModal
+            title="Delete Skill"
+            onClose={() => setDeleting(null)}
+            onConfirm={() => {
+              void window.ptnotes.skills
+                .delete(activeProject, deleting.scope, deleting.name)
+                .then(() => {
+                  setDeleting(null)
+                  void reload()
+                })
+            }}
+            message={
+              <>
+                Delete the {deleting.scope} skill &quot;{deleting.name}&quot;? This cannot be
+                undone.
+              </>
+            }
+          />,
+          document.body
+        )}
     </>
   )
 }

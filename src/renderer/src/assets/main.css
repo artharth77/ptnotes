@@ -959,6 +959,14 @@ body {
   backdrop-filter: blur(12px) saturate(1.2);
 }
 
+/* Nested dialogs (e.g. New Skill inside the settings modal): a frost card on a
+   frost card stacks compositing to near-opaque, so the inner dialog is solid —
+   the outer card already provides the frosted look over app content */
+.modal .modal-overlay > .modal {
+  background: var(--bg-elev);
+  backdrop-filter: none;
+}
+
 /* Solid appearance: frost variable goes opaque and all backdrop blur drops */
 :root[data-surface-translucent='off'] {
   --frost-bg: var(--bg-elev);
@@ -970,7 +978,7 @@ body {
 .menu-overlay {
   position: fixed;
   inset: 0;
-  z-index: 90;
+  z-index: 101;
 }
 
 .note-menu {
@@ -978,7 +986,7 @@ body {
   min-width: 170px;
   max-height: calc(100vh - 16px);
   overflow-y: auto;
-  z-index: 95;
+  z-index: 102;
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: var(--shadow);
