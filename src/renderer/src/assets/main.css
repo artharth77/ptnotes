@@ -3173,6 +3173,8 @@ fieldset.kanban-form {
   gap: 8px;
   font-size: 12px;
   color: var(--text);
+  z-index: 95;
+  position: relative;
 }
 
 .code-block-lang-label {
