@@ -60,6 +60,8 @@ export interface StorageSettings {
   fontSize?: 'small' | 'default' | 'large' | 'xlarge'
   uiDensity?: 'compact' | 'cozy'
   editorFontFamily?: 'sans' | 'serif' | 'mono'
+  /** Frosted translucent surfaces; false renders every frost surface solid. */
+  surfaceTranslucent?: boolean
   /** User enable/disable choices for builtin (app-shipped, read-only) skills, keyed by skill name. */
   builtinSkillOverrides?: Record<string, boolean>
 }
@@ -69,6 +71,7 @@ export interface AppearanceSettings {
   fontSize: 'small' | 'default' | 'large' | 'xlarge'
   uiDensity: 'compact' | 'cozy'
   editorFontFamily: 'sans' | 'serif' | 'mono'
+  surfaceTranslucent: boolean
 }
 
 /** Persisted main-window geometry restored on next launch. */
@@ -241,6 +244,18 @@ export interface ExplorerFolderNode {
   path: string
   children: ExplorerFolderNode[]
 }
+
+/** File explorer clipboard: paths relative to the files root + copy/cut mode. */
+export interface ExplorerClipboard {
+  paths: string[]
+  mode: 'copy' | 'cut'
+}
+
+/** Pending file-explorer operation dialog (new folder / rename / delete confirm). */
+export type ExplorerOpsDialog =
+  | { kind: 'newFolder'; dir: string }
+  | { kind: 'rename'; path: string; name: string }
+  | { kind: 'delete'; items: { path: string; name: string }[] }
 
 /** One image in the project gallery (`<project>/notes/images/`). */
 export interface GalleryImage {
@@ -509,7 +524,8 @@ export type {
   Schedule,
   ScheduleMeta,
   ScheduleStatus,
-  ScheduleTask
+  ScheduleTask,
+  ScheduleTitleWidth
 } from './planner'
 
 export type { SnapshotMeta } from './snapshots'

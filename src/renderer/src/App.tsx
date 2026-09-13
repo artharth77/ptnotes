@@ -22,7 +22,7 @@ import { AskUserDialog } from './components/AskUserDialog'
 import { ModulePanel } from './components/ModulePanel'
 import { ModuleHistoryOverlay } from './components/ModuleHistoryOverlay'
 import { TraceViewerModal } from './components/TraceViewerModal'
-import { PromptModal, Modal } from './components/Modal'
+import { PromptModal, ConfirmModal } from './components/Modal'
 import { Resizer } from './components/Resizer'
 import type { Tab, ToolCallInfo } from '@shared/types'
 import { addUsage, normalizeUsage } from '@shared/usage'
@@ -289,22 +289,18 @@ function ConfirmDeleteDialog(): React.JSX.Element {
   }
 
   return (
-    <Modal title="Confirm Delete" onClose={() => void respond(false)}>
-      <p className="confirm-message">{req.message}</p>
+    <ConfirmModal
+      title="Confirm Delete"
+      onClose={() => void respond(false)}
+      onConfirm={() => void respond(true)}
+      message={req.message}
+    >
       <ul className="confirm-list">
         {req.items.map((name) => (
           <li key={name}>{name}</li>
         ))}
       </ul>
-      <div className="modal-actions">
-        <button className="btn" onClick={() => void respond(false)}>
-          Cancel
-        </button>
-        <button className="btn danger" onClick={() => void respond(true)}>
-          Delete
-        </button>
-      </div>
-    </Modal>
+    </ConfirmModal>
   )
 }
 
@@ -346,6 +342,8 @@ function App(): React.JSX.Element {
     document.documentElement.setAttribute('data-ui-density', density)
     const editorFont = useAppStore.getState().editorFontFamily
     document.documentElement.setAttribute('data-editor-font', editorFont)
+    const translucent = useAppStore.getState().surfaceTranslucent
+    document.documentElement.setAttribute('data-surface-translucent', translucent ? 'on' : 'off')
   }, [init])
 
   useEffect(() => {
@@ -364,6 +362,9 @@ function App(): React.JSX.Element {
             patch.push(() => state.setUiDensity(remote.uiDensity))
           if (remote.editorFontFamily && remote.editorFontFamily !== state.editorFontFamily) {
             patch.push(() => state.setEditorFontFamily(remote.editorFontFamily))
+          }
+          if (remote.surfaceTranslucent !== state.surfaceTranslucent) {
+            patch.push(() => state.setSurfaceTranslucent(remote.surfaceTranslucent))
           }
           patch.forEach((fn) => fn())
         }

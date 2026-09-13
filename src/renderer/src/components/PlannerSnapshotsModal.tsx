@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { mdiRestore, mdiTagOutline, mdiTrashCanOutline } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
 import { friendlyError } from '../errors'
-import { Modal } from './Modal'
+import { Modal, ConfirmModal } from './Modal'
 import { MdiIcon } from './MdiIcon'
 import type { Schedule, SnapshotMeta } from '@shared/types'
 
@@ -156,19 +156,12 @@ export function PlannerSnapshotsModal(): React.JSX.Element {
         ))}
       </div>
       {confirmDeleteTs !== null && (
-        <Modal title="Delete Snapshot" onClose={() => setConfirmDeleteTs(null)}>
-          <p className="confirm-message">
-            Delete this snapshot permanently? Its tag will be removed too.
-          </p>
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setConfirmDeleteTs(null)}>
-              Cancel
-            </button>
-            <button className="btn danger" onClick={() => void doDelete()}>
-              Delete
-            </button>
-          </div>
-        </Modal>
+        <ConfirmModal
+          title="Delete Snapshot"
+          onClose={() => setConfirmDeleteTs(null)}
+          onConfirm={() => void doDelete()}
+          message="Delete this snapshot permanently? Its tag will be removed too."
+        />
       )}
     </Modal>
   )

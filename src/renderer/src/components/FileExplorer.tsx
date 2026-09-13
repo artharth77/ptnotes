@@ -40,11 +40,24 @@ import {
   isImageFile,
   isPdfFile,
   isTextFile,
+  parentOf,
   visibleExplorerEntries
 } from '@shared/filesExplorer'
 import { useAppStore } from '../store/useAppStore'
+import {
+  confirmExplorerDelete,
+  copyExplorerPaths,
+  cutExplorerPaths,
+  openExplorerDelete,
+  openExplorerNewFolder,
+  openExplorerRename,
+  pasteExplorer,
+  revealExplorerPath,
+  submitExplorerNewFolder,
+  submitExplorerRename
+} from '../store/explorerOps'
 import { friendlyError } from '../errors'
-import { Modal, PromptModal } from './Modal'
+import { ConfirmModal, PromptModal } from './Modal'
 import { FileViewer } from './FileViewer'
 import { ImageViewer } from './ImageViewer'
 import { PdfViewer } from './PdfViewer'
@@ -52,10 +65,6 @@ import { PdfPageManager } from './PdfPageManager'
 import { PdfMergeDialog } from './PdfMergeDialog'
 import { MdiIcon } from './MdiIcon'
 import { fileTypeIcon } from './contentIcons'
-
-type Clipboard = { paths: string[]; mode: 'copy' | 'cut' }
-type Dialog =
-  { kind: 'newFolder' } | { kind: 'rename'; entry: ExplorerEntry } | { kind: 'delete' } | null
 
 /** While any of these is on screen, the file list ignores keyboard navigation. */
 const FILE_LIST_KEY_GUARD_SELECTOR =
@@ -99,11 +108,6 @@ function formatDate(ms: number): string {
     hour: '2-digit',
     minute: '2-digit'
   })
-}
-
-function parentOf(dir: string): string {
-  const idx = dir.lastIndexOf('/')
-  return idx === -1 ? '' : dir.slice(0, idx)
 }
 
 /** Clickable column header: cycles ascending → descending → default for its key. */
@@ -151,6 +155,7 @@ export function FileTreePanel(): React.JSX.Element {
   const cwd = useAppStore((s) => s.explorerCwd)
   const expanded = useAppStore((s) => s.explorerExpanded)
   const collapsed = useAppStore((s) => s.explorerCollapsed)
+  const clipboard = useAppStore((s) => s.explorerClipboard)
   const selectFolder = useAppStore((s) => s.selectExplorerFolder)
   const toggleFolder = useAppStore((s) => s.toggleExplorerFolder)
 
@@ -161,16 +166,69 @@ export function FileTreePanel(): React.JSX.Element {
     return s
   }, [expanded, cwd, collapsed])
 
+  /** Right-click target folder ('' = files root). */
+  const [menu, setMenu] = useState<{ x: number; y: number; path: string; name: string } | null>(
+    null
+  )
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  function openTreeMenu(e: React.MouseEvent, node: ExplorerFolderNode): void {
+    e.preventDefault()
+    e.stopPropagation()
+    selectFolder(node.path)
+    setMenu({ x: e.clientX, y: e.clientY, path: node.path, name: node.name })
+    setMenuPos(null)
+  }
+
+  function closeMenu(): void {
+    setMenu(null)
+    setMenuPos(null)
+  }
+
+  // Clamp the menu inside the window once its real size is known (before paint).
+  useLayoutEffect(() => {
+    if (!menu) return
+    const el = menuRef.current
+    if (!el) return
+    setMenuPos({
+      x: Math.max(8, Math.min(menu.x, window.innerWidth - el.offsetWidth - 8)),
+      y: Math.max(8, Math.min(menu.y, window.innerHeight - el.offsetHeight - 8))
+    })
+  }, [menu])
+
+  useEffect(() => {
+    if (!menu) return
+    function close(): void {
+      setMenu(null)
+      setMenuPos(null)
+    }
+    function onKey(e: KeyboardEvent): void {
+      if (e.key === 'Escape') close()
+    }
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('resize', close)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', close)
+    }
+  }, [menu])
+
+  const cutPaths = clipboard?.mode === 'cut' ? clipboard.paths : null
+  const canPaste = !!clipboard && clipboard.paths.length > 0
+
   function renderNode(node: ExplorerFolderNode, depth: number): ReactNode {
     const isExpanded = effectiveExpanded.has(node.path)
     const isCwd = cwd === node.path
     const isRoot = node.path === ''
+    const isCut = cutPaths?.includes(node.path) ?? false
     return (
       <div key={isRoot ? '__root__' : node.path}>
         <div
-          className={`file-explorer-tree-row${isCwd ? ' selected' : ''}`}
+          className={`file-explorer-tree-row${isCwd ? ' selected' : ''}${isCut ? ' cut' : ''}`}
           style={{ paddingLeft: 8 + depth * 16 }}
           onClick={() => selectFolder(node.path)}
+          onContextMenu={(e) => openTreeMenu(e, node)}
           title={isRoot ? 'files' : node.path}
         >
           <button
@@ -197,7 +255,186 @@ export function FileTreePanel(): React.JSX.Element {
     )
   }
 
-  return <div className="file-tree-panel">{tree && renderNode(tree, 0)}</div>
+  return (
+    <div className="file-tree-panel">
+      {tree && renderNode(tree, 0)}
+      {menu && (
+        <>
+          <div
+            className="menu-overlay"
+            onClick={closeMenu}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              closeMenu()
+            }}
+          />
+          <div
+            ref={menuRef}
+            className="note-menu"
+            style={{
+              left: menuPos?.x ?? menu.x,
+              top: menuPos?.y ?? menu.y,
+              visibility: menuPos ? 'visible' : 'hidden'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className="note-menu-item"
+              onClick={() => {
+                closeMenu()
+                openExplorerNewFolder(menu.path)
+              }}
+            >
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiFolderPlusOutline} size={16} />
+              </span>
+              New Folder
+            </button>
+            <div className="note-menu-sep" />
+            <button
+              className="note-menu-item"
+              disabled={menu.path === ''}
+              onClick={() => {
+                closeMenu()
+                copyExplorerPaths([menu.path])
+              }}
+            >
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiContentCopy} size={16} />
+              </span>
+              Copy
+            </button>
+            <button
+              className="note-menu-item"
+              disabled={menu.path === ''}
+              onClick={() => {
+                closeMenu()
+                cutExplorerPaths([menu.path])
+              }}
+            >
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiContentCut} size={16} />
+              </span>
+              Cut
+            </button>
+            <button
+              className="note-menu-item"
+              disabled={!canPaste}
+              onClick={() => {
+                closeMenu()
+                void pasteExplorer(menu.path)
+              }}
+            >
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiContentPaste} size={16} />
+              </span>
+              Paste
+            </button>
+            <div className="note-menu-sep" />
+            <button
+              className="note-menu-item"
+              disabled={menu.path === ''}
+              onClick={() => {
+                closeMenu()
+                openExplorerRename(menu.path, menu.name)
+              }}
+            >
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiPencil} size={16} />
+              </span>
+              Rename
+            </button>
+            <button
+              className="note-menu-item"
+              disabled={menu.path === ''}
+              onClick={() => {
+                closeMenu()
+                revealExplorerPath(menu.path)
+              }}
+            >
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiFolderSearchOutline} size={16} />
+              </span>
+              Show in Folder
+            </button>
+            <div className="note-menu-sep" />
+            <button
+              className="note-menu-item danger"
+              disabled={menu.path === ''}
+              onClick={() => {
+                closeMenu()
+                openExplorerDelete([{ path: menu.path, name: menu.name }])
+              }}
+            >
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiTrashCanOutline} size={16} />
+              </span>
+              Delete
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+/** Shared new-folder / rename / delete dialogs for the explorer (dialog state lives in the store). */
+export function ExplorerOpsDialogs(): React.JSX.Element | null {
+  const dialog = useAppStore((s) => s.explorerOpsDialog)
+  const [error, setError] = useState<string | null>(null)
+  const [lastDialog, setLastDialog] = useState(dialog)
+  if (lastDialog !== dialog) {
+    setLastDialog(dialog)
+    setError(null)
+  }
+  if (!dialog) return null
+  const close = (): void => useAppStore.getState().setExplorerOpsDialog(null)
+  if (dialog.kind === 'delete') {
+    return (
+      <ConfirmModal
+        title="Confirm Delete"
+        onClose={close}
+        onConfirm={() => void confirmExplorerDelete()}
+        message={
+          <>
+            Delete{' '}
+            {dialog.items.length === 1
+              ? `"${dialog.items[0].name}"`
+              : `${dialog.items.length} items`}
+            ? This cannot be undone.
+          </>
+        }
+      >
+        {dialog.items.length > 1 && (
+          <ul className="confirm-list">
+            {dialog.items.map((i) => (
+              <li key={i.path}>{i.name}</li>
+            ))}
+          </ul>
+        )}
+      </ConfirmModal>
+    )
+  }
+  return (
+    <PromptModal
+      title={dialog.kind === 'newFolder' ? 'New Folder' : 'Rename'}
+      placeholder={dialog.kind === 'newFolder' ? 'Folder name' : undefined}
+      initialValue={dialog.kind === 'rename' ? dialog.name : ''}
+      submitLabel={dialog.kind === 'newFolder' ? 'Create' : 'Rename'}
+      error={error}
+      onClose={close}
+      onSubmit={(value) => {
+        void (async () => {
+          try {
+            if (dialog.kind === 'newFolder') await submitExplorerNewFolder(value)
+            else await submitExplorerRename(value)
+          } catch (err) {
+            setError(friendlyError(err))
+          }
+        })()
+      }}
+    />
+  )
 }
 
 export function FileListPanel(): React.JSX.Element {
@@ -218,15 +455,8 @@ export function FileListPanel(): React.JSX.Element {
   const uiDensity = useAppStore((s) => s.uiDensity)
   const entryIconSize = uiDensity === 'cozy' ? 24 : 16
 
-  const [clipboard, setClipboard] = useState<Clipboard | null>(null)
-  /** Latest clipboard for the keyboard handler (avoids stale effect closures). */
-  const clipboardRef = useRef<Clipboard | null>(null)
-  useEffect(() => {
-    clipboardRef.current = clipboard
-  }, [clipboard])
-  const [dialog, setDialog] = useState<Dialog>(null)
-  const [dialogError, setDialogError] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const clipboard = useAppStore((s) => s.explorerClipboard)
+  const error = useAppStore((s) => s.explorerOpsError)
   /** Raw right-click point; the menu renders hidden until its real size is measured. */
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null)
@@ -243,6 +473,25 @@ export function FileListPanel(): React.JSX.Element {
    *  Stores the cwd it belongs to, so it implicitly resets on any navigation. */
   const [dotDotCwd, setDotDotCwd] = useState<string | null>(null)
   const dotDotSelected = dotDotCwd !== null && dotDotCwd === cwd
+  const panelRef = useRef<HTMLDivElement>(null)
+  const toolbarRef = useRef<HTMLDivElement>(null)
+  const statusbarRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const panel = panelRef.current
+    const tb = toolbarRef.current
+    const sb = statusbarRef.current
+    if (!panel || !tb || !sb) return
+    const apply = (): void => {
+      panel.style.setProperty('--explorer-toolbar-h', `${tb.offsetHeight}px`)
+      panel.style.setProperty('--explorer-statusbar-h', `${sb.offsetHeight}px`)
+    }
+    apply()
+    const ro = new ResizeObserver(apply)
+    ro.observe(tb)
+    ro.observe(sb)
+    return () => ro.disconnect()
+  }, [])
 
   const cycleSort = useCallback((key: ExplorerSortKey): void => {
     const cur = useAppStore.getState().explorerSort
@@ -357,7 +606,7 @@ export function FileListPanel(): React.JSX.Element {
     const project = useAppStore.getState().activeProject
     if (!project) return
     void window.ptnotes.files.openExternal(project, entry.path).then((err) => {
-      if (err) setError(friendlyError(err))
+      if (err) useAppStore.getState().setExplorerOpsError(friendlyError(err))
     })
   }, [])
 
@@ -404,51 +653,27 @@ export function FileListPanel(): React.JSX.Element {
     activateEntry(entry)
   }
 
-  const runAction = useCallback(
-    async (fn: () => Promise<unknown>): Promise<void> => {
-      const project = useAppStore.getState().activeProject
-      if (!project) return
-      setError(null)
-      try {
-        await fn()
-        await loadExplorer()
-        void refreshFiles()
-      } catch (err) {
-        setError(friendlyError(err))
-      }
-    },
-    [loadExplorer, refreshFiles]
-  )
-
   const copySelected = useCallback((): void => {
-    const sel = useAppStore.getState().explorerSelected
-    if (sel.length === 0) return
-    setClipboard({ paths: [...sel], mode: 'copy' })
-  }, [setClipboard])
+    copyExplorerPaths(useAppStore.getState().explorerSelected)
+  }, [])
 
   const cutSelected = useCallback((): void => {
-    const sel = useAppStore.getState().explorerSelected
-    if (sel.length === 0) return
-    setClipboard({ paths: [...sel], mode: 'cut' })
-  }, [setClipboard])
+    cutExplorerPaths(useAppStore.getState().explorerSelected)
+  }, [])
 
   const paste = useCallback((): void => {
-    const project = useAppStore.getState().activeProject
-    const clip = clipboardRef.current
-    if (!project || !clip || clip.paths.length === 0) return
-    if (clip.mode === 'cut') setClipboard(null)
-    void runAction(() =>
-      clip.mode === 'copy'
-        ? window.ptnotes.files.explorerCopy(project, clip.paths, useAppStore.getState().explorerCwd)
-        : window.ptnotes.files.explorerMove(project, clip.paths, useAppStore.getState().explorerCwd)
-    )
-  }, [setClipboard, runAction])
+    void pasteExplorer(useAppStore.getState().explorerCwd)
+  }, [])
 
   const openDelete = useCallback((): void => {
-    if (useAppStore.getState().explorerSelected.length === 0) return
-    setDialogError(null)
-    setDialog({ kind: 'delete' })
-  }, [setDialogError, setDialog])
+    const s = useAppStore.getState()
+    if (s.explorerSelected.length === 0) return
+    openExplorerDelete(
+      s.explorerEntries
+        .filter((e) => s.explorerSelected.includes(e.path))
+        .map((e) => ({ path: e.path, name: e.name }))
+    )
+  }, [])
 
   // Arrow keys move the selection, Space previews and Enter opens (OS default app).
   // Inside a subfolder the virtual `..` row sits above the entries and is selectable.
@@ -583,72 +808,19 @@ export function FileListPanel(): React.JSX.Element {
     setMergeDialog(selectedPdfEntries)
   }
 
-  function submitRename(name: string): void {
-    if (dialog?.kind !== 'rename' || !activeProject) return
-    const entry = dialog.entry
-    void (async () => {
-      try {
-        const newPath = await window.ptnotes.files.explorerRename(activeProject, entry.path, name)
-        setDialog(null)
-        setDialogError(null)
-        setSelected([newPath])
-        await loadExplorer()
-        void refreshFiles()
-      } catch (err) {
-        setDialogError(friendlyError(err))
-      }
-    })()
-  }
-
-  function submitNewFolder(name: string): void {
-    if (!activeProject) return
-    void (async () => {
-      try {
-        await window.ptnotes.files.explorerCreateFolder(activeProject, cwd, name)
-        setDialog(null)
-        setDialogError(null)
-        useAppStore.setState((s) => ({
-          explorerExpanded: [...new Set([...s.explorerExpanded, cwd])]
-        }))
-        await loadExplorer()
-        void refreshFiles()
-      } catch (err) {
-        setDialogError(friendlyError(err))
-      }
-    })()
-  }
-
-  function submitDelete(): void {
-    if (!activeProject) return
-    void (async () => {
-      try {
-        await window.ptnotes.files.explorerDelete(activeProject, selected)
-        setDialog(null)
-        setSelected([])
-        await loadExplorer()
-        void refreshFiles()
-      } catch (err) {
-        setDialog(null)
-        setError(friendlyError(err))
-      }
-    })()
-  }
-
   function openNewFolder(): void {
-    setDialogError(null)
-    setDialog({ kind: 'newFolder' })
+    openExplorerNewFolder(cwd)
   }
 
   function openRename(): void {
     const entry = selectedEntries[0]
     if (!entry) return
-    setDialogError(null)
-    setDialog({ kind: 'rename', entry })
+    openExplorerRename(entry.path, entry.name)
   }
 
   function revealSelected(): void {
-    if (!activeProject || selected.length !== 1) return
-    void window.ptnotes.files.revealByName(activeProject, selected[0]).catch(() => {})
+    if (selected.length !== 1) return
+    revealExplorerPath(selected[0])
   }
 
   const crumbs = useMemo(() => ancestorsOf(cwd), [cwd])
@@ -656,11 +828,12 @@ export function FileListPanel(): React.JSX.Element {
   return (
     <div
       className="file-list-panel"
+      ref={panelRef}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
-      <div className="file-explorer-toolbar">
+      <div className="file-explorer-toolbar" ref={toolbarRef}>
         <button className="icon-btn" onClick={openNewFolder} title="New folder">
           <MdiIcon path={mdiFolderPlusOutline} size={16} />
           <span>New Folder</span>
@@ -847,7 +1020,7 @@ export function FileListPanel(): React.JSX.Element {
           </div>
         )}
       </div>
-      <div className="file-explorer-statusbar">
+      <div className="file-explorer-statusbar" ref={statusbarRef}>
         <span className="file-explorer-item-count">
           {explorerFilter
             ? `${entries.length} of ${rawEntries.length} items`
@@ -1048,50 +1221,7 @@ export function FileListPanel(): React.JSX.Element {
           </div>
         </>
       )}
-      {dialog?.kind === 'newFolder' && (
-        <PromptModal
-          title="New Folder"
-          placeholder="Folder name"
-          submitLabel="Create"
-          error={dialogError}
-          onClose={() => setDialog(null)}
-          onSubmit={submitNewFolder}
-        />
-      )}
-      {dialog?.kind === 'rename' && (
-        <PromptModal
-          title="Rename"
-          initialValue={dialog.entry.name}
-          submitLabel="Rename"
-          error={dialogError}
-          onClose={() => setDialog(null)}
-          onSubmit={submitRename}
-        />
-      )}
-      {dialog?.kind === 'delete' && (
-        <Modal title="Confirm Delete" onClose={() => setDialog(null)}>
-          <p className="confirm-message">
-            Delete{' '}
-            {selected.length === 1 ? `"${selectedEntries[0]?.name}"` : `${selected.length} items`}?
-            This cannot be undone.
-          </p>
-          {selected.length > 1 && (
-            <ul className="confirm-list">
-              {selectedEntries.map((e) => (
-                <li key={e.path}>{e.name}</li>
-              ))}
-            </ul>
-          )}
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setDialog(null)}>
-              Cancel
-            </button>
-            <button className="btn danger" onClick={submitDelete}>
-              Delete
-            </button>
-          </div>
-        </Modal>
-      )}
+      <ExplorerOpsDialogs />
       {viewer && (
         <ImageViewer
           src={viewer.src}

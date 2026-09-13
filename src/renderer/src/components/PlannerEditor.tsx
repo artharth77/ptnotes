@@ -32,7 +32,7 @@ import {
 } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
 import { MdiIcon } from './MdiIcon'
-import { Modal, PromptModal } from './Modal'
+import { PromptModal, ConfirmModal } from './Modal'
 import { friendlyError } from '../errors'
 import { CalendarModal } from './CalendarModal'
 import { PlannerColumnModal } from './PlannerColumnModal'
@@ -43,8 +43,12 @@ import {
   GanttChart,
   GANTT_DAY_WIDTH_DEFAULT,
   GANTT_DAY_WIDTH_MAX,
-  GANTT_DAY_WIDTH_MIN
+  GANTT_DAY_WIDTH_MIN,
+  GANTT_TITLE_WIDTH_DEFAULT,
+  GANTT_TITLE_WIDTH_MAX,
+  GANTT_TITLE_WIDTH_MIN
 } from './GanttChart'
+import { PlannerResizeHandle } from './PlannerResizeHandle'
 import {
   applyDateRule,
   collectOwners,
@@ -58,6 +62,7 @@ import {
   nextWorkingDayString,
   normalizeColumnOrder,
   normalizeOwner,
+  normalizeTitleWidth,
   overallPercentComplete,
   parseOwners,
   planIndicator,
@@ -69,7 +74,8 @@ import type {
   PlannerExportRow,
   Schedule,
   ScheduleStatus,
-  ScheduleTask
+  ScheduleTask,
+  ScheduleTitleWidth
 } from '@shared/types'
 
 type PlannerColumnKey =
@@ -119,6 +125,10 @@ const COL_WIDTHS: Record<PlannerColumnKey, string> = {
 /** Pinned first, never movable (Plan Indicator stays hideable; No./Title always visible). */
 const FIXED_COLUMNS: PlannerColumnKey[] = ['indicator', 'no', 'title']
 
+const TITLE_WIDTH_GRID_MIN = 180
+const TITLE_WIDTH_GRID_MAX = 600
+const TITLE_WIDTH_GRID_DEFAULT = 300
+
 type MovableColumnKey = Exclude<PlannerColumnKey, 'indicator' | 'no' | 'title'>
 
 const MOVABLE_HEADERS: Record<MovableColumnKey, { label: string; className: string }> = {
@@ -133,12 +143,36 @@ const MOVABLE_HEADERS: Record<MovableColumnKey, { label: string; className: stri
   note: { label: 'Note', className: 'planner-col-note' }
 }
 
-function colTemplate(visible: Set<PlannerColumnKey>, order: PlannerColumnKey[]): string {
+function colTemplate(
+  visible: Set<PlannerColumnKey>,
+  order: PlannerColumnKey[],
+  titleWidth: number | null
+): string {
   const cols: string[] = ['28px']
   for (const k of order) {
-    if (k === 'no' || k === 'title' || visible.has(k)) cols.push(COL_WIDTHS[k])
+    if (k === 'no' || k === 'title' || visible.has(k)) {
+      cols.push(k === 'title' ? `${titleWidth ?? TITLE_WIDTH_GRID_DEFAULT}px` : COL_WIDTHS[k])
+    }
   }
   return cols.join(' ')
+}
+
+function colTemplateSplit(
+  visible: Set<PlannerColumnKey>,
+  order: PlannerColumnKey[],
+  titleWidth: number | null
+): { left: string; right: string; leftCount: number } {
+  const left: string[] = ['28px']
+  const right: string[] = []
+  for (const k of order) {
+    if (!(k === 'no' || k === 'title' || visible.has(k))) continue
+    if (k === 'indicator' || k === 'no' || k === 'title') {
+      left.push(k === 'title' ? `${titleWidth ?? TITLE_WIDTH_GRID_DEFAULT}px` : COL_WIDTHS[k])
+    } else {
+      right.push(COL_WIDTHS[k])
+    }
+  }
+  return { left: left.join(' '), right: right.join(' '), leftCount: left.length }
 }
 
 function initColumnOrder(saved: string[] | undefined): PlannerColumnKey[] {
@@ -450,11 +484,32 @@ export function PlannerEditor(): React.JSX.Element {
   const [columnOrder, setColumnOrder] = useState<PlannerColumnKey[]>(() =>
     initColumnOrder(schedule?.columnOrder)
   )
+  const [titleWidthGrid, setTitleWidthGrid] = useState<number | null>(() =>
+    normalizeTitleWidth(schedule?.titleWidth?.grid, TITLE_WIDTH_GRID_MIN, TITLE_WIDTH_GRID_MAX)
+  )
+  const [titleWidthGantt, setTitleWidthGantt] = useState<number>(
+    () =>
+      normalizeTitleWidth(
+        schedule?.titleWidth?.gantt,
+        GANTT_TITLE_WIDTH_MIN,
+        GANTT_TITLE_WIDTH_MAX
+      ) ?? GANTT_TITLE_WIDTH_DEFAULT
+  )
   const [prevScheduleId, setPrevScheduleId] = useState(schedule?.id)
   if (schedule?.id !== prevScheduleId) {
     setPrevScheduleId(schedule?.id)
     setVisibleCols(initVisibleCols(schedule?.columnVisibility))
     setColumnOrder(initColumnOrder(schedule?.columnOrder))
+    setTitleWidthGrid(
+      normalizeTitleWidth(schedule?.titleWidth?.grid, TITLE_WIDTH_GRID_MIN, TITLE_WIDTH_GRID_MAX)
+    )
+    setTitleWidthGantt(
+      normalizeTitleWidth(
+        schedule?.titleWidth?.gantt,
+        GANTT_TITLE_WIDTH_MIN,
+        GANTT_TITLE_WIDTH_MAX
+      ) ?? GANTT_TITLE_WIDTH_DEFAULT
+    )
     setView('table')
     setOwnerMenu(null)
   }
@@ -471,12 +526,87 @@ export function PlannerEditor(): React.JSX.Element {
   const pendingFocus = useRef<{ id: string; col: string } | null>(null)
   const saveTimer = useRef<number | null>(null)
   const editSession = useRef<{ scheduleId: string; snapshot: Schedule } | null>(null)
+  const plannerRef = useRef<HTMLDivElement | null>(null)
+  const titlebarRef = useRef<HTMLDivElement | null>(null)
+  const toolbarRef = useRef<HTMLDivElement | null>(null)
+  const statusbarRef = useRef<HTMLDivElement | null>(null)
+  const hScrollBarRef = useRef<HTMLDivElement | null>(null)
+  const hScrollThumbRef = useRef<HTMLDivElement | null>(null)
   const focusValueRef = useRef<{
     id: string
     col: string
     value: string | number | null
     undoLen: number
   } | null>(null)
+
+  useEffect(() => {
+    const root = plannerRef.current
+    const tb = titlebarRef.current
+    const bar = toolbarRef.current
+    const sb = statusbarRef.current
+    if (!root || !tb || !bar || !sb) return
+    const apply = (): void => {
+      root.style.setProperty('--planner-titlebar-h', `${tb.offsetHeight}px`)
+      root.style.setProperty('--planner-toolbar-h', `${bar.offsetHeight}px`)
+      root.style.setProperty('--planner-header-h', `${tb.offsetHeight + bar.offsetHeight}px`)
+      root.style.setProperty('--planner-statusbar-h', `${sb.offsetHeight}px`)
+    }
+    apply()
+    const ro = new ResizeObserver(apply)
+    ro.observe(tb)
+    ro.observe(bar)
+    ro.observe(sb)
+    return () => ro.disconnect()
+  }, [schedule?.id])
+
+  useEffect(() => {
+    const target = view === 'gantt' ? ganttBodyRef.current : gridScrollRef.current
+    const barEl = hScrollBarRef.current
+    const thumbEl = hScrollThumbRef.current
+    if (!target || !barEl || !thumbEl) return
+    const update = (): void => {
+      const overflow = target.scrollWidth - target.clientWidth
+      barEl.style.display = overflow > 1 ? 'flex' : 'none'
+      const ratio = target.scrollWidth > 0 ? target.clientWidth / target.scrollWidth : 1
+      const pct = Math.min(100, Math.max(4, ratio * 100))
+      const pos = Math.min(100 - pct, Math.max(0, (target.scrollLeft / target.scrollWidth) * 100))
+      thumbEl.style.width = `${pct}%`
+      thumbEl.style.left = `${pos}%`
+    }
+    update()
+    target.addEventListener('scroll', update, { passive: true })
+    const ro = new ResizeObserver(update)
+    ro.observe(target)
+    if (target.firstElementChild) ro.observe(target.firstElementChild)
+    return () => {
+      ro.disconnect()
+      target.removeEventListener('scroll', update)
+    }
+  }, [view, schedule?.id])
+
+  function handleHScrollDown(e: React.PointerEvent<HTMLDivElement>): void {
+    const target = view === 'gantt' ? ganttBodyRef.current : gridScrollRef.current
+    const barEl = hScrollBarRef.current
+    const thumbEl = hScrollThumbRef.current
+    if (!target || !barEl || !thumbEl || target.scrollWidth <= target.clientWidth) return
+    e.preventDefault()
+    const rect = barEl.getBoundingClientRect()
+    const thumbW = Math.max(30, target.clientWidth * (rect.width / target.scrollWidth))
+    const thumbLeft = ((parseFloat(thumbEl.style.left) || 0) / 100) * rect.width
+    const offsetInThumb = Math.min(Math.max(0, e.clientX - rect.left - thumbLeft), thumbW)
+    const onMove = (ev: PointerEvent): void => {
+      const x = Math.min(Math.max(0, ev.clientX - rect.left - offsetInThumb), rect.width - thumbW)
+      target.scrollLeft = x / (rect.width / target.scrollWidth)
+    }
+    const onUp = (): void => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      document.body.style.removeProperty('cursor')
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    document.body.style.setProperty('cursor', 'grabbing')
+  }
 
   function recordHistory(base: Schedule): void {
     const snapshot = JSON.parse(JSON.stringify(base)) as Schedule
@@ -763,7 +893,8 @@ export function PlannerEditor(): React.JSX.Element {
   const sc: Schedule = schedule
   const cal = calendar ?? defaultCalendar()
   const rows = flattenTasks(sc.tasks, null, 0, collapsed, [])
-  const template = colTemplate(visibleCols, columnOrder)
+  const template = colTemplate(visibleCols, columnOrder, titleWidthGrid)
+  const colSplit = colTemplateSplit(visibleCols, columnOrder, titleWidthGrid)
   const today = formatDate(new Date())
   const noLeft = 28 + (visibleCols.has('indicator') ? 5 : 0)
   const titleLeft = noLeft + 46
@@ -1099,6 +1230,23 @@ export function PlannerEditor(): React.JSX.Element {
       }
       return next
     })
+  }
+
+  function persistTitleWidth(patch: { grid?: number | null; gantt?: number }): void {
+    const current = useAppStore.getState().scheduleContent
+    if (!current) return
+    const next: ScheduleTitleWidth = {}
+    const grid =
+      'grid' in patch ? (patch.grid === null ? undefined : patch.grid) : current.titleWidth?.grid
+    const gantt = 'gantt' in patch ? patch.gantt : current.titleWidth?.gantt
+    if (grid !== undefined) next.grid = grid
+    if (gantt !== undefined) next.gantt = gantt
+    commit(
+      current,
+      current.tasks,
+      { titleWidth: Object.keys(next).length > 0 ? next : undefined },
+      false
+    )
   }
 
   function applyOwnerEdit(id: string): void {
@@ -1613,17 +1761,19 @@ export function PlannerEditor(): React.JSX.Element {
     const scroll = gridScrollRef.current
     const row = gridRef.current?.querySelector<HTMLElement>(`[data-row="${id}"]`)
     if (!scroll || !row) return
-    const headerH =
-      gridRef.current?.querySelector<HTMLElement>('.planner-grid-head')?.offsetHeight ?? 0
+    const head = gridRef.current?.querySelector<HTMLElement>('.planner-grid-head')
+    const hRect = head?.getBoundingClientRect()
+    const sRect = scroll.getBoundingClientRect()
+    const headerGuard = hRect ? hRect.bottom - sRect.top : 0
+    const statusH = statusbarRef.current?.offsetHeight ?? 0
     const rect = row.getBoundingClientRect()
-    const srect = scroll.getBoundingClientRect()
-    const top = rect.top - srect.top
-    const bottom = rect.bottom - srect.top
+    const top = rect.top - sRect.top
+    const bottom = rect.bottom - sRect.top
     const viewH = scroll.clientHeight
-    if (top < headerH) {
-      scroll.scrollTop += top - headerH
-    } else if (bottom > viewH) {
-      scroll.scrollTop += bottom - viewH
+    if (top < headerGuard) {
+      scroll.scrollTop += top - headerGuard
+    } else if (bottom > viewH - statusH) {
+      scroll.scrollTop += bottom - (viewH - statusH)
     }
   }
 
@@ -1796,8 +1946,8 @@ export function PlannerEditor(): React.JSX.Element {
   const deleteTotal = confirmDelete ? countDeletable(confirmDelete.tasks) : 0
 
   return (
-    <div className="planner-editor">
-      <div className="planner-titlebar">
+    <div className={`planner-editor${ganttMode ? ' planner-gantt' : ''}`} ref={plannerRef}>
+      <div className="planner-titlebar" ref={titlebarRef}>
         <span className="planner-toolbar-title" title={schedule.name}>
           {schedule.name}
         </span>
@@ -1821,7 +1971,7 @@ export function PlannerEditor(): React.JSX.Element {
           </button>
         )}
       </div>
-      <div className="planner-toolbar">
+      <div className="planner-toolbar" ref={toolbarRef}>
         <div className="planner-toolbar-group">
           <button
             className="icon-btn"
@@ -1993,21 +2143,53 @@ export function PlannerEditor(): React.JSX.Element {
                 onMouseDownCapture={handleGridMouseDown}
               >
                 <div className="planner-grid-head" style={{ gridTemplateColumns: template }}>
-                  <div className="planner-col-toggle planner-cell"></div>
-                  {visibleCols.has('indicator') && (
-                    <div className="planner-col-indicator planner-cell"></div>
-                  )}
-                  <div className="planner-col-no planner-cell" style={{ left: noLeft }}>
-                    No.
-                  </div>
-                  <div className="planner-col-title planner-cell" style={{ left: titleLeft }}>
-                    Title
-                  </div>
-                  {movableCols.map((key) => (
-                    <div key={key} className={`${MOVABLE_HEADERS[key].className} planner-cell`}>
-                      {MOVABLE_HEADERS[key].label}
+                  <div
+                    className="planner-head-band planner-head-left"
+                    style={{
+                      gridColumn: `1 / ${colSplit.leftCount + 1}`,
+                      gridTemplateColumns: colSplit.left
+                    }}
+                  >
+                    <div className="planner-col-toggle planner-cell"></div>
+                    {visibleCols.has('indicator') && (
+                      <div className="planner-col-indicator planner-cell"></div>
+                    )}
+                    <div className="planner-col-no planner-cell" style={{ left: noLeft }}>
+                      No.
                     </div>
-                  ))}
+                    <div className="planner-col-title planner-cell" style={{ left: titleLeft }}>
+                      Title
+                      <PlannerResizeHandle
+                        width={titleWidthGrid}
+                        min={TITLE_WIDTH_GRID_MIN}
+                        max={TITLE_WIDTH_GRID_MAX}
+                        onResize={setTitleWidthGrid}
+                        onCommitEnd={(w) => {
+                          setTitleWidthGrid(w)
+                          persistTitleWidth({ grid: w })
+                        }}
+                        onReset={() => {
+                          setTitleWidthGrid(null)
+                          persistTitleWidth({ grid: null })
+                        }}
+                      />
+                    </div>
+                  </div>
+                  {colSplit.right && (
+                    <div
+                      className="planner-head-band planner-head-right"
+                      style={{
+                        gridColumn: `${colSplit.leftCount + 1} / -1`,
+                        gridTemplateColumns: colSplit.right
+                      }}
+                    >
+                      {movableCols.map((key) => (
+                        <div key={key} className={`${MOVABLE_HEADERS[key].className} planner-cell`}>
+                          {MOVABLE_HEADERS[key].label}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div className="planner-grid-body">{renderTaskTree(sc.tasks, null, 0)}</div>
               </div>
@@ -2017,7 +2199,14 @@ export function PlannerEditor(): React.JSX.Element {
                 calendar={cal}
                 collapsed={collapsed}
                 dayWidth={ganttDayWidth}
+                titleWidth={titleWidthGantt}
                 onToggle={toggleCollapse}
+                onTitleWidthResize={setTitleWidthGantt}
+                onTitleWidthCommit={(w) => persistTitleWidth({ gantt: w })}
+                onTitleWidthReset={() => {
+                  setTitleWidthGantt(GANTT_TITLE_WIDTH_DEFAULT)
+                  persistTitleWidth({ gantt: GANTT_TITLE_WIDTH_DEFAULT })
+                }}
                 onResize={handleGanttResize}
                 onSetDates={handleGanttSetDates}
                 onClearPlan={handleGanttClearPlan}
@@ -2027,7 +2216,10 @@ export function PlannerEditor(): React.JSX.Element {
           </div>
         )}
       </div>
-      <div className="planner-statusbar">
+      <div className="planner-hscroll" ref={hScrollBarRef} onPointerDown={handleHScrollDown}>
+        <div className="planner-hscroll-thumb" ref={hScrollThumbRef} />
+      </div>
+      <div className="planner-statusbar" ref={statusbarRef}>
         {ganttMode && (
           <div className="planner-gantt-zoom" title="Gantt zoom">
             <button
@@ -2256,9 +2448,19 @@ export function PlannerEditor(): React.JSX.Element {
       )}
 
       {confirmDelete && (
-        <Modal title="Delete task" onClose={() => setConfirmDelete(null)}>
-          <p className="confirm-message">
-            {confirmDelete.tasks.length === 1
+        <ConfirmModal
+          title="Delete task"
+          onClose={() => setConfirmDelete(null)}
+          onConfirm={() => {
+            if (confirmDelete) {
+              commit(sc, removeTasks(sc.tasks, new Set(confirmDelete.tasks.map((t) => t.id))))
+            }
+            setSelected(new Set())
+            setAnchorId(null)
+            setConfirmDelete(null)
+          }}
+          message={
+            confirmDelete.tasks.length === 1
               ? confirmDelete.tasks[0].children.length > 0
                 ? `Delete "${confirmDelete.tasks[0].title || 'Untitled'}" and its ${
                     deleteTotal - 1
@@ -2266,27 +2468,9 @@ export function PlannerEditor(): React.JSX.Element {
                 : `Delete "${confirmDelete.tasks[0].title || 'Untitled'}"? This cannot be undone.`
               : `Delete ${confirmDelete.tasks.length} selected task${
                   confirmDelete.tasks.length === 1 ? '' : 's'
-                } (${deleteTotal} total including subtasks)? This cannot be undone.`}
-          </p>
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setConfirmDelete(null)}>
-              Cancel
-            </button>
-            <button
-              className="btn danger"
-              onClick={() => {
-                if (confirmDelete) {
-                  commit(sc, removeTasks(sc.tasks, new Set(confirmDelete.tasks.map((t) => t.id))))
-                }
-                setSelected(new Set())
-                setAnchorId(null)
-                setConfirmDelete(null)
-              }}
-            >
-              Delete
-            </button>
-          </div>
-        </Modal>
+                } (${deleteTotal} total including subtasks)? This cannot be undone.`
+          }
+        />
       )}
 
       {columnsOpen && (

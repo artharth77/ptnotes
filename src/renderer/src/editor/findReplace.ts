@@ -114,11 +114,20 @@ function scrollMatchIntoView(editor: Editor, match: FindRange): void {
   const content = editor.view.dom.closest('.editor-content')
   if (!content) return
   const cRect = content.getBoundingClientRect()
+  const overlays = content.parentElement?.querySelectorAll<HTMLElement>(
+    '.editor-toolbar, .find-bar'
+  )
+  let overlayH = 0
+  overlays?.forEach((o) => {
+    overlayH = Math.max(overlayH, o.getBoundingClientRect().bottom - cRect.top)
+  })
+  const meta = content.parentElement?.querySelector<HTMLElement>('.editor-meta')
+  const metaH = meta ? Math.max(0, cRect.bottom - meta.getBoundingClientRect().top) : 0
   const margin = 12
-  if (rect.top < cRect.top) {
-    content.scrollTop += rect.top - cRect.top - margin
-  } else if (rect.bottom > cRect.bottom) {
-    content.scrollTop += rect.bottom - cRect.bottom + margin
+  if (rect.top < cRect.top + overlayH) {
+    content.scrollTop += rect.top - cRect.top - overlayH - margin
+  } else if (rect.bottom > cRect.bottom - metaH) {
+    content.scrollTop += rect.bottom - (cRect.bottom - metaH) + margin
   }
 }
 

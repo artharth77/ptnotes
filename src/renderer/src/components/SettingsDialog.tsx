@@ -11,7 +11,7 @@ import {
   mdiTrashCanOutline
 } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
-import { Modal, TextField } from './Modal'
+import { Modal, ConfirmModal, TextField } from './Modal'
 import { MdiIcon } from './MdiIcon'
 import { BotsSettingsPane } from './BotsSettingsPane'
 import type {
@@ -262,6 +262,7 @@ function AiSettingsPane({
 }): React.JSX.Element {
   const [editing, setEditing] = useState<AIProfile | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const profile = config.profiles.find((p) => p.id === config.activeProfileId) ?? config.profiles[0]
   const selected = config.profiles.find((p) => p.id === selectedId) ?? profile
@@ -280,6 +281,11 @@ function AiSettingsPane({
     if (selected) setEditing({ ...selected })
   }
 
+  function requestDeleteProfile(): void {
+    if (!selected || config.profiles.length <= 1) return
+    setDeleting(true)
+  }
+
   async function deleteProfile(): Promise<void> {
     if (config.profiles.length <= 1) return
     const targetId = selected?.id ?? ''
@@ -290,6 +296,7 @@ function AiSettingsPane({
       activeProfileId: config.activeProfileId === targetId ? rest[0].id : config.activeProfileId
     }
     setSelectedId(null)
+    setDeleting(false)
     await onCommit(next)
   }
 
@@ -373,7 +380,7 @@ function AiSettingsPane({
           </button>
           <button
             className="btn"
-            onClick={() => void deleteProfile()}
+            onClick={requestDeleteProfile}
             disabled={!selected || config.profiles.length <= 1}
           >
             Delete
@@ -410,6 +417,21 @@ function AiSettingsPane({
             initial={editing}
             onClose={() => setEditing(null)}
             onSave={(saved) => void saveProfile(saved)}
+          />,
+          document.body
+        )}
+      {deleting &&
+        selected &&
+        createPortal(
+          <ConfirmModal
+            title="Delete profile"
+            onClose={() => setDeleting(false)}
+            onConfirm={() => void deleteProfile()}
+            message={
+              <p className="confirm-message">
+                Delete profile &quot;{selected.name}&quot;? This cannot be undone.
+              </p>
+            }
           />,
           document.body
         )}
@@ -610,10 +632,12 @@ function AppearanceSettings(): React.JSX.Element {
   const fontSize = useAppStore((s) => s.fontSize)
   const uiDensity = useAppStore((s) => s.uiDensity)
   const editorFontFamily = useAppStore((s) => s.editorFontFamily)
+  const surfaceTranslucent = useAppStore((s) => s.surfaceTranslucent)
   const setTheme = useAppStore((s) => s.setTheme)
   const setFontSize = useAppStore((s) => s.setFontSize)
   const setUiDensity = useAppStore((s) => s.setUiDensity)
   const setEditorFontFamily = useAppStore((s) => s.setEditorFontFamily)
+  const setSurfaceTranslucent = useAppStore((s) => s.setSurfaceTranslucent)
   const themeOptions: Array<{
     value: 'light' | 'dark' | 'system'
     label: string
@@ -652,14 +676,8 @@ function AppearanceSettings(): React.JSX.Element {
   ]
   return (
     <>
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>Appearance</div>
-          <p className="hint" style={{ marginTop: 2, marginBottom: 0 }}>
-            Choose PTNotes&apos; color scheme.
-          </p>
-        </div>
-      </div>
+      <div className="section-title">Theme</div>
+      <p className="hint">Choose PTNotes&apos; color scheme.</p>
       <div className="seg block" role="radiogroup" aria-label="Theme">
         {themeOptions.map((opt) => (
           <button
@@ -675,16 +693,8 @@ function AppearanceSettings(): React.JSX.Element {
         ))}
       </div>
 
-      <div style={{ height: 24 }} />
-
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>Font size</div>
-          <p className="hint" style={{ marginTop: 2, marginBottom: 0 }}>
-            Base text size for the whole interface.
-          </p>
-        </div>
-      </div>
+      <div className="section-title">Font size</div>
+      <p className="hint">Base text size for the whole interface.</p>
       <div className="seg block" role="radiogroup" aria-label="Font size">
         {fontSizeOptions.map((opt) => (
           <button
@@ -710,16 +720,8 @@ function AppearanceSettings(): React.JSX.Element {
         ))}
       </div>
 
-      <div style={{ height: 24 }} />
-
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>UI density</div>
-          <p className="hint" style={{ marginTop: 2, marginBottom: 0 }}>
-            Compact = less vertical padding (more information on screen).
-          </p>
-        </div>
-      </div>
+      <div className="section-title">UI density</div>
+      <p className="hint">Compact = less vertical padding (more information on screen).</p>
       <div className="seg block" role="radiogroup" aria-label="UI density">
         {densityOptions.map((opt) => (
           <button
@@ -735,16 +737,8 @@ function AppearanceSettings(): React.JSX.Element {
         ))}
       </div>
 
-      <div style={{ height: 24 }} />
-
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>Editor font</div>
-          <p className="hint" style={{ marginTop: 2, marginBottom: 0 }}>
-            Font family for note body content. Does not change the UI chrome font.
-          </p>
-        </div>
-      </div>
+      <div className="section-title">Editor font</div>
+      <p className="hint">Font family for note body content. Does not change the UI chrome font.</p>
       <div className="seg block" role="radiogroup" aria-label="Editor font">
         {editorFontOptions.map((opt) => (
           <button
@@ -766,6 +760,29 @@ function AppearanceSettings(): React.JSX.Element {
             {opt.label}
           </button>
         ))}
+      </div>
+
+      <div className="section-title">Translucency</div>
+      <p className="hint">Frosted translucent popups, menus and panels; Solid = opaque surfaces.</p>
+      <div className="seg block" role="radiogroup" aria-label="Translucency">
+        <button
+          role="radio"
+          aria-checked={surfaceTranslucent}
+          className={`seg-btn${surfaceTranslucent ? ' active' : ''}`}
+          onClick={() => setSurfaceTranslucent(true)}
+          title="Blur + translucent backlight behind floating surfaces"
+        >
+          Translucent
+        </button>
+        <button
+          role="radio"
+          aria-checked={!surfaceTranslucent}
+          className={`seg-btn${surfaceTranslucent ? '' : ' active'}`}
+          onClick={() => setSurfaceTranslucent(false)}
+          title="Fully opaque floating surfaces, no blur"
+        >
+          Solid
+        </button>
       </div>
     </>
   )
@@ -1094,38 +1111,43 @@ function SkillsPane(): React.JSX.Element {
               )}
               {menuFor === key && menuPos && (
                 <>
-                  <div className="menu-overlay" onClick={() => setMenuFor(null)} />
-                  <div
-                    ref={menuRef}
-                    className="note-menu"
-                    style={{ left: menuPos.x, top: menuPos.y }}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <button className="note-menu-item" onClick={() => void openEditor(meta)}>
-                      <span className="note-menu-icon">
-                        <MdiIcon path={mdiPencil} size={16} />
-                      </span>{' '}
-                      Edit skill
-                    </button>
-                    <button className="note-menu-item" onClick={() => void moveSkill(meta)}>
-                      <span className="note-menu-icon">
-                        <MdiIcon path={mdiSwapHorizontal} size={16} />
-                      </span>{' '}
-                      Move to {meta.scope === 'global' ? 'Project' : 'Global'} skills
-                    </button>
-                    <button
-                      className="note-menu-item danger"
-                      onClick={() => {
-                        setMenuFor(null)
-                        setDeleting(meta)
-                      }}
-                    >
-                      <span className="note-menu-icon">
-                        <MdiIcon path={mdiTrashCanOutline} size={16} />
-                      </span>{' '}
-                      Delete skill
-                    </button>
-                  </div>
+                  {createPortal(
+                    <>
+                      <div className="menu-overlay" onClick={() => setMenuFor(null)} />
+                      <div
+                        ref={menuRef}
+                        className="note-menu"
+                        style={{ left: menuPos.x, top: menuPos.y }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button className="note-menu-item" onClick={() => void openEditor(meta)}>
+                          <span className="note-menu-icon">
+                            <MdiIcon path={mdiPencil} size={16} />
+                          </span>{' '}
+                          Edit skill
+                        </button>
+                        <button className="note-menu-item" onClick={() => void moveSkill(meta)}>
+                          <span className="note-menu-icon">
+                            <MdiIcon path={mdiSwapHorizontal} size={16} />
+                          </span>{' '}
+                          Move to {meta.scope === 'global' ? 'Project' : 'Global'} skills
+                        </button>
+                        <button
+                          className="note-menu-item danger"
+                          onClick={() => {
+                            setMenuFor(null)
+                            setDeleting(meta)
+                          }}
+                        >
+                          <span className="note-menu-icon">
+                            <MdiIcon path={mdiTrashCanOutline} size={16} />
+                          </span>{' '}
+                          Delete skill
+                        </button>
+                      </div>
+                    </>,
+                    document.body
+                  )}
                 </>
               )}
             </div>
@@ -1174,53 +1196,54 @@ function SkillsPane(): React.JSX.Element {
             )}
         </>
       )}
-      {creating && (
-        <SkillEditorModal
-          project={activeProject}
-          initial={null}
-          onClose={() => setCreating(false)}
-          onSaved={() => {
-            setCreating(false)
-            void reload()
-          }}
-        />
-      )}
-      {editing && (
-        <SkillEditorModal
-          project={activeProject}
-          initial={editing}
-          onClose={() => setEditing(null)}
-          onSaved={() => {
-            setEditing(null)
-            void reload()
-          }}
-        />
-      )}
-      {deleting && (
-        <Modal title="Delete Skill" onClose={() => setDeleting(null)}>
-          <p className="confirm-message">
-            Delete the {deleting.scope} skill &quot;{deleting.name}&quot;? This cannot be undone.
-          </p>
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setDeleting(null)}>
-              Cancel
-            </button>
-            <button
-              className="btn danger"
-              onClick={() => {
-                void window.ptnotes.skills
-                  .delete(activeProject, deleting.scope, deleting.name)
-                  .then(() => {
-                    setDeleting(null)
-                    void reload()
-                  })
-              }}
-            >
-              Delete
-            </button>
-          </div>
-        </Modal>
-      )}
+      {creating &&
+        createPortal(
+          <SkillEditorModal
+            project={activeProject}
+            initial={null}
+            onClose={() => setCreating(false)}
+            onSaved={() => {
+              setCreating(false)
+              void reload()
+            }}
+          />,
+          document.body
+        )}
+      {editing &&
+        createPortal(
+          <SkillEditorModal
+            project={activeProject}
+            initial={editing}
+            onClose={() => setEditing(null)}
+            onSaved={() => {
+              setEditing(null)
+              void reload()
+            }}
+          />,
+          document.body
+        )}
+      {deleting &&
+        createPortal(
+          <ConfirmModal
+            title="Delete Skill"
+            onClose={() => setDeleting(null)}
+            onConfirm={() => {
+              void window.ptnotes.skills
+                .delete(activeProject, deleting.scope, deleting.name)
+                .then(() => {
+                  setDeleting(null)
+                  void reload()
+                })
+            }}
+            message={
+              <>
+                Delete the {deleting.scope} skill &quot;{deleting.name}&quot;? This cannot be
+                undone.
+              </>
+            }
+          />,
+          document.body
+        )}
     </>
   )
 }
@@ -1390,23 +1413,24 @@ export function SettingsDialog(): React.JSX.Element {
       </div>
       {error && <p className="form-error">{error}</p>}
       {pendingRoot && (
-        <Modal title="Move project data" onClose={() => setPendingRoot(null)}>
-          <p className="confirm-message">
-            Move all project data from <code>{storage.rootDir}</code> to <code>{pendingRoot}</code>?
-          </p>
+        <ConfirmModal
+          title="Move project data"
+          onClose={() => setPendingRoot(null)}
+          disabled={moving}
+          confirmLabel={moving ? 'Moving…' : 'Move'}
+          onConfirm={() => void confirmMove()}
+          message={
+            <>
+              Move all project data from <code>{storage.rootDir}</code> to{' '}
+              <code>{pendingRoot}</code>?
+            </>
+          }
+        >
           <p className="hint">
             Every project folder, notes, chats and the project registry will be moved. The current
             location will no longer be used.
           </p>
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setPendingRoot(null)} disabled={moving}>
-              Cancel
-            </button>
-            <button className="btn danger" onClick={() => void confirmMove()} disabled={moving}>
-              {moving ? 'Moving…' : 'Move'}
-            </button>
-          </div>
-        </Modal>
+        </ConfirmModal>
       )}
     </Modal>
   )

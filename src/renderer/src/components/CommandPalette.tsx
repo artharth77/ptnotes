@@ -31,6 +31,9 @@ export type CommandPaletteAction = {
 type SettingsCategory =
   'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets' | 'bots' | 'appearance'
 
+/** Canonical category display order — groups never reshuffle while typing. */
+const CATEGORY_ORDER = ['Project', 'Create', 'View', 'Settings', 'Appearance']
+
 function fuzzyMatch(haystack: string, needle: string): number | null {
   if (!needle) return 0
   const h = haystack.toLowerCase()
@@ -255,29 +258,45 @@ export function CommandPalette(): React.JSX.Element | null {
     return out
   }, [actions, query])
 
-  const grouped = useMemo<
-    Array<{ category: string; entries: Array<{ item: (typeof filtered)[number]; index: number }> }>
+  /**
+   * Merged groups in canonical category order; items keep their score-sorted
+   * order within each group. Keyboard navigation follows this display order
+   * (`displayItems`), so highlights move exactly as rendered.
+   */
+  const groups = useMemo<
+    Array<{ category: string; entries: Array<{ action: CommandPaletteAction; score: number }> }>
   >(() => {
-    const order: string[] = []
-    const byCat = new Map<string, Array<{ item: (typeof filtered)[number]; index: number }>>()
-    filtered.forEach((item, index) => {
-      const cat = item.action.category
-      if (!byCat.has(cat)) {
-        order.push(cat)
-        byCat.set(cat, [])
+    const rank = new Map(CATEGORY_ORDER.map((c, i) => [c, i]))
+    const byCat = new Map<string, Array<{ action: CommandPaletteAction; score: number }>>()
+    for (const item of filtered) {
+      let list = byCat.get(item.action.category)
+      if (!list) {
+        list = []
+        byCat.set(item.action.category, list)
       }
-      byCat.get(cat)!.push({ item, index })
-    })
-    return order.map((category) => ({ category, entries: byCat.get(category)! }))
+      list.push(item)
+    }
+    const cats = [...byCat.keys()].sort(
+      (a, b) => (rank.get(a) ?? Infinity) - (rank.get(b) ?? Infinity)
+    )
+    return cats.map((category) => ({ category, entries: byCat.get(category)! }))
   }, [filtered])
 
+  const displayItems = useMemo(() => groups.flatMap((group) => group.entries), [groups])
+
   useEffect(() => {
-    const clamped = Math.min(activeIndex, Math.max(0, filtered.length - 1))
+    const clamped = Math.min(activeIndex, Math.max(0, displayItems.length - 1))
     if (clamped !== activeIndex) setActiveIndex(clamped)
-  }, [filtered, activeIndex, setActiveIndex])
+  }, [displayItems, activeIndex, setActiveIndex])
+
+  useEffect(() => {
+    if (!open) return
+    const el = document.querySelector('.command-palette-item.active')
+    el?.scrollIntoView({ block: 'nearest' })
+  }, [activeIndex, open])
 
   function select(i: number): void {
-    const item = filtered[i]
+    const item = displayItems[i]
     if (item) item.action.run()
   }
 
@@ -298,7 +317,7 @@ export function CommandPalette(): React.JSX.Element | null {
             setOpen(false)
           } else if (e.key === 'ArrowDown') {
             e.preventDefault()
-            setActiveIndex(Math.min(filtered.length - 1, activeIndex + 1))
+            setActiveIndex(Math.min(displayItems.length - 1, activeIndex + 1))
           } else if (e.key === 'ArrowUp') {
             e.preventDefault()
             setActiveIndex(Math.max(0, activeIndex - 1))
@@ -325,27 +344,30 @@ export function CommandPalette(): React.JSX.Element | null {
           {filtered.length === 0 ? (
             <div className="command-palette-empty">No commands match “{query}”.</div>
           ) : (
-            grouped.map((group) => (
+            groups.map((group) => (
               <div key={group.category} className="command-palette-group">
                 <div className="command-palette-group-header">{group.category}</div>
-                {group.entries.map(({ item, index: i }) => (
-                  <button
-                    key={item.action.id}
-                    className={`command-palette-item${i === activeIndex ? ' active' : ''}`}
-                    onClick={() => select(i)}
-                    onMouseEnter={() => setActiveIndex(i)}
-                  >
-                    <span className="command-palette-icon">
-                      <MdiIcon path={item.action.iconPath} size={18} />
-                    </span>
-                    <span className="command-palette-text">
-                      <span className="command-palette-title">{item.action.title}</span>
-                      {item.action.subtitle && (
-                        <span className="command-palette-subtitle">{item.action.subtitle}</span>
-                      )}
-                    </span>
-                  </button>
-                ))}
+                {group.entries.map((item) => {
+                  const i = displayItems.indexOf(item)
+                  return (
+                    <button
+                      key={item.action.id}
+                      className={`command-palette-item${i === activeIndex ? ' active' : ''}`}
+                      onClick={() => select(i)}
+                      onMouseEnter={() => setActiveIndex(i)}
+                    >
+                      <span className="command-palette-icon">
+                        <MdiIcon path={item.action.iconPath} size={18} />
+                      </span>
+                      <span className="command-palette-text">
+                        <span className="command-palette-title">{item.action.title}</span>
+                        {item.action.subtitle && (
+                          <span className="command-palette-subtitle">{item.action.subtitle}</span>
+                        )}
+                      </span>
+                    </button>
+                  )
+                })}
               </div>
             ))
           )}

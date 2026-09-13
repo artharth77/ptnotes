@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.18.1] — 2026-09-13
+
+### Added
+
+- **UI: translucent frosted surfaces app-wide, with a Translucency toggle** — context menus, dropdowns and floating popups (note/skill/planner kanban menus, kanban label menus, AI model/endpoint popups, chat bubble menus, mention & slash popups, gantt info popup, project dropdown), modal cards, and the full-screen chat image / PDF / PDF-page-manager viewers share one frosted surface recipe (`color-mix` 60% elevation + `backdrop-filter: blur(12px) saturate(1.2)`, theme-tunable via `--frost-bg`). Nested dialogs render solid against the outer frost card so frost-on-frost never stacks to near-opaque. The Settings → Appearance pane gains a **Translucency** segmented control (translucent / solid): solid mode makes every frost surface opaque and drops backdrop blur; the choice persists (`settings:setAppearance`) and applies live across light and dark themes.
+- **Planner: frosted gantt/planner overlays** — the planner title/toolbar/status-bar overlays and the gantt header bands (left title header, day band) are frosted translucent; the gantt scroller content pads below the toolbar overlays so the first row is visible and rows scroll beneath the title/toolbar/status bars, with the sticky gantt header pinned to the scrollport top and month heads sharing the frost.
+- **Files: frosted explorer chrome** — the file-explorer toolbar and status bar became frosted overlays (list scrolls beneath them, heights measured via ResizeObserver), the error banner floats under the toolbar, and the sticky list header is translucent. Both the gantt month heads and explorer chrome match the menus' frost recipe.
+- **Chat: `/models` opens the model popup in the chat status bar** — the slash command no longer jumps to AI settings; it opens the same profile picker as clicking the model name, with **Up/Down/Enter/Escape** keyboard navigation (cursor highlight, scroll-into-view), a 100 ms first-key grace so the opening keystroke can't immediately close it, and focus returning to the chat input after select/cancel. Keyboard nav is also enabled for clicking the model name, which now anchors the popup's bottom edge 4 px above the status-bar button (replacing the per-item height estimate that shifted it upward).
+- **Chat: trace button disabled when there is no trace** — a new `chat:traceExists` IPC reports whether the active session has raw AI trace data; the status-bar trace button is disabled (with a "no trace yet" tooltip) until the first AI response, and re-checks when the session changes or a run completes.
+- **Project dropdown: keyboard navigation** — Escape closes, Up/Down move a highlighted cursor (snapped to the active project on open, synced with mouse hover), and Enter opens the cursor row (missing-path entries open Recreate); rows scroll into view as the cursor moves.
+- **Settings: AI profile delete now asks for confirmation** — a `ConfirmModal` (Delete / Cancel, Enter confirms) guards deleting an AI profile instead of removing it on a single click.
+
+### Changed
+
+- **Command palette: frosted, undimmed, and predictable ordering** — the Cmd/Ctrl+K palette now uses the shared frost surface over a transparent, unblurred backdrop (matching Global Find); items render in **canonical category groups** (Project → Create → View → Settings → Appearance, stable while typing, score-sorted within each group), Up/Down follow the displayed order (previously the highlight jumped because it walked the score-sorted list while rendering a re-bucketed grouping), and the highlighted row scrolls into view. Group headers fade from the frost background so items scroll under them cleanly; modal cards use the same frost.
+- **UI: modal overlays no longer dim the screen** — modals open over the undimmed app with the frosted card reading light-glass (also matches the command palette / Global Find overlays).
+- **Chat: fullscreen viewer backdrops use frost blur instead of a black dim** — the chat image viewer (`.chat-img-viewer`), PDF preview and PDF page manager replace their 75% black scrim with the frosted blur surface; the text/markdown FileViewer opens over a transparent overlay with its panel in the frost group.
+
+### Fixed
+
+- **Settings: skills `...` menu rendered at the wrong position and under the modal** — the viewport-positioned `position: fixed` menu was trapped by the frosted modal (its `backdrop-filter` turns it into a containing block) and clipped by the scrolling pane; the menu now renders via a portal to `document.body`, and the shared menu layer (`menu-overlay` / `note-menu`) sits above the modal layer (z-index 101/102) so context menus can open over any open dialog. All SkillsPane dialogs (New/Edit Skill, deletes, AI-profile editor edit) also portal to the body so they frost correctly instead of stacking frost-on-frost.
+- **Planner: gantt first row hidden under the toolbar overlay** — the undimmed scroller previously placed the first rows underneath the title/toolbar overlays at rest; the scroller now pads below them (status-bar padding included).
+
 ## [0.18.0] — 2026-09-13
 
 ### Fixed

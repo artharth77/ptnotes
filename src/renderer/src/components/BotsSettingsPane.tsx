@@ -4,7 +4,7 @@ import { useAppStore } from '../store/useAppStore'
 import { formatGroupTimestamp } from '@shared/bots'
 import type { AIProfile } from '@shared/types'
 import type { BotMemoryEntry, GroupChatMeta } from '@shared/bots'
-import { Modal } from './Modal'
+import { ConfirmModal } from './Modal'
 import { MdiIcon } from './MdiIcon'
 import { friendlyError } from '../errors'
 
@@ -320,11 +320,18 @@ export function BotsSettingsPane(): React.JSX.Element {
       {error && <div className="form-error">{error}</div>}
 
       {confirmDelete && (
-        <Modal title="Delete Bot" onClose={() => setConfirmDelete(null)}>
-          <p className="confirm-message">
-            Delete bot &quot;{bots.find((b) => b.id === confirmDelete.id)?.name ?? confirmDelete.id}
-            &quot;? This cannot be undone.
-          </p>
+        <ConfirmModal
+          title="Delete Bot"
+          onClose={() => setConfirmDelete(null)}
+          onConfirm={() => void removeBot()}
+          message={
+            <>
+              Delete bot &quot;
+              {bots.find((b) => b.id === confirmDelete.id)?.name ?? confirmDelete.id}
+              &quot;? This cannot be undone.
+            </>
+          }
+        >
           {confirmDelete.groups.length > 0 && (
             <p className="hint">
               The bot is a member of {confirmDelete.groups.length} group chat
@@ -333,15 +340,7 @@ export function BotsSettingsPane(): React.JSX.Element {
               {confirmDelete.groups.length === 1 ? ' it' : ' them'}.
             </p>
           )}
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setConfirmDelete(null)}>
-              Cancel
-            </button>
-            <button className="btn danger" onClick={() => void removeBot()}>
-              Delete
-            </button>
-          </div>
-        </Modal>
+        </ConfirmModal>
       )}
     </>
   )

@@ -79,4 +79,12 @@ export function registerChatIpc(service: PTNotesService): void {
       sessionId: string
     ): Promise<AiTraceFile | null> => service.readChatTrace(project, sessionId)
   )
+  ipcMain.handle(
+    'chat:traceExists',
+    async (_e: IpcMainInvokeEvent, project: string, sessionId: string): Promise<boolean> => {
+      if (!sessionId) return false
+      const meta = await service.chatTraceMeta(project, sessionId)
+      return meta.count > 0
+    }
+  )
 }

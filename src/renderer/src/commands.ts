@@ -15,9 +15,9 @@ export const builtinSlashCommands: SlashCommand[] = [
   },
   {
     name: 'models',
-    description: 'Open AI settings to choose a model',
+    description: 'Choose a model (opens the model picker)',
     action: (ctx: SlashCommandContext) => {
-      ctx.openAiSettings()
+      ctx.openModelPopup()
     }
   }
 ]

@@ -382,6 +382,8 @@ function FormatButtons({
 
 export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.JSX.Element {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+  const toolbarRef = useRef<HTMLDivElement | null>(null)
   const [contentEl, setContentEl] = useState<HTMLElement | null>(null)
   const appliedContent = useRef(content)
   const onUpdateCount = useRef(0)
@@ -570,6 +572,29 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
   const [galleryOpen, setGalleryOpen] = useState(false)
   const [dropActive, setDropActive] = useState(false)
   const findInputRef = useRef<HTMLInputElement | null>(null)
+  const findBarRef = useRef<HTMLDivElement | null>(null)
+  const metaRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const wrap = wrapRef.current
+    if (!wrap) return
+    const tb = rawMode ? null : toolbarRef.current
+    const fb = rawMode ? null : findBarRef.current
+    const meta = metaRef.current
+    const apply = (): void => {
+      if (meta) wrap.style.setProperty('--editor-meta-h', `${meta.offsetHeight}px`)
+      if (tb) wrap.style.setProperty('--editor-toolbar-h', `${tb.offsetHeight}px`)
+      else wrap.style.setProperty('--editor-toolbar-h', '0px')
+      if (fb) wrap.style.setProperty('--editor-findbar-h', `${fb.offsetHeight}px`)
+      if (!fb) wrap.style.setProperty('--editor-findbar-h', '0px')
+    }
+    apply()
+    const ro = new ResizeObserver(apply)
+    if (meta) ro.observe(meta)
+    if (tb) ro.observe(tb)
+    if (fb) ro.observe(fb)
+    return () => ro.disconnect()
+  }, [rawMode, noteId, findOpen])
 
   useEffect(() => {
     if (!tableMenu && !formatMenu) return
@@ -750,7 +775,8 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
 
   return (
     <div
-      className="editor-wrap"
+      className={`editor-wrap${findOpen && !rawMode ? ' editor-find-open' : ''}`}
+      ref={wrapRef}
       onDragOver={(e) => {
         if (rawMode || !e.dataTransfer.types.includes('Files')) return
         e.preventDefault()
@@ -767,7 +793,7 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
       }}
     >
       {!rawMode && (
-        <div className="editor-toolbar">
+        <div className="editor-toolbar" ref={toolbarRef}>
           <ToolbarBtn
             icon={mdiFormatHeader1}
             title="Heading 1"
@@ -935,7 +961,7 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
         </div>
       )}
       {!rawMode && findOpen && (
-        <div className="find-bar">
+        <div className="find-bar" ref={findBarRef}>
           <input
             ref={findInputRef}
             className="find-input"
@@ -1159,7 +1185,7 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
           </div>
         </BubbleMenu>
       )}
-      <div className="editor-meta">
+      <div className="editor-meta" ref={metaRef}>
         <span>
           Saving to <code>notes/{noteId}.md</code> · markdown
         </span>

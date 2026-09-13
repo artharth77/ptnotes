@@ -42,8 +42,10 @@ import type {
   Tab,
   ToolCallInfo,
   FileEntry,
+  ExplorerClipboard,
   ExplorerEntry,
   ExplorerFolderNode,
+  ExplorerOpsDialog,
   ExplorerSort
 } from '@shared/types'
 
@@ -129,11 +131,18 @@ interface AppState {
   explorerSort: ExplorerSort
   /** Name filter of the file list ('' = no filter). */
   explorerFilter: string
+  /** Explorer clipboard shared by the folder tree and the file list. */
+  explorerClipboard: ExplorerClipboard | null
+  /** Pending explorer op dialog (new folder / rename / delete confirm). */
+  explorerOpsDialog: ExplorerOpsDialog | null
+  /** Last explorer op error, shown in the file list banner. */
+  explorerOpsError: string | null
   formatHelperEnabled: boolean
   theme: 'light' | 'dark' | 'system'
   fontSize: 'small' | 'default' | 'large' | 'xlarge'
   uiDensity: 'compact' | 'cozy'
   editorFontFamily: 'sans' | 'serif' | 'mono'
+  surfaceTranslucent: boolean
   commandPaletteOpen: boolean
   commandPaletteQuery: string
   commandPaletteActiveIndex: number
@@ -272,11 +281,15 @@ interface AppState {
   setExplorerSelected: (paths: string[]) => void
   setExplorerSort: (sort: ExplorerSort) => void
   setExplorerFilter: (filter: string) => void
+  setExplorerClipboard: (clip: ExplorerClipboard | null) => void
+  setExplorerOpsDialog: (dialog: ExplorerOpsDialog | null) => void
+  setExplorerOpsError: (error: string | null) => void
   setFormatHelperEnabled: (enabled: boolean) => void
   setTheme: (theme: 'light' | 'dark' | 'system') => void
   setFontSize: (size: 'small' | 'default' | 'large' | 'xlarge') => void
   setUiDensity: (density: 'compact' | 'cozy') => void
   setEditorFontFamily: (family: 'sans' | 'serif' | 'mono') => void
+  setSurfaceTranslucent: (translucent: boolean) => void
   setCommandPaletteOpen: (open: boolean) => void
   toggleCommandPalette: () => void
   setCommandPaletteQuery: (q: string) => void
@@ -353,6 +366,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   explorerCollapsed: [],
   explorerSort: null,
   explorerFilter: '',
+  explorerClipboard: null,
+  explorerOpsDialog: null,
+  explorerOpsError: null,
   formatHelperEnabled: localStorage.getItem('ptnotes:formatHelper') !== '0',
   theme: (localStorage.getItem('ptnotes:theme') as 'light' | 'dark' | 'system' | null) ?? 'system',
   fontSize:
@@ -361,6 +377,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   uiDensity: (localStorage.getItem('ptnotes:uiDensity') as 'compact' | 'cozy' | null) ?? 'cozy',
   editorFontFamily:
     (localStorage.getItem('ptnotes:editorFont') as 'sans' | 'serif' | 'mono' | null) ?? 'sans',
+  surfaceTranslucent: localStorage.getItem('ptnotes:surfaceTranslucent') !== 'false',
   commandPaletteOpen: false,
   commandPaletteQuery: '',
   commandPaletteActiveIndex: 0,
@@ -471,7 +488,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       moduleHistoryRunId: null,
       explorerCwd: '',
       explorerTree: null,
-      explorerEntries: []
+      explorerEntries: [],
+      explorerClipboard: null,
+      explorerOpsDialog: null,
+      explorerOpsError: null
     })
     await Promise.all([
       get().refreshNotes(),
@@ -1700,6 +1720,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ explorerFilter: filter })
   },
 
+  setExplorerClipboard(explorerClipboard) {
+    set({ explorerClipboard })
+  },
+
+  setExplorerOpsDialog(explorerOpsDialog) {
+    set({ explorerOpsDialog })
+  },
+
+  setExplorerOpsError(explorerOpsError) {
+    set({ explorerOpsError })
+  },
+
   setFormatHelperEnabled(enabled) {
     localStorage.setItem('ptnotes:formatHelper', enabled ? '1' : '0')
     set({ formatHelperEnabled: enabled })
@@ -1751,6 +1783,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     void (async () => {
       try {
         await window.ptnotes.settings.setAppearance({ editorFontFamily: family })
+      } catch {
+        /* safe to ignore */
+      }
+    })()
+  },
+
+  setSurfaceTranslucent(translucent) {
+    localStorage.setItem('ptnotes:surfaceTranslucent', String(translucent))
+    document.documentElement.setAttribute('data-surface-translucent', translucent ? 'on' : 'off')
+    set({ surfaceTranslucent: translucent })
+    void (async () => {
+      try {
+        await window.ptnotes.settings.setAppearance({ surfaceTranslucent: translucent })
       } catch {
         /* safe to ignore */
       }

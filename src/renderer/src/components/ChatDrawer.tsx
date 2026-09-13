@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   mdiChevronDown,
@@ -259,8 +259,14 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   const [activeProfileName, setActiveProfileName] = useState('')
   const [activeProfileId, setActiveProfileId] = useState('')
   const [aiConfig, setAiConfig] = useState<AIConfig | null>(null)
-  const [profileMenuPos, setProfileMenuPos] = useState<{ top: number; right: number } | null>(null)
+  const [profileMenuPos, setProfileMenuPos] = useState<{ bottom: number; right: number } | null>(
+    null
+  )
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
+  const [profileCursor, setProfileCursor] = useState(0)
+  const openedAtRef = useRef<number | null>(null)
+  const firstKeyIgnoredRef = useRef(false)
+  const [traceExists, setTraceExists] = useState(false)
   const profileNameBtnRef = useRef<HTMLButtonElement>(null)
 
   const chatBubbleOriginRef = useRef<Element | null>(null)
@@ -552,46 +558,98 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     }
   }, [])
 
-  const profiles = aiConfig?.profiles ?? []
+  const profiles = useMemo(() => aiConfig?.profiles ?? [], [aiConfig])
+
+  const switchProfile = useCallback(
+    async (id: string): Promise<void> => {
+      if (!aiConfig) return
+      if (id === activeProfileId) {
+        closeProfileMenu()
+        return
+      }
+      closeProfileMenu()
+      try {
+        const saved = await window.ptnotes.ai.saveProfiles({ ...aiConfig, activeProfileId: id })
+        setAiConfig(saved)
+        setActiveProfileId(saved.activeProfileId)
+        const active = saved.profiles.find((p) => p.id === saved.activeProfileId)
+        setActiveProfileName(active?.name ?? '')
+        setActiveModel(active?.model ?? '')
+      } catch {
+        // ignore switch failures
+      }
+    },
+    [aiConfig, activeProfileId]
+  )
 
   function openProfileMenu(): void {
     const el = profileNameBtnRef.current
     if (el) {
       const rect = el.getBoundingClientRect()
-      const menuHeight = Math.min(
-        aiConfig?.profiles.length ? aiConfig?.profiles.length * 55 : 40,
-        280
-      )
+      // anchor the popup's bottom edge just above the button so it hugs the
+      // statusbar regardless of how many profile rows it contains
       setProfileMenuPos({
-        top: Math.max(4, rect.top - menuHeight - 4),
+        bottom: Math.max(4, window.innerHeight - rect.top + 4),
         right: Math.max(0, window.innerWidth - rect.right)
       })
     }
+    const idx = profiles.findIndex((p) => p.id === activeProfileId)
+    setProfileCursor(idx >= 0 ? idx : 0)
+    openedAtRef.current = performance.now()
+    firstKeyIgnoredRef.current = false
     setProfileMenuOpen(true)
   }
+
+  // Up/Down move the cursor, Enter selects it, Escape cancels; either way the
+  // conversation input gets focus back so typing resumes immediately
+  useEffect(() => {
+    if (!profileMenuOpen) return
+    function onKey(e: KeyboardEvent): void {
+      if (document.querySelector('.modal-overlay, .menu-overlay, .command-palette-backdrop')) return
+      // Grace period: ignore only the first key within 100ms of opening — the
+      // same Enter/Escape that opened the popup (slash keydown) arrives on
+      // window right after attach. Any later key is honored immediately.
+      if (
+        openedAtRef.current !== null &&
+        performance.now() - openedAtRef.current < 100 &&
+        !firstKeyIgnoredRef.current
+      ) {
+        firstKeyIgnoredRef.current = true
+        return
+      }
+      openedAtRef.current = null
+      const n = profiles.length
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        if (n === 0) return
+        const delta = e.key === 'ArrowDown' ? 1 : -1
+        setProfileCursor((c) => Math.max(0, Math.min(n - 1, c + delta)))
+      } else if (e.key === 'Enter') {
+        const p = profiles[profileCursor]
+        if (!p) return
+        e.preventDefault()
+        closeProfileMenu()
+        textareaRef.current?.focus()
+        void switchProfile(p.id)
+      } else if (e.key === 'Escape') {
+        e.preventDefault()
+        closeProfileMenu()
+        textareaRef.current?.focus()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [profileMenuOpen, profiles, profileCursor, switchProfile])
 
   function closeProfileMenu(): void {
     setProfileMenuOpen(false)
   }
 
-  async function switchProfile(id: string): Promise<void> {
-    if (!aiConfig) return
-    if (id === activeProfileId) {
-      closeProfileMenu()
-      return
-    }
-    closeProfileMenu()
-    try {
-      const saved = await window.ptnotes.ai.saveProfiles({ ...aiConfig, activeProfileId: id })
-      setAiConfig(saved)
-      setActiveProfileId(saved.activeProfileId)
-      const active = saved.profiles.find((p) => p.id === saved.activeProfileId)
-      setActiveProfileName(active?.name ?? '')
-      setActiveModel(active?.model ?? '')
-    } catch {
-      // ignore switch failures
-    }
-  }
+  useEffect(() => {
+    if (!profileMenuOpen) return
+    const el = document.querySelector('.chat-profile-item.cursor')
+    el?.scrollIntoView({ block: 'nearest' })
+  }, [profileCursor, profileMenuOpen])
 
   const list = useMemo(() => messages ?? [], [messages])
 
@@ -729,6 +787,24 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     prevBusy.current = chatBusy
   }, [chatBusy, activeProject])
 
+  // Trace button state: re-check when the session changes or an AI run ends
+  const activeSessionId = activeProject ? getActiveSessionId(activeProject) : null
+  useEffect(() => {
+    if (!activeProject || !activeSessionId) return
+    let cancelled = false
+    window.ptnotes.chat
+      .traceExists(activeProject, activeSessionId)
+      .then((ok) => {
+        if (!cancelled) setTraceExists(ok)
+      })
+      .catch(() => {
+        if (!cancelled) setTraceExists(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [activeProject, getActiveSessionId, chatBusy, activeSessionId])
+
   useEffect(() => {
     if (!activeProject) return
     let cancelled = false
@@ -852,7 +928,8 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
       const ctx: SlashCommandContext = {
         project: activeProject,
         newChat: (p: string) => newChat(p),
-        openAiSettings: () => openSettings('ai')
+        openAiSettings: () => openSettings('ai'),
+        openModelPopup: openProfileMenu
       }
       void cmd.action(ctx)
       return
@@ -1345,12 +1422,13 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
           </div>
           <button
             className="btn small ghost"
+            disabled={!traceExists}
             onClick={() => {
               if (!activeProject) return
               const id = getActiveSessionId(activeProject)
               if (id) openTraceViewer({ kind: 'chat', key: id, title: chatTitle || 'AI Assistant' })
             }}
-            title="View AI trace"
+            title={traceExists ? 'View AI trace' : 'No AI trace for this chat yet'}
           >
             <MdiIcon path={mdiTimelineClockOutline} size={16} />
           </button>
@@ -1623,15 +1701,18 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
         createPortal(
           <>
             <div className="chat-history-overlay" onClick={closeProfileMenu} />
-            <div className="chat-profile-menu" style={profileMenuPos ?? { top: 0, right: 0 }}>
+            <div className="chat-profile-menu" style={profileMenuPos ?? { bottom: 0, right: 0 }}>
               {profiles.length === 0 && <div className="chat-profile-empty">No profiles</div>}
-              {profiles.map((p) => (
+              {profiles.map((p, i) => (
                 <button
                   key={p.id}
                   type="button"
-                  className={
-                    p.id === activeProfileId ? 'chat-profile-item active' : 'chat-profile-item'
-                  }
+                  className={[
+                    'chat-profile-item',
+                    p.id === activeProfileId ? 'active' : '',
+                    profileCursor === i ? 'cursor' : ''
+                  ].join(' ')}
+                  onMouseEnter={() => setProfileCursor(i)}
                   onClick={() => void switchProfile(p.id)}
                 >
                   <span className="chat-profile-item-name">{p.name}</span>

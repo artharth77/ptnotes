@@ -14,7 +14,7 @@ import {
   mdiTrashCanOutline
 } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
-import { Modal, TextField } from './Modal'
+import { Modal, ConfirmModal, TextField } from './Modal'
 import { MdiIcon } from './MdiIcon'
 import { NOTE_TEMPLATES, getNoteTemplate } from '../noteTemplates'
 
@@ -174,12 +174,19 @@ export function NoteList(): React.JSX.Element {
       setMenuFor(null)
       return
     }
-    const t = e.currentTarget as HTMLElement | null
-    if (!t) return
-    const rect = t.getBoundingClientRect()
-    const x = Math.min(rect.right, window.innerWidth - CONTEXT_MENU_W - MENU_MARGIN)
-    const y = Math.min(rect.bottom, window.innerHeight - CONTEXT_MENU_H - MENU_MARGIN)
-    setMenuPos({ x: Math.max(MENU_MARGIN, x), y: Math.max(MENU_MARGIN, y) })
+    let menuX: number
+    let menuY: number
+    if (e.type === 'contextmenu') {
+      menuX = Math.min(e.clientX, window.innerWidth - CONTEXT_MENU_W - MENU_MARGIN)
+      menuY = Math.min(e.clientY, window.innerHeight - CONTEXT_MENU_H - MENU_MARGIN)
+    } else {
+      const t = e.currentTarget as HTMLElement | null
+      if (!t) return
+      const rect = t.getBoundingClientRect()
+      menuX = Math.min(rect.right, window.innerWidth - CONTEXT_MENU_W - MENU_MARGIN)
+      menuY = Math.min(rect.bottom, window.innerHeight - CONTEXT_MENU_H - MENU_MARGIN)
+    }
+    setMenuPos({ x: Math.max(MENU_MARGIN, menuX), y: Math.max(MENU_MARGIN, menuY) })
     setMenuFor(id)
   }
 
@@ -418,7 +425,7 @@ export function NoteList(): React.JSX.Element {
                     <span className="note-menu-icon">
                       <MdiIcon path={note?.starred ? mdiStar : mdiStarOutline} size={16} />
                     </span>{' '}
-                    {note?.starred ? 'Unpin' : 'Pin / Star'}
+                    {note?.starred ? 'Unpin' : 'Pin'}
                   </button>
                   <button
                     className="note-menu-item"
@@ -562,19 +569,12 @@ export function NoteList(): React.JSX.Element {
       )}
 
       {confirmDeleteId && (
-        <Modal title="Delete Note" onClose={() => setConfirmDeleteId(null)}>
-          <p className="confirm-message">
-            Delete note &quot;{confirmDeleteId}&quot;? This cannot be undone.
-          </p>
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setConfirmDeleteId(null)}>
-              Cancel
-            </button>
-            <button className="btn danger" onClick={() => void doDelete()}>
-              Delete
-            </button>
-          </div>
-        </Modal>
+        <ConfirmModal
+          title="Delete Note"
+          onClose={() => setConfirmDeleteId(null)}
+          onConfirm={() => void doDelete()}
+          message={<>Delete note &quot;{confirmDeleteId}&quot;? This cannot be undone.</>}
+        />
       )}
     </div>
   )
