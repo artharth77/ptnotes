@@ -295,15 +295,34 @@ export class PTNotesService {
         const rawSnippet = content.slice(snippetStart, snippetEnd)
         const snippetPrefix = snippetStart > 0 ? '…' : ''
         const snippetSuffix = snippetEnd < content.length ? '…' : ''
-        const snippet = `${snippetPrefix}${rawSnippet.replace(/\s+/g, ' ').trim()}${snippetSuffix}`
-        const relMatchStart = snippetPrefix.length + Math.max(0, idx - snippetStart)
+        let body = ''
+        let matchStartRel = -1
+        let matchEndRel = -1
+        let lastWs = true
+        for (let i = 0; i < rawSnippet.length; i++) {
+          if (snippetStart + i === idx) matchStartRel = body.length
+          if (/\s/.test(rawSnippet[i])) {
+            if (!lastWs) {
+              body += ' '
+              lastWs = true
+            }
+          } else {
+            body += rawSnippet[i]
+            lastWs = false
+          }
+          if (snippetStart + i + 1 === idx + query.length) matchEndRel = body.length
+        }
+        body = body.replace(/\s+$/, '')
+        const snippet = `${snippetPrefix}${body}${snippetSuffix}`
+        if (matchStartRel < 0) matchStartRel = 0
+        if (matchEndRel < 0) matchEndRel = body.length
         out.push({
           noteId: id,
           name: id,
           snippet,
           line,
-          matchStart: relMatchStart,
-          matchEnd: relMatchStart + query.length
+          matchStart: snippetPrefix.length + matchStartRel,
+          matchEnd: snippetPrefix.length + matchEndRel
         })
         count++
         idx = lower.indexOf(lowerQuery, idx + query.length)
