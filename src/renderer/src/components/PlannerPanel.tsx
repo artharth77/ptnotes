@@ -116,12 +116,19 @@ export function PlannerPanel(): React.JSX.Element {
       setMenuFor(null)
       return
     }
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     const menuW = 180
     const menuH = 208
-    const x = Math.min(rect.right, window.innerWidth - menuW - 8)
-    const y = Math.min(rect.bottom, window.innerHeight - menuH - 8)
-    setMenuPos({ x: Math.max(8, x), y: Math.max(8, y) })
+    let menuX: number
+    let menuY: number
+    if (e.type === 'contextmenu') {
+      menuX = Math.min(e.clientX, window.innerWidth - menuW - 8)
+      menuY = Math.min(e.clientY, window.innerHeight - menuH - 8)
+    } else {
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+      menuX = Math.min(rect.right, window.innerWidth - menuW - 8)
+      menuY = Math.min(rect.bottom, window.innerHeight - menuH - 8)
+    }
+    setMenuPos({ x: Math.max(8, menuX), y: Math.max(8, menuY) })
     setMenuFor(id)
   }
 
