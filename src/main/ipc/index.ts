@@ -82,6 +82,7 @@ export function registerChatIpc(service: PTNotesService): void {
   ipcMain.handle(
     'chat:traceExists',
     async (_e: IpcMainInvokeEvent, project: string, sessionId: string): Promise<boolean> => {
+      if (!sessionId) return false
       const meta = await service.chatTraceMeta(project, sessionId)
       return meta.count > 0
     }

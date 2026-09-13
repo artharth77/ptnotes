@@ -790,10 +790,10 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   // Trace button state: re-check when the session changes or an AI run ends
   const activeSessionId = activeProject ? getActiveSessionId(activeProject) : null
   useEffect(() => {
-    if (!activeProject) return
+    if (!activeProject || !activeSessionId) return
     let cancelled = false
     window.ptnotes.chat
-      .traceExists(activeProject, activeSessionId ?? '')
+      .traceExists(activeProject, activeSessionId)
       .then((ok) => {
         if (!cancelled) setTraceExists(ok)
       })
