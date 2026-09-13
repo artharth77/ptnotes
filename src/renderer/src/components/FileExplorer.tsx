@@ -57,7 +57,7 @@ import {
   submitExplorerRename
 } from '../store/explorerOps'
 import { friendlyError } from '../errors'
-import { Modal, PromptModal } from './Modal'
+import { ConfirmModal, PromptModal } from './Modal'
 import { FileViewer } from './FileViewer'
 import { ImageViewer } from './ImageViewer'
 import { PdfViewer } from './PdfViewer'
@@ -391,12 +391,20 @@ export function ExplorerOpsDialogs(): React.JSX.Element | null {
   const close = (): void => useAppStore.getState().setExplorerOpsDialog(null)
   if (dialog.kind === 'delete') {
     return (
-      <Modal title="Confirm Delete" onClose={close}>
-        <p className="confirm-message">
-          Delete{' '}
-          {dialog.items.length === 1 ? `"${dialog.items[0].name}"` : `${dialog.items.length} items`}
-          ? This cannot be undone.
-        </p>
+      <ConfirmModal
+        title="Confirm Delete"
+        onClose={close}
+        onConfirm={() => void confirmExplorerDelete()}
+        message={
+          <>
+            Delete{' '}
+            {dialog.items.length === 1
+              ? `"${dialog.items[0].name}"`
+              : `${dialog.items.length} items`}
+            ? This cannot be undone.
+          </>
+        }
+      >
         {dialog.items.length > 1 && (
           <ul className="confirm-list">
             {dialog.items.map((i) => (
@@ -404,15 +412,7 @@ export function ExplorerOpsDialogs(): React.JSX.Element | null {
             ))}
           </ul>
         )}
-        <div className="modal-actions">
-          <button className="btn" onClick={close}>
-            Cancel
-          </button>
-          <button className="btn danger" onClick={() => void confirmExplorerDelete()}>
-            Delete
-          </button>
-        </div>
-      </Modal>
+      </ConfirmModal>
     )
   }
   return (

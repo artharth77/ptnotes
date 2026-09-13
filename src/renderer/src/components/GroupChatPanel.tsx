@@ -29,7 +29,7 @@ import type { GroupChatMeta, GroupMessage } from '@shared/bots'
 import type { AskAnswer, AskQuestion, FileEntry } from '@shared/types'
 import { MarkdownContent } from './MarkdownContent'
 import { USER_MSG_COLLAPSE_LIMIT } from './chatContent'
-import { Modal } from './Modal'
+import { Modal, ConfirmModal } from './Modal'
 import { MdiIcon } from './MdiIcon'
 import { KANBAN_LINK_ICON, NOTE_LINK_ICON } from './contentIcons'
 
@@ -1163,27 +1163,22 @@ function GroupAskBubble({
           document.body
         )}
       {deletingId && (
-        <Modal title="Delete group chat" onClose={() => setDeletingId(null)}>
-          <p className="confirm-message">
-            Delete group chat &quot;
-            {groups.find((g) => g.groupId === deletingId)?.title ?? deletingId}
-            &quot;? Its messages and background task history are removed too. This cannot be undone.
-          </p>
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setDeletingId(null)}>
-              Cancel
-            </button>
-            <button
-              className="btn danger"
-              onClick={() => {
-                if (activeProject) void deleteBotGroupLocal(activeProject, deletingId)
-                setDeletingId(null)
-              }}
-            >
-              Delete
-            </button>
-          </div>
-        </Modal>
+        <ConfirmModal
+          title="Delete group chat"
+          onClose={() => setDeletingId(null)}
+          onConfirm={() => {
+            if (activeProject) void deleteBotGroupLocal(activeProject, deletingId)
+            setDeletingId(null)
+          }}
+          message={
+            <>
+              Delete group chat &quot;
+              {groups.find((g) => g.groupId === deletingId)?.title ?? deletingId}
+              &quot;? Its messages and background task history are removed too. This cannot be
+              undone.
+            </>
+          }
+        />
       )}
     </>
   )

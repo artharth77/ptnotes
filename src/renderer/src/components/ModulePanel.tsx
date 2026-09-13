@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { mdiDotsVertical, mdiTrashCanOutline } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
 import { ModuleCard } from './ModuleCard'
-import { Modal } from './Modal'
+import { ConfirmModal } from './Modal'
 import { MdiIcon } from './MdiIcon'
 
 const NO_RUNS: never[] = []
@@ -134,28 +134,24 @@ export function ModulePanel(): React.JSX.Element {
         ))}
       </div>
       {confirmClear && (
-        <Modal title="Delete module history" onClose={() => setConfirmClear(false)}>
-          <p className="confirm-message">
-            Delete all {doneRuns.length} finished module runs (done / failed / cancelled)? Active
-            runs are kept.
-          </p>
-          <label className="confirm-checkbox">
-            <input
-              type="checkbox"
-              checked={deleteOutputFiles}
-              onChange={(e) => setDeleteOutputFiles(e.target.checked)}
-            />
-            Also delete related output files
-          </label>
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setConfirmClear(false)}>
-              Cancel
-            </button>
-            <button className="btn danger" onClick={() => void clearHistory()} disabled={clearing}>
-              {clearing ? 'Deleting…' : 'Delete all'}
-            </button>
-          </div>
-        </Modal>
+        <ConfirmModal
+          title="Delete module history"
+          onClose={() => setConfirmClear(false)}
+          disabled={clearing}
+          confirmLabel={clearing ? 'Deleting…' : 'Delete all'}
+          onConfirm={() => void clearHistory()}
+          message={
+            <>
+              Delete all {doneRuns.length} finished module runs (done / failed / cancelled)? Active
+              runs are kept.
+            </>
+          }
+          checkbox={{
+            checked: deleteOutputFiles,
+            label: 'Also delete related output files',
+            onToggle: setDeleteOutputFiles
+          }}
+        />
       )}
     </div>
   )

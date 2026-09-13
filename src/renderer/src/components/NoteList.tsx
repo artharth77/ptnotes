@@ -14,7 +14,7 @@ import {
   mdiTrashCanOutline
 } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
-import { Modal, TextField } from './Modal'
+import { Modal, ConfirmModal, TextField } from './Modal'
 import { MdiIcon } from './MdiIcon'
 import { NOTE_TEMPLATES, getNoteTemplate } from '../noteTemplates'
 
@@ -562,19 +562,12 @@ export function NoteList(): React.JSX.Element {
       )}
 
       {confirmDeleteId && (
-        <Modal title="Delete Note" onClose={() => setConfirmDeleteId(null)}>
-          <p className="confirm-message">
-            Delete note &quot;{confirmDeleteId}&quot;? This cannot be undone.
-          </p>
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setConfirmDeleteId(null)}>
-              Cancel
-            </button>
-            <button className="btn danger" onClick={() => void doDelete()}>
-              Delete
-            </button>
-          </div>
-        </Modal>
+        <ConfirmModal
+          title="Delete Note"
+          onClose={() => setConfirmDeleteId(null)}
+          onConfirm={() => void doDelete()}
+          message={<>Delete note &quot;{confirmDeleteId}&quot;? This cannot be undone.</>}
+        />
       )}
     </div>
   )

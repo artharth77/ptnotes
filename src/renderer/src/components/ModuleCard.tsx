@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { mdiChatProcessingOutline, mdiRefresh } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
 import type { ModuleRun, ModuleStepState } from '@shared/types'
-import { Modal } from './Modal'
+import { ConfirmModal } from './Modal'
 import { MdiIcon } from './MdiIcon'
 import { fileTypeIcon } from './contentIcons'
 import { STATUS_LABELS } from './moduleStatus'
@@ -220,30 +220,29 @@ export function ModuleCard({
         </div>
       </div>
       {confirmDelete && (
-        <Modal title="Delete module run" onClose={() => setConfirmDelete(false)}>
-          <p className="confirm-message">
-            Delete this run ({run.module.name} — &quot;{run.title}&quot;)?
-          </p>
-          <label className="confirm-checkbox">
-            <input
-              type="checkbox"
-              checked={deleteOutputFiles}
-              onChange={(e) => setDeleteOutputFiles(e.target.checked)}
-              disabled={outputFiles.length === 0}
-            />
-            Also delete the related output file{outputFiles.length === 1 ? '' : 's'}
-            {outputFiles.length === 0 ? ' (no output files)' : ` (${outputFiles.length})`}
-          </label>
+        <ConfirmModal
+          title="Delete module run"
+          onClose={() => setConfirmDelete(false)}
+          disabled={deleting}
+          confirmLabel={deleting ? 'Deleting…' : 'Delete'}
+          onConfirm={() => void deleteRun()}
+          message={
+            <>
+              Delete this run ({run.module.name} — &quot;{run.title}&quot;)?
+            </>
+          }
+          checkbox={{
+            checked: deleteOutputFiles && outputFiles.length > 0,
+            label: `Also delete the related output file${outputFiles.length === 1 ? '' : 's'}${
+              outputFiles.length === 0 ? ' (no output files)' : ` (${outputFiles.length})`
+            }`,
+            onToggle: (v) => {
+              if (outputFiles.length > 0) setDeleteOutputFiles(v)
+            }
+          }}
+        >
           {outputFiles.length === 0 && <p className="hint">This run has no output files.</p>}
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setConfirmDelete(false)} disabled={deleting}>
-              Cancel
-            </button>
-            <button className="btn danger" onClick={() => void deleteRun()} disabled={deleting}>
-              {deleting ? 'Deleting…' : 'Delete'}
-            </button>
-          </div>
-        </Modal>
+        </ConfirmModal>
       )}
     </div>
   )

@@ -32,7 +32,7 @@ import {
 } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
 import { MdiIcon } from './MdiIcon'
-import { Modal, PromptModal } from './Modal'
+import { PromptModal, ConfirmModal } from './Modal'
 import { friendlyError } from '../errors'
 import { CalendarModal } from './CalendarModal'
 import { PlannerColumnModal } from './PlannerColumnModal'
@@ -2330,9 +2330,19 @@ export function PlannerEditor(): React.JSX.Element {
       )}
 
       {confirmDelete && (
-        <Modal title="Delete task" onClose={() => setConfirmDelete(null)}>
-          <p className="confirm-message">
-            {confirmDelete.tasks.length === 1
+        <ConfirmModal
+          title="Delete task"
+          onClose={() => setConfirmDelete(null)}
+          onConfirm={() => {
+            if (confirmDelete) {
+              commit(sc, removeTasks(sc.tasks, new Set(confirmDelete.tasks.map((t) => t.id))))
+            }
+            setSelected(new Set())
+            setAnchorId(null)
+            setConfirmDelete(null)
+          }}
+          message={
+            confirmDelete.tasks.length === 1
               ? confirmDelete.tasks[0].children.length > 0
                 ? `Delete "${confirmDelete.tasks[0].title || 'Untitled'}" and its ${
                     deleteTotal - 1
@@ -2340,27 +2350,9 @@ export function PlannerEditor(): React.JSX.Element {
                 : `Delete "${confirmDelete.tasks[0].title || 'Untitled'}"? This cannot be undone.`
               : `Delete ${confirmDelete.tasks.length} selected task${
                   confirmDelete.tasks.length === 1 ? '' : 's'
-                } (${deleteTotal} total including subtasks)? This cannot be undone.`}
-          </p>
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setConfirmDelete(null)}>
-              Cancel
-            </button>
-            <button
-              className="btn danger"
-              onClick={() => {
-                if (confirmDelete) {
-                  commit(sc, removeTasks(sc.tasks, new Set(confirmDelete.tasks.map((t) => t.id))))
-                }
-                setSelected(new Set())
-                setAnchorId(null)
-                setConfirmDelete(null)
-              }}
-            >
-              Delete
-            </button>
-          </div>
-        </Modal>
+                } (${deleteTotal} total including subtasks)? This cannot be undone.`
+          }
+        />
       )}
 
       {columnsOpen && (

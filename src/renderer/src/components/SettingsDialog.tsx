@@ -11,7 +11,7 @@ import {
   mdiTrashCanOutline
 } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
-import { Modal, TextField } from './Modal'
+import { Modal, ConfirmModal, TextField } from './Modal'
 import { MdiIcon } from './MdiIcon'
 import { BotsSettingsPane } from './BotsSettingsPane'
 import type {
@@ -1197,29 +1197,23 @@ function SkillsPane(): React.JSX.Element {
         />
       )}
       {deleting && (
-        <Modal title="Delete Skill" onClose={() => setDeleting(null)}>
-          <p className="confirm-message">
-            Delete the {deleting.scope} skill &quot;{deleting.name}&quot;? This cannot be undone.
-          </p>
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setDeleting(null)}>
-              Cancel
-            </button>
-            <button
-              className="btn danger"
-              onClick={() => {
-                void window.ptnotes.skills
-                  .delete(activeProject, deleting.scope, deleting.name)
-                  .then(() => {
-                    setDeleting(null)
-                    void reload()
-                  })
-              }}
-            >
-              Delete
-            </button>
-          </div>
-        </Modal>
+        <ConfirmModal
+          title="Delete Skill"
+          onClose={() => setDeleting(null)}
+          onConfirm={() => {
+            void window.ptnotes.skills
+              .delete(activeProject, deleting.scope, deleting.name)
+              .then(() => {
+                setDeleting(null)
+                void reload()
+              })
+          }}
+          message={
+            <>
+              Delete the {deleting.scope} skill &quot;{deleting.name}&quot;? This cannot be undone.
+            </>
+          }
+        />
       )}
     </>
   )
@@ -1390,23 +1384,24 @@ export function SettingsDialog(): React.JSX.Element {
       </div>
       {error && <p className="form-error">{error}</p>}
       {pendingRoot && (
-        <Modal title="Move project data" onClose={() => setPendingRoot(null)}>
-          <p className="confirm-message">
-            Move all project data from <code>{storage.rootDir}</code> to <code>{pendingRoot}</code>?
-          </p>
+        <ConfirmModal
+          title="Move project data"
+          onClose={() => setPendingRoot(null)}
+          disabled={moving}
+          confirmLabel={moving ? 'Moving…' : 'Move'}
+          onConfirm={() => void confirmMove()}
+          message={
+            <>
+              Move all project data from <code>{storage.rootDir}</code> to{' '}
+              <code>{pendingRoot}</code>?
+            </>
+          }
+        >
           <p className="hint">
             Every project folder, notes, chats and the project registry will be moved. The current
             location will no longer be used.
           </p>
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setPendingRoot(null)} disabled={moving}>
-              Cancel
-            </button>
-            <button className="btn danger" onClick={() => void confirmMove()} disabled={moving}>
-              {moving ? 'Moving…' : 'Move'}
-            </button>
-          </div>
-        </Modal>
+        </ConfirmModal>
       )}
     </Modal>
   )

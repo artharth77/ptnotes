@@ -4,7 +4,7 @@ import { isImageFile } from '@shared/filesExplorer'
 import type { GalleryImage } from '@shared/types'
 import { useAppStore } from '../store/useAppStore'
 import { ptFileUrl } from '../editor/imageNodeView'
-import { Modal } from './Modal'
+import { Modal, ConfirmModal } from './Modal'
 import { MdiIcon } from './MdiIcon'
 
 interface GalleryModalProps {
@@ -156,19 +156,12 @@ export function GalleryModal({ onClose, onInsert }: GalleryModalProps): React.JS
         </button>
       </div>
       {confirmDelete && (
-        <Modal title="Delete image" onClose={() => setConfirmDelete(null)}>
-          <p className="confirm-message">
-            Delete “{confirmDelete}” from the gallery? This cannot be undone.
-          </p>
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setConfirmDelete(null)}>
-              Cancel
-            </button>
-            <button className="btn danger" onClick={() => void remove(confirmDelete)}>
-              Delete
-            </button>
-          </div>
-        </Modal>
+        <ConfirmModal
+          title="Delete image"
+          onClose={() => setConfirmDelete(null)}
+          onConfirm={() => void remove(confirmDelete)}
+          message={<>Delete “{confirmDelete}” from the gallery? This cannot be undone.</>}
+        />
       )}
     </Modal>
   )

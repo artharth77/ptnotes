@@ -11,7 +11,7 @@ import {
 } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
 import { friendlyError } from '../errors'
-import { Modal, TextField } from './Modal'
+import { Modal, ConfirmModal, TextField } from './Modal'
 import { MdiIcon } from './MdiIcon'
 import { PlannerSnapshotsModal } from './PlannerSnapshotsModal'
 
@@ -324,19 +324,12 @@ export function PlannerPanel(): React.JSX.Element {
       )}
 
       {confirmDeleteId && (
-        <Modal title="Delete Schedule" onClose={() => setConfirmDeleteId(null)}>
-          <p className="confirm-message">
-            Delete schedule &quot;{confirmDeleteId}&quot;? This cannot be undone.
-          </p>
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setConfirmDeleteId(null)}>
-              Cancel
-            </button>
-            <button className="btn danger" onClick={() => void doDelete()}>
-              Delete
-            </button>
-          </div>
-        </Modal>
+        <ConfirmModal
+          title="Delete Schedule"
+          onClose={() => setConfirmDeleteId(null)}
+          onConfirm={() => void doDelete()}
+          message={<>Delete schedule &quot;{confirmDeleteId}&quot;? This cannot be undone.</>}
+        />
       )}
 
       {snapshotsOpen && <PlannerSnapshotsModal />}

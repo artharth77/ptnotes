@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { mdiFolderOpenOutline, mdiPencil, mdiTrashCanOutline } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
-import { Modal, TextField } from './Modal'
+import { Modal, ConfirmModal, TextField } from './Modal'
 import { MdiIcon } from './MdiIcon'
 
 export function ProjectDropdown(): React.JSX.Element {
@@ -223,20 +223,17 @@ export function ProjectDropdown(): React.JSX.Element {
       )}
 
       {deleting && (
-        <Modal title="Delete project" onClose={() => setDeleting(null)}>
-          <p className="confirm-message">
-            Delete project &quot;{deleting}&quot; and its entire folder — all notes, files, chats
-            and task history? This cannot be undone.
-          </p>
-          <div className="modal-actions">
-            <button className="btn" onClick={() => setDeleting(null)}>
-              Cancel
-            </button>
-            <button className="btn danger" onClick={() => void handleDelete()}>
-              Delete
-            </button>
-          </div>
-        </Modal>
+        <ConfirmModal
+          title="Delete project"
+          onClose={() => setDeleting(null)}
+          onConfirm={() => void handleDelete()}
+          message={
+            <>
+              Delete project &quot;{deleting}&quot; and its entire folder — all notes, files, chats
+              and task history? This cannot be undone.
+            </>
+          }
+        />
       )}
     </div>
   )
