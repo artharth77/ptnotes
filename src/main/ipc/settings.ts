@@ -43,7 +43,8 @@ function toAppearance(settings: StorageSettings): AppearanceSettings {
     editorFontFamily:
       settings.editorFontFamily === 'serif' || settings.editorFontFamily === 'mono'
         ? settings.editorFontFamily
-        : 'sans'
+        : 'sans',
+    surfaceTranslucent: settings.surfaceTranslucent !== false
   }
 }
 
@@ -105,6 +106,9 @@ export function registerSettingsIpc(
         input.editorFontFamily === 'mono'
       ) {
         patch.editorFontFamily = input.editorFontFamily
+      }
+      if (typeof input.surfaceTranslucent === 'boolean') {
+        patch.surfaceTranslucent = input.surfaceTranslucent
       }
       return toAppearance(await store.save({ ...current, ...patch }))
     }

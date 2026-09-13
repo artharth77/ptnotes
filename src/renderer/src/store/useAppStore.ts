@@ -142,6 +142,7 @@ interface AppState {
   fontSize: 'small' | 'default' | 'large' | 'xlarge'
   uiDensity: 'compact' | 'cozy'
   editorFontFamily: 'sans' | 'serif' | 'mono'
+  surfaceTranslucent: boolean
   commandPaletteOpen: boolean
   commandPaletteQuery: string
   commandPaletteActiveIndex: number
@@ -288,6 +289,7 @@ interface AppState {
   setFontSize: (size: 'small' | 'default' | 'large' | 'xlarge') => void
   setUiDensity: (density: 'compact' | 'cozy') => void
   setEditorFontFamily: (family: 'sans' | 'serif' | 'mono') => void
+  setSurfaceTranslucent: (translucent: boolean) => void
   setCommandPaletteOpen: (open: boolean) => void
   toggleCommandPalette: () => void
   setCommandPaletteQuery: (q: string) => void
@@ -375,6 +377,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   uiDensity: (localStorage.getItem('ptnotes:uiDensity') as 'compact' | 'cozy' | null) ?? 'cozy',
   editorFontFamily:
     (localStorage.getItem('ptnotes:editorFont') as 'sans' | 'serif' | 'mono' | null) ?? 'sans',
+  surfaceTranslucent: localStorage.getItem('ptnotes:surfaceTranslucent') !== 'false',
   commandPaletteOpen: false,
   commandPaletteQuery: '',
   commandPaletteActiveIndex: 0,
@@ -1780,6 +1783,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     void (async () => {
       try {
         await window.ptnotes.settings.setAppearance({ editorFontFamily: family })
+      } catch {
+        /* safe to ignore */
+      }
+    })()
+  },
+
+  setSurfaceTranslucent(translucent) {
+    localStorage.setItem('ptnotes:surfaceTranslucent', String(translucent))
+    document.documentElement.setAttribute('data-surface-translucent', translucent ? 'on' : 'off')
+    set({ surfaceTranslucent: translucent })
+    void (async () => {
+      try {
+        await window.ptnotes.settings.setAppearance({ surfaceTranslucent: translucent })
       } catch {
         /* safe to ignore */
       }

@@ -56,6 +56,8 @@ export class SettingsStore {
           if (typeof value === 'boolean') builtinSkillOverrides[key] = value
         }
       }
+      const surfaceTranslucent: StorageSettings['surfaceTranslucent'] =
+        parsed.surfaceTranslucent !== false
       return {
         rootDir,
         disabledModules,
@@ -67,6 +69,7 @@ export class SettingsStore {
         fontSize,
         uiDensity,
         editorFontFamily,
+        surfaceTranslucent,
         builtinSkillOverrides
       }
     } catch {
@@ -75,7 +78,8 @@ export class SettingsStore {
         theme: 'system',
         fontSize: 'default',
         uiDensity: 'cozy',
-        editorFontFamily: 'sans'
+        editorFontFamily: 'sans',
+        surfaceTranslucent: true
       }
     }
   }
@@ -112,6 +116,7 @@ export class SettingsStore {
         settings.editorFontFamily === 'serif' || settings.editorFontFamily === 'mono'
           ? settings.editorFontFamily
           : 'sans',
+      surfaceTranslucent: settings.surfaceTranslucent !== false,
       builtinSkillOverrides: {}
     }
     if (settings.builtinSkillOverrides && typeof settings.builtinSkillOverrides === 'object') {

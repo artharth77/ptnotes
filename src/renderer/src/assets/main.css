@@ -950,6 +950,14 @@ body {
   backdrop-filter: blur(12px) saturate(1.2);
 }
 
+/* Solid appearance: frost variable goes opaque and all backdrop blur drops */
+:root[data-surface-translucent='off'] {
+  --frost-bg: var(--bg-elev);
+}
+:root[data-surface-translucent='off'] * {
+  backdrop-filter: none !important;
+}
+
 .menu-overlay {
   position: fixed;
   inset: 0;
@@ -2137,6 +2145,12 @@ fieldset.kanban-form {
   font-size: 13px;
   font-weight: 500;
   color: var(--text-dim);
+}
+
+.section-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-top: 8px;
 }
 
 .hint {

@@ -342,6 +342,8 @@ function App(): React.JSX.Element {
     document.documentElement.setAttribute('data-ui-density', density)
     const editorFont = useAppStore.getState().editorFontFamily
     document.documentElement.setAttribute('data-editor-font', editorFont)
+    const translucent = useAppStore.getState().surfaceTranslucent
+    document.documentElement.setAttribute('data-surface-translucent', translucent ? 'on' : 'off')
   }, [init])
 
   useEffect(() => {
@@ -360,6 +362,9 @@ function App(): React.JSX.Element {
             patch.push(() => state.setUiDensity(remote.uiDensity))
           if (remote.editorFontFamily && remote.editorFontFamily !== state.editorFontFamily) {
             patch.push(() => state.setEditorFontFamily(remote.editorFontFamily))
+          }
+          if (remote.surfaceTranslucent !== state.surfaceTranslucent) {
+            patch.push(() => state.setSurfaceTranslucent(remote.surfaceTranslucent))
           }
           patch.forEach((fn) => fn())
         }

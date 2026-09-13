@@ -610,10 +610,12 @@ function AppearanceSettings(): React.JSX.Element {
   const fontSize = useAppStore((s) => s.fontSize)
   const uiDensity = useAppStore((s) => s.uiDensity)
   const editorFontFamily = useAppStore((s) => s.editorFontFamily)
+  const surfaceTranslucent = useAppStore((s) => s.surfaceTranslucent)
   const setTheme = useAppStore((s) => s.setTheme)
   const setFontSize = useAppStore((s) => s.setFontSize)
   const setUiDensity = useAppStore((s) => s.setUiDensity)
   const setEditorFontFamily = useAppStore((s) => s.setEditorFontFamily)
+  const setSurfaceTranslucent = useAppStore((s) => s.setSurfaceTranslucent)
   const themeOptions: Array<{
     value: 'light' | 'dark' | 'system'
     label: string
@@ -652,14 +654,8 @@ function AppearanceSettings(): React.JSX.Element {
   ]
   return (
     <>
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>Appearance</div>
-          <p className="hint" style={{ marginTop: 2, marginBottom: 0 }}>
-            Choose PTNotes&apos; color scheme.
-          </p>
-        </div>
-      </div>
+      <div className="section-title">Theme</div>
+      <p className="hint">Choose PTNotes&apos; color scheme.</p>
       <div className="seg block" role="radiogroup" aria-label="Theme">
         {themeOptions.map((opt) => (
           <button
@@ -675,16 +671,8 @@ function AppearanceSettings(): React.JSX.Element {
         ))}
       </div>
 
-      <div style={{ height: 24 }} />
-
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>Font size</div>
-          <p className="hint" style={{ marginTop: 2, marginBottom: 0 }}>
-            Base text size for the whole interface.
-          </p>
-        </div>
-      </div>
+      <div className="section-title">Font size</div>
+      <p className="hint">Base text size for the whole interface.</p>
       <div className="seg block" role="radiogroup" aria-label="Font size">
         {fontSizeOptions.map((opt) => (
           <button
@@ -710,16 +698,8 @@ function AppearanceSettings(): React.JSX.Element {
         ))}
       </div>
 
-      <div style={{ height: 24 }} />
-
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>UI density</div>
-          <p className="hint" style={{ marginTop: 2, marginBottom: 0 }}>
-            Compact = less vertical padding (more information on screen).
-          </p>
-        </div>
-      </div>
+      <div className="section-title">UI density</div>
+      <p className="hint">Compact = less vertical padding (more information on screen).</p>
       <div className="seg block" role="radiogroup" aria-label="UI density">
         {densityOptions.map((opt) => (
           <button
@@ -735,16 +715,8 @@ function AppearanceSettings(): React.JSX.Element {
         ))}
       </div>
 
-      <div style={{ height: 24 }} />
-
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>Editor font</div>
-          <p className="hint" style={{ marginTop: 2, marginBottom: 0 }}>
-            Font family for note body content. Does not change the UI chrome font.
-          </p>
-        </div>
-      </div>
+      <div className="section-title">Editor font</div>
+      <p className="hint">Font family for note body content. Does not change the UI chrome font.</p>
       <div className="seg block" role="radiogroup" aria-label="Editor font">
         {editorFontOptions.map((opt) => (
           <button
@@ -766,6 +738,29 @@ function AppearanceSettings(): React.JSX.Element {
             {opt.label}
           </button>
         ))}
+      </div>
+
+      <div className="section-title">Translucency</div>
+      <p className="hint">Frosted translucent popups, menus and panels; Solid = opaque surfaces.</p>
+      <div className="seg block" role="radiogroup" aria-label="Translucency">
+        <button
+          role="radio"
+          aria-checked={surfaceTranslucent}
+          className={`seg-btn${surfaceTranslucent ? ' active' : ''}`}
+          onClick={() => setSurfaceTranslucent(true)}
+          title="Blur + translucent backlight behind floating surfaces"
+        >
+          Translucent
+        </button>
+        <button
+          role="radio"
+          aria-checked={!surfaceTranslucent}
+          className={`seg-btn${surfaceTranslucent ? '' : ' active'}`}
+          onClick={() => setSurfaceTranslucent(false)}
+          title="Fully opaque floating surfaces, no blur"
+        >
+          Solid
+        </button>
       </div>
     </>
   )

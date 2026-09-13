@@ -60,6 +60,8 @@ export interface StorageSettings {
   fontSize?: 'small' | 'default' | 'large' | 'xlarge'
   uiDensity?: 'compact' | 'cozy'
   editorFontFamily?: 'sans' | 'serif' | 'mono'
+  /** Frosted translucent surfaces; false renders every frost surface solid. */
+  surfaceTranslucent?: boolean
   /** User enable/disable choices for builtin (app-shipped, read-only) skills, keyed by skill name. */
   builtinSkillOverrides?: Record<string, boolean>
 }
@@ -69,6 +71,7 @@ export interface AppearanceSettings {
   fontSize: 'small' | 'default' | 'large' | 'xlarge'
   uiDensity: 'compact' | 'cozy'
   editorFontFamily: 'sans' | 'serif' | 'mono'
+  surfaceTranslucent: boolean
 }
 
 /** Persisted main-window geometry restored on next launch. */
