@@ -11,9 +11,11 @@ import { registerPlannerIpc } from './ipc/planner'
 import { registerSnapshotsIpc } from './ipc/snapshots'
 import { registerAiIpc, createSessionRegistry } from './ipc/ai'
 import { registerFilesIpc } from './ipc/files'
+import { registerGalleryIpc } from './ipc/gallery'
 import { registerSettingsIpc } from './ipc/settings'
 import { registerSkillsIpc } from './ipc/skills'
 import { registerModulesIpc } from './ipc/modules'
+import { registerDiagramsIpc } from './ipc/diagrams'
 import { registerToolsetsIpc } from './ipc/toolsets'
 import { registerBotsIpc } from './ipc/bots'
 import { BotsStore } from './bots/db'
@@ -105,14 +107,17 @@ function buildAppMenu(): Menu {
         ...(isMac
           ? ([
               { role: 'pasteAndMatchStyle' },
-              { role: 'delete' },
-              { role: 'selectAll' }
+              { role: 'delete' }
             ] as Electron.MenuItemConstructorOptions[])
-          : ([
-              { role: 'delete' },
-              { type: 'separator' },
-              { role: 'selectAll' }
-            ] as Electron.MenuItemConstructorOptions[]))
+          : ([{ role: 'delete' }, { type: 'separator' }] as Electron.MenuItemConstructorOptions[])),
+        {
+          label: 'Select All',
+          accelerator: 'CmdOrCtrl+A',
+          click: (_item, win) => {
+            const target = win as Electron.BrowserWindow | undefined
+            target?.webContents.send('global:select-all')
+          }
+        }
       ]
     },
     {
@@ -407,6 +412,7 @@ app.whenReady().then(async () => {
   registerSnapshotsIpc(service)
   registerAiIpc(registry, configStore, service)
   registerFilesIpc(service, registry, configStore)
+  registerGalleryIpc(service)
   registerSettingsIpc(service, settingsStore, (newRoot) => {
     botsStoreRef?.setRootDir(newRoot)
     groupChatForwarder.current?.closeAll()
@@ -415,6 +421,7 @@ app.whenReady().then(async () => {
   registerModulesIpc(moduleManager!, settingsStore, moduleRegistry)
   registerToolsetsIpc(settingsStore)
   registerBotsIpc(botsStore, groupChatManager, moduleManager!)
+  registerDiagramsIpc()
 
   windowStateStore = new WindowStateStore()
   const windowState = await windowStateStore.load()

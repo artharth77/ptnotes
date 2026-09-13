@@ -12,6 +12,7 @@ import type {
   ExplorerEntry,
   ExplorerFolderNode,
   FileEntry,
+  GalleryImage,
   NoteMeta,
   NoteSearchMatch,
   PdfInfo,
@@ -48,6 +49,7 @@ import {
   type NewKanbanColumnInput
 } from '@shared/kanban'
 import { slugify } from '@shared/slug'
+import { isImageFile } from '@shared/filesExplorer'
 import {
   countTasks,
   defaultCalendar,
@@ -316,6 +318,11 @@ export class PTNotesService {
 
   private filesDir(name: string): string {
     return join(this.projectDir(name), 'files')
+  }
+
+  /** Per-project image gallery dir (`<project>/notes/images/`). */
+  private galleryDir(name: string): string {
+    return join(this.notesDir(name), 'images')
   }
 
   private modulesDir(name: string): string {
@@ -1126,6 +1133,74 @@ export class PTNotesService {
     const dest = join(dir, candidate)
     await fs.copyFile(sourcePath, dest)
     return dest
+  }
+
+  /**
+   * Copy an image into the gallery (`<project>/notes/images/`) as
+   * `<hash16>-<name>.<ext>`. An identical file (same content + name) already
+   * in the gallery is reused instead of copied. Returns the stored name.
+   */
+  async importGalleryImage(
+    project: string,
+    sourcePath: string,
+    fileName?: string
+  ): Promise<string> {
+    const original = fileName || basename(sourcePath)
+    const rawExt = extname(original)
+    if (!isImageFile(original) || !rawExt) {
+      throw new Error(`Unsupported image: "${original}"`)
+    }
+    const dir = this.galleryDir(project)
+    await fs.mkdir(dir, { recursive: true })
+    const ext = rawExt.toLowerCase()
+    const stem = original.slice(0, original.length - rawExt.length)
+    const hash = (await hashFile(sourcePath)).slice(0, 16)
+    const name = `${hash}-${slugify(stem)}${ext}`
+    const dest = join(dir, name)
+    if (await this.pathExists(dest)) return name
+    await fs.copyFile(sourcePath, dest)
+    return name
+  }
+
+  /** Gallery import for in-memory data (e.g. clipboard images with no file path). */
+  async importGalleryImageData(
+    project: string,
+    fileName: string,
+    data: Uint8Array
+  ): Promise<string> {
+    const rawExt = extname(fileName)
+    if (!isImageFile(fileName) || !rawExt) {
+      throw new Error(`Unsupported image: "${fileName}"`)
+    }
+    const dir = this.galleryDir(project)
+    await fs.mkdir(dir, { recursive: true })
+    const hash = createHash('sha256').update(data).digest('hex').slice(0, 16)
+    const name = `${hash}-${slugify(fileName.slice(0, fileName.length - rawExt.length))}${rawExt.toLowerCase()}`
+    const dest = join(dir, name)
+    if (await this.pathExists(dest)) return name
+    await fs.writeFile(dest, data)
+    return name
+  }
+
+  /** All images in the gallery, newest first. */
+  async listGalleryImages(project: string): Promise<GalleryImage[]> {
+    const dir = this.galleryDir(project)
+    const entries = await fs.readdir(dir).catch(() => [] as string[])
+    const out: GalleryImage[] = []
+    for (const name of entries) {
+      if (name.startsWith('.') || !isImageFile(name)) continue
+      const st = await fs.stat(join(dir, name)).catch(() => null)
+      if (!st?.isFile()) continue
+      out.push({ name, size: st.size, mtime: st.mtimeMs, absPath: join(dir, name) })
+    }
+    return out.sort((a, b) => b.mtime - a.mtime)
+  }
+
+  async deleteGalleryImage(project: string, name: string): Promise<void> {
+    if (!name || name === '.' || name === '..' || name.includes('/') || name.includes('\\')) {
+      throw new Error(`Invalid image name: ${name}`)
+    }
+    await fs.unlink(join(this.galleryDir(project), name)).catch(() => {})
   }
 
   async listFiles(project: string): Promise<string[]> {

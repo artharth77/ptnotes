@@ -38,7 +38,6 @@ export function NoteList(): React.JSX.Element {
   const notesSortDir = useAppStore((s) => s.notesSortDir)
   const selectNote = useAppStore((s) => s.selectNote)
   const createNote = useAppStore((s) => s.createNote)
-  const saveNote = useAppStore((s) => s.saveNote)
   const renameNote = useAppStore((s) => s.renameNote)
   const deleteNote = useAppStore((s) => s.deleteNote)
   const refreshNotes = useAppStore((s) => s.refreshNotes)
@@ -134,12 +133,10 @@ export function NoteList(): React.JSX.Element {
   async function handleCreate(): Promise<void> {
     const trimmed = name.trim()
     if (!trimmed) return
-    const templateId = selectedTemplate
-    await createNote(trimmed)
-    const template = getNoteTemplate(templateId)
-    if (template && template.id !== 'blank') {
-      await saveNote(template.content(trimmed, new Date()))
-    }
+    const template = getNoteTemplate(selectedTemplate)
+    const content =
+      template && template.id !== 'blank' ? template.content(trimmed, new Date()) : undefined
+    await createNote(trimmed, content)
     setName('')
     setSelectedTemplate('blank')
     setCreating(false)

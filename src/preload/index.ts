@@ -21,6 +21,7 @@ import type {
   ExplorerEntry,
   ExplorerFolderNode,
   FileEntry,
+  GalleryImage,
   GroupChatData,
   GroupChatMeta,
   GroupMessagePageOpts,
@@ -30,6 +31,7 @@ import type {
   ModuleRun,
   ModuleSettings,
   ModuleStartResult,
+  MermaidRenderResult,
   NewGroupInput,
   StorageSettings,
   ToolsetSettings,
@@ -352,6 +354,16 @@ const api = {
     openExternal: (project: string, fileName: string): Promise<string> =>
       ipcRenderer.invoke('files:openExternal', project, fileName)
   },
+  gallery: {
+    list: (project: string): Promise<GalleryImage[]> => ipcRenderer.invoke('gallery:list', project),
+    import: (project: string, sourcePath: string, fileName?: string): Promise<string> =>
+      ipcRenderer.invoke('gallery:import', project, sourcePath, fileName),
+    importData: (project: string, fileName: string, data: Uint8Array): Promise<string> =>
+      ipcRenderer.invoke('gallery:importData', project, fileName, data),
+    choose: (project: string): Promise<string[]> => ipcRenderer.invoke('gallery:choose', project),
+    delete: (project: string, name: string): Promise<void> =>
+      ipcRenderer.invoke('gallery:delete', project, name)
+  },
   modules: {
     list: (project: string): Promise<ModuleRun[]> => ipcRenderer.invoke('modules:list', project),
     listAvailable: (): Promise<ModuleSettings[]> => ipcRenderer.invoke('modules:listAvailable'),
@@ -443,11 +455,22 @@ const api = {
       }
     }
   },
+  diagrams: {
+    render: (source: string): Promise<MermaidRenderResult> =>
+      ipcRenderer.invoke('diagrams:render', source)
+  },
   onOpenFind: (callback: () => void): (() => void) => {
     const listener = (): void => callback()
     ipcRenderer.on('global:open-find', listener)
     return () => {
       ipcRenderer.removeListener('global:open-find', listener)
+    }
+  },
+  onSelectAll: (callback: () => void): (() => void) => {
+    const listener = (): void => callback()
+    ipcRenderer.on('global:select-all', listener)
+    return () => {
+      ipcRenderer.removeListener('global:select-all', listener)
     }
   }
 }
