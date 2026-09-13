@@ -368,7 +368,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'create_note',
         description:
-          'Create a new markdown note in a project. If a note with the given title already exists, replace its entire content (full rewrite). For small targeted changes to an existing note, use update_note instead.',
+          'Create a new markdown note in a project. If a note with the given title already exists, replace its entire content (full rewrite). For small targeted changes to an existing note, use update_note instead. Mermaid diagrams are supported: use fenced ```mermaid code blocks in the content — the note editor renders them as live diagrams.',
         parameters: {
           type: 'object',
           properties: {
@@ -395,7 +395,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'update_note',
         description:
-          'Edit an existing note in a project with line-based, diff-style hunks. Read the note first with read_note and use the line numbers it displays verbatim (do not recount), then pass an edits array of {startLine, endLine, content} hunks: a hunk replaces lines startLine..endLine (1-based, inclusive) with content — aim each hunk at the exact line(s) to change; endLine = startLine - 1 inserts content before line startLine; startLine = totalLines + 1 (with endLine = totalLines) appends at the end; an empty content deletes the lines. All hunks reference the original line numbers and are applied in one atomic write, so multiple hunks never shift each other. The content you write is raw markdown — never include the line-number prefixes. The note must already exist — use create_note to create it.',
+          'Edit an existing note in a project with line-based, diff-style hunks. Read the note first with read_note and use the line numbers it displays verbatim (do not recount), then pass an edits array of {startLine, endLine, content} hunks: a hunk replaces lines startLine..endLine (1-based, inclusive) with content — aim each hunk at the exact line(s) to change; endLine = startLine - 1 inserts content before line startLine; startLine = totalLines + 1 (with endLine = totalLines) appends at the end; an empty content deletes the lines. All hunks reference the original line numbers and are applied in one atomic write, so multiple hunks never shift each other. The content you write is raw markdown — never include the line-number prefixes. Mermaid diagrams are supported: write fenced ```mermaid code blocks — the note editor renders them as live diagrams. The note must already exist — use create_note to create it.',
         parameters: {
           type: 'object',
           properties: {
