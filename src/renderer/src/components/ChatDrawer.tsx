@@ -259,7 +259,9 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   const [activeProfileName, setActiveProfileName] = useState('')
   const [activeProfileId, setActiveProfileId] = useState('')
   const [aiConfig, setAiConfig] = useState<AIConfig | null>(null)
-  const [profileMenuPos, setProfileMenuPos] = useState<{ top: number; right: number } | null>(null)
+  const [profileMenuPos, setProfileMenuPos] = useState<{ bottom: number; right: number } | null>(
+    null
+  )
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [profileCursor, setProfileCursor] = useState(0)
   const openedAtRef = useRef<number | null>(null)
@@ -583,12 +585,10 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     const el = profileNameBtnRef.current
     if (el) {
       const rect = el.getBoundingClientRect()
-      const menuHeight = Math.min(
-        aiConfig?.profiles.length ? aiConfig?.profiles.length * 55 : 40,
-        280
-      )
+      // anchor the popup's bottom edge just above the button so it hugs the
+      // statusbar regardless of how many profile rows it contains
       setProfileMenuPos({
-        top: Math.max(4, rect.top - menuHeight - 4),
+        bottom: Math.max(4, window.innerHeight - rect.top + 4),
         right: Math.max(0, window.innerWidth - rect.right)
       })
     }
@@ -1681,7 +1681,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
         createPortal(
           <>
             <div className="chat-history-overlay" onClick={closeProfileMenu} />
-            <div className="chat-profile-menu" style={profileMenuPos ?? { top: 0, right: 0 }}>
+            <div className="chat-profile-menu" style={profileMenuPos ?? { bottom: 0, right: 0 }}>
               {profiles.length === 0 && <div className="chat-profile-empty">No profiles</div>}
               {profiles.map((p, i) => (
                 <button
