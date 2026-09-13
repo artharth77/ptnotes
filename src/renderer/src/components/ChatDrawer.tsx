@@ -266,6 +266,7 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
   const [profileCursor, setProfileCursor] = useState(0)
   const openedAtRef = useRef<number | null>(null)
   const firstKeyIgnoredRef = useRef(false)
+  const [traceExists, setTraceExists] = useState(false)
   const profileNameBtnRef = useRef<HTMLButtonElement>(null)
 
   const chatBubbleOriginRef = useRef<Element | null>(null)
@@ -785,6 +786,24 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     }
     prevBusy.current = chatBusy
   }, [chatBusy, activeProject])
+
+  // Trace button state: re-check when the session changes or an AI run ends
+  const activeSessionId = activeProject ? getActiveSessionId(activeProject) : null
+  useEffect(() => {
+    if (!activeProject) return
+    let cancelled = false
+    window.ptnotes.chat
+      .traceExists(activeProject, activeSessionId ?? '')
+      .then((ok) => {
+        if (!cancelled) setTraceExists(ok)
+      })
+      .catch(() => {
+        if (!cancelled) setTraceExists(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [activeProject, getActiveSessionId, chatBusy, activeSessionId])
 
   useEffect(() => {
     if (!activeProject) return
@@ -1403,12 +1422,13 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
           </div>
           <button
             className="btn small ghost"
+            disabled={!traceExists}
             onClick={() => {
               if (!activeProject) return
               const id = getActiveSessionId(activeProject)
               if (id) openTraceViewer({ kind: 'chat', key: id, title: chatTitle || 'AI Assistant' })
             }}
-            title="View AI trace"
+            title={traceExists ? 'View AI trace' : 'No AI trace for this chat yet'}
           >
             <MdiIcon path={mdiTimelineClockOutline} size={16} />
           </button>

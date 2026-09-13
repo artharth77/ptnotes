@@ -156,7 +156,9 @@ const api = {
     rename: (project: string, sessionId: string, title: string): Promise<void> =>
       ipcRenderer.invoke('chat:rename', project, sessionId, title),
     readTrace: (project: string, sessionId: string): Promise<AiTraceFile | null> =>
-      ipcRenderer.invoke('chat:readTrace', project, sessionId)
+      ipcRenderer.invoke('chat:readTrace', project, sessionId),
+    traceExists: (project: string, sessionId: string): Promise<boolean> =>
+      ipcRenderer.invoke('chat:traceExists', project, sessionId)
   },
   planner: {
     list: (project: string): Promise<ScheduleMeta[]> => ipcRenderer.invoke('planner:list', project),
