@@ -6633,6 +6633,13 @@ fieldset.kanban-form {
   padding-bottom: 0;
 }
 
+/* Give the gantt scroller the same top pad the table scroller gets so the
+   first row is visible below the toolbar overlay at scroll-top */
+.planner-editor.planner-gantt .planner-grid-scroll .gantt-body {
+  padding-top: var(--planner-header-h, 88px);
+  padding-bottom: var(--planner-statusbar-h, 38px);
+}
+
 /* A custom slim scrollbar is rendered above the status bar; hide the native one */
 .planner-grid-scroll::-webkit-scrollbar:horizontal,
 .gantt-body::-webkit-scrollbar:horizontal {
@@ -7062,7 +7069,7 @@ fieldset.kanban-form {
 
 .gantt-header {
   position: sticky;
-  top: var(--planner-header-h, 88px);
+  top: 0;
   z-index: 3;
   border-bottom: 1px solid var(--border);
 }
@@ -7158,7 +7165,7 @@ fieldset.kanban-form {
   white-space: nowrap;
   box-sizing: border-box;
   border-right: 1px solid var(--border);
-  background: var(--bg-elev);
+  background: color-mix(in srgb, var(--bg-elev) 60%, transparent);
 }
 
 .gantt-month-head {
