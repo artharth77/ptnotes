@@ -84,6 +84,7 @@ interface AppState {
   snapshotsOpen: boolean
   snapshotList: SnapshotMeta[]
   tab: Tab
+  lastTab: Tab
   chatOpen: boolean
   moduleOpen: boolean
   botsOpen: boolean
@@ -252,6 +253,7 @@ interface AppState {
   renameNote: (id: string, newTitle: string) => Promise<void>
   deleteNote: (id: string) => Promise<void>
   setTab: (tab: Tab) => void
+  restoreLastTab: () => void
   setChatOpen: (open: boolean) => void
   setRightView: (view: 'chat' | 'bots' | 'modules' | 'botTasks') => void
   appendChatMessage: (project: string, msg: ChatMessage) => void
@@ -311,7 +313,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   noteContent: '',
   kanban: null,
   kanbanArchive: null,
-  kanbanListView: 'active',
   activeKanbanCardId: null,
   kanbanEditingId: null,
   kanbanViewingId: null,
@@ -328,7 +329,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   snapshotsOpen: false,
   snapshotList: [],
   tab: 'notes',
+  lastTab: 'notes',
   chatOpen: false,
+  kanbanListView: 'active',
   moduleOpen: false,
   botsOpen: false,
   rightView: 'chat',
@@ -1474,8 +1477,24 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setTab(tab) {
+    const current = get().tab
+    if (tab !== current && current !== 'dashboard') {
+      set({ lastTab: current })
+    }
     set({ tab })
     if (tab === 'files') void get().loadExplorer()
+  },
+
+  restoreLastTab() {
+    const state = get()
+    const fallback: Tab = state.activeNoteId
+      ? 'notes'
+      : state.activeScheduleId
+        ? 'planner'
+        : 'notes'
+    const target: Tab = state.lastTab !== 'dashboard' ? (state.lastTab ?? fallback) : fallback
+    set({ tab: target, lastTab: state.tab })
+    if (target === 'files') void get().loadExplorer()
   },
 
   setChatOpen(chatOpen) {

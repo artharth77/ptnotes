@@ -12,6 +12,7 @@ import { MdiIcon } from './components/MdiIcon'
 import {
   mdiAccountGroupOutline,
   mdiAlertCircleOutline,
+  mdiArrowLeft,
   mdiCalendarClockOutline,
   mdiChartDonut,
   mdiFileDocumentOutline,
@@ -78,6 +79,7 @@ export function DashboardPage(): React.JSX.Element {
   const createNote = useAppStore((s) => s.createNote)
   const setChatOpen = useAppStore((s) => s.setChatOpen)
   const setRightView = useAppStore((s) => s.setRightView)
+  const restoreLastTab = useAppStore((s) => s.restoreLastTab)
 
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null)
   const [loading, setLoading] = useState<boolean>(true)
@@ -183,16 +185,27 @@ export function DashboardPage(): React.JSX.Element {
   return (
     <div className="dashboard-page" key={activeProject}>
       <header className="dashboard-header">
-        <div>
-          <h1>Dashboard</h1>
-          <p className="muted">
-            Project overview —{' '}
-            {activeProject
-              ? snapshot
-                ? `Generated ${new Date(snapshot.generatedAt).toLocaleString()}`
-                : 'Loading data…'
-              : 'No project open'}
-          </p>
+        <div className="dashboard-header-title">
+          <button
+            className="btn ghost dashboard-back-btn"
+            onClick={restoreLastTab}
+            title="Back to previous tab"
+          >
+            <span className="btn-icon">
+              <MdiIcon path={mdiArrowLeft} size={18} />
+            </span>
+          </button>
+          <div>
+            <h1>Dashboard</h1>
+            <p className="muted">
+              Project overview —{' '}
+              {activeProject
+                ? snapshot
+                  ? `Generated ${new Date(snapshot.generatedAt).toLocaleString()}`
+                  : 'Loading data…'
+                : 'No project open'}
+            </p>
+          </div>
         </div>
         <div className="dashboard-stat-row">
           {snapshot && (

@@ -10167,3 +10167,19 @@ fieldset.kanban-form {
 .app-body:has(.sidebar.collapsed ~ main > .dashboard-page) .main-area {
   padding-left: 0;
 }
+
+/* Dashboard: back button + title row */
+.dashboard-header-title {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+}
+.dashboard-back-btn {
+  border: 1px solid transparent !important;
+  padding: 6px 10px !important;
+}
+.dashboard-back-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border) !important;
+}

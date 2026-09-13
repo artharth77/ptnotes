@@ -63,6 +63,7 @@ export function TopBar(): React.JSX.Element {
   const setTheme = useAppStore((s) => s.setTheme)
   const tab = useAppStore((s) => s.tab)
   const setTab = useAppStore((s) => s.setTab)
+  const restoreLastTab = useAppStore((s) => s.restoreLastTab)
 
   return (
     <header className="topbar">
@@ -108,9 +109,18 @@ export function TopBar(): React.JSX.Element {
         <ProjectDropdown />
         <button
           className={`btn ghost dashboard-launch-btn ${tab === 'dashboard' ? 'active' : ''}`}
-          onClick={() => setTab('dashboard')}
+          onClick={() => {
+            if (tab === 'dashboard') restoreLastTab()
+            else setTab('dashboard')
+          }}
           disabled={!activeProject}
-          title={activeProject ? 'Open project dashboard' : 'Open a project to view dashboard'}
+          title={
+            activeProject
+              ? tab === 'dashboard'
+                ? 'Close dashboard (return to previous tab)'
+                : 'Open project dashboard'
+              : 'Open a project to view dashboard'
+          }
         >
           <span className="btn-icon">
             <MdiIcon path={mdiViewDashboardOutline} size={18} />
