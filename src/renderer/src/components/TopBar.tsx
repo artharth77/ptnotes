@@ -71,7 +71,14 @@ export function TopBar(): React.JSX.Element {
         <button
           className="btn ghost"
           onClick={() => setSidebarVisible(!sidebarVisible)}
-          title={sidebarVisible ? 'Hide left panel' : 'Show left panel'}
+          disabled={tab === 'dashboard'}
+          title={
+            tab === 'dashboard'
+              ? 'Left panel is hidden while the dashboard is open'
+              : sidebarVisible
+                ? 'Hide left panel'
+                : 'Show left panel'
+          }
         >
           <span className="btn-icon">
             {sidebarVisible ? (

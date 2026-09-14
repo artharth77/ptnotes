@@ -8649,7 +8649,12 @@ fieldset.kanban-form {
 
 :root[data-theme='dark'] .command-palette-group-header,
 :root[data-theme='system'] .command-palette-group-header {
-  background: linear-gradient(to bottom, var(--frost-bg) 0%, var(--frost-bg) 70%, rgba(0, 0, 0, 0) 100%);
+  background: linear-gradient(
+    to bottom,
+    var(--frost-bg) 0%,
+    var(--frost-bg) 70%,
+    rgba(0, 0, 0, 0) 100%
+  );
 }
 
 .command-palette-group .command-palette-item {
@@ -9579,16 +9584,35 @@ fieldset.kanban-form {
 
 /* ===== Dashboard (Project Overview) ===== */
 .dashboard-page {
-  padding: 22px 26px 48px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.dashboard-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 0 26px;
+  min-width: 0;
 }
 .dashboard-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
   display: flex;
   flex-direction: row;
   align-items: flex-start;
   justify-content: space-between;
   gap: 18px;
   margin-bottom: 18px;
+  padding: 8px 26px;
+  background: var(--frost-bg);
+  backdrop-filter: blur(12px) saturate(1.2);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+  border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
 }
 .dashboard-header h1 {
@@ -9597,14 +9621,22 @@ fieldset.kanban-form {
   font-weight: 700;
   letter-spacing: -0.01em;
 }
+.dashboard-header p {
+  margin: 0;
+  line-height: 1.35;
+}
 .dashboard-stat-row {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
 }
 .stat {
-  background: var(--bg-elev);
+  position: relative;
+  cursor: default;
+  background: color-mix(in srgb, var(--bg-elev) 65%, transparent);
   border: 1px solid var(--border);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   border-radius: 10px;
   padding: 10px 14px;
   min-width: 92px;
@@ -9612,6 +9644,50 @@ fieldset.kanban-form {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  transition: border-color 120ms ease;
+}
+.stat:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.stat-hint {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  max-width: 320px;
+  width: max-content;
+  padding: 8px 12px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.22);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: normal;
+  text-align: left;
+  color: var(--text);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(4px);
+  transition:
+    opacity 100ms ease,
+    visibility 100ms ease,
+    transform 100ms ease;
+  pointer-events: none;
+}
+.stat:hover .stat-hint {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+.health-cell:hover .stat-hint {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+.health-cell .stat-hint {
+  right: auto;
+  left: 0;
 }
 .stat-value {
   font-size: 18px;
@@ -9646,6 +9722,10 @@ fieldset.kanban-form {
   grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 14px;
   margin-bottom: 18px;
+  align-items: start;
+}
+.dashboard-grid > .dashboard-widget:nth-child(-n + 3) {
+  align-self: stretch;
 }
 @media (max-width: 1200px) {
   .dashboard-grid {
@@ -9656,8 +9736,12 @@ fieldset.kanban-form {
   .dashboard-grid {
     grid-template-columns: minmax(0, 1fr);
   }
-  .dashboard-widget.dashboard-span-2 {
-    grid-column: span 1 !important;
+  .dashboard-masonry {
+    column-count: 1;
+  }
+  .quick-actions-grid {
+    flex-wrap: wrap;
+    justify-content: center;
   }
 }
 
@@ -9672,18 +9756,20 @@ fieldset.kanban-form {
   gap: 10px;
   min-height: 0;
 }
-.dashboard-widget.dashboard-span-2 {
-  grid-column: span 3;
+.dashboard-masonry {
+  column-count: 2;
+  column-gap: 14px;
+  margin-bottom: 18px;
 }
-.dashboard-widget.dashboard-span-full {
-  grid-column: 1 / -1;
+.dashboard-masonry .dashboard-widget {
+  grid-column: auto;
+  margin-bottom: 14px;
+  break-inside: avoid;
+  -webkit-column-break-inside: avoid;
 }
 @media (max-width: 1200px) {
   .dashboard-widget {
     grid-column: span 1;
-  }
-  .dashboard-widget.dashboard-span-2 {
-    grid-column: span 2;
   }
 }
 .dashboard-widget h3 {
@@ -9756,6 +9842,8 @@ fieldset.kanban-form {
 }
 
 .kpi {
+  position: relative;
+  cursor: default;
   flex: 1;
   min-width: 64px;
   background: color-mix(in srgb, var(--bg-hover) 45%, transparent);
@@ -9767,6 +9855,21 @@ fieldset.kanban-form {
   gap: 2px;
   align-items: center;
   text-align: center;
+  transition: border-color 120ms ease;
+}
+.kpi:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.kpi .stat-hint {
+  right: auto;
+  left: 0;
+  min-width: 220px;
+  text-align: left;
+}
+.kpi:hover .stat-hint {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
 }
 .kpi.big {
   padding: 10px 12px;
@@ -9816,18 +9919,41 @@ fieldset.kanban-form {
 }
 .pill-overdue {
   color: #c53030;
-  background: color-mix(in srgb, #c53030 15%, transparent);
-  border-color: color-mix(in srgb, #c53030 45%, transparent);
+  background: color-mix(in srgb, #c53030 12%, var(--bg-elev));
+  border-color: color-mix(in srgb, #c53030 45%, var(--bg-elev));
 }
 .pill-today {
   color: #9c4221;
-  background: color-mix(in srgb, #dd6b20 20%, transparent);
-  border-color: color-mix(in srgb, #dd6b20 50%, transparent);
+  background: color-mix(in srgb, #dd6b20 16%, var(--bg-elev));
+  border-color: color-mix(in srgb, #dd6b20 50%, var(--bg-elev));
 }
 .pill-upcoming {
   color: #2c5282;
-  background: color-mix(in srgb, #3182ce 18%, transparent);
-  border-color: color-mix(in srgb, #3182ce 45%, transparent);
+  background: color-mix(in srgb, #3182ce 14%, var(--bg-elev));
+  border-color: color-mix(in srgb, #3182ce 45%, var(--bg-elev));
+}
+.pill-filter {
+  font-family: inherit;
+  cursor: pointer;
+  font-size: 11px;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+.pill-filter:hover:not(.active) {
+  border-color: currentColor;
+}
+.pill-filter.deactive {
+  opacity: 0.45;
+}
+.pill-filter.deactive:hover {
+  opacity: 0.8;
+}
+.pill-filter.active {
+  border-color: currentColor;
+  box-shadow: inset 0 0 0 1px currentColor;
+  font-weight: 700;
 }
 
 .badge {
@@ -9907,6 +10033,12 @@ fieldset.kanban-form {
 }
 
 /* overdue list */
+.overdue-list {
+  flex: 1 1 auto;
+  height: 320px;
+  min-height: 0;
+  max-height: 100%;
+}
 .overdue-list .overdue-item {
   padding: 8px 10px;
   border-radius: 8px;
@@ -9977,6 +10109,8 @@ fieldset.kanban-form {
   gap: 8px;
 }
 .health-cell {
+  position: relative;
+  cursor: default;
   padding: 7px 9px;
   background: color-mix(in srgb, var(--bg-hover) 55%, transparent);
   border: 1px solid var(--border);
@@ -9985,6 +10119,10 @@ fieldset.kanban-form {
   flex-direction: column;
   gap: 2px;
   align-items: flex-start;
+  transition: border-color 120ms ease;
+}
+.health-cell:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 .health-cell .muted {
   font-size: 10px;
@@ -9999,16 +10137,17 @@ fieldset.kanban-form {
 /* activity feed */
 .activity-list {
   gap: 5px;
+  max-height: none;
 }
-.activity-item {
+li.activity-item {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 8px;
+  padding: 4px 6px;
   border-radius: 7px;
   border: 1px solid transparent;
 }
-.activity-item:hover {
+li.activity-item:hover {
   background: var(--bg-hover);
   border-color: var(--border);
 }
@@ -10081,41 +10220,46 @@ fieldset.kanban-form {
 
 /* quick actions */
 .dashboard-quick-actions {
-  margin-top: 8px;
-  padding-top: 4px;
-}
-.dashboard-quick-actions h2 {
-  margin: 0 0 10px;
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  padding: 8px 26px 12px;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
 }
 .quick-actions-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 10px;
+  display: flex;
+  gap: 12px;
+  padding: 9px 12px;
+  background: color-mix(in srgb, var(--bg-elev) 80%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  backdrop-filter: blur(12px) saturate(1.2);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+  pointer-events: auto;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, var(--shadow-strength, 0.25));
 }
 .qa-btn {
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 14px 12px;
+  min-width: 86px;
+  padding: 10px 8px 9px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 5px;
+  background: transparent;
+  border: none;
+  border-radius: 14px;
   cursor: pointer;
   color: var(--text);
   transition:
-    transform 80ms ease,
     background 120ms ease,
-    border-color 120ms ease;
+    transform 80ms ease;
   font-family: inherit;
 }
 .qa-btn:hover {
   background: var(--bg-hover);
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   transform: translateY(-1px);
 }
 .qa-btn:active {
@@ -10140,9 +10284,10 @@ fieldset.kanban-form {
   color: #dd6b20;
 }
 .qa-label {
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--text);
+  line-height: 1;
 }
 
 /* Dashboard: hide sidebar, widen main. Launch button next to project dropdown */

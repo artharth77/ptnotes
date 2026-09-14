@@ -72,6 +72,8 @@ interface AppState {
   kanbanEditingId: string | null
   kanbanViewingId: string | null
   kanbanCreatingColumnId: string | null
+  noteCreating: boolean
+  plannerCreating: boolean
   kanbanCollapsed: Record<string, boolean>
   projectFiles: string[]
   projectFileEntries: FileEntry[]
@@ -197,6 +199,10 @@ interface AppState {
   closeKanbanViewer: () => void
   openKanbanCreate: (columnId: string) => void
   closeKanbanCreate: () => void
+  openNoteCreate: () => void
+  closeNoteCreate: () => void
+  openPlannerCreate: () => void
+  closePlannerCreate: () => void
   toggleKanbanColumn: (columnId: string) => void
   refreshFiles: () => Promise<void>
   refreshSchedules: () => Promise<void>
@@ -317,6 +323,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   kanbanEditingId: null,
   kanbanViewingId: null,
   kanbanCreatingColumnId: null,
+  noteCreating: false,
+  plannerCreating: false,
   kanbanCollapsed: {},
   projectFiles: [],
   projectFileEntries: [],
@@ -457,6 +465,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           kanbanEditingId: null,
           kanbanViewingId: null,
           kanbanCreatingColumnId: null,
+          noteCreating: false,
+          plannerCreating: false,
           kanbanCollapsed: {},
           activeNoteId: null,
           noteContent: ''
@@ -487,6 +497,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       kanbanViewingId: null,
       kanbanCreatingColumnId: null,
       kanbanListView: 'active',
+      noteCreating: false,
+      plannerCreating: false,
       loading: true,
       moduleHistoryRunId: null,
       explorerCwd: '',
@@ -843,6 +855,22 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   openKanbanCreate(columnId) {
     set({ kanbanCreatingColumnId: columnId, kanbanEditingId: null })
+  },
+
+  openNoteCreate() {
+    set({ noteCreating: true })
+  },
+
+  closeNoteCreate() {
+    set({ noteCreating: false })
+  },
+
+  openPlannerCreate() {
+    set({ plannerCreating: true })
+  },
+
+  closePlannerCreate() {
+    set({ plannerCreating: false })
   },
 
   closeKanbanCreate() {
