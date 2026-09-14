@@ -15,6 +15,7 @@ import { friendlyError } from '../errors'
 import { Modal, ConfirmModal, TextField } from './Modal'
 import { MdiIcon } from './MdiIcon'
 import { PlannerSnapshotsModal } from './PlannerSnapshotsModal'
+import { PlannerMiniCalendar } from './PlannerMiniCalendar'
 
 function formatDate(ms: number): string {
   if (!ms) return ''
@@ -344,6 +345,8 @@ export function PlannerPanel(): React.JSX.Element {
       )}
 
       {snapshotsOpen && createPortal(<PlannerSnapshotsModal />, document.body)}
+
+      <PlannerMiniCalendar />
     </div>
   )
 }
