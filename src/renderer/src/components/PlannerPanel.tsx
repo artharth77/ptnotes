@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   mdiContentCopy,
   mdiDotsVertical,
@@ -342,7 +343,7 @@ export function PlannerPanel(): React.JSX.Element {
         />
       )}
 
-      {snapshotsOpen && <PlannerSnapshotsModal />}
+      {snapshotsOpen && createPortal(<PlannerSnapshotsModal />, document.body)}
     </div>
   )
 }

@@ -380,6 +380,7 @@ function App(): React.JSX.Element {
   const rightOpen = chatOpen || moduleOpen || botsOpen
   const setRightView = useAppStore((s) => s.setRightView)
   const settingsOpen = useAppStore((s) => s.settingsOpen)
+  const snapshotsOpen = useAppStore((s) => s.snapshotsOpen)
   const storeSidebarVisible = useAppStore((s) => s.sidebarVisible)
   // Temporary show state: panelPeek reveals a closed sidebar panel while the
   // mouse is over the tab strip (auto-hidden on leave).
@@ -423,7 +424,7 @@ function App(): React.JSX.Element {
   // V-tab strip hover peek: reveal a closed sidebar panel while the mouse is
   // over the strip; auto-hide shortly after the mouse leaves.
   function showPeek(): void {
-    if (!peekEnabled) return
+    if (!peekEnabled || snapshotsOpen) return
     if (hidePeekTimer.current !== null) {
       window.clearTimeout(hidePeekTimer.current)
       hidePeekTimer.current = null
@@ -456,6 +457,24 @@ function App(): React.JSX.Element {
       if (hidePeekTimer.current !== null) window.clearTimeout(hidePeekTimer.current)
       if (peekCloseTimer.current !== null) window.clearTimeout(peekCloseTimer.current)
     }
+  }, [])
+
+  // Opening a modal that renders over the whole app (e.g. planner snapshots, which
+  // lives in the sidebar panel) must not keep the peek panel visible — drop it.
+  useEffect(() => {
+    return useAppStore.subscribe((state, prev) => {
+      if (!state.snapshotsOpen || prev.snapshotsOpen) return
+      if (hidePeekTimer.current !== null) {
+        window.clearTimeout(hidePeekTimer.current)
+        hidePeekTimer.current = null
+      }
+      if (peekCloseTimer.current !== null) {
+        window.clearTimeout(peekCloseTimer.current)
+        peekCloseTimer.current = null
+      }
+      setPanelPeek(false)
+      setPanelPeekClosing(false)
+    })
   }, [])
 
   // Switching to the dashboard while the panel is peeking drops the overlay
