@@ -751,12 +751,13 @@ body {
   flex-direction: column;
   align-items: center;
   padding: 4px 0;
-  gap: 2px;
+  gap: 8px;
   overflow-y: auto;
   overflow-x: hidden;
 }
 
 .vtabs-btn {
+  position: relative;
   width: 32px;
   height: 32px;
   border: none;
@@ -781,6 +782,19 @@ body {
 .vtabs-btn.active {
   color: var(--accent);
   background: var(--accent-soft);
+}
+
+/* Accent bar on the strip's left edge next to the active tab */
+.vtabs-btn.active::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 22px;
+  background: var(--accent);
+  border-radius: 0 2px 2px 0;
 }
 
 .vtabs-btn.disabled {
