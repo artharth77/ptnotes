@@ -9799,6 +9799,87 @@ fieldset.kanban-form {
   justify-content: center;
   padding: 6px 0 10px;
 }
+/* Dashboard interactive donut charts */
+.donut-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 0 2px;
+}
+.donut-svg {
+  width: 190px;
+  height: 190px;
+  max-width: 100%;
+  display: block;
+}
+.donut-track {
+  stroke: color-mix(in srgb, var(--border) 70%, transparent);
+  fill: none;
+}
+.donut-slice {
+  transition:
+    transform 140ms ease,
+    opacity 140ms ease;
+  stroke: var(--bg);
+  stroke-width: 1.5;
+}
+.donut-slice.dimmed {
+  opacity: 0.45;
+}
+.donut-wrap:hover .donut-slice:hover {
+  opacity: 1;
+}
+.donut-center-value {
+  font-size: 26px;
+  font-weight: 700;
+  fill: var(--text);
+  font-family: inherit;
+  pointer-events: none;
+}
+.donut-center-label {
+  font-size: 12px;
+  fill: var(--text-dim);
+  font-family: inherit;
+  pointer-events: none;
+}
+.donut-tip {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 8px));
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--text);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  white-space: nowrap;
+  z-index: 5;
+}
+.donut-tip-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  flex: 0 0 auto;
+}
+.donut-tip-label {
+  font-weight: 600;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.donut-tip-value {
+  color: var(--text-dim);
+}
+.dashboard-widget li.active,
+.dashboard-widget tr.active {
+  background: var(--bg-hover);
+}
+
 .widget-chart svg {
   max-width: 100%;
   max-height: 240px;
@@ -10357,4 +10438,16 @@ li.activity-item:hover {
   max-width: 100%;
   height: auto;
   display: block;
+}
+
+/* visually hidden (donut aria-live readout) */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
 }

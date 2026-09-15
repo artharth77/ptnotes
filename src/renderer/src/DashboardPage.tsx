@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import type { InfographicRenderResult } from '@shared/types'
 import type {
   ActivityItem,
   DashboardSnapshot,
@@ -9,6 +8,7 @@ import type {
 } from '@shared/dashboard'
 import { useAppStore } from './store/useAppStore'
 import { MdiIcon } from './components/MdiIcon'
+import { DonutChart } from './components/DonutChart'
 import { useIsDarkTheme } from './useIsDarkTheme'
 import {
   mdiAccountGroupOutline,
@@ -25,68 +25,6 @@ import {
   mdiRocketLaunchOutline,
   mdiStar
 } from '@mdi/js'
-
-const CHART_PIXEL_WIDTH = 720
-const CHART_WIDTH = 720
-const CHART_HEIGHT = 440
-
-const darkPiePalette = [
-  '#60a5fa',
-  '#34d399',
-  '#fbbf24',
-  '#f87171',
-  '#a78bfa',
-  '#22d3ee',
-  '#fb923c',
-  '#f472b6'
-]
-const lightPiePalette = [
-  '#3b82f6',
-  '#10b981',
-  '#f59e0b',
-  '#ef4444',
-  '#8b5cf6',
-  '#06b6d4',
-  '#f97316',
-  '#ec4899'
-]
-
-const APP_FONT_STACK =
-  '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
-
-const antvThemeConfig = (
-  dark: boolean,
-  fontSizeStep: number,
-  palette?: string[]
-): Record<string, unknown> => ({
-  base: {
-    text: {
-      'font-family': APP_FONT_STACK,
-      'font-size': 18 + fontSizeStep
-    }
-  },
-  title: {
-    'font-size': 16 + fontSizeStep,
-    fontWeight: 600
-  },
-  baseFontSize: 16 + fontSizeStep,
-  labelFontSize: 18 + fontSizeStep,
-  axisFontSize: 15 + fontSizeStep,
-  legendFontSize: 16 + fontSizeStep,
-  titleFontSize: 22 + fontSizeStep,
-  titleFontWeight: 600,
-  subtitleFontSize: 14 + fontSizeStep,
-  annotationFontSize: 15 + fontSizeStep,
-  colors: dark ? darkPiePalette : lightPiePalette,
-  ...(palette ? { palette } : {}),
-  colorBg: dark ? '#1b1d23' : '#ffffff',
-  textColor: dark ? '#f2f4f7' : '#1f2937',
-  labelColor: dark ? '#d1d5db' : '#111827',
-  subTextColor: dark ? '#9ca3af' : '#6b7280',
-  borderColor: dark ? 'rgba(255,255,255,0.08)' : '#e5e7eb',
-  splitLineColor: dark ? 'rgba(255,255,255,0.08)' : '#e5e7eb',
-  axisLineColor: dark ? 'rgba(255,255,255,0.12)' : '#d1d5db'
-})
 
 const fontSizeStepFor = (size: 'small' | 'default' | 'large' | 'xlarge'): number =>
   size === 'small' ? -1 : size === 'large' ? 2 : size === 'xlarge' ? 4 : 0
@@ -156,10 +94,8 @@ export function DashboardPage(): React.JSX.Element {
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null)
   const [loading, setLoading] = useState<boolean>(true)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [workloadSvg, setWorkloadSvg] = useState<string | null>(null)
-  const [kanbanPieSvg, setKanbanPieSvg] = useState<string | null>(null)
-  const [workloadChartErr, setWorkloadChartErr] = useState<string | null>(null)
-  const [kanbanChartErr, setKanbanChartErr] = useState<string | null>(null)
+  const [activeWorkload, setActiveWorkload] = useState<string | null>(null)
+  const [activeKanban, setActiveKanban] = useState<string | null>(null)
   const [overdueFilter, setOverdueFilter] = useState<'all' | 'overdue' | 'today' | 'upcoming'>(
     'all'
   )
@@ -191,73 +127,6 @@ export function DashboardPage(): React.JSX.Element {
       cancelled = true
     }
   }, [activeProject])
-
-  useEffect(() => {
-    queueMicrotask(() => {
-      setWorkloadSvg(null)
-      setKanbanPieSvg(null)
-      setWorkloadChartErr(null)
-      setKanbanChartErr(null)
-    })
-    const workloadRows = snapshot?.workload ?? []
-    const kanbanRows = snapshot?.kanbanStats.rows ?? []
-    const theme = isDark ? 'dark' : 'light'
-    const themeConfig = antvThemeConfig(isDark, fontSizeStepFor(fontSize))
-    void (async (): Promise<void> => {
-      if (workloadRows.length) {
-        const values = workloadRows
-          .slice(0, 10)
-          .map((w) => ({ label: w.owner, value: w.totalItems }))
-        const infographic = {
-          template: 'chart-pie-donut-plain-text',
-          theme,
-          themeConfig,
-          data: { values },
-          width: CHART_WIDTH,
-          height: CHART_HEIGHT,
-          title: 'Workload by Assignee'
-        }
-        try {
-          const out: InfographicRenderResult = await window.ptnotes.infographic.render(
-            infographic,
-            CHART_PIXEL_WIDTH
-          )
-          if (out.ok && out.svg) setWorkloadSvg(out.svg)
-          else setWorkloadChartErr(out.error ?? 'Could not render')
-        } catch (e) {
-          setWorkloadChartErr(e instanceof Error ? e.message : String(e))
-        }
-      }
-      const kanbanData = kanbanRows.filter((r) => r.count > 0)
-      if (kanbanData.length > 0) {
-        const values = kanbanData.map((r) => ({ label: r.title, value: r.count }))
-        const kanbanThemeConfig = antvThemeConfig(
-          isDark,
-          fontSizeStepFor(fontSize),
-          kanbanData.map((r) => r.color)
-        )
-        const infographic = {
-          template: 'chart-pie-donut-pill-badge',
-          theme,
-          themeConfig: kanbanThemeConfig,
-          data: { values },
-          width: CHART_WIDTH,
-          height: CHART_HEIGHT,
-          title: 'Kanban Status'
-        }
-        try {
-          const out: InfographicRenderResult = await window.ptnotes.infographic.render(
-            infographic,
-            CHART_PIXEL_WIDTH
-          )
-          if (out.ok && out.svg) setKanbanPieSvg(out.svg)
-          else setKanbanChartErr(out.error ?? 'Could not render')
-        } catch (e) {
-          setKanbanChartErr(e instanceof Error ? e.message : String(e))
-        }
-      }
-    })()
-  }, [snapshot, isDark, fontSize])
 
   const sortedOverdue = useMemo<OverdueItem[]>(() => {
     if (!snapshot) return []
@@ -403,33 +272,21 @@ export function DashboardPage(): React.JSX.Element {
                   <MdiIcon path={mdiAccountGroupOutline} size={16} /> Workload
                 </h3>
                 <>
-                  {workloadSvg ? (
-                    <div
-                      className="widget-chart"
-                      dangerouslySetInnerHTML={{ __html: workloadSvg }}
-                    />
-                  ) : workloadChartErr ? (
-                    <>
-                      <div className="widget-empty dashboard-warn">
-                        <MdiIcon path={mdiAlertCircleOutline} size={16} /> Chart unavailable:{' '}
-                        {workloadChartErr}
-                      </div>
-                      <ul className="widget-list kanban-legend">
-                        {workloadRows.slice(0, 8).map((w) => (
-                          <li key={w.owner}>
-                            <span className="color-swatch" />
-                            <span className="legend-title">{w.owner}</span>
-                            <span className="legend-count">{w.totalItems}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </>
-                  ) : workloadRows.length === 0 ? (
+                  {workloadRows.length === 0 ? (
                     <div className="widget-empty muted">
                       No kanban cards or planner tasks assigned yet.
                     </div>
                   ) : (
-                    <div className="widget-empty muted">Generating chart…</div>
+                    <DonutChart
+                      isDark={isDark}
+                      fontSizeStep={fontSizeStepFor(fontSize)}
+                      data={workloadRows
+                        .slice(0, 10)
+                        .map((w) => ({ label: w.owner, value: w.totalItems }))}
+                      centerLabel="Items"
+                      activeKey={activeWorkload}
+                      onActiveChange={setActiveWorkload}
+                    />
                   )}
                   <table className="widget-table widget-workload-table">
                     <thead>
@@ -450,7 +307,12 @@ export function DashboardPage(): React.JSX.Element {
                         </tr>
                       ) : (
                         workloadRows.slice(0, 8).map((w) => (
-                          <tr key={w.owner}>
+                          <tr
+                            key={w.owner}
+                            className={activeWorkload === w.owner ? 'active' : ''}
+                            onMouseEnter={() => setActiveWorkload(w.owner)}
+                            onMouseLeave={() => setActiveWorkload(null)}
+                          >
                             <td className="owner">{w.owner}</td>
                             <td>{w.kanbanCards}</td>
                             <td>{w.plannerTasks}</td>
@@ -484,38 +346,32 @@ export function DashboardPage(): React.JSX.Element {
                     <span className="kpi-label">Total</span>
                   </div>
                 </div>
-                {kanbanPieSvg ? (
-                  <div
-                    className="widget-chart"
-                    dangerouslySetInnerHTML={{ __html: kanbanPieSvg }}
+                {kanbanRows.some((r) => r.count > 0) ? (
+                  <DonutChart
+                    isDark={isDark}
+                    fontSizeStep={fontSizeStepFor(fontSize)}
+                    data={kanbanRows
+                      .filter((r) => r.count > 0)
+                      .map((r) => ({
+                        label: r.title,
+                        value: r.count,
+                        color: r.isDone ? '#2f855a' : r.color
+                      }))}
+                    centerLabel="Cards"
+                    activeKey={activeKanban}
+                    onActiveChange={setActiveKanban}
                   />
-                ) : kanbanChartErr ? (
-                  <>
-                    <div className="widget-empty dashboard-warn">
-                      <MdiIcon path={mdiAlertCircleOutline} size={16} /> Chart unavailable:{' '}
-                      {kanbanChartErr}
-                    </div>
-                    <ul className="widget-list kanban-legend">
-                      {kanbanRows.slice(0, 8).map((r) => (
-                        <li key={r.columnId}>
-                          <span
-                            className="color-swatch"
-                            style={{ background: r.isDone ? '#2f855a' : r.color }}
-                          />
-                          <span className="legend-title">{r.title}</span>
-                          <span className="legend-count">{r.count}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </>
-                ) : kanbanRows.some((r) => r.count > 0) ? (
-                  <div className="widget-empty muted">Generating chart…</div>
                 ) : (
                   <div className="widget-empty muted">No kanban data yet</div>
                 )}
                 <ul className="widget-list kanban-legend">
                   {kanbanRows.slice(0, 8).map((r) => (
-                    <li key={r.columnId}>
+                    <li
+                      key={r.columnId}
+                      className={activeKanban === r.title ? 'active' : ''}
+                      onMouseEnter={() => setActiveKanban(r.title)}
+                      onMouseLeave={() => setActiveKanban(null)}
+                    >
                       <span
                         className="color-swatch"
                         style={{ background: r.isDone ? '#2f855a' : r.color }}
