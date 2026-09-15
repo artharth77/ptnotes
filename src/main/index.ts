@@ -9,6 +9,7 @@ import { registerProjectIpc, registerNoteIpc, registerChatIpc } from './ipc'
 import { registerKanbanIpc } from './ipc/kanban'
 import { registerPlannerIpc } from './ipc/planner'
 import { registerSnapshotsIpc } from './ipc/snapshots'
+import { registerDashboardIpc } from './ipc/dashboard'
 import { registerAiIpc, createSessionRegistry } from './ipc/ai'
 import { registerFilesIpc } from './ipc/files'
 import { registerGalleryIpc } from './ipc/gallery'
@@ -16,6 +17,7 @@ import { registerSettingsIpc } from './ipc/settings'
 import { registerSkillsIpc } from './ipc/skills'
 import { registerModulesIpc } from './ipc/modules'
 import { registerDiagramsIpc } from './ipc/diagrams'
+import { registerInfographicIpc } from './ipc/infographic'
 import { registerToolsetsIpc } from './ipc/toolsets'
 import { registerBotsIpc } from './ipc/bots'
 import { BotsStore } from './bots/db'
@@ -410,6 +412,7 @@ app.whenReady().then(async () => {
   registerChatIpc(service)
   registerPlannerIpc(service)
   registerSnapshotsIpc(service)
+  registerDashboardIpc(service)
   registerAiIpc(registry, configStore, service)
   registerFilesIpc(service, registry, configStore)
   registerGalleryIpc(service)
@@ -422,6 +425,7 @@ app.whenReady().then(async () => {
   registerToolsetsIpc(settingsStore)
   registerBotsIpc(botsStore, groupChatManager, moduleManager!)
   registerDiagramsIpc()
+  registerInfographicIpc()
 
   windowStateStore = new WindowStateStore()
   const windowState = await windowStateStore.load()

@@ -86,6 +86,11 @@ export function registerKanbanIpc(service: PTNotesService): void {
     service.loadKanbanArchive(project)
   )
   ipcMain.handle(
+    'kanban:archiveColumn',
+    async (_e: IpcMainInvokeEvent, project: string, columnId: string) =>
+      service.archiveKanbanColumn(project, columnId)
+  )
+  ipcMain.handle(
     'kanban:archiveCard',
     async (_e: IpcMainInvokeEvent, project: string, cardId: string) =>
       service.archiveKanbanCard(project, cardId)

@@ -194,13 +194,17 @@ function useActions(): CommandPaletteAction[] {
       switchTab('kanban', 'Kanban', mdiViewGridOutline),
       switchTab('planner', 'Planner', mdiViewDashboardOutline),
       switchTab('modules', 'Modules', mdiViewModuleOutline),
-      {
-        id: 'sidebar:toggle',
-        title: sidebarVisible ? 'Hide Left Sidebar' : 'Show Left Sidebar',
-        iconPath: mdiMenu,
-        category: 'View',
-        run: () => closeAndRun(() => setSidebarVisible(!sidebarVisible))
-      },
+      ...(tab === 'dashboard'
+        ? []
+        : [
+            {
+              id: 'sidebar:toggle',
+              title: sidebarVisible ? 'Hide Left Sidebar' : 'Show Left Sidebar',
+              iconPath: mdiMenu,
+              category: 'View',
+              run: () => closeAndRun(() => setSidebarVisible(!sidebarVisible))
+            }
+          ]),
       openSettings('storage', 'Storage', mdiCogOutline),
       openSettings('appearance', 'Appearance', mdiBrightness4),
       openSettings('ai', 'AI', mdiCogOutline),

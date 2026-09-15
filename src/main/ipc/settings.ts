@@ -44,7 +44,8 @@ function toAppearance(settings: StorageSettings): AppearanceSettings {
       settings.editorFontFamily === 'serif' || settings.editorFontFamily === 'mono'
         ? settings.editorFontFamily
         : 'sans',
-    surfaceTranslucent: settings.surfaceTranslucent !== false
+    surfaceTranslucent: settings.surfaceTranslucent !== false,
+    sidebarVisible: settings.sidebarVisible !== false
   }
 }
 
@@ -109,6 +110,9 @@ export function registerSettingsIpc(
       }
       if (typeof input.surfaceTranslucent === 'boolean') {
         patch.surfaceTranslucent = input.surfaceTranslucent
+      }
+      if (typeof input.sidebarVisible === 'boolean') {
+        patch.sidebarVisible = input.sidebarVisible
       }
       return toAppearance(await store.save({ ...current, ...patch }))
     }

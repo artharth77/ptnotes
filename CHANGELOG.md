@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.19.0] — 2026-09-15
+
+### Added
+
+- **Dashboard: project overview page (MVP)** — a new dashboard tab aggregates a project's live data into six widgets: Workload (tasks per assignee donut), Kanban status (cards per column donut), Planner health (on-time / late / done KPIs with overdue pills as clickable filters), Recent Notes (clickable rows with 2-line snippets and star state), Activity (recent notes / cards / tasks) and Quick Actions. All aggregations are pure functions in `src/shared/dashboard.ts` (shared with tests), served over a new `dashboard:snapshot` IPC; charts render through `@antv/infographic` in an isolated utility process (`infographic:render` IPC — the renderer never touches the rasterizer), replacing the earlier static mermaid pies.
+- **Dashboard: interactive donut charts** — the static infographic pies became interactive donut charts with hover slices, animated sweeps and a clickable swatch legend; chart text sizes scale with the user's global font-size preference and the palette is theme-aware (custom light/dark color arrays so slices stay readable on both themes).
+- **Dashboard: quick actions** — a macOS-style floating dock offers New Note / New Card / New Planner / File Explorer: each switches to the target tab and opens its add modal; the dashboard's frosted sticky header shows headline stats (notes, cards, tasks) with hover hints, and rows 2+ use a masonry layout.
+- **Dashboard: launch/exit paths** — a launch button next to the project dropdown in the top bar toggles the dashboard (accent while active, disabled with no project open); the page has its own Back button, and the top-bar button restores the previous tab. While the dashboard is active the sidebar auto-hides and the sidebar toggle is disabled (TopBar + command palette).
+- **Planner: floating frost mini calendar** — a mini-calendar button in the vertical tab bar opens a frosted popup with month navigation, month/year pickers and a today jump for the schedule panel.
+- **Kanban: "move all" to archived column** — the column menu gains an action to move every card of a column into the archived column.
+
+### Changed
+
+- **UI: vertical icon tab bar with hover-peek side panel** — the horizontal sidebar tabs became a 48px vertical icon strip (notes / kanban / planner / files) with frosted floating hover hints; the closed side panel now hover-peeks as a temporary frost overlay (rounded right corners, accent left-edge bar on the active tab) that auto-hides on mouse-out, and the last show/hide state persists across restarts. Fixing the peek also removed a 1px shift of the main area, and new app icons were regenerated for mac and windows.
+
+### Fixed
+
+- **Planner: snapshots modal shows alone** — the planner peek panel no longer renders behind the snapshots modal (the modal is portaled so it displays on its own).
+- **Kanban: label filter popup clickable** — the label filter popup hidden under an overlay couldn't be clicked; it now stacks above it.
+
 ## [0.18.2] — 2026-09-14
 
 ### Added

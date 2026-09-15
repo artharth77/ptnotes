@@ -33,6 +33,7 @@ import type {
   ModuleSettings,
   ModuleStartResult,
   MermaidRenderResult,
+  InfographicRenderResult,
   NewGroupInput,
   StorageSettings,
   ToolsetSettings,
@@ -139,6 +140,8 @@ const api = {
       ipcRenderer.invoke('kanban:deleteColumn', project, columnId, options),
     loadArchive: (project: string): Promise<KanbanArchive> =>
       ipcRenderer.invoke('kanban:loadArchive', project),
+    archiveColumn: (project: string, columnId: string): Promise<KanbanArchiveMove> =>
+      ipcRenderer.invoke('kanban:archiveColumn', project, columnId),
     archiveCard: (project: string, cardId: string): Promise<KanbanArchiveMove> =>
       ipcRenderer.invoke('kanban:archiveCard', project, cardId),
     restoreCard: (project: string, cardId: string): Promise<KanbanArchiveMove> =>
@@ -357,6 +360,10 @@ const api = {
     openExternal: (project: string, fileName: string): Promise<string> =>
       ipcRenderer.invoke('files:openExternal', project, fileName)
   },
+  dashboard: {
+    getSnapshot: (project: string): Promise<import('@shared/dashboard').DashboardSnapshot> =>
+      ipcRenderer.invoke('dashboard:getSnapshot', project)
+  },
   gallery: {
     list: (project: string): Promise<GalleryImage[]> => ipcRenderer.invoke('gallery:list', project),
     import: (project: string, sourcePath: string, fileName?: string): Promise<string> =>
@@ -466,6 +473,13 @@ const api = {
       data: Uint8Array,
       format: 'png' | 'svg'
     ): Promise<DiagramSaveResult> => ipcRenderer.invoke('diagrams:save', { name, data, format })
+  },
+  infographic: {
+    render: (
+      infographic: string | Record<string, unknown>,
+      pixelWidth?: number
+    ): Promise<InfographicRenderResult> =>
+      ipcRenderer.invoke('infographic:render', infographic, pixelWidth)
   },
   onOpenFind: (callback: () => void): (() => void) => {
     const listener = (): void => callback()
