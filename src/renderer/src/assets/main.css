@@ -259,6 +259,7 @@ body {
   top: 0;
   bottom: 0;
   z-index: 60;
+  border-radius: 0 18px 18px 0;
   box-shadow: 8px 0 24px rgba(0, 0, 0, 0.25);
   background: transparent;
 }
@@ -268,6 +269,7 @@ body {
   position: absolute;
   inset: 0;
   z-index: -1;
+  border-radius: inherit;
   background: var(--frost-bg);
   backdrop-filter: blur(12px) saturate(1.2);
 }
