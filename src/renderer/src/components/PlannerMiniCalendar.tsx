@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { mdiCalendarMonth, mdiChevronLeft, mdiChevronRight, mdiClose } from '@mdi/js'
+import { createPortal } from 'react-dom'
+import { mdiChevronLeft, mdiChevronRight, mdiClose } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
 import { defaultCalendar, formatDate, isWorkingDay } from '@shared/planner'
 import { MdiIcon } from './MdiIcon'
@@ -30,25 +31,71 @@ function buildMonthCells(year: number, month: number): (Date | null)[] {
   return cells
 }
 
+function capturePickerRect(popup: HTMLDivElement | null): {
+  left: number
+  top: number
+  width: number
+  height: number
+} | null {
+  if (!popup) return null
+  const r = popup.getBoundingClientRect()
+  const width = 120
+  const height = 200
+  return {
+    left: r.left + (r.width - width) / 2,
+    top: r.top + (r.height - height) / 2,
+    width,
+    height
+  }
+}
+
 export function PlannerMiniCalendar(): React.JSX.Element {
+  const setOpen = useAppStore((s) => s.setPlannerCalendarOpen)
   const calendar = useAppStore((s) => s.calendar) ?? defaultCalendar()
-  const [open, setOpen] = useState(false)
   const [view, setView] = useState(() => {
     const now = new Date()
     return { year: now.getFullYear(), month: now.getMonth() }
   })
   const [yearPickerOpen, setYearPickerOpen] = useState(false)
-  const activeYearRef = useRef<HTMLButtonElement>(null)
+  const [monthPickerOpen, setMonthPickerOpen] = useState(false)
+  const [pickerRect, setPickerRect] = useState<{
+    left: number
+    top: number
+    width: number
+    height: number
+  } | null>(null)
+  const activeItemRef = useRef<HTMLButtonElement>(null)
+  const popupRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (yearPickerOpen) activeYearRef.current?.scrollIntoView({ block: 'center' })
-  }, [yearPickerOpen])
+    if (yearPickerOpen || monthPickerOpen)
+      activeItemRef.current?.scrollIntoView({ block: 'center' })
+  }, [yearPickerOpen, monthPickerOpen])
 
-  const openCalendar = (): void => {
-    const now = new Date()
-    setView({ year: now.getFullYear(), month: now.getMonth() })
+  useEffect(() => {
+    if (!(yearPickerOpen || monthPickerOpen)) return
+    function onPointerDown(e: MouseEvent): void {
+      const target = e.target as HTMLElement
+      if (target.closest('.planner-cal-years')) return
+      if (target.closest('.planner-cal-year-btn') || target.closest('.planner-cal-month-btn'))
+        return
+      setYearPickerOpen(false)
+      setMonthPickerOpen(false)
+    }
+    window.addEventListener('mousedown', onPointerDown)
+    return () => window.removeEventListener('mousedown', onPointerDown)
+  }, [yearPickerOpen, monthPickerOpen])
+
+  const toggleYearPicker = (): void => {
+    if (!yearPickerOpen) setPickerRect(capturePickerRect(popupRef.current))
+    setYearPickerOpen((o) => !o)
+    setMonthPickerOpen(false)
+  }
+
+  const toggleMonthPicker = (): void => {
+    if (!monthPickerOpen) setPickerRect(capturePickerRect(popupRef.current))
+    setMonthPickerOpen((o) => !o)
     setYearPickerOpen(false)
-    setOpen(true)
   }
 
   const cells = buildMonthCells(view.year, view.month)
@@ -71,107 +118,135 @@ export function PlannerMiniCalendar(): React.JSX.Element {
     else if (e.deltaY > 0) shiftMonth(1)
   }
 
-  return (
+  return createPortal(
     <>
-      {open && (
-        <div className="planner-cal-popup" onWheel={onWheel}>
-          <div className="planner-cal-head">
+      <div className="planner-cal-popup" ref={popupRef} onWheel={onWheel}>
+        <div className="planner-cal-head">
+          <button
+            className="icon-btn small planner-cal-nav"
+            title="Previous month"
+            onClick={() => shiftMonth(-1)}
+          >
+            <MdiIcon path={mdiChevronLeft} size={16} />
+          </button>
+          <span className="planner-cal-title">
             <button
-              className="icon-btn small planner-cal-nav"
-              title="Previous month"
-              onClick={() => shiftMonth(-1)}
+              className="planner-cal-month-btn"
+              title="Pick month"
+              onClick={toggleMonthPicker}
             >
-              <MdiIcon path={mdiChevronLeft} size={16} />
+              {MONTH_NAMES[view.month]}
+            </button>{' '}
+            <button className="planner-cal-year-btn" title="Pick year" onClick={toggleYearPicker}>
+              {view.year}
             </button>
-            <span className="planner-cal-title">
-              {MONTH_NAMES[view.month]}{' '}
-              <button
-                className="planner-cal-year-btn"
-                title="Pick year"
-                onClick={() => setYearPickerOpen((o) => !o)}
-              >
-                {view.year}
-              </button>
-            </span>
-            <button
-              className="icon-btn small planner-cal-nav"
-              title="Next month"
-              onClick={() => shiftMonth(1)}
-            >
-              <MdiIcon path={mdiChevronRight} size={16} />
-            </button>
-            <button
-              className="icon-btn small planner-cal-close"
-              title="Close calendar"
-              onClick={() => {
-                setYearPickerOpen(false)
-                setOpen(false)
-              }}
-            >
-              <MdiIcon path={mdiClose} size={16} />
-            </button>
+          </span>
+          <button
+            className="icon-btn small planner-cal-nav"
+            title="Next month"
+            onClick={() => shiftMonth(1)}
+          >
+            <MdiIcon path={mdiChevronRight} size={16} />
+          </button>
+          <button
+            className="icon-btn small planner-cal-close"
+            title="Close calendar"
+            onClick={() => {
+              setYearPickerOpen(false)
+              setMonthPickerOpen(false)
+              setOpen(false)
+            }}
+          >
+            <MdiIcon path={mdiClose} size={16} />
+          </button>
+        </div>
+        <div className="planner-cal-body">
+          <div className="planner-cal-weekdays">
+            {WEEKDAY_LABELS.map((label, i) => (
+              <span key={i} className="planner-cal-weekday">
+                {label}
+              </span>
+            ))}
           </div>
-          <div className="planner-cal-body">
-            <div className="planner-cal-weekdays">
-              {WEEKDAY_LABELS.map((label, i) => (
-                <span key={i} className="planner-cal-weekday">
-                  {label}
+          <div className="planner-cal-grid">
+            {cells.map((date, i) =>
+              date ? (
+                <span
+                  key={i}
+                  className={`planner-cal-day ${
+                    formatDate(date) === todayKey ? 'planner-cal-today' : ''
+                  } ${!isWorkingDay(date, calendar) ? 'planner-cal-off' : ''}`}
+                >
+                  {date.getDate()}
                 </span>
-              ))}
-            </div>
-            <div className="planner-cal-grid">
-              {cells.map((date, i) =>
-                date ? (
-                  <span
-                    key={i}
-                    className={`planner-cal-day ${
-                      formatDate(date) === todayKey ? 'planner-cal-today' : ''
-                    } ${!isWorkingDay(date, calendar) ? 'planner-cal-off' : ''}`}
-                  >
-                    {date.getDate()}
-                  </span>
-                ) : (
-                  <span key={i} className="planner-cal-day planner-cal-empty" />
-                )
-              )}
-            </div>
-            <button
-              className="planner-cal-today-btn"
-              title="Go to current date"
-              onClick={() => {
-                const now = new Date()
-                setView({ year: now.getFullYear(), month: now.getMonth() })
-              }}
-            >
-              Today
-            </button>
-            {yearPickerOpen && (
-              <div className="planner-cal-years">
-                {Array.from({ length: yearMax - yearMin + 1 }, (_, i) => yearMax - i).map((y) => (
-                  <button
-                    key={y}
-                    ref={y === view.year ? activeYearRef : undefined}
-                    className={`planner-cal-year-item ${y === view.year ? 'active' : ''}`}
-                    onClick={() => {
-                      setView((v) => ({ ...v, year: y }))
-                      setYearPickerOpen(false)
-                    }}
-                  >
-                    {y}
-                  </button>
-                ))}
-              </div>
+              ) : (
+                <span key={i} className="planner-cal-day planner-cal-empty" />
+              )
             )}
           </div>
+          <button
+            className="planner-cal-today-btn"
+            title="Go to current date"
+            onClick={() => {
+              const now = new Date()
+              setView({ year: now.getFullYear(), month: now.getMonth() })
+            }}
+          >
+            Today
+          </button>
+        </div>
+      </div>
+      {yearPickerOpen && pickerRect && (
+        <div
+          className="planner-cal-years"
+          style={{
+            left: pickerRect.left,
+            top: pickerRect.top,
+            width: pickerRect.width,
+            height: pickerRect.height
+          }}
+        >
+          {Array.from({ length: yearMax - yearMin + 1 }, (_, i) => yearMax - i).map((y) => (
+            <button
+              key={y}
+              ref={y === view.year ? activeItemRef : undefined}
+              className={`planner-cal-year-item ${y === view.year ? 'active' : ''}`}
+              onClick={() => {
+                setView((v) => ({ ...v, year: y }))
+                setYearPickerOpen(false)
+              }}
+            >
+              {y}
+            </button>
+          ))}
         </div>
       )}
-      <button
-        className="planner-cal-fab"
-        title="Calendar"
-        onClick={() => (open ? setOpen(false) : openCalendar())}
-      >
-        <MdiIcon path={mdiCalendarMonth} size={18} />
-      </button>
-    </>
+      {monthPickerOpen && pickerRect && (
+        <div
+          className="planner-cal-years"
+          style={{
+            left: pickerRect.left,
+            top: pickerRect.top,
+            width: pickerRect.width,
+            height: pickerRect.height
+          }}
+        >
+          {MONTH_NAMES.map((m, i) => (
+            <button
+              key={m}
+              ref={i === view.month ? activeItemRef : undefined}
+              className={`planner-cal-year-item ${i === view.month ? 'active' : ''}`}
+              onClick={() => {
+                setView((v) => ({ ...v, month: i }))
+                setMonthPickerOpen(false)
+              }}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
+      )}
+    </>,
+    document.body
   )
 }
