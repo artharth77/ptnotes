@@ -1503,7 +1503,7 @@ body {
   position: absolute;
   top: calc(100% + 6px);
   left: 0;
-  z-index: 95;
+  z-index: 102;
   width: 220px;
   border: 1px solid var(--border);
   border-radius: 8px;
