@@ -137,7 +137,7 @@ export function PlannerPanel(): React.JSX.Element {
   }
 
   return (
-    <div className="note-list planner-panel">
+    <div className="note-list">
       <div className="list-header">
         <div className="note-filter-wrap">
           <input

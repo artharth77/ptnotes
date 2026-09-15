@@ -10,7 +10,8 @@ import {
   mdiBulletinBoard,
   mdiChartTimeline,
   mdiNotebookOutline,
-  mdiViewDashboardOutline
+  mdiViewDashboardOutline,
+  mdiCalendarMonth
 } from '@mdi/js'
 import { NoteList } from './components/NoteList'
 import { KanbanPanel } from './components/KanbanPanel'
@@ -33,6 +34,7 @@ import { TraceViewerModal } from './components/TraceViewerModal'
 import { PromptModal, ConfirmModal } from './components/Modal'
 import { Resizer } from './components/Resizer'
 import { DashboardPage } from './DashboardPage'
+import { PlannerMiniCalendar } from './components/PlannerMiniCalendar'
 import type { Tab, ToolCallInfo } from '@shared/types'
 import { addUsage, normalizeUsage } from '@shared/usage'
 
@@ -91,14 +93,17 @@ const VTAB_BAR_WIDTH = 48
 function VTabs({
   onDashboard,
   onTab,
-  onPeekHover
+  onPeekHover,
+  onCalendar
 }: {
   onDashboard: () => void
   onTab: (id: Tab) => void
   onPeekHover: () => void
+  onCalendar: () => void
 }): React.JSX.Element {
   const tab = useAppStore((s) => s.tab)
   const activeProject = useAppStore((s) => s.activeProject)
+  const plannerCalendarOpen = useAppStore((s) => s.plannerCalendarOpen)
   const [tip, setTip] = useState<{ label: string; x: number; y: number } | null>(null)
 
   useEffect(() => {
@@ -160,6 +165,15 @@ function VTabs({
             <MdiIcon path={t.icon} size={18} />
           </button>
         ))}
+        <div className="vtabs-spacer" />
+        <div className="vtabs-sep" />
+        <button
+          className={`vtabs-btn ${plannerCalendarOpen ? 'active' : ''}`}
+          onClick={onCalendar}
+          {...tipHandlers('Calendar')}
+        >
+          <MdiIcon path={mdiCalendarMonth} size={18} />
+        </button>
       </div>
       {tip &&
         createPortal(
@@ -387,6 +401,7 @@ function App(): React.JSX.Element {
   const rightOpen = chatOpen || moduleOpen || botsOpen
   const setRightView = useAppStore((s) => s.setRightView)
   const settingsOpen = useAppStore((s) => s.settingsOpen)
+  const plannerCalendarOpen = useAppStore((s) => s.plannerCalendarOpen)
   const snapshotsOpen = useAppStore((s) => s.snapshotsOpen)
   const storeSidebarVisible = useAppStore((s) => s.sidebarVisible)
   // Temporary show state: panelPeek reveals a closed sidebar panel while the
@@ -525,6 +540,11 @@ function App(): React.JSX.Element {
     }
     useAppStore.getState().setTab(id)
     if (!useAppStore.getState().sidebarVisible) setPanelPeek(true)
+  }
+
+  function goCalendar(): void {
+    const s = useAppStore.getState()
+    s.setPlannerCalendarOpen(!s.plannerCalendarOpen)
   }
 
   useEffect(() => {
@@ -801,7 +821,12 @@ function App(): React.JSX.Element {
             onMouseLeave={scheduleHidePeek}
           >
             <div className="vtabs">
-              <VTabs onDashboard={goDashboard} onTab={goTab} onPeekHover={showPeek} />
+              <VTabs
+                onDashboard={goDashboard}
+                onTab={goTab}
+                onPeekHover={showPeek}
+                onCalendar={goCalendar}
+              />
             </div>
             <aside
               ref={sidebarRef}
@@ -925,6 +950,7 @@ function App(): React.JSX.Element {
       )}
 
       {settingsOpen && <SettingsDialog />}
+      {plannerCalendarOpen && <PlannerMiniCalendar />}
       <CommandPalette />
       <GlobalFind />
       {(kanbanEditingId || kanbanCreatingColumnId || kanbanViewingId) && (

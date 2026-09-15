@@ -85,6 +85,7 @@ interface AppState {
   plannerRedo: Record<string, Schedule[]>
   snapshotsOpen: boolean
   snapshotList: SnapshotMeta[]
+  plannerCalendarOpen: boolean
   tab: Tab
   lastTab: Tab
   chatOpen: boolean
@@ -217,6 +218,7 @@ interface AppState {
   deleteSchedule: (id: string) => Promise<void>
   saveCalendar: (calendar: ProjectCalendar) => Promise<void>
   setSnapshotsOpen: (open: boolean) => void
+  setPlannerCalendarOpen: (open: boolean) => void
   refreshSnapshots: () => Promise<void>
   restoreSnapshot: (ts: number) => Promise<void>
   setSnapshotTag: (ts: number, tag: string | null) => Promise<void>
@@ -337,6 +339,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   plannerRedo: {},
   snapshotsOpen: false,
   snapshotList: [],
+  plannerCalendarOpen: false,
   tab: 'notes',
   lastTab: 'notes',
   chatOpen: false,
@@ -1019,6 +1022,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   setSnapshotsOpen(open) {
     set({ snapshotsOpen: open, snapshotList: open ? get().snapshotList : [] })
     if (open) void get().refreshSnapshots()
+  },
+
+  setPlannerCalendarOpen(open) {
+    set({ plannerCalendarOpen: open })
   },
 
   async refreshSnapshots() {
