@@ -432,7 +432,7 @@ function run(): void {
     overdue.total
   )
   console.log(
-    '   planner %complete:',
+    '   planner %%complete:',
     health.percentComplete.toFixed(1),
     '% / late',
     health.lateTasks,
