@@ -4,7 +4,6 @@ import {
   mdiChatProcessingOutline,
   mdiCogOutline,
   mdiPuzzleOutline,
-  mdiViewDashboardOutline,
   mdiWeatherNight,
   mdiWeatherSunny
 } from '@mdi/js'
@@ -62,8 +61,6 @@ export function TopBar(): React.JSX.Element {
   const theme = useAppStore((s) => s.theme)
   const setTheme = useAppStore((s) => s.setTheme)
   const tab = useAppStore((s) => s.tab)
-  const setTab = useAppStore((s) => s.setTab)
-  const restoreLastTab = useAppStore((s) => s.restoreLastTab)
 
   return (
     <header className="topbar">
@@ -114,25 +111,6 @@ export function TopBar(): React.JSX.Element {
         </button>
         <span className="app-logo">PTNotes</span>
         <ProjectDropdown />
-        <button
-          className={`btn ghost dashboard-launch-btn ${tab === 'dashboard' ? 'active' : ''}`}
-          onClick={() => {
-            if (tab === 'dashboard') restoreLastTab()
-            else setTab('dashboard')
-          }}
-          disabled={!activeProject}
-          title={
-            activeProject
-              ? tab === 'dashboard'
-                ? 'Close dashboard (return to previous tab)'
-                : 'Open project dashboard'
-              : 'Open a project to view dashboard'
-          }
-        >
-          <span className="btn-icon">
-            <MdiIcon path={mdiViewDashboardOutline} size={18} />
-          </span>
-        </button>
       </div>
       <div className="topbar-right">
         <button

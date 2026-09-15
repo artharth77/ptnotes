@@ -62,6 +62,8 @@ export interface StorageSettings {
   editorFontFamily?: 'sans' | 'serif' | 'mono'
   /** Frosted translucent surfaces; false renders every frost surface solid. */
   surfaceTranslucent?: boolean
+  /** Last left-panel visibility; restored on next launch. */
+  sidebarVisible?: boolean
   /** User enable/disable choices for builtin (app-shipped, read-only) skills, keyed by skill name. */
   builtinSkillOverrides?: Record<string, boolean>
 }
@@ -72,6 +74,7 @@ export interface AppearanceSettings {
   uiDensity: 'compact' | 'cozy'
   editorFontFamily: 'sans' | 'serif' | 'mono'
   surfaceTranslucent: boolean
+  sidebarVisible: boolean
 }
 
 /** Persisted main-window geometry restored on next launch. */

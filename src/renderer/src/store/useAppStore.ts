@@ -367,7 +367,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   settingsOpen: false,
   settingsCategory: 'storage',
   skillEditRequest: null,
-  sidebarVisible: true,
+  sidebarVisible: localStorage.getItem('ptnotes:sidebarVisible') !== 'false',
+
   explorerCwd: '',
   explorerTree: null,
   explorerEntries: [],
@@ -1683,7 +1684,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setSidebarVisible(sidebarVisible) {
+    localStorage.setItem('ptnotes:sidebarVisible', String(sidebarVisible))
     set({ sidebarVisible })
+    void (async () => {
+      try {
+        await window.ptnotes.settings.setAppearance({ sidebarVisible })
+      } catch {
+        /* preload IPC unavailable in isolated renderer/HMR; safe to ignore */
+      }
+    })()
   },
 
   async loadExplorer(dir) {

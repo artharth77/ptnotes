@@ -235,11 +235,40 @@ body {
   border-right: 1px solid var(--border);
   overflow: hidden;
   flex-shrink: 0;
-  transition: width 0.25s ease;
+  transition:
+    width 0.25s ease,
+    left 0.2s ease;
 }
 
 .sidebar.collapsed {
   width: 0 !important;
+}
+
+/* Skip width/left animation (e.g. instant drop when entering the dashboard) */
+.sidebar.instant {
+  transition: none !important;
+}
+
+/* Temporary hover-reveal: take the panel out of flow and float it over the main area.
+   The frost blur must live on ::before, not on .sidebar.peek itself — a
+   backdrop-filter ancestor becomes the containing block for fixed-position
+   children (.note-menu, .menu-overlay) and clips/misplaces them. */
+.sidebar.peek {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 60;
+  box-shadow: 8px 0 24px rgba(0, 0, 0, 0.25);
+  background: transparent;
+}
+
+.sidebar.peek::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--frost-bg);
+  backdrop-filter: blur(12px) saturate(1.2);
 }
 
 .sidebar .sidebar-content {
@@ -695,44 +724,93 @@ body {
   background: var(--bg-hover);
 }
 
-/* ---------- Side tabs ---------- */
+/* ---------- Vertical tab strip ---------- */
 
-.side-tabs {
+.left-strip {
+  position: relative;
   display: flex;
-  border-bottom: 1px solid var(--border);
+  align-items: stretch;
+  flex-shrink: 0;
 }
 
-.side-tab {
+.vtabs {
+  width: 48px;
+  flex-shrink: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elev);
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+}
+
+.vtabs-inner {
   flex: 1;
-  padding: 10px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 4px 0;
+  gap: 2px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.vtabs-btn {
+  width: 32px;
+  height: 32px;
   border: none;
   background: transparent;
   color: var(--text-dim);
-  font-size: 13px;
-  font-weight: 500;
   cursor: pointer;
-  border-bottom: 2px solid transparent;
-  position: relative;
-  transition:
-    color 0.32s ease,
-    border-bottom-color 0.32s ease;
-}
-
-.side-tab:hover {
-  color: var(--text);
-}
-
-.side-tab.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-}
-
-.side-tab.icon-only {
-  flex: 0 0 44px;
+  border-radius: 6px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0;
+  flex-shrink: 0;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.vtabs-btn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.vtabs-btn.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.vtabs-btn.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.vtabs-sep {
+  width: 24px;
+  height: 1px;
+  background: var(--border);
+  margin: 3px 0;
+  flex-shrink: 0;
+}
+
+/* Hover hint rendered next to a v-tab icon (portaled to body, fixed position) */
+.vtabs-tip {
+  position: fixed;
+  transform: translateY(-50%);
+  z-index: 130;
+  background: var(--frost-bg);
+  backdrop-filter: blur(12px) saturate(1.2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  padding: 5px 10px;
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 /* ---------- Lists ---------- */
@@ -10371,28 +10449,7 @@ li.activity-item:hover {
   line-height: 1;
 }
 
-/* Dashboard: hide sidebar, widen main. Launch button next to project dropdown */
-.dashboard-launch-btn {
-  margin-left: 6px;
-  border: 1px solid transparent !important;
-}
-.dashboard-launch-btn:hover:not(:disabled),
-.dashboard-launch-btn.active {
-  background: var(--bg-hover);
-  border-color: var(--border) !important;
-  color: var(--accent);
-}
-.dashboard-launch-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-.app-body:has(.sidebar.collapsed ~ main > .dashboard-page) .sidebar {
-  pointer-events: none;
-  opacity: 0;
-}
-.app-body:has(.sidebar.collapsed ~ main > .dashboard-page) .main-area {
-  padding-left: 0;
-}
+/* Dashboard back button hint: left panel is hidden, main fills the width */
 
 /* Dashboard: back button + title row */
 .dashboard-header-title {
@@ -10401,15 +10458,6 @@ li.activity-item:hover {
   align-items: center;
   gap: 12px;
 }
-.dashboard-back-btn {
-  border: 1px solid transparent !important;
-  padding: 6px 10px !important;
-}
-.dashboard-back-btn:hover {
-  background: var(--bg-hover);
-  border-color: var(--border) !important;
-}
-
 .notes-snippet {
   margin: 2px 0 0;
   padding: 0;

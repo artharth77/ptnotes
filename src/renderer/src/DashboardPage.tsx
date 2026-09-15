@@ -13,7 +13,6 @@ import { useIsDarkTheme } from './useIsDarkTheme'
 import {
   mdiAccountGroupOutline,
   mdiAlertCircleOutline,
-  mdiArrowLeft,
   mdiCalendarClockOutline,
   mdiChartDonut,
   mdiFileDocumentOutline,
@@ -84,13 +83,12 @@ export function DashboardPage(): React.JSX.Element {
   const openNoteCreate = useAppStore((s) => s.openNoteCreate)
   const openPlannerCreate = useAppStore((s) => s.openPlannerCreate)
   const openKanbanCreate = useAppStore((s) => s.openKanbanCreate)
+  const setActiveKanbanCard = useAppStore((s) => s.setActiveKanbanCard)
   const refreshKanban = useAppStore((s) => s.refreshKanban)
   const setChatOpen = useAppStore((s) => s.setChatOpen)
   const fontSize = useAppStore((s) => s.fontSize)
   const setRightView = useAppStore((s) => s.setRightView)
-  const restoreLastTab = useAppStore((s) => s.restoreLastTab)
   const isDark = useIsDarkTheme()
-
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null)
   const [loading, setLoading] = useState<boolean>(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -140,6 +138,7 @@ export function DashboardPage(): React.JSX.Element {
 
   const openOverdue = (item: OverdueItem): void => {
     if (item.kind === 'kanban-card') {
+      setActiveKanbanCard(item.id)
       setTab('kanban')
     } else {
       if (item.scheduleId) {
@@ -192,15 +191,6 @@ export function DashboardPage(): React.JSX.Element {
     <div className="dashboard-page" key={activeProject}>
       <header className="dashboard-header">
         <div className="dashboard-header-title">
-          <button
-            className="btn ghost dashboard-back-btn"
-            onClick={restoreLastTab}
-            title="Back to previous tab"
-          >
-            <span className="btn-icon">
-              <MdiIcon path={mdiArrowLeft} size={18} />
-            </span>
-          </button>
           <div>
             <h1>Dashboard</h1>
             <p className="muted">

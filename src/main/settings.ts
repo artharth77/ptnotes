@@ -70,6 +70,7 @@ export class SettingsStore {
         uiDensity,
         editorFontFamily,
         surfaceTranslucent,
+        sidebarVisible: parsed.sidebarVisible !== false,
         builtinSkillOverrides
       }
     } catch {
@@ -117,6 +118,7 @@ export class SettingsStore {
           ? settings.editorFontFamily
           : 'sans',
       surfaceTranslucent: settings.surfaceTranslucent !== false,
+      sidebarVisible: settings.sidebarVisible !== false,
       builtinSkillOverrides: {}
     }
     if (settings.builtinSkillOverrides && typeof settings.builtinSkillOverrides === 'object') {

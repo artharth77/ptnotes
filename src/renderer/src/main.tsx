@@ -55,7 +55,8 @@ import './assets/main.css'
         fontSize: 'default',
         uiDensity: 'cozy',
         editorFontFamily: 'sans',
-        quickSwitcher: true
+        surfaceTranslucent: true,
+        sidebarVisible: true
       }),
       setAppearance: noopAsync,
       get: async () => ({}),
