@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   mdiContentCopy,
   mdiDotsVertical,
@@ -33,7 +34,10 @@ export function PlannerPanel(): React.JSX.Element {
   const snapshotsOpen = useAppStore((s) => s.snapshotsOpen)
   const setSnapshotsOpen = useAppStore((s) => s.setSnapshotsOpen)
 
-  const [creating, setCreating] = useState(false)
+  const creating = useAppStore((s) => s.plannerCreating)
+  const openPlannerCreate = useAppStore((s) => s.openPlannerCreate)
+  const closePlannerCreate = useAppStore((s) => s.closePlannerCreate)
+  const setCreating = (v: boolean): void => (v ? openPlannerCreate() : closePlannerCreate())
   const [renaming, setRenaming] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [formError, setFormError] = useState('')
@@ -339,7 +343,7 @@ export function PlannerPanel(): React.JSX.Element {
         />
       )}
 
-      {snapshotsOpen && <PlannerSnapshotsModal />}
+      {snapshotsOpen && createPortal(<PlannerSnapshotsModal />, document.body)}
     </div>
   )
 }

@@ -54,6 +54,7 @@ export function KanbanPanel(): React.JSX.Element {
   const deleteKanbanCard = useAppStore((s) => s.deleteKanbanCard)
   const setKanbanListView = useAppStore((s) => s.setKanbanListView)
   const archiveKanbanCard = useAppStore((s) => s.archiveKanbanCard)
+  const archiveKanbanColumn = useAppStore((s) => s.archiveKanbanColumn)
   const restoreKanbanCard = useAppStore((s) => s.restoreKanbanCard)
   const deleteArchivedKanbanCard = useAppStore((s) => s.deleteArchivedKanbanCard)
   const setActiveKanbanCard = useAppStore((s) => s.setActiveKanbanCard)
@@ -489,6 +490,19 @@ export function KanbanPanel(): React.JSX.Element {
                     <MdiIcon path={mdiPencilOutline} size={16} />
                   </span>
                   Edit column
+                </button>
+                <button
+                  className="note-menu-item"
+                  disabled={kanban.cards.every((c) => c.columnId !== menuColumn.id)}
+                  onClick={() => {
+                    void archiveKanbanColumn(menuColumn.id)
+                    setMenu(null)
+                  }}
+                >
+                  <span className="note-menu-icon">
+                    <MdiIcon path={mdiArchiveArrowDownOutline} size={16} />
+                  </span>
+                  Move all to archived
                 </button>
                 <button
                   className="note-menu-item danger"

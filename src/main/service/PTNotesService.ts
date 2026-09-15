@@ -358,6 +358,25 @@ export class PTNotesService {
     return join(this.projectDir(project), 'screenshots')
   }
 
+  /** Paths used by the project dashboard aggregator (read-only IPC layer). */
+  dashboardContext(project: string): {
+    projectDir: string
+    kanbanPath: string
+    filesDir: string
+    chatDir: string
+    notesDir: string
+    plannerDir: string
+  } {
+    return {
+      projectDir: this.projectDir(project),
+      kanbanPath: this.kanbanPath(project),
+      filesDir: this.filesDir(project),
+      chatDir: this.chatDir(project),
+      notesDir: this.notesDir(project),
+      plannerDir: this.plannerDir(project)
+    }
+  }
+
   private plannerDir(name: string): string {
     return join(this.projectDir(name), 'planner')
   }
@@ -2610,6 +2629,24 @@ export class PTNotesService {
       }
       board.cards = board.cards.filter((c) => c.id !== cardId)
       archive.cards.push(card)
+      await this.writeKanban(project, board)
+      await this.writeKanbanArchive(project, archive)
+      return { board, archive }
+    })
+  }
+
+  async archiveKanbanColumn(project: string, columnId: string): Promise<KanbanArchiveMove> {
+    return this.withKanbanLock(project, async () => {
+      const board = await this.readKanban(project)
+      if (!board.columns.some((c) => c.id === columnId)) {
+        throw new Error(`Column "${columnId}" not found`)
+      }
+      const archive = await this.loadKanbanArchive(project)
+      const moving = board.cards.filter((c) => c.columnId === columnId)
+      const archivedIds = new Set(archive.cards.map((c) => c.id))
+      const fresh = moving.filter((c) => !archivedIds.has(c.id))
+      board.cards = board.cards.filter((c) => c.columnId !== columnId)
+      archive.cards.push(...fresh)
       await this.writeKanban(project, board)
       await this.writeKanbanArchive(project, archive)
       return { board, archive }

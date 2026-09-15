@@ -44,8 +44,11 @@ export function NoteList(): React.JSX.Element {
   const setNotesSort = useAppStore((s) => s.setNotesSort)
   const toggleNotesSortDir = useAppStore((s) => s.toggleNotesSortDir)
   const toggleNoteStarred = useAppStore((s) => s.toggleNoteStarred)
+  const openNoteCreate = useAppStore((s) => s.openNoteCreate)
+  const closeNoteCreate = useAppStore((s) => s.closeNoteCreate)
 
-  const [creating, setCreating] = useState(false)
+  const creating = useAppStore((s) => s.noteCreating)
+  const setCreating = (v: boolean): void => (v ? openNoteCreate() : closeNoteCreate())
   const [renaming, setRenaming] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [selectedTemplate, setSelectedTemplate] = useState<string>('blank')

@@ -55,7 +55,8 @@ import './assets/main.css'
         fontSize: 'default',
         uiDensity: 'cozy',
         editorFontFamily: 'sans',
-        quickSwitcher: true
+        surfaceTranslucent: true,
+        sidebarVisible: true
       }),
       setAppearance: noopAsync,
       get: async () => ({}),
@@ -115,6 +116,50 @@ import './assets/main.css'
       setTag: noopAsync,
       delete: noopAsync
     }
+    const noopDashboard = {
+      getSnapshot: async () =>
+        ({
+          projectId: '',
+          projectName: '',
+          generatedAt: Date.now(),
+          workload: [],
+          kanbanStats: {
+            rows: [],
+            totalCards: 0,
+            totalDone: 0,
+            totalActive: 0
+          },
+          overdue: { overdue: [], today: [], upcoming: [], total: 0 },
+          plannerHealth: {
+            scheduleCount: 0,
+            totalTasks: 0,
+            totalLeafTasks: 0,
+            percentComplete: 0,
+            onTimeTasks: 0,
+            lateTasks: 0,
+            ownerCount: 0,
+            criticalPathDays: 0
+          },
+          activity: [],
+          recentNotes: []
+        }) as any
+    }
+    const noopDiagrams = {
+      render: async () => ({ ok: false, error: 'stub' }) as any
+    }
+    const noopInfographic = {
+      render: async () => ({ ok: false, error: 'stub' }) as any
+    }
+    const noopPdf = {
+      supportsUpload: async () => false,
+      upload: async () => ({ ok: false }) as any,
+      info: async () => ({ ok: false }) as any,
+      setViewerOpen: noop,
+      onViewerEscape: noopUnsub,
+      renderPage: async () => ({ ok: false }) as any,
+      rebuild: async () => ({ ok: false }) as any,
+      merge: async () => ({ ok: false }) as any
+    }
     const noopChat = {
       list: async () => emptyList,
       read: async () => ({ id: '', messages: [] }) as any,
@@ -157,6 +202,10 @@ import './assets/main.css'
       planner: noopPlanner,
       files: noopFiles,
       snapshots: noopSnapshots,
+      dashboard: noopDashboard,
+      diagrams: noopDiagrams,
+      infographic: noopInfographic,
+      pdf: noopPdf,
       chat: noopChat,
       bots: noopBots,
       modules: noopModules,
@@ -164,6 +213,15 @@ import './assets/main.css'
       onOpenFind: (cb: () => void) => {
         const handler = (e: KeyboardEvent) => {
           if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') cb()
+        }
+        if (typeof window !== 'undefined') window.addEventListener('keydown', handler)
+        return () => {
+          if (typeof window !== 'undefined') window.removeEventListener('keydown', handler)
+        }
+      },
+      onSelectAll: (cb: () => void) => {
+        const handler = (e: KeyboardEvent) => {
+          if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') cb()
         }
         if (typeof window !== 'undefined') window.addEventListener('keydown', handler)
         return () => {

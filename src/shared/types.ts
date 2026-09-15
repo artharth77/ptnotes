@@ -24,7 +24,7 @@ export interface NoteSearchMatch {
   matchEnd: number
 }
 
-export type Tab = 'notes' | 'kanban' | 'modules' | 'planner' | 'files'
+export type Tab = 'notes' | 'kanban' | 'planner' | 'dashboard' | 'modules' | 'files'
 
 export interface AIProviderConfig {
   baseUrl: string
@@ -62,6 +62,8 @@ export interface StorageSettings {
   editorFontFamily?: 'sans' | 'serif' | 'mono'
   /** Frosted translucent surfaces; false renders every frost surface solid. */
   surfaceTranslucent?: boolean
+  /** Last left-panel visibility; restored on next launch. */
+  sidebarVisible?: boolean
   /** User enable/disable choices for builtin (app-shipped, read-only) skills, keyed by skill name. */
   builtinSkillOverrides?: Record<string, boolean>
 }
@@ -72,6 +74,7 @@ export interface AppearanceSettings {
   uiDensity: 'compact' | 'cozy'
   editorFontFamily: 'sans' | 'serif' | 'mono'
   surfaceTranslucent: boolean
+  sidebarVisible: boolean
 }
 
 /** Persisted main-window geometry restored on next launch. */
@@ -196,6 +199,16 @@ export interface DiagramSaveResult {
   ok: boolean
   path?: string
   canceled?: boolean
+  error?: string
+}
+
+export interface InfographicRenderResult {
+  ok: boolean
+  svg?: string
+  png?: string
+  template?: string
+  width?: number
+  height?: number
   error?: string
 }
 

@@ -72,6 +72,8 @@ interface AppState {
   kanbanEditingId: string | null
   kanbanViewingId: string | null
   kanbanCreatingColumnId: string | null
+  noteCreating: boolean
+  plannerCreating: boolean
   kanbanCollapsed: Record<string, boolean>
   projectFiles: string[]
   projectFileEntries: FileEntry[]
@@ -84,6 +86,7 @@ interface AppState {
   snapshotsOpen: boolean
   snapshotList: SnapshotMeta[]
   tab: Tab
+  lastTab: Tab
   chatOpen: boolean
   moduleOpen: boolean
   botsOpen: boolean
@@ -187,6 +190,7 @@ interface AppState {
   ) => Promise<void>
   setKanbanListView: (view: 'active' | 'archived') => void
   archiveKanbanCard: (cardId: string) => Promise<void>
+  archiveKanbanColumn: (columnId: string) => Promise<void>
   restoreKanbanCard: (cardId: string) => Promise<void>
   deleteArchivedKanbanCard: (cardId: string) => Promise<void>
   setActiveKanbanCard: (id: string | null) => void
@@ -196,6 +200,10 @@ interface AppState {
   closeKanbanViewer: () => void
   openKanbanCreate: (columnId: string) => void
   closeKanbanCreate: () => void
+  openNoteCreate: () => void
+  closeNoteCreate: () => void
+  openPlannerCreate: () => void
+  closePlannerCreate: () => void
   toggleKanbanColumn: (columnId: string) => void
   refreshFiles: () => Promise<void>
   refreshSchedules: () => Promise<void>
@@ -252,6 +260,7 @@ interface AppState {
   renameNote: (id: string, newTitle: string) => Promise<void>
   deleteNote: (id: string) => Promise<void>
   setTab: (tab: Tab) => void
+  restoreLastTab: () => void
   setChatOpen: (open: boolean) => void
   setRightView: (view: 'chat' | 'bots' | 'modules' | 'botTasks') => void
   appendChatMessage: (project: string, msg: ChatMessage) => void
@@ -311,11 +320,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   noteContent: '',
   kanban: null,
   kanbanArchive: null,
-  kanbanListView: 'active',
   activeKanbanCardId: null,
   kanbanEditingId: null,
   kanbanViewingId: null,
   kanbanCreatingColumnId: null,
+  noteCreating: false,
+  plannerCreating: false,
   kanbanCollapsed: {},
   projectFiles: [],
   projectFileEntries: [],
@@ -328,7 +338,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   snapshotsOpen: false,
   snapshotList: [],
   tab: 'notes',
+  lastTab: 'notes',
   chatOpen: false,
+  kanbanListView: 'active',
   moduleOpen: false,
   botsOpen: false,
   rightView: 'chat',
@@ -356,7 +368,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   settingsOpen: false,
   settingsCategory: 'storage',
   skillEditRequest: null,
-  sidebarVisible: true,
+  sidebarVisible: localStorage.getItem('ptnotes:sidebarVisible') !== 'false',
+
   explorerCwd: '',
   explorerTree: null,
   explorerEntries: [],
@@ -454,6 +467,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           kanbanEditingId: null,
           kanbanViewingId: null,
           kanbanCreatingColumnId: null,
+          noteCreating: false,
+          plannerCreating: false,
           kanbanCollapsed: {},
           activeNoteId: null,
           noteContent: ''
@@ -484,6 +499,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       kanbanViewingId: null,
       kanbanCreatingColumnId: null,
       kanbanListView: 'active',
+      noteCreating: false,
+      plannerCreating: false,
       loading: true,
       moduleHistoryRunId: null,
       explorerCwd: '',
@@ -796,6 +813,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  async archiveKanbanColumn(columnId) {
+    const project = get().activeProject
+    if (!project) return
+    try {
+      const { board, archive } = await window.ptnotes.kanban.archiveColumn(project, columnId)
+      set({
+        kanban: board,
+        kanbanArchive: archive,
+        activeKanbanCardId: null,
+        kanbanEditingId: null
+      })
+    } catch {
+      await get().refreshKanban()
+    }
+  },
+
   async restoreKanbanCard(cardId) {
     const project = get().activeProject
     if (!project) return
@@ -840,6 +873,22 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   openKanbanCreate(columnId) {
     set({ kanbanCreatingColumnId: columnId, kanbanEditingId: null })
+  },
+
+  openNoteCreate() {
+    set({ noteCreating: true })
+  },
+
+  closeNoteCreate() {
+    set({ noteCreating: false })
+  },
+
+  openPlannerCreate() {
+    set({ plannerCreating: true })
+  },
+
+  closePlannerCreate() {
+    set({ plannerCreating: false })
   },
 
   closeKanbanCreate() {
@@ -1474,8 +1523,24 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setTab(tab) {
+    const current = get().tab
+    if (tab !== current && current !== 'dashboard') {
+      set({ lastTab: current })
+    }
     set({ tab })
     if (tab === 'files') void get().loadExplorer()
+  },
+
+  restoreLastTab() {
+    const state = get()
+    const fallback: Tab = state.activeNoteId
+      ? 'notes'
+      : state.activeScheduleId
+        ? 'planner'
+        : 'notes'
+    const target: Tab = state.lastTab !== 'dashboard' ? (state.lastTab ?? fallback) : fallback
+    set({ tab: target, lastTab: state.tab })
+    if (target === 'files') void get().loadExplorer()
   },
 
   setChatOpen(chatOpen) {
@@ -1636,7 +1701,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setSidebarVisible(sidebarVisible) {
+    localStorage.setItem('ptnotes:sidebarVisible', String(sidebarVisible))
     set({ sidebarVisible })
+    void (async () => {
+      try {
+        await window.ptnotes.settings.setAppearance({ sidebarVisible })
+      } catch {
+        /* preload IPC unavailable in isolated renderer/HMR; safe to ignore */
+      }
+    })()
   },
 
   async loadExplorer(dir) {

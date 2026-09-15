@@ -1,9 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useAppStore } from './store/useAppStore'
 import { friendlyError } from './errors'
 import { TopBar } from './components/TopBar'
 import { MdiIcon } from './components/MdiIcon'
-import { mdiFolderOpenOutline, mdiFolderOutline } from '@mdi/js'
+import {
+  mdiFolderOpenOutline,
+  mdiFolderOutline,
+  mdiBulletinBoard,
+  mdiChartTimeline,
+  mdiNotebookOutline,
+  mdiViewDashboardOutline
+} from '@mdi/js'
 import { NoteList } from './components/NoteList'
 import { KanbanPanel } from './components/KanbanPanel'
 import { KanbanBoard } from './components/KanbanBoard'
@@ -24,6 +32,7 @@ import { ModuleHistoryOverlay } from './components/ModuleHistoryOverlay'
 import { TraceViewerModal } from './components/TraceViewerModal'
 import { PromptModal, ConfirmModal } from './components/Modal'
 import { Resizer } from './components/Resizer'
+import { DashboardPage } from './DashboardPage'
 import type { Tab, ToolCallInfo } from '@shared/types'
 import { addUsage, normalizeUsage } from '@shared/usage'
 
@@ -77,29 +86,89 @@ const PLANNER_TOOLS = new Set([
   'set_calendar'
 ])
 
-function SideTabs(): React.JSX.Element {
+const VTAB_BAR_WIDTH = 48
+
+function VTabs({
+  onDashboard,
+  onTab,
+  onPeekHover
+}: {
+  onDashboard: () => void
+  onTab: (id: Tab) => void
+  onPeekHover: () => void
+}): React.JSX.Element {
   const tab = useAppStore((s) => s.tab)
-  const setTab = useAppStore((s) => s.setTab)
+  const activeProject = useAppStore((s) => s.activeProject)
+  const [tip, setTip] = useState<{ label: string; x: number; y: number } | null>(null)
+
+  useEffect(() => {
+    if (!tip) return
+    const hide = (): void => setTip(null)
+    window.addEventListener('scroll', hide, true)
+    return () => window.removeEventListener('scroll', hide, true)
+  }, [tip])
+
+  function showTip(e: React.MouseEvent<HTMLElement>, label: string): void {
+    const r = e.currentTarget.getBoundingClientRect()
+    setTip({ label, x: r.right + 8, y: r.top + r.height / 2 })
+  }
+
+  function hideTip(e: React.MouseEvent<HTMLElement>): void {
+    if (e.relatedTarget) setTip(null)
+  }
+
+  const tabs: Array<{ id: Tab; icon: string; title: string }> = [
+    { id: 'notes', icon: mdiNotebookOutline, title: 'Notes' },
+    { id: 'kanban', icon: mdiBulletinBoard, title: 'Kanban' },
+    { id: 'planner', icon: mdiChartTimeline, title: 'Planner' },
+    { id: 'files', icon: tab === 'files' ? mdiFolderOpenOutline : mdiFolderOutline, title: 'Files' }
+  ]
+
+  const tipHandlers = (
+    label: string,
+    onEnter?: React.MouseEventHandler<HTMLElement>
+  ): {
+    onMouseEnter: (e: React.MouseEvent<HTMLElement>) => void
+    onMouseLeave: (e: React.MouseEvent<HTMLElement>) => void
+    onMouseMove?: (e: React.MouseEvent<HTMLElement>) => void
+  } => ({
+    onMouseEnter: (e: React.MouseEvent<HTMLElement>) => {
+      showTip(e, label)
+      onEnter?.(e)
+    },
+    onMouseLeave: hideTip
+  })
 
   return (
-    <div className="side-tabs">
-      {(['notes', 'kanban', 'planner'] as Tab[]).map((t) => (
+    <>
+      <div className="vtabs-inner">
         <button
-          key={t}
-          className={`side-tab ${tab === t ? 'active' : ''}`}
-          onClick={() => setTab(t)}
+          className={`vtabs-btn ${tab === 'dashboard' ? 'active' : ''} ${!activeProject ? 'disabled' : ''}`}
+          onClick={onDashboard}
+          {...tipHandlers('Dashboard')}
         >
-          {t === 'notes' ? 'Notes' : t === 'kanban' ? 'Kanban' : t === 'planner' ? 'Planner' : ''}
+          <MdiIcon path={mdiViewDashboardOutline} size={18} />
         </button>
-      ))}
-      <button
-        className={`side-tab icon-only ${tab === 'files' ? 'active' : ''}`}
-        onClick={() => setTab('files')}
-        title="Files"
-      >
-        <MdiIcon path={tab === 'files' ? mdiFolderOpenOutline : mdiFolderOutline} size={18} />
-      </button>
-    </div>
+        <div className="vtabs-sep" />
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            className={`vtabs-btn ${tab === t.id ? 'active' : ''}`}
+            onClick={() => onTab(t.id)}
+            {...tipHandlers(t.title, tab === t.id ? () => onPeekHover() : undefined)}
+          >
+            <MdiIcon path={t.icon} size={18} />
+          </button>
+        ))}
+      </div>
+      {tip &&
+        createPortal(
+          <div className="vtabs-tip" style={{ left: tip.x, top: tip.y }}>
+            {tip.label}
+          </div>,
+          document.body
+        )}
+    </>
   )
 }
 
@@ -318,7 +387,20 @@ function App(): React.JSX.Element {
   const rightOpen = chatOpen || moduleOpen || botsOpen
   const setRightView = useAppStore((s) => s.setRightView)
   const settingsOpen = useAppStore((s) => s.settingsOpen)
-  const sidebarVisible = useAppStore((s) => s.sidebarVisible)
+  const snapshotsOpen = useAppStore((s) => s.snapshotsOpen)
+  const storeSidebarVisible = useAppStore((s) => s.sidebarVisible)
+  // Temporary show state: panelPeek reveals a closed sidebar panel while the
+  // mouse is over the tab strip (auto-hidden on leave).
+  const [panelPeek, setPanelPeek] = useState(false)
+  /** Keeps the panel overlay-positioned while its hide animation runs so the
+      static re-flow hits it already collapsed and the main area never shifts. */
+  const [panelPeekClosing, setPanelPeekClosing] = useState(false)
+  const hidePeekTimer = useRef<number | null>(null)
+  const peekCloseTimer = useRef<number | null>(null)
+  const peekEnabled = !storeSidebarVisible
+  const sidebarVisible = tab === 'dashboard' ? false : storeSidebarVisible || panelPeek
+  const panelPeekClass =
+    (panelPeek || panelPeekClosing) && tab !== 'dashboard' && !storeSidebarVisible
   const askRequest = useAppStore((s) => s.askRequest)
   const kanbanEditingId = useAppStore((s) => s.kanbanEditingId)
   const kanbanViewingId = useAppStore((s) => s.kanbanViewingId)
@@ -346,6 +428,105 @@ function App(): React.JSX.Element {
     document.documentElement.setAttribute('data-surface-translucent', translucent ? 'on' : 'off')
   }, [init])
 
+  // V-tab strip: opening a peek happens when the mouse enters the active tab;
+  // the panel auto-hides shortly after the mouse leaves the strip. Moving inside
+  // the strip keeps an already-open peek alive.
+  function showPeek(): void {
+    if (!peekEnabled || snapshotsOpen || tab === 'dashboard') return
+    setPanelPeek(true)
+  }
+  function keepPeek(): void {
+    if (!peekEnabled || !panelPeek) return
+    if (hidePeekTimer.current !== null) {
+      window.clearTimeout(hidePeekTimer.current)
+      hidePeekTimer.current = null
+    }
+    if (peekCloseTimer.current !== null) {
+      window.clearTimeout(peekCloseTimer.current)
+      peekCloseTimer.current = null
+      setPanelPeekClosing(false)
+    }
+    setPanelPeek(true)
+  }
+
+  function scheduleHidePeek(): void {
+    if (hidePeekTimer.current !== null) window.clearTimeout(hidePeekTimer.current)
+    hidePeekTimer.current = window.setTimeout(() => {
+      hidePeekTimer.current = null
+      setPanelPeek(false)
+      if (tab !== 'dashboard' && !storeSidebarVisible) {
+        setPanelPeekClosing(true)
+        peekCloseTimer.current = window.setTimeout(() => {
+          peekCloseTimer.current = null
+          setPanelPeekClosing(false)
+        }, 260)
+      }
+    }, 200)
+  }
+
+  useEffect(() => {
+    return () => {
+      if (hidePeekTimer.current !== null) window.clearTimeout(hidePeekTimer.current)
+      if (peekCloseTimer.current !== null) window.clearTimeout(peekCloseTimer.current)
+    }
+  }, [])
+
+  // Opening a modal that renders over the whole app (e.g. planner snapshots, which
+  // lives in the sidebar panel) must not keep the peek panel visible — drop it.
+  useEffect(() => {
+    return useAppStore.subscribe((state, prev) => {
+      if (!state.snapshotsOpen || prev.snapshotsOpen) return
+      if (hidePeekTimer.current !== null) {
+        window.clearTimeout(hidePeekTimer.current)
+        hidePeekTimer.current = null
+      }
+      if (peekCloseTimer.current !== null) {
+        window.clearTimeout(peekCloseTimer.current)
+        peekCloseTimer.current = null
+      }
+      setPanelPeek(false)
+      setPanelPeekClosing(false)
+    })
+  }, [])
+
+  // Switching to the dashboard while the panel is peeking drops the overlay
+  // instantly (no hide animation), since the dashboard owns the full main area.
+  const [sidebarInstant, setSidebarInstant] = useState(false)
+  function goDashboard(): void {
+    const dropping = panelPeek || panelPeekClosing
+    if (hidePeekTimer.current !== null) {
+      window.clearTimeout(hidePeekTimer.current)
+      hidePeekTimer.current = null
+    }
+    if (peekCloseTimer.current !== null) {
+      window.clearTimeout(peekCloseTimer.current)
+      peekCloseTimer.current = null
+    }
+    setPanelPeek(false)
+    setPanelPeekClosing(false)
+    if (dropping) {
+      setSidebarInstant(true)
+      window.setTimeout(() => setSidebarInstant(false), 260)
+    }
+    useAppStore.getState().setTab('dashboard')
+  }
+
+  // Tab switch: re-arm the peek so the destination panel is temporarily shown
+  // even when the mouse never left the strip (e.g. returning from dashboard).
+  function goTab(id: Tab): void {
+    if (hidePeekTimer.current !== null) {
+      window.clearTimeout(hidePeekTimer.current)
+      hidePeekTimer.current = null
+    }
+    if (peekCloseTimer.current !== null) {
+      window.clearTimeout(peekCloseTimer.current)
+      peekCloseTimer.current = null
+      setPanelPeekClosing(false)
+    }
+    useAppStore.getState().setTab(id)
+    if (!useAppStore.getState().sidebarVisible) setPanelPeek(true)
+  }
+
   useEffect(() => {
     let cancelled = false
     void (async () => {
@@ -365,6 +546,9 @@ function App(): React.JSX.Element {
           }
           if (remote.surfaceTranslucent !== state.surfaceTranslucent) {
             patch.push(() => state.setSurfaceTranslucent(remote.surfaceTranslucent))
+          }
+          if (remote.sidebarVisible !== state.sidebarVisible) {
+            state.setSidebarVisible(remote.sidebarVisible)
           }
           patch.forEach((fn) => fn())
         }
@@ -611,25 +795,33 @@ function App(): React.JSX.Element {
 
       {activeProject ? (
         <div className="app-body">
-          <aside
-            ref={sidebarRef}
-            className={`sidebar${sidebarVisible ? '' : ' collapsed'}`}
-            style={{ width: sidebarVisible ? sidebarWidth : 0 }}
+          <div
+            className={`left-strip${peekEnabled ? ' peek-enabled' : ''}`}
+            onMouseEnter={keepPeek}
+            onMouseLeave={scheduleHidePeek}
           >
-            <SideTabs />
-            <div key={tab} className="sidebar-panel">
-              {tab === 'kanban' ? (
-                <KanbanPanel />
-              ) : tab === 'planner' ? (
-                <PlannerPanel />
-              ) : tab === 'files' ? (
-                <FileTreePanel />
-              ) : (
-                <NoteList />
-              )}
+            <div className="vtabs">
+              <VTabs onDashboard={goDashboard} onTab={goTab} onPeekHover={showPeek} />
             </div>
-          </aside>
-          {sidebarVisible && (
+            <aside
+              ref={sidebarRef}
+              className={`sidebar${sidebarVisible ? '' : ' collapsed'}${panelPeekClass ? ' peek' : ''}${sidebarInstant ? ' instant' : ''}`}
+              style={{ width: sidebarVisible ? sidebarWidth : 0, left: VTAB_BAR_WIDTH }}
+            >
+              <div key={tab} className="sidebar-panel">
+                {tab === 'kanban' ? (
+                  <KanbanPanel />
+                ) : tab === 'planner' ? (
+                  <PlannerPanel />
+                ) : tab === 'files' ? (
+                  <FileTreePanel />
+                ) : (
+                  <NoteList />
+                )}
+              </div>
+            </aside>
+          </div>
+          {sidebarVisible && !panelPeek && (
             <Resizer
               position="end"
               targetRef={sidebarRef}
@@ -639,7 +831,9 @@ function App(): React.JSX.Element {
             />
           )}
           <main className="main-area">
-            {tab === 'files' ? (
+            {tab === 'dashboard' ? (
+              <DashboardPage />
+            ) : tab === 'files' ? (
               <FileListPanel key={activeProject} />
             ) : tab === 'planner' ? (
               activeScheduleId ? (
