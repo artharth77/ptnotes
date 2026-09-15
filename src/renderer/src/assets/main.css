@@ -242,6 +242,7 @@ body {
 
 .sidebar.collapsed {
   width: 0 !important;
+  border-right: none;
 }
 
 /* Skip width/left animation (e.g. instant drop when entering the dashboard) */
