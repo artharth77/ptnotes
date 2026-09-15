@@ -90,10 +90,12 @@ const VTAB_BAR_WIDTH = 48
 
 function VTabs({
   onDashboard,
-  onTab
+  onTab,
+  onPeekHover
 }: {
   onDashboard: () => void
   onTab: (id: Tab) => void
+  onPeekHover: () => void
 }): React.JSX.Element {
   const tab = useAppStore((s) => s.tab)
   const activeProject = useAppStore((s) => s.activeProject)
@@ -123,12 +125,17 @@ function VTabs({
   ]
 
   const tipHandlers = (
-    label: string
+    label: string,
+    onEnter?: React.MouseEventHandler<HTMLElement>
   ): {
     onMouseEnter: (e: React.MouseEvent<HTMLElement>) => void
     onMouseLeave: (e: React.MouseEvent<HTMLElement>) => void
+    onMouseMove?: (e: React.MouseEvent<HTMLElement>) => void
   } => ({
-    onMouseEnter: (e: React.MouseEvent<HTMLElement>) => showTip(e, label),
+    onMouseEnter: (e: React.MouseEvent<HTMLElement>) => {
+      showTip(e, label)
+      onEnter?.(e)
+    },
     onMouseLeave: hideTip
   })
 
@@ -148,7 +155,7 @@ function VTabs({
             key={t.id}
             className={`vtabs-btn ${tab === t.id ? 'active' : ''}`}
             onClick={() => onTab(t.id)}
-            {...tipHandlers(t.title)}
+            {...tipHandlers(t.title, tab === t.id ? () => onPeekHover() : undefined)}
           >
             <MdiIcon path={t.icon} size={18} />
           </button>
@@ -421,10 +428,15 @@ function App(): React.JSX.Element {
     document.documentElement.setAttribute('data-surface-translucent', translucent ? 'on' : 'off')
   }, [init])
 
-  // V-tab strip hover peek: reveal a closed sidebar panel while the mouse is
-  // over the strip; auto-hide shortly after the mouse leaves.
+  // V-tab strip: opening a peek happens when the mouse enters the active tab;
+  // the panel auto-hides shortly after the mouse leaves the strip. Moving inside
+  // the strip keeps an already-open peek alive.
   function showPeek(): void {
-    if (!peekEnabled || snapshotsOpen) return
+    if (!peekEnabled || snapshotsOpen || tab === 'dashboard') return
+    setPanelPeek(true)
+  }
+  function keepPeek(): void {
+    if (!peekEnabled || !panelPeek) return
     if (hidePeekTimer.current !== null) {
       window.clearTimeout(hidePeekTimer.current)
       hidePeekTimer.current = null
@@ -434,7 +446,7 @@ function App(): React.JSX.Element {
       peekCloseTimer.current = null
       setPanelPeekClosing(false)
     }
-    if (!storeSidebarVisible && tab !== 'dashboard') setPanelPeek(true)
+    setPanelPeek(true)
   }
 
   function scheduleHidePeek(): void {
@@ -785,11 +797,11 @@ function App(): React.JSX.Element {
         <div className="app-body">
           <div
             className={`left-strip${peekEnabled ? ' peek-enabled' : ''}`}
-            onMouseEnter={showPeek}
+            onMouseEnter={keepPeek}
             onMouseLeave={scheduleHidePeek}
           >
             <div className="vtabs">
-              <VTabs onDashboard={goDashboard} onTab={goTab} />
+              <VTabs onDashboard={goDashboard} onTab={goTab} onPeekHover={showPeek} />
             </div>
             <aside
               ref={sidebarRef}

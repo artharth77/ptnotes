@@ -140,6 +140,8 @@ const api = {
       ipcRenderer.invoke('kanban:deleteColumn', project, columnId, options),
     loadArchive: (project: string): Promise<KanbanArchive> =>
       ipcRenderer.invoke('kanban:loadArchive', project),
+    archiveColumn: (project: string, columnId: string): Promise<KanbanArchiveMove> =>
+      ipcRenderer.invoke('kanban:archiveColumn', project, columnId),
     archiveCard: (project: string, cardId: string): Promise<KanbanArchiveMove> =>
       ipcRenderer.invoke('kanban:archiveCard', project, cardId),
     restoreCard: (project: string, cardId: string): Promise<KanbanArchiveMove> =>

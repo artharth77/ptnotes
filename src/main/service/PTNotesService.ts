@@ -2635,6 +2635,24 @@ export class PTNotesService {
     })
   }
 
+  async archiveKanbanColumn(project: string, columnId: string): Promise<KanbanArchiveMove> {
+    return this.withKanbanLock(project, async () => {
+      const board = await this.readKanban(project)
+      if (!board.columns.some((c) => c.id === columnId)) {
+        throw new Error(`Column "${columnId}" not found`)
+      }
+      const archive = await this.loadKanbanArchive(project)
+      const moving = board.cards.filter((c) => c.columnId === columnId)
+      const archivedIds = new Set(archive.cards.map((c) => c.id))
+      const fresh = moving.filter((c) => !archivedIds.has(c.id))
+      board.cards = board.cards.filter((c) => c.columnId !== columnId)
+      archive.cards.push(...fresh)
+      await this.writeKanban(project, board)
+      await this.writeKanbanArchive(project, archive)
+      return { board, archive }
+    })
+  }
+
   async restoreKanbanCard(project: string, cardId: string): Promise<KanbanArchiveMove> {
     return this.withKanbanLock(project, async () => {
       const archive = await this.loadKanbanArchive(project)

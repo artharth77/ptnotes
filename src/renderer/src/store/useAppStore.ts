@@ -190,6 +190,7 @@ interface AppState {
   ) => Promise<void>
   setKanbanListView: (view: 'active' | 'archived') => void
   archiveKanbanCard: (cardId: string) => Promise<void>
+  archiveKanbanColumn: (columnId: string) => Promise<void>
   restoreKanbanCard: (cardId: string) => Promise<void>
   deleteArchivedKanbanCard: (cardId: string) => Promise<void>
   setActiveKanbanCard: (id: string | null) => void
@@ -801,6 +802,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!project) return
     try {
       const { board, archive } = await window.ptnotes.kanban.archiveCard(project, cardId)
+      set({
+        kanban: board,
+        kanbanArchive: archive,
+        activeKanbanCardId: null,
+        kanbanEditingId: null
+      })
+    } catch {
+      await get().refreshKanban()
+    }
+  },
+
+  async archiveKanbanColumn(columnId) {
+    const project = get().activeProject
+    if (!project) return
+    try {
+      const { board, archive } = await window.ptnotes.kanban.archiveColumn(project, columnId)
       set({
         kanban: board,
         kanbanArchive: archive,
