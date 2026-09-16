@@ -48,6 +48,9 @@ import type {
   Project,
   ProjectCalendar,
   Schedule,
+  ScheduleJob,
+  ScheduleJobInput,
+  ScheduleJobRun,
   ScheduleMeta,
   SnapshotMeta,
   SkillContent,
@@ -411,6 +414,31 @@ const api = {
       ipcRenderer.invoke('toolsets:setEnabled', id, enabled),
     setConfig: (id: string, key: string, value: unknown): Promise<ToolsetSettings[]> =>
       ipcRenderer.invoke('toolsets:setConfig', id, key, value)
+  },
+  jobs: {
+    list: (project: string): Promise<ScheduleJob[]> => ipcRenderer.invoke('jobs:list', project),
+    save: (project: string, input: ScheduleJobInput): Promise<ScheduleJob> =>
+      ipcRenderer.invoke('jobs:save', project, input),
+    setEnabled: (project: string, id: string, enabled: boolean): Promise<ScheduleJob> =>
+      ipcRenderer.invoke('jobs:setEnabled', project, id, enabled),
+    delete: (project: string, id: string): Promise<boolean> =>
+      ipcRenderer.invoke('jobs:delete', project, id),
+    runNow: (project: string, id: string): Promise<void> =>
+      ipcRenderer.invoke('jobs:runNow', project, id),
+    runs: (project: string, jobId: string, limit?: number): Promise<ScheduleJobRun[]> =>
+      ipcRenderer.invoke('jobs:runs', project, jobId, limit),
+    readTrace: (project: string, runId: string): Promise<AiTraceFile | null> =>
+      ipcRenderer.invoke('jobs:readTrace', project, runId),
+    onEvent: (callback: (event: import('@shared/scheduleJobs').ScheduleJobEvent) => void) => {
+      const listener = (
+        _e: unknown,
+        event: import('@shared/scheduleJobs').ScheduleJobEvent
+      ): void => callback(event)
+      ipcRenderer.on('jobs:event', listener)
+      return () => {
+        ipcRenderer.removeListener('jobs:event', listener)
+      }
+    }
   },
   bots: {
     listBots: (): Promise<BotProfile[]> => ipcRenderer.invoke('bots:listBots'),

@@ -3,6 +3,7 @@ import { join, extname } from 'path'
 import { promises as fs } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import icon512 from '../../resources/icon512.png?asset'
 import splashUrl from '../../resources/splash.html?asset'
 import { PTNotesService } from './service/PTNotesService'
 import { registerProjectIpc, registerNoteIpc, registerChatIpc } from './ipc'
@@ -20,7 +21,11 @@ import { registerDiagramsIpc } from './ipc/diagrams'
 import { registerInfographicIpc } from './ipc/infographic'
 import { registerToolsetsIpc } from './ipc/toolsets'
 import { registerBotsIpc } from './ipc/bots'
+import { registerJobsIpc } from './ipc/jobs'
 import { BotsStore } from './bots/db'
+import { JobsStore } from './jobs/db'
+import { JobScheduler } from './jobs/scheduler'
+import { ScheduleJobRunner } from './jobs/runner'
 import { GroupChatManager } from './bots/orchestrator'
 import { createBotTaskModule } from './bots/botTask'
 import { ModuleRegistry } from './modules/registry'
@@ -32,6 +37,7 @@ import { shutdownInfographicRenderer } from './modules/shared/infographicRendere
 import { shutdownPdfRenderer } from './pdf/pdfRenderer'
 import { close as closeBrowser } from './mcp/browser'
 import type { PTTool } from './ai/tools'
+import { isLocalEndpoint } from './ai/chatSession'
 import { createPptxModule } from './modules/pptx'
 import { createInfographicModule } from './modules/infographic'
 import { createDocxModule } from './modules/docx'
@@ -61,6 +67,9 @@ let moduleManager: ModuleRunManager | undefined
 /** Lets the module broadcast (created before the bots system) forward bot-task events. */
 const groupChatForwarder: { current: GroupChatManager | undefined } = { current: undefined }
 let botsStoreRef: BotsStore | undefined
+let jobsStoreRef: JobsStore | undefined
+let jobSchedulerRef: JobScheduler | undefined
+let jobAbortControllerRef: AbortController | undefined
 
 /**
  * Chromium's PDF plugin runs in an out-of-process iframe that consumes
@@ -206,7 +215,7 @@ function createWindow(windowState: WindowState): void {
     backgroundColor: '#131418',
     autoHideMenuBar: true,
     title: 'PTNotes',
-    ...(process.platform === 'linux' || process.platform === 'win32' ? { icon } : {}),
+    ...(process.platform === 'linux' || process.platform === 'win32' ? { icon: icon512 } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
@@ -244,6 +253,9 @@ function createWindow(windowState: WindowState): void {
   )
 
   mainWindow.on('close', saveWindowState)
+  mainWindow.on('focus', () => {
+    mainWindow?.flashFrame(false)
+  })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     openExternalSafely(details.url)
@@ -401,6 +413,51 @@ app.whenReady().then(async () => {
   })
   groupChatForwarder.current = groupChatManager
 
+  // Scheduled jobs: per-project SQLite (`<project>/.data/jobs/jobs.db`) + a minute-tick
+  // scheduler that fires tool-capable background AI runs per project.
+  const jobsStore = new JobsStore(() => service.root)
+  jobsStoreRef = jobsStore
+  const jobAbortController = new AbortController()
+  jobAbortControllerRef = jobAbortController
+  const jobScheduler = new JobScheduler({
+    listProjects: async () => {
+      await service.ensureRoot()
+      const entries = await fs.readdir(service.root, { withFileTypes: true })
+      return entries.filter((e) => e.isDirectory() && !e.name.startsWith('.')).map((e) => e.name)
+    },
+    store: jobsStore,
+    runnerFor: (project) => {
+      void project
+      return {
+        run: async (job, run) => {
+          const runner = new ScheduleJobRunner({
+            project,
+            service,
+            configStore,
+            moduleManager: moduleManager!,
+            moduleRegistry: moduleRegistry,
+            disabledModules: (await settingsStore.load()).disabledModules ?? [],
+            db: jobsStore,
+            signal: jobAbortController.signal
+          })
+          return runner.run(job, run)
+        }
+      }
+    },
+    broadcast: (evt) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        win.webContents.send('jobs:event', evt)
+        if (evt.type === 'notify' && !win.isFocused()) win.flashFrame(true)
+      }
+    },
+    aiConfigured: async () => {
+      const cfg = await configStore.load()
+      return !!cfg.model && (!!cfg.apiKey || isLocalEndpoint(cfg.baseUrl))
+    }
+  })
+  jobScheduler.start()
+  jobSchedulerRef = jobScheduler
+
   const registry = createSessionRegistry(service, configStore, toolsProvider, async () => {
     const { buildPromptSection } = await import('./mcp/toolsets')
     const current = await settingsStore.load()
@@ -418,12 +475,15 @@ app.whenReady().then(async () => {
   registerGalleryIpc(service)
   registerSettingsIpc(service, settingsStore, (newRoot) => {
     botsStoreRef?.setRootDir(newRoot)
+    jobsStoreRef?.setRootDir(newRoot)
     groupChatForwarder.current?.closeAll()
   })
   registerSkillsIpc(service)
   registerModulesIpc(moduleManager!, settingsStore, moduleRegistry)
   registerToolsetsIpc(settingsStore)
   registerBotsIpc(botsStore, groupChatManager, moduleManager!)
+  registerJobsIpc(jobsStore, jobSchedulerRef!)
+
   registerDiagramsIpc()
   registerInfographicIpc()
 
@@ -447,6 +507,10 @@ app.on('will-quit', () => {
   void moduleManager?.cancelActive()
   groupChatForwarder.current?.closeAll()
   botsStoreRef?.closeAll()
+  jobAbortControllerRef?.abort()
+  jobSchedulerRef?.stop()
+  jobsStoreRef?.closeAll()
+
   void closeBrowser()
   shutdownChartRenderer()
   shutdownDiagramRenderer()

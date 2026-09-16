@@ -19,6 +19,7 @@ Read the section(s) relevant to your task rather than the whole file when possib
 | [IPC surface (window.ptnotes)](#ipc-surface-windowptnotes)              | Preload/renderer ↔ main IPC handler shapes                               |
 | [AI chat feature](#ai-chat-feature)                                     | Chat session, tools, module orchestration, trace, PDF, chat UI, settings |
 | [Bots group chat](#bots-group-chat)                                     | Bot identities, group chats, routing rules, background tasks, memories   |
+| [Scheduled jobs](#scheduled-jobs)                                       | Per-project scheduled AI jobs, minute-tick scheduler, job notifications  |
 | [Notes & caveats](#notes--caveats)                                      | Behavioral constraints (tool scoping, mention semantics)                 |
 
 ---
@@ -112,6 +113,9 @@ Run `npm run typecheck` and `npm run lint` after any change.
         └── bots/               (bots group chat, SQLite via the `node:sqlite` builtin)
             ├── groupchat.db       (tables: group_chats, group_messages, bot_memories, bot_task_queue; WAL)
             └── <groupId>.trace.jsonl (per-group raw AI trace, JSONL like chat traces)
+        └── jobs/               (scheduled jobs, SQLite via the `node:sqlite` builtin)
+            ├── jobs.db             (tables: jobs, job_runs; WAL)
+            └── traces/<runId>.trace.jsonl (per-run raw AI trace, JSONL like chat traces)
 ```
 
 - The **global bot library** lives in Electron `userData/bots.db` (SQLite, WAL; table `bots`) — bots are app-wide identities; their memories are scoped per project (rows in the project's `bot_memories` table).
@@ -165,6 +169,10 @@ src/
 │       ├── db.ts          # BotsStore: SQLite via node:sqlite — global bots.db + per-project groupchat.db (groups/messages/memories/task queue) + per-group trace JSONL
 │       ├── orchestrator.ts # GroupChatManager: per-group serialized turn queue, routing rules, non-streamed bot turns, assign→task handling, single-flight queue, summarization + memory extraction
 │       └── botTask.ts     # hidden internal `bot-task` module (base tools + start_module/wait_modules) that powers bot background runs
+│   └── jobs/
+│       ├── db.ts          # JobsStore: per-project jobs.db via node:sqlite (jobs + run history) + per-run trace JSONL append/read
+│       ├── runner.ts      # ScheduleJobRunner: non-streamed agentic loop with start_module/wait_modules tools, project-context system prompt, NO RESPONSE handling
+│       └── scheduler.ts   # JobScheduler: minute-tick timer (aligned to :00s) that checks every project's enabled jobs, launches due runs, purges >30-day history
 │   └── modules/
 │       ├── registry.ts   # module registry (extensible)
 │       ├── runs.ts       # ModuleRunManager: start/list/stop + event broadcast + readChat/readTrace (live in-memory or persisted .chat.json/.trace.jsonl) + waitForRuns (multi-module waiting for the main chat)
@@ -211,6 +219,8 @@ src/
 │   │   │   ├── GroupChatPanel.tsx   # bots group chat view (roster, badges, timestamps, @bot mentions, typing indicator, group modal/history)
 │   │   │   ├── BotTasksPanel.tsx    # bot background tasks panel (Modules-panel layout filtered to bot-task runs)
 │   │   │   ├── BotsSettingsPane.tsx # Settings ▸ Bots (bot library CRUD + per-project memory viewer)
+│   │   │   ├── ScheduleJobsOverlay.tsx # Schedule Jobs overlay (vtab alarm button): job list + detail editor + toolbar (new/delete/enable/execute now)
+│   │   │   ├── JobNotifications.tsx # bottom-right stack of job notifications (one block per run, ✕ close)
 │   │   │   ├── ModuleHistoryOverlay.tsx # read-only transcript overlay for module runs (💬 button on ModuleCard)
 │   │   │   └── SettingsDialog.tsx  # multi-panel Settings (Storage + Appearance + AI + Modules + Toolsets + Skills + Bots + About)
 │   └── ...
@@ -219,7 +229,8 @@ src/
     ├── bots.ts          # bots types (BotProfile, GroupMessage, …) + PURE routing logic (tag extraction, relay policy, assign parsing, memory merge) shared by main + renderer + tests
     ├── kanban.ts        # kanban board types + pure helpers (normalize, lookups, due-date formatting) shared by main + renderer + tests
     ├── planner.ts       # pure planner engine (dates, status rules, rollups) shared by main + renderer + tests
-    └── snapshots.ts     # pure snapshot helpers (filename codec, canonical hash input, GFS prune plan) shared by main + renderer + tests
+    ├── snapshots.ts     # pure snapshot helpers (filename codec, canonical hash input, GFS prune plan) shared by main + renderer + tests
+    └── scheduleJobs.ts  # scheduled-jobs types + PURE schedule math (time-rule expansion, ±2-min exact window, next-run computation, retention plan) shared by main + renderer + tests
 ````
 
 ### Security invariants (do not break)
@@ -280,6 +291,7 @@ src/
 - **Files:** `list` (`<project>/files/*` — PDF + any text file — for the chat `#` picker), `getPathForFile` (dropped file path via `webUtils`, never `File.path`), `copyToProject` (content-based: any text file + PDFs copied into `<project>/files/`; non-PDF binaries rejected), `extract` (local text → `{ text, pageCount, charCount, truncated }`; pdfjs-dist for `.pdf`, raw text for any text file), `reveal` (`shell.showItemInFolder`)
 - **Modules:** `list`, `listAvailable`, `setEnabled`, `start`, `startModule`, `stop`, `retry`, `reveal` (optional `filePath` to reveal a specific file of a multi-file run; defaults to the primary `outputFile`), `deleteRun`, `clearHistory`, `readChat` (per-run subagent transcript: live in-memory for active runs, persisted `<project>/.data/modules/<runId>.chat.json` otherwise), `readTrace` (per-run raw AI trace `AiTraceFile`: live from the runner for active runs, else disk). A run records **every** deliverable in `outputFiles` (one 📄 reveal pill each on the card; the first is also `outputFile`); `deleteRun`/`clearHistory` with the delete-output option removes them all. A run may also carry a `result` payload (submitted via `submit_result`) and an `expectResult` spec (from `start_module`'s `expect` argument). Hidden `bot-task` runs never appear in `listAvailable`/Settings and are never deleted by the Modules panel's `clearHistory`; the bots surface exposes them instead (below).
 - **Bots:** `listBots`, `saveBot(input)`, `deleteBot(id)` (also drops the bot from every group roster of project DBs open at that moment; leader falls back to the first remaining member), `listMemories(project, botId?)`, `deleteMemory(project, botId, memoryId)`; `listGroups(project)` (also reconciles the task queue: rows left `running` by a crash are dropped, and prunes roster ids of since-deleted bots with the same leader fallback — healing rosters `deleteBot` couldn't scrub — and reconciles stale pending ask messages), `readGroup(project, groupId, {limit?, beforeSeq?}?) → GroupChatData` (meta + messages + summary; without paging options it returns the full history — what the orchestrator uses for the transcript — while with `{limit, beforeSeq?}` it returns a page plus `hasMore`/`oldestSeq`; the UI loads the latest `GROUP_CHAT_PAGE_SIZE` messages and prepends older pages on scroll-up, keeping viewport position), `createGroup(project, {title, botIds, leaderBotId})` (1–8 bots, leader must be a member), `updateGroup` (same roster rules), `deleteGroup`, `clearGroupMessages` (stop + cancel live bot-task runs with suppressed reports + drop queue rows); `send(project, groupId, text)` (resolves when the whole orchestration settles), `stop(project, groupId)`, `askResponse(project, groupId, messageId, answers, cancelled)` (resolves a pending bot-task ask; returns whether a pending ask was found); `listTasks(project) → ModuleRun[]` (bot-task runs only), `clearTaskHistory(project, deleteOutputFiles?)`, `readTrace(project, groupId)`; `onEvent(cb)` subscribing to `bots:event` (broadcast to **all windows**): `message` (persisted GroupMessage), `turn-start`/`turn-end` (typing indicator), `group-updated`, `summary`, `error`.
+- **Jobs:** `list(project)` (jobs, also reconciles run rows left `running` by a crash), `save(project, input)` (create when `id` absent / update), `setEnabled(project, id, enabled)`, `delete(project, id)` (drops jobs + its run rows), `runNow(project, id)` (execute immediately, bypassing the schedule check), `runs(project, jobId, limit)` (recent run history for the detail panel), `readTrace(project, runId)`; `onEvent(cb)` subscribing to `jobs:event` (broadcast to **all windows**; unfocused windows also flash the taskbar): `notify` (a job produced user-visible output) and `runs-changed` (run finished — overlay reloads jobs).
 
 ## AI chat feature
 
@@ -787,6 +799,35 @@ Multi-bot group conversations with identities, roles, memories and background ta
 
 - Third drawer view (`rightView: 'chat' | 'bots' | 'modules' | 'botTasks'`, top-bar toggle, `⌘⇧G`): group header (title, Tasks/New/settings/trace buttons, group-history popover with open/rename/trace/delete), roster chips, message list (user bubbles right-aligned; bot messages with colored initial avatar, name, role badge, leader badge, timestamp `HH:MM` today / `MMM D, HH:MM` otherwise; system notices as centered pills), "**\<name\>** is typing…" indicator on `turn-start`, `@` mention popup fed by the group's bots in the composer, Send/Stop. `@bot-id` mentions in messages render as highlighted chips showing `@Name` (per-bot color in markdown messages via `linkifyBotMentions` → `mention:` links handled by `MarkdownContent`; translucent chips in user bubbles via `splitMentionSegments`; fenced code blocks untouched). Store slices: per-project `botGroups`/`activeBotGroupId`, per-group `botGroupMessages`/`botGroupBusy`/`botTyping`; events are applied via `applyBotGroupEvent` (message upsert by id).
 - Bot management lives in Settings ▸ Bots (`BotsSettingsPane`): library list (edit = inline form with name/role/persona/profile/model), two-step delete, and a per-project memory viewer for the selected bot.
+
+## Scheduled jobs
+
+Per-project scheduled background AI jobs: the user defines a job (title, day-of-week set, time rule, execution condition, prompt, preferred response language) and a minute-tick scheduler in the main process fires tool-capable background AI runs when due.
+
+### Data & storage
+
+- **Per project**: `<project>/.data/jobs/jobs.db` (SQLite via `node:sqlite`, WAL) with tables `jobs` (id UUID, title, enabled, days JSON — JS `getDay()` values defaulting to all seven, time_rule JSON, condition `exact`/`next`, prompt, language, next_run_at, last_run_at, timestamps) and `job_runs` (run_id, job_id, title snapshot, started_at/finished_at, status `running`/`done`/`failed`/`cancelled`, notice, error; indexed by started_at). Per-run AI traces append to `<project>/.data/jobs/traces/<runId>.trace.jsonl` (same JSONL shape as chat/bot traces, recorded as kind `module`). Runs left `running` by a crash are reconciled to `cancelled` on the next `jobs:list`.
+- All job/run persistence goes through `JobsStore` (`src/main/jobs/db.ts`) — never write the DB elsewhere. `changeRoot` closes/reopens the per-project DBs.
+
+### Schedule math (pure in `src/shared/scheduleJobs.ts`)
+
+- Time rules: `hourly` (every hour from HH to HH at MM), `every30` (… at 00/30), `every10` (… at 00/10/20/30/40/50), `list` (specific `HH:MM` times). `ruleMinutes` expands a rule into minutes-of-day (0..1439); `sanitizeTimeRule` normalizes untrusted shapes (clamped hours/minutes, deduped/validated time strings).
+- **Execution conditions**: `exact` — the current wall-clock minute must sit within the **+2 minutes AFTER a scheduled minute** of an allowed day (a 18:00 slot fires only in 18:00–18:02, never before) AND the previous run must be older than the **3-minute dedupe window** (a late tick still fires, but only once) — this is the default; `next` — the pre-computed `nextRunAt` fires once `now >= nextRunAt`; `computeNextRunAt` recomputes the next allowed slot strictly after launch time and persists it BEFORE the run starts (so the overlay shows a fresh "next execute" and the tick can't double-fire), and `setLastRun` keeps that stored value unless explicitly overridden (COALESCE).
+- Retention: `planJobPrune` returns run ids older than 30 days; both their `job_runs` rows and trace files are purged at most once per project per day on the tick. `**NO RESPONSE**` is the exact final-answer marker that suppresses the notification.
+
+### Scheduler (`src/main/jobs/scheduler.ts`) + runner (`src/main/jobs/runner.ts`)
+
+- `JobScheduler` starts in `app.whenReady()` with a first tick aligned to the next minute boundary (:00s), then a 60 s interval. Each tick lists project root directories, and per-project work is serialized via an inflight promise map (same pattern as the per-project locks). A job never runs twice concurrently (per `project/jobId` single-flight map); launched runs are awaited (`drain`) so ticks stay deterministic.
+- Every run is recorded in `job_runs` at launch; `Execute now` skips the time-wise due check but shares the same single-flight guard.
+- `ScheduleJobRunner` uses the **default AI profile** (`configStore.load()`) and runs a non-streamed agentic loop (≤ 8 tool turns) with `start_module` + `wait_modules` tools built like the main chat's module tools (with the settings' disabled-modules list applied). The system prompt carries the project name, current local date/time, the job's schedule days, the preferred response language (blank = English), and the `**NO RESPONSE**` instruction ("this is NOT a chat… reply exactly **NO RESPONSE** when nothing is worth reporting"); the user message is the job prompt. Abort on app quit (`AbortController` shared with `will-quit`).
+- A run's final answer (unless `**NO RESPONSE**`) becomes a `notify` event; run history/notification text lands in `job_runs` and the raw exchange in the trace file, so traces stay **separate from chat/groups/modules**.
+
+### Notifications & UI
+
+- `notify` events broadcast to all windows with `webContents.send('jobs:event', …)`; a window that isn't focused also gets `flashFrame(true)` (Windows taskbar flash / macOS dock bounce) and `focus` clears it. Notifications **stack** bottom-right (`JobNotifications.tsx`): one frosted block per run with job title, time, full text, and its own ✕ close — live events never replace each other, older ones remain until manually closed.
+- The vtab strip gains an **alarm** button above the Calendar button (disabled with no project); it opens `ScheduleJobsOverlay`: toolbar (New job / Delete with confirm / Enable-Disable / Execute now) on top of a two-pane body — job list on the left, detail form on the right; the detail edits the selected job or, with nothing selected, shows a **new job** form. Detail fields: title, enabled switch, day-of-week checkboxes (all default), time rule select (4 kinds with from/to-hour and minute/list inputs), execution-condition radio (exact ±2 min default vs next-run), prompt textarea, preferred response language (blank = English placeholder). In edit mode, Last executed / Next execute show as read-only info (last from `lastRunAt`, next only meaningful for `next`-condition jobs).
+- Notification bodies render as **markdown** via `MarkdownContent` (same renderer as chat).
+- `ScheduleJobEvent` and all job types live in `src/shared/types.ts` re-exports; the scheduler/workers never depend on the renderer.
 
 ## Notes & caveats
 

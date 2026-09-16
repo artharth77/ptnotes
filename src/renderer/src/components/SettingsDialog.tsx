@@ -631,11 +631,15 @@ function AppearanceSettings(): React.JSX.Element {
   const theme = useAppStore((s) => s.theme)
   const fontSize = useAppStore((s) => s.fontSize)
   const uiDensity = useAppStore((s) => s.uiDensity)
+  const vtabStyle = useAppStore((s) => s.vtabStyle)
+  const vtabIconColor = useAppStore((s) => s.vtabIconColor)
   const editorFontFamily = useAppStore((s) => s.editorFontFamily)
   const surfaceTranslucent = useAppStore((s) => s.surfaceTranslucent)
   const setTheme = useAppStore((s) => s.setTheme)
   const setFontSize = useAppStore((s) => s.setFontSize)
   const setUiDensity = useAppStore((s) => s.setUiDensity)
+  const setVtabStyle = useAppStore((s) => s.setVtabStyle)
+  const setVtabIconColor = useAppStore((s) => s.setVtabIconColor)
   const setEditorFontFamily = useAppStore((s) => s.setEditorFontFamily)
   const setSurfaceTranslucent = useAppStore((s) => s.setSurfaceTranslucent)
   const themeOptions: Array<{
@@ -664,6 +668,22 @@ function AppearanceSettings(): React.JSX.Element {
   }> = [
     { value: 'compact', label: 'Compact', desc: 'Tighter spacing' },
     { value: 'cozy', label: 'Cozy', desc: 'Default spacing' }
+  ]
+  const vtabStyleOptions: Array<{
+    value: 'icons' | 'labels'
+    label: string
+    desc: string
+  }> = [
+    { value: 'icons', label: 'Icons', desc: 'Icon-only tab strip' },
+    { value: 'labels', label: 'Icon + label', desc: 'Icons with labels underneath' }
+  ]
+  const vtabIconColorOptions: Array<{
+    value: 'mono' | 'color'
+    label: string
+    desc: string
+  }> = [
+    { value: 'mono', label: 'Mono', desc: 'All icons use the standard gray/accent' },
+    { value: 'color', label: 'Color', desc: "Each main tab's icon gets its own color" }
   ]
   const editorFontOptions: Array<{
     value: 'sans' | 'serif' | 'mono'
@@ -730,6 +750,40 @@ function AppearanceSettings(): React.JSX.Element {
             aria-checked={uiDensity === opt.value}
             className={`seg-btn${uiDensity === opt.value ? ' active' : ''}`}
             onClick={() => setUiDensity(opt.value)}
+            title={opt.desc}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="section-title">Tab bar</div>
+      <p className="hint">Icons only, or icons with a label underneath (wider strip).</p>
+      <div className="seg block" role="radiogroup" aria-label="Tab bar">
+        {vtabStyleOptions.map((opt) => (
+          <button
+            key={opt.value}
+            role="radio"
+            aria-checked={vtabStyle === opt.value}
+            className={`seg-btn${vtabStyle === opt.value ? ' active' : ''}`}
+            onClick={() => setVtabStyle(opt.value)}
+            title={opt.desc}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+      <p className="hint">
+        Mono keeps the standard gray/accent; color tints each main tab&apos;s icon.
+      </p>
+      <div className="seg block" role="radiogroup" aria-label="Icon color">
+        {vtabIconColorOptions.map((opt) => (
+          <button
+            key={opt.value}
+            role="radio"
+            aria-checked={vtabIconColor === opt.value}
+            className={`seg-btn${vtabIconColor === opt.value ? ' active' : ''}`}
+            onClick={() => setVtabIconColor(opt.value)}
             title={opt.desc}
           >
             {opt.label}

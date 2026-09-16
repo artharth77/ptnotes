@@ -35,6 +35,9 @@ import { PromptModal, ConfirmModal } from './components/Modal'
 import { Resizer } from './components/Resizer'
 import { DashboardPage } from './DashboardPage'
 import { PlannerMiniCalendar } from './components/PlannerMiniCalendar'
+import { ScheduleJobsOverlay } from './components/ScheduleJobsOverlay'
+import { JobNotifications } from './components/JobNotifications'
+import { mdiAlarm } from '@mdi/js'
 import type { Tab, ToolCallInfo } from '@shared/types'
 import { addUsage, normalizeUsage } from '@shared/usage'
 
@@ -88,22 +91,27 @@ const PLANNER_TOOLS = new Set([
   'set_calendar'
 ])
 
-const VTAB_BAR_WIDTH = 48
+const VTAB_ICON_BAR_WIDTH = 48
+const VTAB_LABEL_BAR_WIDTH = 72
 
 function VTabs({
   onDashboard,
   onTab,
   onPeekHover,
-  onCalendar
+  onCalendar,
+  onJobs
 }: {
   onDashboard: () => void
   onTab: (id: Tab) => void
   onPeekHover: () => void
   onCalendar: () => void
+  onJobs: () => void
 }): React.JSX.Element {
   const tab = useAppStore((s) => s.tab)
   const activeProject = useAppStore((s) => s.activeProject)
   const plannerCalendarOpen = useAppStore((s) => s.plannerCalendarOpen)
+  const scheduleJobsOpen = useAppStore((s) => s.scheduleJobsOpen)
+  const vtabStyle = useAppStore((s) => s.vtabStyle)
   const [tip, setTip] = useState<{ label: string; x: number; y: number } | null>(null)
 
   useEffect(() => {
@@ -114,6 +122,7 @@ function VTabs({
   }, [tip])
 
   function showTip(e: React.MouseEvent<HTMLElement>, label: string): void {
+    if (vtabStyle === 'labels') return
     const r = e.currentTarget.getBoundingClientRect()
     setTip({ label, x: r.right + 8, y: r.top + r.height / 2 })
   }
@@ -144,35 +153,47 @@ function VTabs({
     onMouseLeave: hideTip
   })
 
+  const labeled = vtabStyle === 'labels'
   return (
     <>
-      <div className="vtabs-inner">
+      <div className={`vtabs-inner${labeled ? ' labeled' : ''}`}>
         <button
           className={`vtabs-btn ${tab === 'dashboard' ? 'active' : ''} ${!activeProject ? 'disabled' : ''}`}
           onClick={onDashboard}
           {...tipHandlers('Dashboard')}
         >
           <MdiIcon path={mdiViewDashboardOutline} size={18} />
+          <span className="vtabs-label small">Dashboard</span>
         </button>
         <div className="vtabs-sep" />
         {tabs.map((t) => (
           <button
             key={t.id}
-            className={`vtabs-btn ${tab === t.id ? 'active' : ''}`}
+            className={`vtabs-btn vtab-${t.id} ${tab === t.id ? 'active' : ''}`}
             onClick={() => onTab(t.id)}
             {...tipHandlers(t.title, tab === t.id ? () => onPeekHover() : undefined)}
           >
             <MdiIcon path={t.icon} size={18} />
+            <span className={`vtabs-label${t.title.length >= 8 ? ' small' : ''}`}>{t.title}</span>
           </button>
         ))}
         <div className="vtabs-spacer" />
         <div className="vtabs-sep" />
+        <button
+          className={`vtabs-btn ${scheduleJobsOpen ? 'active' : ''} ${!activeProject ? 'disabled' : ''}`}
+          onClick={onJobs}
+          {...tipHandlers('Jobs')}
+        >
+          <MdiIcon path={mdiAlarm} size={18} />
+          <span className="vtabs-label">Jobs</span>
+        </button>
         <button
           className={`vtabs-btn ${plannerCalendarOpen ? 'active' : ''}`}
           onClick={onCalendar}
           {...tipHandlers('Calendar')}
         >
           <MdiIcon path={mdiCalendarMonth} size={18} />
+          <span className="vtabs-label small">Calendar</span>
         </button>
       </div>
       {tip &&
@@ -401,6 +422,7 @@ function App(): React.JSX.Element {
   const rightOpen = chatOpen || moduleOpen || botsOpen
   const setRightView = useAppStore((s) => s.setRightView)
   const settingsOpen = useAppStore((s) => s.settingsOpen)
+  const scheduleJobsOpen = useAppStore((s) => s.scheduleJobsOpen)
   const plannerCalendarOpen = useAppStore((s) => s.plannerCalendarOpen)
   const snapshotsOpen = useAppStore((s) => s.snapshotsOpen)
   const storeSidebarVisible = useAppStore((s) => s.sidebarVisible)
@@ -425,6 +447,7 @@ function App(): React.JSX.Element {
   const [chatResizing, setChatResizing] = useState(false)
   const [moduleResizing, setModuleResizing] = useState(false)
   const sidebarRef = useRef<HTMLElement>(null)
+  const vtabStyle = useAppStore((s) => s.vtabStyle)
   const chatColRef = useRef<HTMLDivElement>(null)
   const chatNewTurnRef = useRef(false)
   const chatLastMsgIdRef = useRef<string | null>(null)
@@ -437,6 +460,10 @@ function App(): React.JSX.Element {
     document.documentElement.setAttribute('data-font-size', fontSize)
     const density = useAppStore.getState().uiDensity
     document.documentElement.setAttribute('data-ui-density', density)
+    const vtabStyle = useAppStore.getState().vtabStyle
+    document.documentElement.setAttribute('data-vtab-style', vtabStyle)
+    const vtabIconColor = useAppStore.getState().vtabIconColor
+    document.documentElement.setAttribute('data-vtab-icon-color', vtabIconColor)
     const editorFont = useAppStore.getState().editorFontFamily
     document.documentElement.setAttribute('data-editor-font', editorFont)
     const translucent = useAppStore.getState().surfaceTranslucent
@@ -547,6 +574,12 @@ function App(): React.JSX.Element {
     s.setPlannerCalendarOpen(!s.plannerCalendarOpen)
   }
 
+  function goJobs(): void {
+    const s = useAppStore.getState()
+    if (!s.activeProject) return
+    s.setScheduleJobsOpen(!s.scheduleJobsOpen)
+  }
+
   useEffect(() => {
     let cancelled = false
     void (async () => {
@@ -561,6 +594,16 @@ function App(): React.JSX.Element {
             patch.push(() => state.setFontSize(remote.fontSize))
           if (remote.uiDensity && remote.uiDensity !== state.uiDensity)
             patch.push(() => state.setUiDensity(remote.uiDensity))
+          if (remote.vtabStyle && remote.vtabStyle !== state.vtabStyle) {
+            localStorage.setItem('ptnotes:vtabStyle', remote.vtabStyle)
+            document.documentElement.setAttribute('data-vtab-style', remote.vtabStyle)
+            useAppStore.setState({ vtabStyle: remote.vtabStyle })
+          }
+          if (remote.vtabIconColor && remote.vtabIconColor !== state.vtabIconColor) {
+            localStorage.setItem('ptnotes:vtabIconColor', remote.vtabIconColor)
+            document.documentElement.setAttribute('data-vtab-icon-color', remote.vtabIconColor)
+            useAppStore.setState({ vtabIconColor: remote.vtabIconColor })
+          }
           if (remote.editorFontFamily && remote.editorFontFamily !== state.editorFontFamily) {
             patch.push(() => state.setEditorFontFamily(remote.editorFontFamily))
           }
@@ -826,12 +869,16 @@ function App(): React.JSX.Element {
                 onTab={goTab}
                 onPeekHover={showPeek}
                 onCalendar={goCalendar}
+                onJobs={goJobs}
               />
             </div>
             <aside
               ref={sidebarRef}
               className={`sidebar${sidebarVisible ? '' : ' collapsed'}${panelPeekClass ? ' peek' : ''}${sidebarInstant ? ' instant' : ''}`}
-              style={{ width: sidebarVisible ? sidebarWidth : 0, left: VTAB_BAR_WIDTH }}
+              style={{
+                width: sidebarVisible ? sidebarWidth : 0,
+                left: vtabStyle === 'labels' ? VTAB_LABEL_BAR_WIDTH : VTAB_ICON_BAR_WIDTH
+              }}
             >
               <div key={tab} className="sidebar-panel">
                 {tab === 'kanban' ? (
@@ -951,6 +998,8 @@ function App(): React.JSX.Element {
 
       {settingsOpen && <SettingsDialog />}
       {plannerCalendarOpen && <PlannerMiniCalendar />}
+      {scheduleJobsOpen && activeProject && <ScheduleJobsOverlay />}
+      <JobNotifications />
       <CommandPalette />
       <GlobalFind />
       {(kanbanEditingId || kanbanCreatingColumnId || kanbanViewingId) && (

@@ -59,6 +59,8 @@ export interface StorageSettings {
   theme?: 'light' | 'dark' | 'system'
   fontSize?: 'small' | 'default' | 'large' | 'xlarge'
   uiDensity?: 'compact' | 'cozy'
+  vtabStyle?: 'icons' | 'labels'
+  vtabIconColor?: 'mono' | 'color'
   editorFontFamily?: 'sans' | 'serif' | 'mono'
   /** Frosted translucent surfaces; false renders every frost surface solid. */
   surfaceTranslucent?: boolean
@@ -72,6 +74,8 @@ export interface AppearanceSettings {
   theme: 'light' | 'dark' | 'system'
   fontSize: 'small' | 'default' | 'large' | 'xlarge'
   uiDensity: 'compact' | 'cozy'
+  vtabStyle: 'icons' | 'labels'
+  vtabIconColor: 'mono' | 'color'
   editorFontFamily: 'sans' | 'serif' | 'mono'
   surfaceTranslucent: boolean
   sidebarVisible: boolean
@@ -581,3 +585,13 @@ export type {
   NewKanbanCardInput,
   NewKanbanColumnInput
 } from './kanban'
+
+export type {
+  ScheduleCondition,
+  ScheduleJob,
+  ScheduleJobEvent,
+  ScheduleJobInput,
+  ScheduleJobRun,
+  ScheduleJobRunStatus,
+  ScheduleTimeRule
+} from './scheduleJobs'

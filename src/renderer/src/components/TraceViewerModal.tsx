@@ -8,7 +8,7 @@ import { normalizeUsage } from '@shared/usage'
 import { mdiCheck, mdiCodeTags, mdiContentCopy, mdiLanguageMarkdown } from '@mdi/js'
 
 interface TraceViewerTarget {
-  kind: 'chat' | 'module' | 'bots'
+  kind: 'chat' | 'module' | 'bots' | 'jobs'
   key: string
   title: string
 }
@@ -106,7 +106,9 @@ function TraceViewerContent({
         ? window.ptnotes.chat.readTrace(project, viewer.key)
         : viewer.kind === 'bots'
           ? window.ptnotes.bots.readTrace(project, viewer.key)
-          : window.ptnotes.modules.readTrace(project, viewer.key)
+          : viewer.kind === 'jobs'
+            ? window.ptnotes.jobs.readTrace(project, viewer.key)
+            : window.ptnotes.modules.readTrace(project, viewer.key)
     load
       .then((t) => {
         if (cancelled) return

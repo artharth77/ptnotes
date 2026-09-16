@@ -110,13 +110,14 @@ interface AppState {
   /** Live subagent tool-call lifecycle per run id (transient; never persisted). */
   moduleToolCalls: Record<string, ToolCallInfo[]>
   moduleHistoryRunId: string | null
-  traceViewer: { kind: 'chat' | 'module' | 'bots'; key: string; title: string } | null
+  traceViewer: { kind: 'chat' | 'module' | 'bots' | 'jobs'; key: string; title: string } | null
   chatBusy: boolean
   chatStreamProject: string | null
   chatWaitRuns: string[]
   confirmRequest: ConfirmRequest | null
   askRequest: AskRequest | null
   settingsOpen: boolean
+  scheduleJobsOpen: boolean
   settingsCategory:
     'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets' | 'bots' | 'appearance'
   skillEditRequest: string | null
@@ -145,6 +146,8 @@ interface AppState {
   theme: 'light' | 'dark' | 'system'
   fontSize: 'small' | 'default' | 'large' | 'xlarge'
   uiDensity: 'compact' | 'cozy'
+  vtabStyle: 'icons' | 'labels'
+  vtabIconColor: 'mono' | 'color'
   editorFontFamily: 'sans' | 'serif' | 'mono'
   surfaceTranslucent: boolean
   commandPaletteOpen: boolean
@@ -232,7 +235,11 @@ interface AppState {
   loadModules: (project: string) => Promise<void>
   applyModuleEvent: (evt: ModuleEvent) => void
   setModuleHistoryRunId: (runId: string | null) => void
-  openTraceViewer: (v: { kind: 'chat' | 'module' | 'bots'; key: string; title: string }) => void
+  openTraceViewer: (v: {
+    kind: 'chat' | 'module' | 'bots' | 'jobs'
+    key: string
+    title: string
+  }) => void
   closeTraceViewer: () => void
   // ---- Bots group chat ----
   loadBotProfiles: () => Promise<void>
@@ -274,6 +281,7 @@ interface AppState {
   setConfirmRequest: (req: ConfirmRequest | null) => void
   setAskRequest: (req: AskRequest | null) => void
   setSettingsOpen: (open: boolean) => void
+  setScheduleJobsOpen: (open: boolean) => void
   setSettingsCategory: (
     category: 'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets' | 'bots' | 'appearance'
   ) => void
@@ -299,6 +307,8 @@ interface AppState {
   setTheme: (theme: 'light' | 'dark' | 'system') => void
   setFontSize: (size: 'small' | 'default' | 'large' | 'xlarge') => void
   setUiDensity: (density: 'compact' | 'cozy') => void
+  setVtabStyle: (style: 'icons' | 'labels') => void
+  setVtabIconColor: (color: 'mono' | 'color') => void
   setEditorFontFamily: (family: 'sans' | 'serif' | 'mono') => void
   setSurfaceTranslucent: (translucent: boolean) => void
   setCommandPaletteOpen: (open: boolean) => void
@@ -369,6 +379,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   confirmRequest: null,
   askRequest: null,
   settingsOpen: false,
+  scheduleJobsOpen: false,
   settingsCategory: 'storage',
   skillEditRequest: null,
   sidebarVisible: localStorage.getItem('ptnotes:sidebarVisible') !== 'false',
@@ -391,6 +402,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     (localStorage.getItem('ptnotes:fontSize') as 'small' | 'default' | 'large' | 'xlarge' | null) ??
     'default',
   uiDensity: (localStorage.getItem('ptnotes:uiDensity') as 'compact' | 'cozy' | null) ?? 'cozy',
+  vtabStyle: (localStorage.getItem('ptnotes:vtabStyle') as 'icons' | 'labels' | null) ?? 'labels',
+  vtabIconColor:
+    (localStorage.getItem('ptnotes:vtabIconColor') as 'mono' | 'color' | null) ?? 'color',
   editorFontFamily:
     (localStorage.getItem('ptnotes:editorFont') as 'sans' | 'serif' | 'mono' | null) ?? 'sans',
   surfaceTranslucent: localStorage.getItem('ptnotes:surfaceTranslucent') !== 'false',
@@ -1691,6 +1705,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ settingsOpen })
   },
 
+  setScheduleJobsOpen(scheduleJobsOpen) {
+    set({ scheduleJobsOpen })
+  },
+
   setSettingsCategory(settingsCategory) {
     set({ settingsCategory })
   },
@@ -1850,6 +1868,32 @@ export const useAppStore = create<AppState>((set, get) => ({
     void (async () => {
       try {
         await window.ptnotes.settings.setAppearance({ uiDensity: density })
+      } catch {
+        /* safe to ignore */
+      }
+    })()
+  },
+
+  setVtabStyle(style) {
+    localStorage.setItem('ptnotes:vtabStyle', style)
+    document.documentElement.setAttribute('data-vtab-style', style)
+    set({ vtabStyle: style })
+    void (async () => {
+      try {
+        await window.ptnotes.settings.setAppearance({ vtabStyle: style })
+      } catch {
+        /* safe to ignore */
+      }
+    })()
+  },
+
+  setVtabIconColor(color) {
+    localStorage.setItem('ptnotes:vtabIconColor', color)
+    document.documentElement.setAttribute('data-vtab-icon-color', color)
+    set({ vtabIconColor: color })
+    void (async () => {
+      try {
+        await window.ptnotes.settings.setAppearance({ vtabIconColor: color })
       } catch {
         /* safe to ignore */
       }
