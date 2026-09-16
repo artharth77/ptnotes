@@ -905,6 +905,20 @@ html[data-vtab-icon-color='color'] .vtabs-btn.vtab-files svg {
   color: var(--vtab-files);
 }
 
+/* Labels mode: also tint the label of the active tab with its assigned hue */
+html[data-vtab-icon-color='color'] .vtabs-btn.active.vtab-notes .vtabs-label {
+  color: var(--vtab-notes);
+}
+html[data-vtab-icon-color='color'] .vtabs-btn.active.vtab-kanban .vtabs-label {
+  color: var(--vtab-kanban);
+}
+html[data-vtab-icon-color='color'] .vtabs-btn.active.vtab-planner .vtabs-label {
+  color: var(--vtab-planner);
+}
+html[data-vtab-icon-color='color'] .vtabs-btn.active.vtab-files .vtabs-label {
+  color: var(--vtab-files);
+}
+
 .vtabs-inner.labeled .vtabs-sep {
   width: 40px;
 }
@@ -2339,10 +2353,17 @@ fieldset.kanban-form {
   margin-top: 4px;
 }
 
+.sched-jobs-detail .modal-actions .form-error {
+  margin-right: auto;
+  align-self: center;
+  padding: 4px 8px 4px 12px;
+  max-width: 60%;
+  line-height: 1.4;
+}
+
 .sched-jobs-detail .modal-actions {
-  position: sticky;
-  bottom: 0;
-  margin: 8px -12px -10px;
+  flex-shrink: 0;
+  margin: 8px -12px 0;
   padding: 10px 12px;
   background: var(--bg-elev);
   border-top: 1px solid var(--border);
@@ -10982,14 +11003,23 @@ li.activity-item:hover {
 .sched-jobs-detail {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  overflow-y: auto;
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 10px 12px;
+  padding: 10px 0 0;
   min-height: 200px;
   flex: 1;
   min-width: 0;
+}
+
+.sched-jobs-detail-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 12px 10px;
 }
 
 .sched-jobs-detail h3 {
@@ -11063,6 +11093,18 @@ li.activity-item:hover {
 
 .sched-jobs-times {
   display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sched-jobs-times-label {
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.8;
+}
+
+.sched-jobs-times-row {
+  display: flex;
   flex-direction: row;
   align-items: stretch;
   gap: 8px;
@@ -11073,7 +11115,7 @@ li.activity-item:hover {
   flex-wrap: wrap;
   align-content: flex-start;
   gap: 5px;
-  flex: 0 1 50%;
+  flex: 0 1 60%;
   min-width: 0;
   min-height: 37px;
   padding: 4px 6px;
@@ -11085,6 +11127,11 @@ li.activity-item:hover {
 .sched-jobs-times-empty {
   font-size: 11px;
   opacity: 0.6;
+}
+
+.sched-jobs-times-list:has(> .sched-jobs-times-empty) {
+  align-content: center;
+  align-items: center;
 }
 
 .sched-jobs-times-add {
@@ -11102,7 +11149,8 @@ li.activity-item:hover {
 
 .sched-jobs-times-input {
   flex: 1 1 0;
-  min-width: 90px;
+  max-width: 80px;
+  min-width: 80px;
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;

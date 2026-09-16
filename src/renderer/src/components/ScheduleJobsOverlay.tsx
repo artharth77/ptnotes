@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ScheduleJob, ScheduleJobInput, ScheduleJobRun, ScheduleTimeRule } from '@shared/types'
 import { computeNextRunAt } from '@shared/scheduleJobs'
 import { useAppStore } from '../store/useAppStore'
+import { friendlyError } from '../errors'
 import { ConfirmModal, Modal, TextField } from './Modal'
 import { MdiIcon } from './MdiIcon'
 import {
@@ -13,6 +14,7 @@ import {
   mdiToggleSwitch,
   mdiToggleSwitchOffOutline,
   mdiClose,
+  mdiMenuLeft,
   mdiHistory,
   mdiTimelineClockOutline
 } from '@mdi/js'
@@ -40,7 +42,7 @@ function emptyDraft(): Draft {
     enabled: true,
     days: [...DEFAULT_WEEKDAYS],
     timeRule: { kind: 'hourly', fromHours: 9, toHours: 18, minute: 0 },
-    condition: 'exact',
+    condition: 'next',
     prompt: '',
     language: ''
   }
@@ -201,13 +203,14 @@ export function ScheduleJobsOverlay(): React.JSX.Element {
 
   function addTime(): void {
     const raw = timesInput.trim()
-    const m = /^([0-9]|[0-2][0-9]):([0-5][0-9])$/.exec(raw)
-    if (!m) {
+    const m = /^([0-2]?\d):([0-5]?\d)$/.exec(raw)
+    if (!m || Number(m[1]) > 23) {
       setTimesError('Use the HH:MM format (24 h), e.g. 09:30.')
       return
     }
     const hour = String(Number(m[1])).padStart(2, '0')
-    const normalized = `${hour}:${m[2]}`
+    const minute = String(Number(m[2])).padStart(2, '0')
+    const normalized = `${hour}:${minute}`
     const times = draft.timeRule.kind === 'list' ? draft.timeRule.times : []
     if (times.includes(normalized)) {
       setTimesError(`"${normalized}" is already in the list.`)
@@ -262,6 +265,10 @@ export function ScheduleJobsOverlay(): React.JSX.Element {
       setError('A job needs at least one day of week selected.')
       return
     }
+    if (draft.timeRule.kind === 'list' && draft.timeRule.times.length === 0) {
+      setError('Add at least one time to the time list.')
+      return
+    }
     const days = draft.days
     const input: ScheduleJobInput = {
       id: draft.id ?? undefined,
@@ -292,7 +299,7 @@ export function ScheduleJobsOverlay(): React.JSX.Element {
         setSavedFlash(false)
       }, 2000)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(friendlyError(err))
     }
   }
 
@@ -400,9 +407,7 @@ export function ScheduleJobsOverlay(): React.JSX.Element {
 
         <div className="sched-jobs-body">
           <div className="sched-jobs-list">
-            {jobs.length === 0 && (
-              <p className="sched-jobs-empty">No jobs yet — create one below.</p>
-            )}
+            {jobs.length === 0 && <p className="sched-jobs-empty">No jobs yet.</p>}
             {jobs.map((job) => (
               <button
                 key={job.id}
@@ -421,230 +426,235 @@ export function ScheduleJobsOverlay(): React.JSX.Element {
           </div>
 
           <div className="sched-jobs-detail">
-            <h3>{isEditing ? 'Job detail' : 'New job'}</h3>
-            {isEditing && (
-              <div className="sched-jobs-meta">
-                <span>
-                  Last executed: {fmtTime(jobs.find((j) => j.id === draft.id)?.lastRunAt)}
-                </span>
-                <span>
-                  Next execute:{' '}
-                  {fmtTime(
-                    draft.condition === 'next'
-                      ? jobs.find((j) => j.id === draft.id)?.nextRunAt
-                      : undefined
-                  )}
-                </span>
+            <div className="sched-jobs-detail-scroll">
+              <h3>{isEditing ? 'Job detail' : 'New job'}</h3>
+              {isEditing && (
+                <div className="sched-jobs-meta">
+                  <span>
+                    Last executed: {fmtTime(jobs.find((j) => j.id === draft.id)?.lastRunAt)}
+                  </span>
+                  <span>
+                    Next execute:{' '}
+                    {fmtTime(
+                      draft.condition === 'next'
+                        ? jobs.find((j) => j.id === draft.id)?.nextRunAt
+                        : undefined
+                    )}
+                  </span>
+                </div>
+              )}
+              <div className="sched-jobs-title-row">
+                <label className="sched-jobs-field sched-jobs-title-field">
+                  <span>Job title</span>
+                  <TextField value={draft.title} onChange={(v) => patchDraft({ title: v })} />
+                </label>
+                <div className="sched-jobs-field sched-jobs-enabled-field">
+                  <span>Enabled</span>
+                  <button
+                    className={`module-settings-toggle${draft.enabled ? ' on' : ''}`}
+                    title={draft.enabled ? 'Disable this job' : 'Enable this job'}
+                    onClick={() => patchDraft({ enabled: !draft.enabled })}
+                  >
+                    <MdiIcon
+                      path={draft.enabled ? mdiToggleSwitch : mdiToggleSwitchOffOutline}
+                      size={32}
+                    />
+                  </button>
+                </div>
               </div>
-            )}
-            <div className="sched-jobs-title-row">
-              <label className="sched-jobs-field sched-jobs-title-field">
-                <span>Job title</span>
-                <TextField value={draft.title} onChange={(v) => patchDraft({ title: v })} />
-              </label>
-              <div className="sched-jobs-field sched-jobs-enabled-field">
-                <span>Enabled</span>
-                <button
-                  className={`module-settings-toggle${draft.enabled ? ' on' : ''}`}
-                  title={draft.enabled ? 'Disable this job' : 'Enable this job'}
-                  onClick={() => patchDraft({ enabled: !draft.enabled })}
-                >
-                  <MdiIcon
-                    path={draft.enabled ? mdiToggleSwitch : mdiToggleSwitchOffOutline}
-                    size={32}
-                  />
-                </button>
-              </div>
-            </div>
-            <div className="sched-jobs-field">
-              <span>Days of week</span>
-              <div className="sched-jobs-days" role="group" aria-label="Days of week">
-                {WEEKDAYS.map((label, i) => {
-                  const active = draft.days.includes(i)
-                  return (
-                    <button
-                      key={label}
-                      type="button"
-                      className={`day-seg ${active ? 'active' : ''}`}
-                      title={active ? `Deselect ${label}` : `Select ${label}`}
-                      onClick={() =>
-                        patchDraft({
-                          days: active
-                            ? draft.days.filter((d) => d !== i)
-                            : [...draft.days, i].sort((a, b) => a - b)
-                        })
-                      }
-                    >
-                      {label}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-            <div className="sched-jobs-field">
-              <span>Time rule</span>
-              <div className="sched-jobs-rule-seg" role="group" aria-label="Time rule">
-                {(
-                  [
-                    { kind: 'hourly', label: 'Every hour' },
-                    { kind: 'every30', label: 'Every 30 minutes' },
-                    { kind: 'every10', label: 'Every 10 minutes' },
-                    { kind: 'list', label: 'Specific time list' }
-                  ] as Array<{ kind: ScheduleTimeRule['kind']; label: string }>
-                ).map((opt) => {
-                  const active = draft.timeRule.kind === opt.kind
-                  return (
-                    <button
-                      key={opt.kind}
-                      type="button"
-                      className={`day-seg ${active ? 'active' : ''}`}
-                      title={active ? opt.label : `Switch to ${opt.label.toLowerCase()}`}
-                      onClick={() => {
-                        if (opt.kind === 'hourly') {
-                          patchRule({
-                            kind: 'hourly',
-                            ...('minute' in draft.timeRule ? {} : { minute: 0 })
-                          } as Partial<ScheduleTimeRule>)
-                        } else if (opt.kind === 'list') {
-                          patchRule({ kind: 'list', times: [] })
-                        } else {
-                          patchRule({ kind: opt.kind })
+              <div className="sched-jobs-field">
+                <span>Days of week</span>
+                <div className="sched-jobs-days" role="group" aria-label="Days of week">
+                  {WEEKDAYS.map((label, i) => {
+                    const active = draft.days.includes(i)
+                    return (
+                      <button
+                        key={label}
+                        type="button"
+                        className={`day-seg ${active ? 'active' : ''}`}
+                        title={active ? `Deselect ${label}` : `Select ${label}`}
+                        onClick={() =>
+                          patchDraft({
+                            days: active
+                              ? draft.days.filter((d) => d !== i)
+                              : [...draft.days, i].sort((a, b) => a - b)
+                          })
                         }
-                      }}
-                    >
-                      {opt.label}
-                    </button>
-                  )
-                })}
+                      >
+                        {label}
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
-              {draft.timeRule.kind !== 'list' ? (
-                <div className="sched-jobs-row">
-                  <label>
-                    From HH
-                    <input
-                      type="number"
-                      min={0}
-                      max={23}
-                      value={draft.timeRule.fromHours}
-                      onChange={(e) => patchRule({ fromHours: Number(e.target.value) })}
-                    />
-                  </label>
-                  <label>
-                    To HH
-                    <input
-                      type="number"
-                      min={0}
-                      max={23}
-                      value={draft.timeRule.toHours}
-                      onChange={(e) => patchRule({ toHours: Number(e.target.value) })}
-                    />
-                  </label>
-                  {draft.timeRule.kind === 'hourly' && 'minute' in draft.timeRule && (
+              <div className="sched-jobs-field">
+                <span>Time rule</span>
+                <div className="sched-jobs-rule-seg" role="group" aria-label="Time rule">
+                  {(
+                    [
+                      { kind: 'hourly', label: 'Every hour' },
+                      { kind: 'every30', label: 'Every 30 minutes' },
+                      { kind: 'every10', label: 'Every 10 minutes' },
+                      { kind: 'list', label: 'Specific time list' }
+                    ] as Array<{ kind: ScheduleTimeRule['kind']; label: string }>
+                  ).map((opt) => {
+                    const active = draft.timeRule.kind === opt.kind
+                    return (
+                      <button
+                        key={opt.kind}
+                        type="button"
+                        className={`day-seg ${active ? 'active' : ''}`}
+                        title={active ? opt.label : `Switch to ${opt.label.toLowerCase()}`}
+                        onClick={() => {
+                          if (opt.kind === 'hourly') {
+                            patchRule({
+                              kind: 'hourly',
+                              ...('minute' in draft.timeRule ? {} : { minute: 0 })
+                            } as Partial<ScheduleTimeRule>)
+                          } else if (opt.kind === 'list') {
+                            patchRule({ kind: 'list', times: [] })
+                          } else {
+                            patchRule({ kind: opt.kind })
+                          }
+                        }}
+                      >
+                        {opt.label}
+                      </button>
+                    )
+                  })}
+                </div>
+                {draft.timeRule.kind !== 'list' ? (
+                  <div className="sched-jobs-row">
                     <label>
-                      At MM
+                      From HH
                       <input
                         type="number"
                         min={0}
-                        max={59}
-                        value={draft.timeRule.minute}
-                        onChange={(e) => patchRule({ minute: Number(e.target.value) })}
+                        max={23}
+                        value={draft.timeRule.fromHours}
+                        onChange={(e) => patchRule({ fromHours: Number(e.target.value) })}
                       />
                     </label>
-                  )}
-                </div>
-              ) : (
-                <div className="sched-jobs-times">
-                  <div className="sched-jobs-times-list">
-                    {draft.timeRule.kind === 'list' && draft.timeRule.times.length === 0 ? (
-                      <span className="sched-jobs-times-empty">No times yet — add one below.</span>
-                    ) : (
-                      draft.timeRule.kind === 'list' &&
-                      draft.timeRule.times.map((t) => (
-                        <span key={t} className="kanban-chip">
-                          {t}
-                          <button
-                            className="kanban-chip-remove"
-                            title={`Remove ${t}`}
-                            onClick={() =>
-                              patchRule({
-                                times: (draft.timeRule as { times: string[] }).times.filter(
-                                  (x) => x !== t
-                                )
-                              })
-                            }
-                          >
-                            <MdiIcon path={mdiClose} size={16} />
-                          </button>
-                        </span>
-                      ))
+                    <label>
+                      To HH
+                      <input
+                        type="number"
+                        min={0}
+                        max={23}
+                        value={draft.timeRule.toHours}
+                        onChange={(e) => patchRule({ toHours: Number(e.target.value) })}
+                      />
+                    </label>
+                    {draft.timeRule.kind === 'hourly' && 'minute' in draft.timeRule && (
+                      <label>
+                        At MM
+                        <input
+                          type="number"
+                          min={0}
+                          max={59}
+                          value={draft.timeRule.minute}
+                          onChange={(e) => patchRule({ minute: Number(e.target.value) })}
+                        />
+                      </label>
                     )}
                   </div>
-                  <div className="sched-jobs-times-add">
-                    <input
-                      className="sched-jobs-times-input"
-                      type="text"
-                      value={timesInput}
-                      placeholder="HH:MM"
-                      onChange={(e) => {
-                        setTimesInput(e.target.value)
-                        setTimesError(null)
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault()
-                          addTime()
-                        }
-                      }}
-                    />
-                    <button className="btn" onClick={addTime}>
-                      Add
-                    </button>
+                ) : (
+                  <div className="sched-jobs-times">
+                    <span className="sched-jobs-times-label">Time list</span>
+                    <div className="sched-jobs-times-row">
+                      <div className="sched-jobs-times-list">
+                        {draft.timeRule.kind === 'list' && draft.timeRule.times.length === 0 ? (
+                          <span className="sched-jobs-times-empty">No times yet.</span>
+                        ) : (
+                          draft.timeRule.kind === 'list' &&
+                          draft.timeRule.times.map((t) => (
+                            <span key={t} className="kanban-chip">
+                              {t}
+                              <button
+                                className="kanban-chip-remove"
+                                title={`Remove ${t}`}
+                                onClick={() =>
+                                  patchRule({
+                                    times: (draft.timeRule as { times: string[] }).times.filter(
+                                      (x) => x !== t
+                                    )
+                                  })
+                                }
+                              >
+                                <MdiIcon path={mdiClose} size={16} />
+                              </button>
+                            </span>
+                          ))
+                        )}
+                      </div>
+                      <div className="sched-jobs-times-add">
+                      <button className="btn" onClick={addTime}>
+                        <MdiIcon path={mdiMenuLeft} size={16} /> Add
+                      </button>
+                        <input
+                          className="sched-jobs-times-input"
+                          type="text"
+                          value={timesInput}
+                          placeholder="HH:MM"
+                          onChange={(e) => {
+                            setTimesInput(e.target.value)
+                            setTimesError(null)
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault()
+                              addTime()
+                            }
+                          }}
+                        />
+                      </div>
+                    </div>
+                    {timesError && <span className="form-error">{timesError}</span>}
                   </div>
-                  {timesError && <span className="form-error">{timesError}</span>}
-                </div>
-              )}
-            </div>
-            <div className="sched-jobs-field">
-              <span>Execution condition</span>
-              <label className="sched-jobs-radio">
-                <input
-                  type="radio"
-                  name="sched-cond"
-                  checked={draft.condition === 'exact'}
-                  onChange={() => patchDraft({ condition: 'exact' })}
+                )}
+              </div>
+              <div className="sched-jobs-field">
+                <span>Execution condition</span>
+                <label className="sched-jobs-radio">
+                  <input
+                    type="radio"
+                    name="sched-cond"
+                    checked={draft.condition === 'exact'}
+                    onChange={() => patchDraft({ condition: 'exact' })}
+                  />
+                  Meet exactly time (±2 min window, deduped)
+                </label>
+                <label className="sched-jobs-radio">
+                  <input
+                    type="radio"
+                    name="sched-cond"
+                    checked={draft.condition === 'next'}
+                    onChange={() => patchDraft({ condition: 'next' })}
+                  />
+                  Next execute time (pre-computed, fires once reached)
+                </label>
+              </div>
+              <label className="sched-jobs-field">
+                <span>Prompt</span>
+                <textarea
+                  className="sched-jobs-prompt"
+                  rows={5}
+                  value={draft.prompt}
+                  onChange={(e) => patchDraft({ prompt: e.target.value })}
+                  placeholder="What the background AI should do for this project (it can use module tools)."
                 />
-                Meet exactly time (±2 min window, deduped)
               </label>
-              <label className="sched-jobs-radio">
-                <input
-                  type="radio"
-                  name="sched-cond"
-                  checked={draft.condition === 'next'}
-                  onChange={() => patchDraft({ condition: 'next' })}
+              <label className="sched-jobs-field">
+                <span>Preferred response language</span>
+                <TextField
+                  value={draft.language}
+                  onChange={(v) => patchDraft({ language: v })}
+                  placeholder="English"
                 />
-                Next execute time (pre-computed, fires once reached)
               </label>
             </div>
-            <label className="sched-jobs-field">
-              <span>Prompt</span>
-              <textarea
-                className="sched-jobs-prompt"
-                rows={5}
-                value={draft.prompt}
-                onChange={(e) => patchDraft({ prompt: e.target.value })}
-                placeholder="What the background AI should do for this project (it can use module tools)."
-              />
-            </label>
-            <label className="sched-jobs-field">
-              <span>Preferred response language</span>
-              <TextField
-                value={draft.language}
-                onChange={(v) => patchDraft({ language: v })}
-                placeholder="English"
-              />
-            </label>
-            {error && <p className="form-error">{error}</p>}
             <div className="modal-actions">
+              {error && <p className="form-error">{error}</p>}
               <button className="btn" onClick={cancelClick}>
                 Cancel
               </button>
