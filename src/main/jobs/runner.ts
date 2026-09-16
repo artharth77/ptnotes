@@ -9,7 +9,7 @@ import type { ModuleRegistry as Registry } from '../modules/registry'
 import type { JobsStore } from './db'
 import type { PTNotesService } from '../service/PTNotesService'
 import type { ScheduleJob } from '@shared/scheduleJobs'
-import { ALL_DAYS, NO_RESPONSE_MARK } from '@shared/scheduleJobs'
+import { ALL_DAYS, isNoResponse } from '@shared/scheduleJobs'
 import type { ScheduleJobRun, ScheduleJobRunStatus } from '@shared/scheduleJobs'
 
 const MAX_TOOL_TURNS = 8
@@ -157,7 +157,7 @@ export class ScheduleJobRunner {
     }
     await trace.flush()
 
-    const notify = finalText !== '' && !finalText.includes(NO_RESPONSE_MARK)
+    const notify = finalText.trim() !== '' && !isNoResponse(finalText)
     return {
       run,
       status: 'done',

@@ -24,7 +24,8 @@ const {
   shouldRunExact,
   shouldRunNext,
   computeNextRunAt,
-  planJobPrune
+  planJobPrune,
+  isNoResponse
 } = await import('../src/shared/scheduleJobs')
 const { JobsStore } = await import('../src/main/jobs/db')
 const { JobScheduler } = await import('../src/main/jobs/scheduler')
@@ -68,11 +69,22 @@ const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6]
 const nowWed = L(5, 17, 12, 3)
 const ruleAt903 = { kind: 'hourly', fromHours: 9, toHours: 17, minute: 3 }
 
-assert.ok(shouldRunExact(ruleAt903, ALL_DAYS, nowWed), 'within ±2 min window fires')
+assert.ok(shouldRunExact(ruleAt903, ALL_DAYS, nowWed), 'fires at the slot minute')
+assert.ok(shouldRunExact(ruleAt903, ALL_DAYS, nowWed + MIN), 'fires 1 min after the slot')
+assert.ok(shouldRunExact(ruleAt903, ALL_DAYS, nowWed + 2 * MIN), 'fires 2 min after the slot')
+assert.ok(!shouldRunExact(ruleAt903, ALL_DAYS, nowWed - 1 * MIN), 'before the slot does not fire')
 assert.ok(!shouldRunExact(ruleAt903, ALL_DAYS, nowWed - 3 * MIN), 'before the window does not fire')
 assert.ok(
   !shouldRunExact(ruleAt903, ALL_DAYS, nowWed, nowWed - 1 * MIN),
-  'recent run (<2 min ago) dedupes'
+  'recent run (<3 min ago) dedupes'
+)
+assert.ok(
+  !shouldRunExact(ruleAt903, ALL_DAYS, nowWed, nowWed - 2 * MIN),
+  'run 2 min ago still dedupes (3-min guard)'
+)
+assert.ok(
+  shouldRunExact(ruleAt903, ALL_DAYS, nowWed, nowWed - 3 * MIN),
+  'run exactly 3 min ago fires again'
 )
 assert.ok(
   shouldRunExact(ruleAt903, ALL_DAYS, nowWed, nowWed - 5 * MIN),
@@ -80,6 +92,18 @@ assert.ok(
 )
 const monday = L(5, 15, 12, 3)
 assert.ok(!shouldRunExact(ruleAt903, [0], monday), 'not the scheduled day → no fire')
+
+// midnight wrap: a 23:59 slot fires in 00:00–00:01 of the following day
+const midnightRule = { kind: 'list', times: ['23:59'] }
+assert.ok(
+  shouldRunExact(midnightRule, ALL_DAYS, L(5, 18, 0, 1)),
+  'late yesterday slot still fires 1 min after midnight'
+)
+assert.ok(
+  !shouldRunExact(midnightRule, ALL_DAYS, L(5, 18, 0, 3)),
+  'window closes 2 min after midnight'
+)
+assert.ok(!shouldRunExact(midnightRule, ALL_DAYS, L(5, 17, 23, 57)), 'before the slot: no fire')
 
 // ---- next condition (+ pre-computed next fire time) ----
 
@@ -119,6 +143,17 @@ assert.deepEqual(
   ),
   ['old']
 )
+
+// ---- NO RESPONSE detection (markdown/case/whitespace variants) ----
+
+assert.ok(isNoResponse('**NO RESPONSE**'), 'canonical marker')
+assert.ok(isNoResponse('NO RESPONSE'), 'without emphasis')
+assert.ok(isNoResponse('*no response*'), 'lowercase + single emphasis')
+assert.ok(isNoResponse('`NO  RESPONSE`'), 'code + double space')
+assert.ok(isNoResponse('done.\n\nNO RESPONSE'), 'prose + trailing marker')
+
+assert.ok(!isNoResponse('Here is today\u2019s summary.'), 'normal answer notifies')
+assert.ok(!isNoResponse('no one responded'), 'unrelated phrase stays notified')
 
 // ---- JobsStore CRUD ----
 

@@ -72,10 +72,22 @@ export interface ScheduleJobInput {
 
 export const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6]
 export const NO_RESPONSE_MARK = '**NO RESPONSE**'
-/** Slack around the scheduled minute for the 'exact' (+-2 minutes) condition. */
+
+/**
+ * Robust NO RESPONSE detection: models often drop the `**` emphasis, change
+ * casing, or wrap the phrase in prose — normalize markdown emphasis, quotes
+ * and whitespace before matching.
+ */
+export function isNoResponse(text: string): boolean {
+  const norm = text
+    .replace(/[*_`~]/g, '')
+    .replace(/\s+/g, '')
+    .toUpperCase()
+  return norm.includes('NORESPONSE')
+} /** Slack around the scheduled minute for the 'exact' (+-2 minutes) condition. */
 export const EXACT_WINDOW_MS = 2 * 60 * 1000
 /** Minimum time between two 'exact'-condition fires of the same job. */
-export const EXACT_DEDUPE_MS = 2 * 60 * 1000
+export const EXACT_DEDUPE_MS = 3 * 60 * 1000
 /** AI traces and run history older than this are purged. */
 export const JOB_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 
@@ -155,8 +167,9 @@ export function localMinuteOfDay(ms: number): number {
 
 /**
  * Fire decision for the 'exact' condition: the current wall-clock minute must sit
- * within +-2 minutes of a scheduled minute of an allowed day, and the previous run
- * must be older than the dedupe window (a late tick still fires, but only once).
+ * within [slot, slot+2] minutes of a scheduled minute of an allowed day (the 2 minutes
+ * AFTER the scheduled minute, never before it), and the previous run must be older
+ * than the dedupe window (a late tick still fires, but only once).
  */
 export function shouldRunExact(
   rule: ScheduleTimeRule,
@@ -168,7 +181,11 @@ export function shouldRunExact(
   if (prevRunAt !== undefined && now - prevRunAt < EXACT_DEDUPE_MS) return false
   const nowMin = localMinuteOfDay(now)
   for (const m of ruleMinutes(rule)) {
-    if (Math.abs(nowMin - m) <= 2) return true
+    // window after the slot; a slot late yesterday can still be due early today
+    for (const slot of [m, m - 1440]) {
+      const diff = nowMin - slot
+      if (diff >= 0 && diff <= 2) return true
+    }
   }
   return false
 }

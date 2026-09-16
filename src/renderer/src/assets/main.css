@@ -526,6 +526,17 @@ body {
   color: var(--text-dim);
 }
 
+.modal .icon-btn.primary:hover {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.sched-jobs-running {
+  font-size: 11px;
+  color: var(--accent);
+  align-self: center;
+}
+
 .refresh-btn {
   font-size: 16px;
   padding: 3px 8px;
@@ -2258,6 +2269,15 @@ fieldset.kanban-form {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 4px;
+}
+
+.sched-jobs-detail .modal-actions {
+  position: sticky;
+  bottom: 0;
+  margin: 8px -12px -10px;
+  padding: 10px 12px;
+  background: var(--bg-elev);
+  border-top: 1px solid var(--border);
 }
 
 .confirm-message {
@@ -10696,11 +10716,16 @@ li.activity-item:hover {
 .modal.sched-jobs-modal {
   width: 760px;
   max-width: calc(100vw - 40px);
-  max-height: calc(100vh - 80px);
+  height: 80vh;
+  min-height: 80vh;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
 }
 
 .modal.sched-jobs-modal .modal-body {
-  max-height: calc(100vh - 180px);
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -10709,6 +10734,15 @@ li.activity-item:hover {
   flex-direction: column;
   gap: 10px;
   min-height: 0;
+  height: 100%;
+}
+
+.sched-jobs-body {
+  display: flex;
+  flex-direction: row;
+  gap: 12px;
+  min-height: 0;
+  flex: 1;
 }
 
 .sched-jobs-toolbar {
@@ -10720,8 +10754,8 @@ li.activity-item:hover {
 }
 
 .sched-jobs-list {
-  flex: 0 0 auto;
-  max-height: 190px;
+  flex: 0 0 240px;
+  max-height: none;
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -10746,6 +10780,17 @@ li.activity-item:hover {
   text-align: left;
   cursor: pointer;
   color: var(--text);
+  align-items: flex-start;
+  position: relative;
+}
+
+.sched-jobs-item-pause {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  color: var(--text-dim);
 }
 
 .sched-jobs-item:hover {
@@ -10759,11 +10804,19 @@ li.activity-item:hover {
 .sched-jobs-item-title {
   font-size: 13px;
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 .sched-jobs-item-sub {
   font-size: 11px;
   opacity: 0.7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 .sched-jobs-detail {
@@ -10775,6 +10828,8 @@ li.activity-item:hover {
   border-radius: 8px;
   padding: 10px 12px;
   min-height: 200px;
+  flex: 1;
+  min-width: 0;
 }
 
 .sched-jobs-detail h3 {
@@ -10816,6 +10871,90 @@ li.activity-item:hover {
 
 .sched-jobs-row input {
   width: 72px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+
+.sched-jobs-row input:focus {
+  border-color: var(--accent);
+}
+
+.sched-jobs-rule-seg {
+  display: flex;
+  width: 100%;
+}
+
+.sched-jobs-days .day-seg,
+.sched-jobs-rule-seg .day-seg {
+  height: 37px;
+  padding: 0;
+}
+
+.sched-jobs-row input,
+.sched-jobs-times-input {
+  height: 37px;
+}
+
+.sched-jobs-times {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.sched-jobs-times-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 5px;
+  flex: 0 1 50%;
+  min-width: 0;
+  min-height: 37px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.sched-jobs-times-empty {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.sched-jobs-times-add {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.sched-jobs-times-add .btn {
+  flex-shrink: 0;
+  height: 37px;
+}
+
+.sched-jobs-times-input {
+  flex: 1 1 0;
+  min-width: 90px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+
+.sched-jobs-times-input:focus {
+  border-color: var(--accent);
 }
 
 .sched-jobs-row.times-row input {
@@ -10825,12 +10964,18 @@ li.activity-item:hover {
 .sched-jobs-select,
 .sched-jobs-prompt {
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text);
-  background: var(--bg-input, var(--bg));
+  background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 5px 8px;
+  border-radius: 8px;
+  padding: 8px 10px;
+  outline: none;
+}
+
+.sched-jobs-select:focus,
+.sched-jobs-prompt:focus {
+  border-color: var(--accent);
 }
 
 .sched-jobs-prompt {
@@ -10840,18 +10985,69 @@ li.activity-item:hover {
 
 .sched-jobs-days {
   display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
+  width: 100%;
 }
 
-.day-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 11px;
+.day-seg {
+  flex: 1;
   border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 2px 8px;
+  background: var(--bg-elev);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1;
+  padding: 5px 0;
+  cursor: pointer;
+  margin-left: -1px;
+}
+
+.day-seg:first-child {
+  border-radius: 6px 0 0 6px;
+  margin-left: 0;
+}
+
+.day-seg:last-child {
+  border-radius: 0 6px 6px 0;
+}
+
+.day-seg:hover {
+  background: var(--bg-hover);
+}
+
+.day-seg.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  position: relative;
+  z-index: 1;
+}
+
+.day-seg:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.sched-jobs-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.sched-jobs-title-field {
+  flex: 1;
+  min-width: 0;
+}
+
+.sched-jobs-enabled-field {
+  align-items: center;
+  justify-content: center;
+}
+
+.sched-jobs-enabled-field .module-settings-toggle {
+  margin-left: 0;
+}
+
+.sched-jobs-enabled-field span {
+  margin-left: 2px;
 }
 
 .sched-jobs-switch,
@@ -10883,46 +11079,120 @@ li.activity-item:hover {
 .job-notification {
   background: var(--frost-bg, var(--bg-elev));
   backdrop-filter: blur(12px) saturate(1.2);
-  border: 1px solid var(--border);
+  border: 4px solid var(--border);
   border-radius: 10px;
   box-shadow: var(--shadow);
-  padding: 8px 10px;
-  animation: dropdown-in 0.15s ease;
+  padding: 5px 7px;
+  animation:
+    job-noti-in 0.18s ease,
+    job-noti-border 2.8s linear;
+}
+
+.job-notification.leaving {
+  animation: job-noti-out 0.18s ease forwards;
+  pointer-events: none;
+}
+
+@keyframes job-noti-border {
+  0%,
+  20% {
+    border-color: var(--accent);
+  }
+  25%,
+  40% {
+    border-color: var(--border);
+  }
+  45%,
+  58% {
+    border-color: var(--accent);
+  }
+  63%,
+  100% {
+    border-color: var(--border);
+  }
+}
+
+@keyframes job-noti-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes job-noti-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+}
+
+.job-notification:hover {
+  border-color: var(--accent);
 }
 
 .job-notification-head {
   display: flex;
   align-items: center;
   gap: 8px;
+  padding-bottom: 6px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border);
 }
 
 .job-notification-title {
   flex: 1;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--app-font-size);
+  font-weight: 700;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .job-notification-time {
-  font-size: 10px;
+  font-size: calc(var(--app-font-size) - 3px);
   opacity: 0.7;
 }
 
 .job-notification-close {
   border: none;
   background: none;
-  color: var(--text);
+  color: var(--text-dim, var(--text));
   cursor: pointer;
-  font-size: 12px;
   padding: 0 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.job-notification-close:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+  border-radius: 5px;
 }
 
 .job-notification-body {
-  margin-top: 6px;
-  font-size: 12px;
-  white-space: pre-wrap;
-  max-height: 200px;
+  font-size: var(--app-font-size);
+  max-height: 240px;
   overflow-y: auto;
+}
+
+.job-notification-body .markdown-body {
+  font-size: var(--app-font-size);
+}
+
+.job-notification-body .markdown-body > :first-child {
+  margin-top: 0;
+}
+
+.job-notification-body .markdown-body > :last-child {
+  margin-bottom: 0;
 }
