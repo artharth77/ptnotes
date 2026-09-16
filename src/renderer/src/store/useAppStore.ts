@@ -146,6 +146,8 @@ interface AppState {
   theme: 'light' | 'dark' | 'system'
   fontSize: 'small' | 'default' | 'large' | 'xlarge'
   uiDensity: 'compact' | 'cozy'
+  vtabStyle: 'icons' | 'labels'
+  vtabIconColor: 'mono' | 'color'
   editorFontFamily: 'sans' | 'serif' | 'mono'
   surfaceTranslucent: boolean
   commandPaletteOpen: boolean
@@ -301,6 +303,8 @@ interface AppState {
   setTheme: (theme: 'light' | 'dark' | 'system') => void
   setFontSize: (size: 'small' | 'default' | 'large' | 'xlarge') => void
   setUiDensity: (density: 'compact' | 'cozy') => void
+  setVtabStyle: (style: 'icons' | 'labels') => void
+  setVtabIconColor: (color: 'mono' | 'color') => void
   setEditorFontFamily: (family: 'sans' | 'serif' | 'mono') => void
   setSurfaceTranslucent: (translucent: boolean) => void
   setCommandPaletteOpen: (open: boolean) => void
@@ -394,6 +398,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     (localStorage.getItem('ptnotes:fontSize') as 'small' | 'default' | 'large' | 'xlarge' | null) ??
     'default',
   uiDensity: (localStorage.getItem('ptnotes:uiDensity') as 'compact' | 'cozy' | null) ?? 'cozy',
+  vtabStyle: (localStorage.getItem('ptnotes:vtabStyle') as 'icons' | 'labels' | null) ?? 'labels',
+  vtabIconColor:
+    (localStorage.getItem('ptnotes:vtabIconColor') as 'mono' | 'color' | null) ?? 'color',
   editorFontFamily:
     (localStorage.getItem('ptnotes:editorFont') as 'sans' | 'serif' | 'mono' | null) ?? 'sans',
   surfaceTranslucent: localStorage.getItem('ptnotes:surfaceTranslucent') !== 'false',
@@ -1857,6 +1864,32 @@ export const useAppStore = create<AppState>((set, get) => ({
     void (async () => {
       try {
         await window.ptnotes.settings.setAppearance({ uiDensity: density })
+      } catch {
+        /* safe to ignore */
+      }
+    })()
+  },
+
+  setVtabStyle(style) {
+    localStorage.setItem('ptnotes:vtabStyle', style)
+    document.documentElement.setAttribute('data-vtab-style', style)
+    set({ vtabStyle: style })
+    void (async () => {
+      try {
+        await window.ptnotes.settings.setAppearance({ vtabStyle: style })
+      } catch {
+        /* safe to ignore */
+      }
+    })()
+  },
+
+  setVtabIconColor(color) {
+    localStorage.setItem('ptnotes:vtabIconColor', color)
+    document.documentElement.setAttribute('data-vtab-icon-color', color)
+    set({ vtabIconColor: color })
+    void (async () => {
+      try {
+        await window.ptnotes.settings.setAppearance({ vtabIconColor: color })
       } catch {
         /* safe to ignore */
       }

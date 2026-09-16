@@ -54,6 +54,8 @@ import './assets/main.css'
         theme: 'system',
         fontSize: 'default',
         uiDensity: 'cozy',
+        vtabStyle: 'labels',
+        vtabIconColor: 'color',
         editorFontFamily: 'sans',
         surfaceTranslucent: true,
         sidebarVisible: true

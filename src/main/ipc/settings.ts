@@ -40,6 +40,8 @@ function toAppearance(settings: StorageSettings): AppearanceSettings {
         ? settings.fontSize
         : 'default',
     uiDensity: settings.uiDensity === 'compact' ? 'compact' : 'cozy',
+    vtabStyle: settings.vtabStyle === 'icons' ? 'icons' : 'labels',
+    vtabIconColor: settings.vtabIconColor === 'mono' ? 'mono' : 'color',
     editorFontFamily:
       settings.editorFontFamily === 'serif' || settings.editorFontFamily === 'mono'
         ? settings.editorFontFamily
@@ -100,6 +102,12 @@ export function registerSettingsIpc(
       }
       if (input.uiDensity === 'compact' || input.uiDensity === 'cozy') {
         patch.uiDensity = input.uiDensity
+      }
+      if (input.vtabStyle === 'icons' || input.vtabStyle === 'labels') {
+        patch.vtabStyle = input.vtabStyle
+      }
+      if (input.vtabIconColor === 'mono' || input.vtabIconColor === 'color') {
+        patch.vtabIconColor = input.vtabIconColor
       }
       if (
         input.editorFontFamily === 'sans' ||

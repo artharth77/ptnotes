@@ -241,7 +241,7 @@ export function ScheduleJobsOverlay(): React.JSX.Element {
   const isEditing = selectedId !== null
 
   return (
-    <Modal title="Schedule Jobs" className="sched-jobs-modal" onClose={close}>
+    <Modal title="Jobs" className="sched-jobs-modal" onClose={close}>
       <div className="sched-jobs">
         <div className="sched-jobs-toolbar">
           <button

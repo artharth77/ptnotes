@@ -172,6 +172,10 @@
     --tok-builtin: #ff7b72;
     --tok-regex: #a5d6ff;
     --tok-variable: #ffa657;
+    --vtab-notes: #39c6d6;
+    --vtab-kanban: #d2a8ff;
+    --vtab-planner: #4cc38a;
+    --vtab-files: #e6b33f;
   }
 }
 
@@ -839,6 +843,70 @@ body {
   color: var(--text);
   white-space: nowrap;
   pointer-events: none;
+}
+
+/* Labels mode: icon with a small label under it; strip widens 48px → 72px */
+html[data-vtab-style='labels'] .vtabs {
+  width: 72px;
+}
+
+.vtabs-label {
+  display: none;
+}
+
+.vtabs-inner.labeled .vtabs-btn {
+  width: 56px;
+  height: auto;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 2px 7px;
+}
+
+.vtabs-inner.labeled .vtabs-label {
+  display: block;
+  font-size: 11px;
+  line-height: 1.2;
+  color: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.vtabs-inner.labeled .vtabs-label.small {
+  font-size: 10px;
+}
+
+/* Color mode: each main tab's icon gets its own hue (mono = default look) */
+:root {
+  --vtab-notes: #0e8d93;
+  --vtab-kanban: #8250df;
+  --vtab-planner: #30a46c;
+  --vtab-files: #d9a024;
+}
+
+:root[data-theme='dark'] {
+  --vtab-notes: #39c6d6;
+  --vtab-kanban: #d2a8ff;
+  --vtab-planner: #4cc38a;
+  --vtab-files: #e6b33f;
+}
+
+html[data-vtab-icon-color='color'] .vtabs-btn.vtab-notes svg {
+  color: var(--vtab-notes);
+}
+html[data-vtab-icon-color='color'] .vtabs-btn.vtab-kanban svg {
+  color: var(--vtab-kanban);
+}
+html[data-vtab-icon-color='color'] .vtabs-btn.vtab-planner svg {
+  color: var(--vtab-planner);
+}
+html[data-vtab-icon-color='color'] .vtabs-btn.vtab-files svg {
+  color: var(--vtab-files);
+}
+
+.vtabs-inner.labeled .vtabs-sep {
+  width: 40px;
 }
 
 /* ---------- Lists ---------- */

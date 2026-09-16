@@ -40,6 +40,10 @@ export class SettingsStore {
           : 'default'
       const uiDensity: StorageSettings['uiDensity'] =
         parsed.uiDensity === 'compact' || parsed.uiDensity === 'cozy' ? parsed.uiDensity : 'cozy'
+      const vtabStyle: StorageSettings['vtabStyle'] =
+        parsed.vtabStyle === 'icons' ? 'icons' : 'labels'
+      const vtabIconColor: StorageSettings['vtabIconColor'] =
+        parsed.vtabIconColor === 'mono' ? 'mono' : 'color'
       const editorFontFamily: StorageSettings['editorFontFamily'] =
         parsed.editorFontFamily === 'sans' ||
         parsed.editorFontFamily === 'serif' ||
@@ -68,6 +72,8 @@ export class SettingsStore {
         theme,
         fontSize,
         uiDensity,
+        vtabStyle,
+        vtabIconColor,
         editorFontFamily,
         surfaceTranslucent,
         sidebarVisible: parsed.sidebarVisible !== false,
@@ -113,6 +119,8 @@ export class SettingsStore {
           ? settings.fontSize
           : 'default',
       uiDensity: settings.uiDensity === 'compact' ? 'compact' : 'cozy',
+      vtabStyle: settings.vtabStyle === 'icons' ? 'icons' : 'labels',
+      vtabIconColor: settings.vtabIconColor === 'mono' ? 'mono' : 'color',
       editorFontFamily:
         settings.editorFontFamily === 'serif' || settings.editorFontFamily === 'mono'
           ? settings.editorFontFamily
