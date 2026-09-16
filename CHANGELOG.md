@@ -1,6 +1,10 @@
 # Changelog
 
-## [dev] — 2026-09-16
+## [0.20.0] — 2026-09-16
+
+### Changed
+
+- **App: larger window/taskbar icon on Windows and Linux** — the main window and taskbar use `resources/icon512.png` (a crisper 512px render); macOS keeps the existing `icon.png` for the splash and dock.
 
 ### Added
 
