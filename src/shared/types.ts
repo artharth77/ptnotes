@@ -581,3 +581,13 @@ export type {
   NewKanbanCardInput,
   NewKanbanColumnInput
 } from './kanban'
+
+export type {
+  ScheduleCondition,
+  ScheduleJob,
+  ScheduleJobEvent,
+  ScheduleJobInput,
+  ScheduleJobRun,
+  ScheduleJobRunStatus,
+  ScheduleTimeRule
+} from './scheduleJobs'

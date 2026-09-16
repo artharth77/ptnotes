@@ -117,6 +117,7 @@ interface AppState {
   confirmRequest: ConfirmRequest | null
   askRequest: AskRequest | null
   settingsOpen: boolean
+  scheduleJobsOpen: boolean
   settingsCategory:
     'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets' | 'bots' | 'appearance'
   skillEditRequest: string | null
@@ -274,6 +275,7 @@ interface AppState {
   setConfirmRequest: (req: ConfirmRequest | null) => void
   setAskRequest: (req: AskRequest | null) => void
   setSettingsOpen: (open: boolean) => void
+  setScheduleJobsOpen: (open: boolean) => void
   setSettingsCategory: (
     category: 'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets' | 'bots' | 'appearance'
   ) => void
@@ -369,6 +371,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   confirmRequest: null,
   askRequest: null,
   settingsOpen: false,
+  scheduleJobsOpen: false,
   settingsCategory: 'storage',
   skillEditRequest: null,
   sidebarVisible: localStorage.getItem('ptnotes:sidebarVisible') !== 'false',
@@ -1689,6 +1692,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setSettingsOpen(settingsOpen) {
     set({ settingsOpen })
+  },
+
+  setScheduleJobsOpen(scheduleJobsOpen) {
+    set({ scheduleJobsOpen })
   },
 
   setSettingsCategory(settingsCategory) {

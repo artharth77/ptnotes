@@ -35,6 +35,9 @@ import { PromptModal, ConfirmModal } from './components/Modal'
 import { Resizer } from './components/Resizer'
 import { DashboardPage } from './DashboardPage'
 import { PlannerMiniCalendar } from './components/PlannerMiniCalendar'
+import { ScheduleJobsOverlay } from './components/ScheduleJobsOverlay'
+import { JobNotifications } from './components/JobNotifications'
+import { mdiAlarm } from '@mdi/js'
 import type { Tab, ToolCallInfo } from '@shared/types'
 import { addUsage, normalizeUsage } from '@shared/usage'
 
@@ -94,16 +97,19 @@ function VTabs({
   onDashboard,
   onTab,
   onPeekHover,
-  onCalendar
+  onCalendar,
+  onJobs
 }: {
   onDashboard: () => void
   onTab: (id: Tab) => void
   onPeekHover: () => void
   onCalendar: () => void
+  onJobs: () => void
 }): React.JSX.Element {
   const tab = useAppStore((s) => s.tab)
   const activeProject = useAppStore((s) => s.activeProject)
   const plannerCalendarOpen = useAppStore((s) => s.plannerCalendarOpen)
+  const scheduleJobsOpen = useAppStore((s) => s.scheduleJobsOpen)
   const [tip, setTip] = useState<{ label: string; x: number; y: number } | null>(null)
 
   useEffect(() => {
@@ -167,6 +173,13 @@ function VTabs({
         ))}
         <div className="vtabs-spacer" />
         <div className="vtabs-sep" />
+        <button
+          className={`vtabs-btn ${scheduleJobsOpen ? 'active' : ''} ${!activeProject ? 'disabled' : ''}`}
+          onClick={onJobs}
+          {...tipHandlers('Schedule Jobs')}
+        >
+          <MdiIcon path={mdiAlarm} size={18} />
+        </button>
         <button
           className={`vtabs-btn ${plannerCalendarOpen ? 'active' : ''}`}
           onClick={onCalendar}
@@ -401,6 +414,7 @@ function App(): React.JSX.Element {
   const rightOpen = chatOpen || moduleOpen || botsOpen
   const setRightView = useAppStore((s) => s.setRightView)
   const settingsOpen = useAppStore((s) => s.settingsOpen)
+  const scheduleJobsOpen = useAppStore((s) => s.scheduleJobsOpen)
   const plannerCalendarOpen = useAppStore((s) => s.plannerCalendarOpen)
   const snapshotsOpen = useAppStore((s) => s.snapshotsOpen)
   const storeSidebarVisible = useAppStore((s) => s.sidebarVisible)
@@ -545,6 +559,12 @@ function App(): React.JSX.Element {
   function goCalendar(): void {
     const s = useAppStore.getState()
     s.setPlannerCalendarOpen(!s.plannerCalendarOpen)
+  }
+
+  function goJobs(): void {
+    const s = useAppStore.getState()
+    if (!s.activeProject) return
+    s.setScheduleJobsOpen(!s.scheduleJobsOpen)
   }
 
   useEffect(() => {
@@ -826,6 +846,7 @@ function App(): React.JSX.Element {
                 onTab={goTab}
                 onPeekHover={showPeek}
                 onCalendar={goCalendar}
+                onJobs={goJobs}
               />
             </div>
             <aside
@@ -951,6 +972,8 @@ function App(): React.JSX.Element {
 
       {settingsOpen && <SettingsDialog />}
       {plannerCalendarOpen && <PlannerMiniCalendar />}
+      {scheduleJobsOpen && activeProject && <ScheduleJobsOverlay />}
+      <JobNotifications />
       <CommandPalette />
       <GlobalFind />
       {(kanbanEditingId || kanbanCreatingColumnId || kanbanViewingId) && (
