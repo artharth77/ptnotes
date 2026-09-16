@@ -174,7 +174,24 @@ export function ScheduleJobsOverlay(): React.JSX.Element {
   const [timesError, setTimesError] = useState<string | null>(null)
   const [savedFlash, setSavedFlash] = useState(false)
   const [runsOpen, setRunsOpen] = useState(false)
+  const [aiReady, setAiReady] = useState(false)
   const savedFlashTimerRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    window.ptnotes.ai
+      .getConfig()
+      .then((cfg) => {
+        if (cancelled) return
+        const local = /localhost|127\.0\.0\.1/.test(cfg.baseUrl || '')
+        const key = (cfg.apiKey || '').trim()
+        setAiReady(!!cfg.model.trim() && (!!key || !!local || !cfg.baseUrl.trim()))
+      })
+      .catch(() => setAiReady(false))
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     return () => {
@@ -356,8 +373,14 @@ export function ScheduleJobsOverlay(): React.JSX.Element {
           </button>
           <button
             className="icon-btn primary"
-            title={runningIds.includes(selectedId ?? '') ? 'Running…' : 'Execute now'}
-            disabled={!isEditing || runningIds.includes(selectedId ?? '')}
+            title={
+              runningIds.includes(selectedId ?? '')
+                ? 'Running…'
+                : aiReady
+                  ? 'Execute now'
+                  : 'Execute now (AI is not configured)'
+            }
+            disabled={!isEditing || runningIds.includes(selectedId ?? '') || !aiReady}
             onClick={() => void runNow()}
           >
             <MdiIcon path={mdiRunFast} size={16} />

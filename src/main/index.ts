@@ -36,6 +36,7 @@ import { shutdownInfographicRenderer } from './modules/shared/infographicRendere
 import { shutdownPdfRenderer } from './pdf/pdfRenderer'
 import { close as closeBrowser } from './mcp/browser'
 import type { PTTool } from './ai/tools'
+import { isLocalEndpoint } from './ai/chatSession'
 import { createPptxModule } from './modules/pptx'
 import { createInfographicModule } from './modules/infographic'
 import { createDocxModule } from './modules/docx'
@@ -447,6 +448,10 @@ app.whenReady().then(async () => {
         win.webContents.send('jobs:event', evt)
         if (evt.type === 'notify' && !win.isFocused()) win.flashFrame(true)
       }
+    },
+    aiConfigured: async () => {
+      const cfg = await configStore.load()
+      return !!cfg.model && (!!cfg.apiKey || isLocalEndpoint(cfg.baseUrl))
     }
   })
   jobScheduler.start()

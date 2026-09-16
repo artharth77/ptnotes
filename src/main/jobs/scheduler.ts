@@ -11,6 +11,8 @@ export interface JobSchedulerDeps {
   store: JobsStore
   runnerFor: (project: string) => Pick<ScheduleJobRunner, 'run'>
   broadcast: (evt: ScheduleJobEvent) => void
+  /** False while the AI provider is unconfigured — job runs are skipped, purges still happen. */
+  aiConfigured?: () => Promise<boolean>
 }
 
 /** Minute-tick scheduler: checks every project's enabled jobs and launches due runs. */
@@ -78,23 +80,33 @@ export class JobScheduler {
 
   /** Check one project's jobs and launch the due ones. */
   private async tickProject(project: string, now: number): Promise<void> {
-    let jobs: ScheduleJob[] = []
-    try {
-      jobs = this.deps.store.listJobs(project).filter((j) => j.enabled)
-    } catch {
-      return
+    let aiReady = true
+    if (this.deps.aiConfigured) {
+      try {
+        aiReady = await this.deps.aiConfigured()
+      } catch {
+        aiReady = true
+      }
     }
-    for (const job of jobs) {
-      const key = `${project}/${job.id}`
-      if (this.activeRuns.has(key)) continue
-      const due =
-        job.condition === 'next'
-          ? shouldRunNext(now, job.nextRunAt)
-          : shouldRunExact(job.timeRule, this.allowedDays(job), now, job.lastRunAt)
-      if (!due) continue
-      this.launch(project, job, key, now)
+    if (aiReady) {
+      let jobs: ScheduleJob[] = []
+      try {
+        jobs = this.deps.store.listJobs(project).filter((j) => j.enabled)
+      } catch {
+        return
+      }
+      for (const job of jobs) {
+        const key = `${project}/${job.id}`
+        if (this.activeRuns.has(key)) continue
+        const due =
+          job.condition === 'next'
+            ? shouldRunNext(now, job.nextRunAt)
+            : shouldRunExact(job.timeRule, this.allowedDays(job), now, job.lastRunAt)
+        if (!due) continue
+        this.launch(project, job, key, now)
+      }
+      await this.drain()
     }
-    await this.drain()
     await this.maybeDailyPurge(project, now)
   }
 
