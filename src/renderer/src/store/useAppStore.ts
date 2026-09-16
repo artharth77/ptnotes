@@ -110,7 +110,7 @@ interface AppState {
   /** Live subagent tool-call lifecycle per run id (transient; never persisted). */
   moduleToolCalls: Record<string, ToolCallInfo[]>
   moduleHistoryRunId: string | null
-  traceViewer: { kind: 'chat' | 'module' | 'bots'; key: string; title: string } | null
+  traceViewer: { kind: 'chat' | 'module' | 'bots' | 'jobs'; key: string; title: string } | null
   chatBusy: boolean
   chatStreamProject: string | null
   chatWaitRuns: string[]
@@ -235,7 +235,11 @@ interface AppState {
   loadModules: (project: string) => Promise<void>
   applyModuleEvent: (evt: ModuleEvent) => void
   setModuleHistoryRunId: (runId: string | null) => void
-  openTraceViewer: (v: { kind: 'chat' | 'module' | 'bots'; key: string; title: string }) => void
+  openTraceViewer: (v: {
+    kind: 'chat' | 'module' | 'bots' | 'jobs'
+    key: string
+    title: string
+  }) => void
   closeTraceViewer: () => void
   // ---- Bots group chat ----
   loadBotProfiles: () => Promise<void>

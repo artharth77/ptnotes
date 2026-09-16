@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ScheduleJob, ScheduleJobInput, ScheduleTimeRule } from '@shared/types'
+import type { ScheduleJob, ScheduleJobInput, ScheduleJobRun, ScheduleTimeRule } from '@shared/types'
 import { computeNextRunAt } from '@shared/scheduleJobs'
 import { useAppStore } from '../store/useAppStore'
 import { ConfirmModal, Modal, TextField } from './Modal'
@@ -12,7 +12,9 @@ import {
   mdiRunFast,
   mdiToggleSwitch,
   mdiToggleSwitchOffOutline,
-  mdiClose
+  mdiClose,
+  mdiHistory,
+  mdiTimelineClockOutline
 } from '@mdi/js'
 
 const DEFAULT_DAYS = [0, 1, 2, 3, 4, 5, 6]
@@ -61,6 +63,90 @@ function fmtTime(ms: number | undefined): string {
   return ms !== undefined && ms > 0 ? new Date(ms).toLocaleString() : '—'
 }
 
+const RUN_LABELS: Record<ScheduleJobRun['status'], string> = {
+  running: 'Running',
+  done: 'Done',
+  failed: 'Failed',
+  cancelled: 'Cancelled'
+}
+
+/** Popup listing the selected job's recent runs with a raw-AI-trace button per run. */
+function JobRunsPopup({
+  project,
+  jobId,
+  jobTitle,
+  onClose
+}: {
+  project: string
+  jobId: string
+  jobTitle: string
+  onClose: () => void
+}): React.JSX.Element {
+  const openTraceViewer = useAppStore((s) => s.openTraceViewer)
+  const [runs, setRuns] = useState<ScheduleJobRun[]>([])
+  const load = useCallback(async (): Promise<void> => {
+    try {
+      setRuns(await window.ptnotes.jobs.runs(project, jobId, 20))
+    } catch {
+      setRuns([])
+    }
+  }, [project, jobId])
+  useEffect(() => {
+    window.ptnotes.jobs
+      .runs(project, jobId, 20)
+      .then(setRuns)
+      .catch(() => setRuns([]))
+    return window.ptnotes.jobs.onEvent((evt) => {
+      if (evt.type === 'runs-changed' && evt.project === project) void load()
+    })
+  }, [load, project, jobId])
+
+  return (
+    <Modal title={`Runs — ${jobTitle}`} className="sched-runs-modal" onClose={onClose}>
+      {runs.length === 0 ? (
+        <p className="sched-runs-empty">No runs recorded for this job yet.</p>
+      ) : (
+        <div className="sched-runs-list">
+          {runs.map((run) => (
+            <div key={run.runId} className="sched-runs-item">
+              <div className="sched-runs-item-head">
+                <span className={`sched-run-status sched-run-${run.status}`}>
+                  {RUN_LABELS[run.status]}
+                </span>
+                <span className="sched-runs-item-time">
+                  {new Date(run.startedAt).toLocaleString()}
+                  {run.finishedAt && run.finishedAt > run.startedAt && (
+                    <> · {Math.round((run.finishedAt - run.startedAt) / 1000)}s</>
+                  )}
+                </span>
+                <button
+                  className="icon-btn sched-runs-trace-btn"
+                  title="View raw AI trace"
+                  onClick={() =>
+                    openTraceViewer({
+                      kind: 'jobs',
+                      key: run.runId,
+                      title: `${jobTitle} · ${new Date(run.startedAt).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}`
+                    })
+                  }
+                >
+                  <MdiIcon path={mdiTimelineClockOutline} size={16} />
+                </button>
+              </div>
+              {(run.notice ?? run.error) && (
+                <span className="sched-runs-item-text">{run.notice ?? run.error}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
+  )
+}
+
 function ruleSummary(rule: ScheduleTimeRule): string {
   const pad = (v: number): string => String(v).padStart(2, '0')
   if (rule.kind === 'hourly') {
@@ -87,6 +173,7 @@ export function ScheduleJobsOverlay(): React.JSX.Element {
   const [timesInput, setTimesInput] = useState('')
   const [timesError, setTimesError] = useState<string | null>(null)
   const [savedFlash, setSavedFlash] = useState(false)
+  const [runsOpen, setRunsOpen] = useState(false)
   const savedFlashTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
@@ -278,6 +365,14 @@ export function ScheduleJobsOverlay(): React.JSX.Element {
           {runningIds.includes(selectedId ?? '') && (
             <span className="sched-jobs-running">Running…</span>
           )}
+          <button
+            className="icon-btn sched-jobs-history-btn"
+            title="Run history and AI traces"
+            disabled={!isEditing}
+            onClick={() => setRunsOpen(true)}
+          >
+            <MdiIcon path={mdiHistory} size={16} />
+          </button>
         </div>
 
         <div className="sched-jobs-body">
@@ -537,6 +632,14 @@ export function ScheduleJobsOverlay(): React.JSX.Element {
           </div>
         </div>
       </div>
+      {runsOpen && activeProject && selectedId && (
+        <JobRunsPopup
+          project={activeProject}
+          jobId={selectedId}
+          jobTitle={jobs.find((j) => j.id === selectedId)?.title ?? selectedId}
+          onClose={() => setRunsOpen(false)}
+        />
+      )}
       {deleteTarget && (
         <ConfirmModal
           title="Delete job"
