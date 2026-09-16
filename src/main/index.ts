@@ -3,6 +3,7 @@ import { join, extname } from 'path'
 import { promises as fs } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import icon512 from '../../resources/icon512.png?asset'
 import splashUrl from '../../resources/splash.html?asset'
 import { PTNotesService } from './service/PTNotesService'
 import { registerProjectIpc, registerNoteIpc, registerChatIpc } from './ipc'
@@ -214,7 +215,7 @@ function createWindow(windowState: WindowState): void {
     backgroundColor: '#131418',
     autoHideMenuBar: true,
     title: 'PTNotes',
-    ...(process.platform === 'linux' || process.platform === 'win32' ? { icon } : {}),
+    ...(process.platform === 'linux' || process.platform === 'win32' ? { icon: icon512 } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
