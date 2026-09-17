@@ -511,7 +511,7 @@ export function GanttChart({
             ) : (
               <div
                 className={`gantt-col-title${isParent ? ' gantt-title-parent' : ''}${
-                  canSetDates ? ' gantt-title-dim' : ''
+                  canSetDates ? ' gantt-title-warn' : ''
                 }`}
                 style={{ paddingLeft: depth * 14 }}
                 onMouseEnter={(e) =>
@@ -520,7 +520,7 @@ export function GanttChart({
                       e,
                       task.title || (isParent ? 'Group task' : 'Task title'),
                       `planner-name-tip gantt-name-tip${isParent ? ' gantt-name-tip-parent' : ''}${
-                        canSetDates ? ' gantt-name-tip-dim' : ''
+                        canSetDates ? ' gantt-name-tip-warn' : ''
                       }`,
                       depth * 14,
                       6

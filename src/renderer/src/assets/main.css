@@ -7372,8 +7372,8 @@ fieldset.kanban-form {
   white-space: nowrap;
 }
 
-.gantt-name-tip-dim {
-  color: var(--text-dim);
+.gantt-name-tip-warn {
+  color: var(--warn);
 }
 
 .gantt-name-tip-parent {
@@ -7620,8 +7620,8 @@ fieldset.kanban-form {
   color: var(--text);
 }
 
-.gantt-row-left .gantt-col-title.gantt-title-dim {
-  color: var(--text-dim);
+.gantt-row-left .gantt-col-title.gantt-title-warn {
+  color: var(--warn);
 }
 
 .gantt-row-left .gantt-col-title.gantt-title-parent {
