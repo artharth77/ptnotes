@@ -1405,6 +1405,7 @@ export function PlannerEditor(): React.JSX.Element {
               }
               onClick={(e) => {
                 e.stopPropagation()
+                setSelected(new Set([task.id]))
                 const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
                 setDepEditor({ id: task.id, x: rect.left, y: rect.bottom + 2 })
               }}
