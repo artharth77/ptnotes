@@ -27,6 +27,7 @@ import {
   mdiRedo,
   mdiTableRowPlusAfter,
   mdiTableRowPlusBefore,
+  mdiTargetVariant,
   mdiTrashCanOutline,
   mdiUndo,
   mdiViewColumnOutline
@@ -457,6 +458,12 @@ function DateField({
 
 const LINK_TYPE_OPTIONS: TaskLinkType[] = ['FS', 'SS', 'FF', 'SF']
 
+/** Preloaded 1x1 transparent GIF drag image: setDragImage shows the platform globe
+ *  fallback when the passed image is not already loaded at dragstart. */
+const DEP_DRAG_BLANK = new Image(1, 1)
+DEP_DRAG_BLANK.src =
+  'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+
 function lagLabel(lag: number): string {
   return lag > 0 ? `+${lag}` : lag === 0 ? '' : String(lag)
 }
@@ -660,6 +667,8 @@ export function PlannerEditor(): React.JSX.Element {
   const [depViolations, setDepViolations] = useState<Record<string, string>>({})
   const [depDragSource, setDepDragSource] = useState<string | null>(null)
   const [depDragOver, setDepDragOver] = useState<string | null>(null)
+  const [depDragFrom, setDepDragFrom] = useState<{ x: number; y: number } | null>(null)
+  const [depDragCursor, setDepDragCursor] = useState<{ x: number; y: number } | null>(null)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [numberDrafts, setNumberDrafts] = useState<Record<string, string>>({})
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -1083,6 +1092,15 @@ export function PlannerEditor(): React.JSX.Element {
   }, [depEditor])
 
   useEffect(() => {
+    if (!depDragSource) return
+    const move = (e: DragEvent): void => {
+      setDepDragCursor({ x: e.clientX, y: e.clientY })
+    }
+    document.addEventListener('dragover', move)
+    return () => document.removeEventListener('dragover', move)
+  }, [depDragSource])
+
+  useEffect(() => {
     const update = (): void => {
       const el = document.activeElement as HTMLElement | null
       const inPlanner = !!el?.closest('.planner-editor')
@@ -1393,11 +1411,15 @@ export function PlannerEditor(): React.JSX.Element {
               onDragStart={(e) => {
                 e.dataTransfer.effectAllowed = 'link'
                 e.dataTransfer.setData('text/plain', `PTNOTES_DEP_FS:${task.id}`)
+                e.dataTransfer.setDragImage(DEP_DRAG_BLANK, 0, 0)
+                setDepDragFrom({ x: e.clientX, y: e.clientY })
                 setDepDragSource(task.id)
               }}
               onDragEnd={() => {
                 setDepDragSource(null)
                 setDepDragOver(null)
+                setDepDragFrom(null)
+                setDepDragCursor(null)
               }}
             >
               {links.length
@@ -1511,10 +1533,14 @@ export function PlannerEditor(): React.JSX.Element {
           if (sourceId) addLinkFromDrag(sourceId, task.id)
           setDepDragSource(null)
           setDepDragOver(null)
+          setDepDragFrom(null)
+          setDepDragCursor(null)
         }}
         onDragEnd={() => {
           setDepDragSource(null)
           setDepDragOver(null)
+          setDepDragFrom(null)
+          setDepDragCursor(null)
         }}
       >
         <div className="planner-col-toggle planner-cell">
@@ -2897,6 +2923,30 @@ export function PlannerEditor(): React.JSX.Element {
             </>
           )
         })()}
+
+      {depDragSource && depDragFrom && (
+        <div className="planner-dep-drag-overlay">
+          <svg width="100%" height="100%">
+            {depDragCursor && (
+              <line
+                x1={depDragFrom.x}
+                y1={depDragFrom.y}
+                x2={depDragCursor.x}
+                y2={depDragCursor.y}
+                className="planner-dep-drag-line"
+              />
+            )}
+          </svg>
+          {depDragCursor && (
+            <div
+              className="planner-dep-drag-target"
+              style={{ left: depDragCursor.x, top: depDragCursor.y }}
+            >
+              <MdiIcon path={mdiTargetVariant} size={20} />
+            </div>
+          )}
+        </div>
+      )}
 
       {gridMenu && (
         <>
