@@ -4,6 +4,7 @@ import {
   mdiArchiveArrowDownOutline,
   mdiArrowDown,
   mdiArrowUp,
+  mdiDotsVertical,
   mdiDrag,
   mdiMinus,
   mdiPencilOutline,
@@ -13,14 +14,16 @@ import {
 } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
 import { KanbanFilterBar } from './KanbanFilterBar'
-import { Modal } from './Modal'
+import { Modal, TextField } from './Modal'
 import { MdiIcon } from './MdiIcon'
 import { useFlip } from './useFlip'
+import { slugify } from '@shared/slug'
 import {
   emptyKanbanCardFilter,
   formatDueDate,
   isKanbanFilterActive,
   isOverdue,
+  KANBAN_COLUMN_COLORS,
   matchesKanbanFilter,
   type KanbanCard,
   type KanbanCardFilter,
@@ -43,14 +46,35 @@ export function KanbanBoard(): React.JSX.Element {
   const moveKanbanColumn = useAppStore((s) => s.moveKanbanColumn)
   const deleteKanbanCard = useAppStore((s) => s.deleteKanbanCard)
   const archiveKanbanCard = useAppStore((s) => s.archiveKanbanCard)
+  const updateKanbanColumn = useAppStore((s) => s.updateKanbanColumn)
+  const archiveKanbanColumn = useAppStore((s) => s.archiveKanbanColumn)
+  const deleteKanbanColumn = useAppStore((s) => s.deleteKanbanColumn)
 
   const [dragId, setDragId] = useState<string | null>(null)
   const [dragColId, setDragColId] = useState<string | null>(null)
   const [overKey, setOverKey] = useState<string | null>(null)
-  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null)
+  const [menu, setMenu] = useState<{
+    kind: 'card' | 'column'
+    id: string
+    x: number
+    y: number
+  } | null>(null)
   const [deleteCard, setDeleteCard] = useState<KanbanCard | null>(null)
   const [removingIds, setRemovingIds] = useState<Set<string>>(new Set())
   const [filter, setFilter] = useState<KanbanCardFilter>({ ...emptyKanbanCardFilter, labels: [] })
+  const [editColumn, setEditColumn] = useState<{
+    id: string
+    title: string
+    color: string | null
+    highlightOverdue: boolean
+  } | null>(null)
+  const [editColumnError, setEditColumnError] = useState<string | null>(null)
+  const [deleteColumn, setDeleteColumn] = useState<{
+    id: string
+    title: string
+    cardCount: number
+  } | null>(null)
+  const [deleteColumnMode, setDeleteColumnMode] = useState<'move' | 'delete'>('move')
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const boardRef = useRef<HTMLDivElement>(null)
   useFlip(cardRefs, boardRef)
@@ -156,10 +180,43 @@ export function KanbanBoard(): React.JSX.Element {
     setOverKey(null)
   }
 
-  function openMenu(cardId: string, e: React.MouseEvent): void {
+  function openMenu(kind: 'card' | 'column', id: string, e: React.MouseEvent): void {
     e.preventDefault()
     e.stopPropagation()
-    setMenu({ id: cardId, x: e.clientX, y: e.clientY })
+    setMenu({ kind, id, x: e.clientX, y: e.clientY })
+  }
+
+  function applyEditColumn(): void {
+    if (!kanban || !editColumn) return
+    const trimmed = editColumn.title.trim()
+    const slug = slugify(trimmed)
+    if (!slug) {
+      setEditColumnError('Enter a column name')
+      return
+    }
+    if (kanban.columns.some((c) => c.id === slug && c.id !== editColumn.id)) {
+      setEditColumnError(`A column named "${trimmed}" already exists`)
+      return
+    }
+    void updateKanbanColumn(editColumn.id, {
+      title: trimmed,
+      color: editColumn.color,
+      highlightOverdue: editColumn.highlightOverdue
+    })
+    setEditColumn(null)
+    setEditColumnError(null)
+  }
+
+  function applyDeleteColumn(): void {
+    if (!kanban || !deleteColumn) return
+    if (kanban.columns.length <= 4) return
+    const target = kanban.columns.find((c) => c.id !== deleteColumn.id)
+    if (!target) return
+    void deleteKanbanColumn(deleteColumn.id, {
+      mode: deleteColumnMode,
+      targetColumnId: target.id
+    })
+    setDeleteColumn(null)
   }
 
   function applyDeleteCard(id: string): void {
@@ -175,7 +232,11 @@ export function KanbanBoard(): React.JSX.Element {
     }, 200)
   }
 
-  const menuCard = menu ? kanban.cards.find((c) => c.id === menu.id) : null
+  const menuCard = menu?.kind === 'card' ? kanban.cards.find((c) => c.id === menu.id) : null
+  const menuColumn = menu?.kind === 'column' ? kanban.columns.find((c) => c.id === menu.id) : null
+  const deleteColumnTarget = deleteColumn
+    ? kanban.columns.find((c) => c.id !== deleteColumn.id)
+    : null
   const filterActive = isKanbanFilterActive(filter)
 
   return (
@@ -218,7 +279,7 @@ export function KanbanBoard(): React.JSX.Element {
                 endDrag()
               }}
             >
-              <div className="kanban-col-head">
+              <div className="kanban-col-head" onContextMenu={(e) => openMenu('column', col.id, e)}>
                 <span
                   className="kanban-col-grip"
                   title="Drag to reorder column"
@@ -232,6 +293,16 @@ export function KanbanBoard(): React.JSX.Element {
                   <MdiIcon path={mdiDrag} size={16} />
                 </span>
                 <span className="kanban-col-name">{col.title}</span>
+                <span
+                  className="kanban-col-menu-btn"
+                  title="Column menu"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setMenu({ kind: 'column', id: col.id, x: e.clientX, y: e.clientY })
+                  }}
+                >
+                  <MdiIcon path={mdiDotsVertical} size={16} />
+                </span>
                 <span
                   className="kanban-col-count"
                   title={filterActive ? `${total} total` : undefined}
@@ -276,7 +347,7 @@ export function KanbanBoard(): React.JSX.Element {
                     onDragEnd={endDrag}
                     onClick={() => setActiveKanbanCard(card.id)}
                     onDoubleClick={() => openKanbanEditor(card.id)}
-                    onContextMenu={(e) => openMenu(card.id, e)}
+                    onContextMenu={(e) => openMenu('card', card.id, e)}
                   />
                 ))}
                 <button
@@ -374,6 +445,177 @@ export function KanbanBoard(): React.JSX.Element {
                 ))}
             </div>
           </>
+        )}
+
+        {menu && menuColumn && (
+          <>
+            <div
+              className="menu-overlay"
+              onClick={(e) => {
+                e.stopPropagation()
+                setMenu(null)
+              }}
+            />
+            <div
+              className="note-menu"
+              style={{ left: menu.x, top: menu.y }}
+              onClick={(e) => e.stopPropagation()}
+              onContextMenu={(e) => e.preventDefault()}
+            >
+              <button
+                className="note-menu-item"
+                onClick={() => {
+                  openKanbanCreate(menuColumn.id)
+                  setMenu(null)
+                }}
+              >
+                <span className="note-menu-icon">
+                  <MdiIcon path={mdiPlus} size={16} />
+                </span>
+                Add card
+              </button>
+              <button
+                className="note-menu-item"
+                onClick={() => {
+                  setEditColumn({
+                    id: menuColumn.id,
+                    title: menuColumn.title,
+                    color: menuColumn.color,
+                    highlightOverdue: menuColumn.highlightOverdue
+                  })
+                  setEditColumnError(null)
+                  setMenu(null)
+                }}
+              >
+                <span className="note-menu-icon">
+                  <MdiIcon path={mdiPencilOutline} size={16} />
+                </span>
+                Edit column
+              </button>
+              <button
+                className="note-menu-item"
+                disabled={kanban.cards.every((c) => c.columnId !== menuColumn.id)}
+                onClick={() => {
+                  void archiveKanbanColumn(menuColumn.id)
+                  setMenu(null)
+                }}
+              >
+                <span className="note-menu-icon">
+                  <MdiIcon path={mdiArchiveArrowDownOutline} size={16} />
+                </span>
+                Move all to archived
+              </button>
+              <button
+                className="note-menu-item danger"
+                disabled={kanban.columns.length <= 4}
+                title={
+                  kanban.columns.length <= 4 ? 'A board needs at least four columns' : undefined
+                }
+                onClick={() => {
+                  const cardCount = kanban.cards.filter((c) => c.columnId === menuColumn.id).length
+                  setDeleteColumn({ id: menuColumn.id, title: menuColumn.title, cardCount })
+                  setDeleteColumnMode('move')
+                  setMenu(null)
+                }}
+              >
+                <span className="note-menu-icon">
+                  <MdiIcon path={mdiTrashCanOutline} size={16} />
+                </span>
+                Delete column
+              </button>
+            </div>
+          </>
+        )}
+
+        {editColumn && (
+          <Modal title="Edit column" onClose={() => setEditColumn(null)}>
+            <TextField
+              value={editColumn.title}
+              onChange={(v) => setEditColumn({ ...editColumn, title: v })}
+              onEnter={applyEditColumn}
+              placeholder="Column name"
+              autoFocus
+            />
+            <div className="kanban-color-picker">
+              <button
+                type="button"
+                className={`kanban-color-swatch none${editColumn.color === null ? ' selected' : ''}`}
+                title="No color"
+                onClick={() => setEditColumn({ ...editColumn, color: null })}
+              />
+              {KANBAN_COLUMN_COLORS.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  className={`kanban-color-swatch${editColumn.color === c ? ' selected' : ''}`}
+                  style={{ background: c }}
+                  title={c}
+                  onClick={() => setEditColumn({ ...editColumn, color: c })}
+                />
+              ))}
+            </div>
+            <label className="kanban-col-option">
+              <input
+                type="checkbox"
+                checked={editColumn.highlightOverdue}
+                onChange={(e) =>
+                  setEditColumn({ ...editColumn, highlightOverdue: e.target.checked })
+                }
+              />
+              Highlight overdue cards
+            </label>
+            {editColumnError && <p className="form-error">{editColumnError}</p>}
+            <div className="modal-actions">
+              <button className="btn" onClick={() => setEditColumn(null)}>
+                Cancel
+              </button>
+              <button className="btn primary" onClick={applyEditColumn}>
+                Save
+              </button>
+            </div>
+          </Modal>
+        )}
+
+        {deleteColumn && (
+          <Modal title="Delete column" onClose={() => setDeleteColumn(null)}>
+            <p>
+              Delete column “{deleteColumn.title}”
+              {deleteColumn.cardCount > 0
+                ? ` and its ${deleteColumn.cardCount} card${deleteColumn.cardCount === 1 ? '' : 's'}`
+                : ''}
+              ?
+            </p>
+            {deleteColumn.cardCount > 0 && (
+              <div className="kanban-delete-options">
+                <label>
+                  <input
+                    type="radio"
+                    name="kanban-delete-mode"
+                    checked={deleteColumnMode === 'move'}
+                    onChange={() => setDeleteColumnMode('move')}
+                  />
+                  Move cards to {deleteColumnTarget?.title ?? 'the first column'}
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="kanban-delete-mode"
+                    checked={deleteColumnMode === 'delete'}
+                    onChange={() => setDeleteColumnMode('delete')}
+                  />
+                  Delete cards
+                </label>
+              </div>
+            )}
+            <div className="modal-actions">
+              <button className="btn" onClick={() => setDeleteColumn(null)}>
+                Cancel
+              </button>
+              <button className="btn danger" onClick={applyDeleteColumn}>
+                Delete
+              </button>
+            </div>
+          </Modal>
         )}
 
         {deleteCard && (

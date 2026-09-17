@@ -7,14 +7,18 @@ import { kanbanSecretToken, secretIdFromToken, secretToken } from '@shared/secre
 import { readFileAsText, parseWorkbookQuery } from './reader'
 import {
   applyDateRule,
+  applyDependencies,
   computeDuration,
   computeEndDate,
   countTasks,
   deriveTaskNo,
   emptyTask,
   findTaskByTitle,
+  isLeafTask,
+  linkConstraints,
   normalizeOwner,
-  rollupScheduleTasks
+  rollupScheduleTasks,
+  stripInvalidLinks
 } from '@shared/planner'
 import { findCardByTitle, findColumnByName } from '@shared/kanban'
 import type {
@@ -22,11 +26,14 @@ import type {
   AskQuestion,
   AskRequest,
   ConfirmRequest,
+  ProjectCalendar,
   Schedule,
   ScheduleMeta,
   ScheduleStatus,
   ScheduleTask,
-  SkillScope
+  SkillScope,
+  TaskLink,
+  TaskLinkType
 } from '@shared/types'
 
 export interface ToolContext {
@@ -285,6 +292,69 @@ function applyTaskFields(
   const actualEnd = dateOrNull(args.actualEnd)
   if (isUpdate ? actualEnd !== null : actualEnd) target.actualEnd = actualEnd
   return duration !== null
+}
+
+const LINK_TYPES: TaskLinkType[] = ['FS', 'SS', 'FF', 'SF']
+
+/** JSON-schema fragment for the `dependsOn` tool parameter (link object array). */
+function dependsOnSchema(what = 'the task'): Record<string, unknown> {
+  return {
+    type: 'array',
+    items: {
+      type: 'object',
+      properties: {
+        predecessor: {
+          type: 'string',
+          description: 'Predecessor: task id (uuid), task number (e.g. 1.2) or title'
+        },
+        type: { type: 'string', description: 'Link type: FS (default), SS, FF or SF' },
+        lag: { type: 'number', description: 'Lag in working days (may be negative, default 0)' }
+      },
+      required: ['predecessor']
+    },
+    description: `Dependency links for ${what}. Replaces the existing links; pass [] to clear. Predecessors must be leaf tasks. Link-derived plan dates are computed and become read-only.`
+  }
+}
+
+/** Clean stale links, recompute dependency-pinned leaf dates, then roll parents up. */
+function dependencyAwareRollup(tasks: ScheduleTask[], calendar: ProjectCalendar): ScheduleTask[] {
+  const stripped = stripInvalidLinks(tasks)
+  const applied = applyDependencies(stripped.tasks, calendar)
+  return rollupScheduleTasks(applied.tasks, calendar)
+}
+
+/**
+ * Resolve `dependsOn` arguments into TaskLinks against the current task tree.
+ * Predecessors are matched like other task references (id, task number or title) and
+ * must be leaf tasks. Links are deduped by (predecessor, type). Returns undefined for
+ * an absent argument (replace semantics: `[]` clears).
+ */
+function parseDependsOn(raw: unknown, tasks: ScheduleTask[]): TaskLink[] | null | undefined {
+  if (raw === undefined) return undefined
+  if (!Array.isArray(raw)) throw new Error('dependsOn must be an array of link objects')
+  const links: TaskLink[] = []
+  for (const item of raw) {
+    const rec = (item ?? {}) as Record<string, unknown>
+    const ref = String(rec.predecessor ?? '')
+    if (!ref) throw new Error('dependsOn entries need a predecessor')
+    const pred = findTask(tasks, ref)
+    if (!pred) throw new Error(`Predecessor "${ref}" not found`)
+    if (!isLeafTask(pred)) {
+      throw new Error(
+        `Predecessor "${pred.title}" is a parent task — only leaf tasks can be predecessors`
+      )
+    }
+    const type = String(rec.type ?? 'FS').toUpperCase() as TaskLinkType
+    if (!LINK_TYPES.includes(type)) {
+      throw new Error(`Invalid dependency type "${String(rec.type ?? '')}" (use FS, SS, FF or SF)`)
+    }
+    const lagRaw = numOrNull(rec.lag)
+    const lag = lagRaw !== null ? Math.round(lagRaw) : 0
+    if (!links.some((l) => l.id === pred.id && l.type === type)) {
+      links.push({ id: pred.id, type, lag })
+    }
+  }
+  return links
 }
 
 type TaskRecord = Record<string, unknown>
@@ -1861,7 +1931,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'add_task',
         description:
-          'Add a task to a project schedule. Match the schedule by id. Optionally nest it under an existing parent task (match the parent by id, task number or title) and/or position it directly after an existing task (match addAfter by id, task number or title; without `parent` the new task is placed as a sibling of the matched task). Plan dates follow the project working-day calendar: set both planStart and planEnd, or planStart + duration; the missing value is computed. Batch mode: pass `tasks`, an array of task records (up to 30 records per call — split larger batches into multiple calls). Top-level fields act as defaults for every record and per-record values override; each record reports its own ok/error result.',
+          'Add a task to a project schedule. Match the schedule by id. Optionally nest it under an existing parent task (match the parent by id, task number or title) and/or position it directly after an existing task (match addAfter by id, task number or title; without `parent` the new task is placed as a sibling of the matched task). Plan dates follow the project working-day calendar: set both planStart and planEnd, or planStart + duration; the missing value is computed. Optional `dependsOn` links this (leaf) task to leaf predecessors — each entry needs a `predecessor` (id, task number or title), an optional `type` (FS default, SS, FF, SF) and optional `lag` in working days. Dependency-derived planStart/planEnd fields are computed automatically and become read-only. Batch mode: pass `tasks`, an array of task records (up to 30 records per call — split larger batches into multiple calls). Top-level fields act as defaults for every record and per-record values override; each record reports its own ok/error result.',
         parameters: {
           type: 'object',
           properties: {
@@ -1895,7 +1965,8 @@ export const tools: PTTool[] = [
                     type: 'string',
                     description:
                       'Task id, task number (e.g. 1.2) or title to position this record after (may reference a task added earlier in the same batch)'
-                  }
+                  },
+                  dependsOn: dependsOnSchema()
                 },
                 required: ['title'],
                 description: 'Task record: same fields as the top-level parameters'
@@ -1913,6 +1984,7 @@ export const tools: PTTool[] = [
               description:
                 'Optional task id, task number (e.g. 1.2) or title to insert this new task directly after. Positions within the sibling list chosen by `parent`; if `parent` is omitted, the new task becomes a sibling of the matched task (nested under the same parent). If the task is not found, the new task is appended at the top level.'
             },
+            dependsOn: dependsOnSchema(),
             title: { type: 'string', description: 'Task title' },
             owner: {
               type: 'string',
@@ -1961,6 +2033,8 @@ export const tools: PTTool[] = [
               if (!title) throw new Error('title is required')
               resolved.title = title
               const explicitDuration = applyTaskFields(resolved, a, false)
+              const deps = parseDependsOn(a.dependsOn, tasks)
+              if (deps !== undefined) resolved.dependsOn = deps ?? undefined
 
               if (resolved.planStart && resolved.planEnd) {
                 resolved.duration = computeDuration(resolved.planStart, resolved.planEnd, calendar)
@@ -2000,7 +2074,7 @@ export const tools: PTTool[] = [
           }
           const saved = {
             ...schedule,
-            tasks: rollupScheduleTasks(tasks, calendar),
+            tasks: dependencyAwareRollup(tasks, calendar),
             updatedAt: Date.now()
           }
           return {
@@ -2026,7 +2100,7 @@ export const tools: PTTool[] = [
       function: {
         name: 'update_task',
         description:
-          'Update an existing task in a project schedule. Match the schedule by id and the task by id, task number (e.g. 1.2) or title. Only provided fields change. For plan dates/duration, the project working-day calendar applies: change one of planStart/planEnd/duration and the other is recomputed. For parent tasks, plan start/end, %complete and duration are derived from children — update the child tasks instead (plan-field edits on a parent are rejected). Parent status and %complete are derived from children. To move a task, set `parent` to the new parent task id, task number (e.g. 1.2) or title (pass empty to move it to the top level) and/or `addAfter` to the task it should follow; the task and its subtree move together. `addAfter` positions the task within the sibling list chosen by `parent` (defaults to append); if `parent` is omitted, the task becomes a sibling of the matched `addAfter` task. Batch mode: pass `tasks`, an array of update records each with a `task` matcher (up to 30 records per call — split larger batches into multiple calls). Top-level fields act as defaults for every record and per-record values override; each record reports its own ok/error result.',
+          "Update an existing task in a project schedule. Match the schedule by id and the task by id, task number (e.g. 1.2) or title. Only provided fields change. For plan dates/duration, the project working-day calendar applies: change one of planStart/planEnd/duration and the other is recomputed. For parent tasks, plan start/end, %complete and duration are derived from children — update the child tasks instead (plan-field edits on a parent are rejected). Parent status and %complete are derived from children. `dependsOn` (leaf tasks only) replaces the task's predecessor links; each entry needs a `predecessor` (id, task number or title), optional `type` (FS default, SS, FF, SF) and optional `lag` in working days; [] clears. Plan fields pinned by dependency links (FS/SS → planStart, FF/SF → planEnd, both → also duration) are read-only: editing them is rejected; edit the predecessor instead. Successor date shifts are applied automatically. To move a task, set `parent` to the new parent task id, task number (e.g. 1.2) or title (pass empty to move it to the top level) and/or `addAfter` to the task it should follow; the task and its subtree move together. `addAfter` positions the task within the sibling list chosen by `parent` (defaults to append); if `parent` is omitted, the task becomes a sibling of the matched `addAfter` task. Batch mode: pass `tasks`, an array of update records each with a `task` matcher (up to 30 records per call — split larger batches into multiple calls). Top-level fields act as defaults for every record and per-record values override; each record reports its own ok/error result.",
         parameters: {
           type: 'object',
           properties: {
@@ -2068,7 +2142,8 @@ export const tools: PTTool[] = [
                     type: 'string',
                     description:
                       'Task id, task number (e.g. 1.2) or title to position this record after'
-                  }
+                  },
+                  dependsOn: dependsOnSchema('this record')
                 },
                 required: ['task'],
                 description:
@@ -2091,6 +2166,7 @@ export const tools: PTTool[] = [
               description:
                 'Optional task id, task number (e.g. 1.2) or title to position this task directly after within the sibling list chosen by `parent`. If `parent` is omitted, the task becomes a sibling of the matched task (nested under the same parent). If the task is not found, the task is appended at the top level.'
             },
+            dependsOn: dependsOnSchema(),
             title: { type: 'string', description: 'New title' },
             owner: {
               type: 'string',
@@ -2145,11 +2221,51 @@ export const tools: PTTool[] = [
                   `Task "${task.title}" is a parent task: owner is not editable on parent tasks.`
                 )
               }
+              if (task.children.length > 0 && a.dependsOn !== undefined) {
+                throw new Error(
+                  `Task "${task.title}" is a parent task: dependencies can only be set on leaf tasks.`
+                )
+              }
 
               const next = { ...task } as ScheduleTask
               applyTaskFields(next, a, true)
 
-              const resolved = applyDateRule(task, next, calendar)
+              const constr = linkConstraints(task)
+              if (constr.startLocked && constr.endLocked) {
+                if (a.planStart !== undefined) {
+                  throw new Error(
+                    `planStart of "${task.title}" is set by a dependency link and read-only. Edit the predecessor or remove the link first.`
+                  )
+                }
+                if (a.planEnd !== undefined) {
+                  throw new Error(
+                    `planEnd of "${task.title}" is set by a dependency link and read-only. Edit the predecessor or remove the link first.`
+                  )
+                }
+                if (a.duration !== undefined) {
+                  throw new Error(
+                    `duration of "${task.title}" is derived from dependency-linked dates and read-only.`
+                  )
+                }
+              } else if (constr.startLocked && a.planStart !== undefined) {
+                throw new Error(
+                  `planStart of "${task.title}" is set by a dependency link and read-only. Edit the predecessor or remove the link first.`
+                )
+              } else if (constr.endLocked && a.planEnd !== undefined) {
+                throw new Error(
+                  `planEnd of "${task.title}" is set by a dependency link and read-only. Edit the predecessor or remove the link first.`
+                )
+              }
+
+              const resolved = applyDateRule(
+                task,
+                next,
+                calendar,
+                task.children.length > 0 ? undefined : constr
+              )
+
+              const nextDeps = parseDependsOn(a.dependsOn, tasks)
+              if (nextDeps !== undefined) resolved.dependsOn = nextDeps ?? undefined
 
               const parentArg = a.parent ? findTask(tasks, String(a.parent)) : null
               const afterArg = a.addAfter ? findTask(tasks, String(a.addAfter)) : null
@@ -2193,7 +2309,7 @@ export const tools: PTTool[] = [
           }
           const saved = {
             ...schedule,
-            tasks: rollupScheduleTasks(tasks, calendar),
+            tasks: dependencyAwareRollup(tasks, calendar),
             updatedAt: Date.now()
           }
           return {

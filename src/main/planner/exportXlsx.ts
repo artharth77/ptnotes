@@ -64,7 +64,8 @@ const COLUMN_WIDTHS: Record<string, number> = {
   actualStart: 12,
   actualEnd: 12,
   percent: 6,
-  note: 40
+  note: 40,
+  deps: 16
 }
 
 type DateKey = 'planStart' | 'planEnd' | 'actualStart' | 'actualEnd'
@@ -305,6 +306,9 @@ export async function buildPlannerExportXlsx(
         }
         case 'note':
           value = row.note || null
+          break
+        case 'deps':
+          value = row.dependsOn ?? null
           break
         default:
           value = null

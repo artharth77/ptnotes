@@ -20,6 +20,7 @@ await fs.rm(ROOT, { recursive: true, force: true })
 
 const {
   applyDateRule,
+  applyDependencies,
   computeDuration,
   computeEndDate,
   collectOwners,
@@ -27,9 +28,13 @@ const {
   defaultCalendar,
   deriveStatus,
   deriveTaskNo,
+  detectCycle,
+  eligibleLinkTargets,
   emptyTask,
   estimatePercentComplete,
   findTaskByTitle,
+  isLeafTask,
+  linkConstraints,
   nextWorkingDayString,
   normalizeCalendar,
   normalizeColumnOrder,
@@ -38,12 +43,15 @@ const {
   ownerStats,
   parseOwners,
   planIndicator,
+  removeTaskLinks,
   rollupScheduleTasks,
-  validateScheduleId
+  stripInvalidLinks,
+  validateScheduleId,
+  validateLinks
 } = await import('../src/shared/planner')
 const { PTNotesService } = await import('../src/main/service/PTNotesService')
 const { tools } = await import('../src/main/ai/tools')
-import type { ScheduleTask } from '../src/shared/types'
+import type { ScheduleTask, TaskLink } from '../src/shared/types'
 import type { ToolContext } from '../src/main/ai/tools'
 
 // ---- outline numbering ----
@@ -132,6 +140,297 @@ assert.equal(
   '2024-01-03',
   'start edited with duration 1 and no end -> end follows start'
 )
+
+// ---- task dependencies ----
+
+const link = (id: string, type: 'FS' | 'SS' | 'FF' | 'SF', lag = 0): TaskLink => ({
+  id,
+  type,
+  lag
+})
+
+const leaf = (
+  id: string,
+  title: string,
+  planStart: string | null,
+  duration: number | null,
+  dependsOn?: TaskLink[]
+): ScheduleTask => ({
+  id,
+  title,
+  status: 'not-started',
+  owner: '',
+  duration,
+  planStart,
+  planEnd: planStart && duration ? computeEndDate(planStart, duration, cal) : null,
+  actualStart: null,
+  actualEnd: null,
+  percentComplete: 0,
+  note: '',
+  dependsOn,
+  children: []
+})
+
+// linkConstraints matrix
+assert.deepEqual(linkConstraints({}), { startLocked: false, endLocked: false })
+assert.deepEqual(linkConstraints({ dependsOn: [link('a', 'FS')] }), {
+  startLocked: true,
+  endLocked: false
+})
+assert.deepEqual(linkConstraints({ dependsOn: [link('a', 'SS', 2)] }), {
+  startLocked: true,
+  endLocked: false
+})
+assert.deepEqual(linkConstraints({ dependsOn: [link('a', 'FF')] }), {
+  startLocked: false,
+  endLocked: true
+})
+assert.deepEqual(linkConstraints({ dependsOn: [link('a', 'SF')] }), {
+  startLocked: false,
+  endLocked: true
+})
+assert.deepEqual(
+  linkConstraints({ dependsOn: [link('a', 'FS'), link('b', 'FF')] }),
+  {
+    startLocked: true,
+    endLocked: true
+  },
+  'both edges pinned'
+)
+
+assert.equal(isLeafTask(leaf('a', 'A', null, null)), true, 'empty task is a leaf')
+assert.equal(
+  isLeafTask({ ...leaf('a', 'A', null, null), children: [leaf('b', 'B', null, null)] }),
+  false
+)
+
+// FS lag semantics: lag 0 = next working day after pred end; -1 = same day
+const fsBase = [leaf('a', 'A', '2024-01-01', 3), leaf('b', 'B', '2024-01-10', 2, [link('a', 'FS')])]
+let dep = applyDependencies(fsBase, cal)
+assert.equal(dep.tasks[1].planStart, '2024-01-04', 'FS lag 0 -> next working day after pred end')
+assert.equal(dep.tasks[1].planEnd, '2024-01-05', 'pinned start recomputes planEnd from duration')
+assert.equal(dep.violations.length, 0)
+dep = applyDependencies(
+  [leaf('a', 'A', '2024-01-01', 3), leaf('b', 'B', '2024-01-10', 2, [link('a', 'FS', 1)])],
+  cal
+)
+assert.equal(dep.tasks[1].planStart, '2024-01-05', 'FS lag 1 skips one more working day')
+dep = applyDependencies(
+  [leaf('a', 'A', '2024-01-01', 3), leaf('b', 'B', '2024-01-10', 2, [link('a', 'FS', -1)])],
+  cal
+)
+assert.equal(dep.tasks[1].planStart, '2024-01-03', 'FS lag -1 lands on the pred end day')
+
+// FS across a weekend + holiday skipping
+dep = applyDependencies(
+  [leaf('a', 'A', '2024-01-05', 1), leaf('b', 'B', '2024-01-01', 1, [link('a', 'FS')])],
+  cal
+)
+assert.equal(dep.tasks[1].planStart, '2024-01-08', 'FS after a Friday starts Monday')
+const jan2Holiday = normalizeCalendar({ weekStart: 1, weekEnd: 5, holidays: ['2024-01-02'] })
+dep = applyDependencies(
+  [leaf('a', 'A', '2024-01-01', 1), leaf('b', 'B', '2024-01-01', 1, [link('a', 'FS')])],
+  jan2Holiday
+)
+assert.equal(dep.tasks[1].planStart, '2024-01-03', 'FS skips holidays')
+
+// SS lag 0 = same day as pred start
+dep = applyDependencies(
+  [leaf('a', 'A', '2024-01-02', 5), leaf('b', 'B', '2024-01-10', 2, [link('a', 'SS')])],
+  cal
+)
+assert.equal(dep.tasks[1].planStart, '2024-01-02', 'SS lag 0 starts together with pred')
+dep = applyDependencies(
+  [leaf('a', 'A', '2024-01-02', 5), leaf('b', 'B', '2024-01-10', 2, [link('a', 'SS', 2)])],
+  cal
+)
+assert.equal(dep.tasks[1].planStart, '2024-01-04', 'SS lag 2 shifts two working days')
+
+// FF lag 0 = same day as pred end
+dep = applyDependencies(
+  [leaf('a', 'A', '2024-01-01', 5), leaf('b', 'B', '2024-01-10', 2, [link('a', 'FF')])],
+  cal
+)
+assert.equal(dep.tasks[1].planEnd, '2024-01-05', 'FF lag 0 ends together with pred')
+
+// SF lag 0 = working day before pred start
+dep = applyDependencies(
+  [leaf('a', 'A', '2024-01-08', 3), leaf('b', 'B', '2024-01-01', 2, [link('a', 'SF')])],
+  cal
+)
+assert.equal(dep.tasks[1].planEnd, '2024-01-05', 'SF lag 0 ends the working day before pred starts')
+
+// both edges locked -> duration derived
+dep = applyDependencies(
+  [
+    leaf('a', 'A', '2024-01-01', 3),
+    leaf('b', 'B', '2024-01-15', 4),
+    leaf('c', 'C', '2024-01-20', 1, [link('a', 'FS'), link('b', 'FF')])
+  ],
+  cal
+)
+assert.equal(dep.tasks[2].planStart, '2024-01-04', 'both locked: start from FS')
+assert.equal(dep.tasks[2].planEnd, '2024-01-18', 'both locked: end from FF (Mon after Fri +0)')
+assert.equal(dep.tasks[2].duration, 11, 'both locked: duration derived from start/end')
+
+// multiple start candidates -> latest wins
+dep = applyDependencies(
+  [
+    leaf('a', 'A', '2024-01-01', 3),
+    leaf('b', 'B', '2024-01-09', 3),
+    leaf('c', 'C', '2024-01-20', 1, [link('a', 'FS'), link('b', 'FS')])
+  ],
+  cal
+)
+assert.equal(dep.tasks[2].planStart, '2024-01-12', 'start locked to the latest predecessor')
+
+// inverted manual range repaired when a link pins the start
+dep = applyDependencies(
+  [leaf('a', 'A', '2024-01-08', 1), leaf('b', 'B', '2024-01-01', 3, [link('a', 'FS')])],
+  cal
+)
+assert.equal(dep.tasks[1].planStart, '2024-01-09', 'start pinned by FS')
+assert.equal(dep.tasks[1].planEnd, '2024-01-11', 'end recomputed from the pinned start + duration')
+assert.equal(dep.violations.length, 0, 'inverted manual range is repaired, not flagged')
+
+// pinned start without a duration: end kept, duration recomputed
+const bNoDur = {
+  ...leaf('b', 'B', '2024-01-05', null),
+  planEnd: '2024-01-06',
+  dependsOn: [link('a', 'FS')]
+}
+dep = applyDependencies([leaf('a', 'A', '2024-01-01', 1), bNoDur], cal)
+assert.equal(dep.tasks[1].planStart, '2024-01-02', 'start pinned ahead of the task')
+assert.equal(dep.tasks[1].planEnd, '2024-01-06', 'end kept when duration is unset')
+assert.equal(dep.tasks[1].duration, 4, 'duration recomputed from pinned start and kept end')
+
+// missing predecessor date -> violation, task untouched
+const missingDate = [leaf('a', 'A', null, null), leaf('b', 'B', '2024-01-01', 1, [link('a', 'FS')])]
+dep = applyDependencies(missingDate, cal)
+assert.equal(dep.tasks[1].planStart, '2024-01-01', 'unusable link leaves the task unchanged')
+assert.equal(dep.violations.length, 1, 'missing pred date is a violation')
+
+// dangling link: validateLinks flags, stripInvalidLinks removes
+const dangling = [
+  leaf('a', 'A', '2024-01-01', 1, [link('ghost', 'FS')]),
+  leaf('b', 'B', '2024-01-02', 1)
+]
+assert.equal(validateLinks(dangling).length, 1, 'dangling link reported')
+const stripped = stripInvalidLinks(dangling)
+assert.equal(stripped.removed, 1, 'dangling link removed')
+assert.equal(stripped.tasks[0].dependsOn, undefined, 'dependsOn dropped when empty')
+
+// non-leaf participants
+const nonLeaf = [
+  { ...leaf('p', 'P', null, null), children: [leaf('p1', 'P1', '2024-01-01', 1)] },
+  leaf('c', 'C', '2024-01-01', 1, [link('p', 'FS')])
+]
+assert.equal(validateLinks(nonLeaf).length, 1, 'non-leaf predecessor reported')
+assert.equal(stripInvalidLinks(nonLeaf).removed, 1, 'non-leaf link stripped')
+
+// ancestor link forbidden
+const ancestorTree = [
+  {
+    ...leaf('p', 'P', null, null),
+    children: [leaf('p1', 'P1', null, null, [link('p', 'FS')])]
+  }
+]
+assert.equal(validateLinks(ancestorTree).length, 1, 'ancestor link reported')
+
+// cycle detection
+const cyc = [
+  leaf('a', 'A', null, null, [link('b', 'FS')]),
+  leaf('b', 'B', null, null, [link('a', 'FS')])
+]
+assert.ok(detectCycle(cyc), 'cycle detected')
+const cycResult = applyDependencies(cyc, cal)
+assert.equal(cycResult.violations.length, 2, 'cycle reported per task')
+assert.equal(cycResult.tasks[0].id, 'a', 'cycle leaves tasks unchanged')
+
+// chained links resolve in dependency order
+const chain = [
+  leaf('a', 'A', '2024-01-01', 2),
+  leaf('b', 'B', null, 2, [link('a', 'FS')]),
+  leaf('c', 'C', null, 2, [link('b', 'FS')])
+]
+dep = applyDependencies(chain, cal)
+assert.equal(dep.tasks[1].planStart, '2024-01-03', 'first successor after pred')
+assert.equal(dep.tasks[2].planStart, '2024-01-05', 'second successor follows the computed pred')
+
+// end-locked inverted date rule: end fixed, start/duration follow
+const endLockedPrev = {
+  ...leaf('x', 'X', '2024-01-01', 5),
+  dependsOn: [link('p', 'FF')]
+}
+let lockedNext = applyDateRule(
+  endLockedPrev,
+  { ...endLockedPrev, planStart: '2024-01-03' },
+  cal,
+  linkConstraints(endLockedPrev)
+)
+assert.equal(lockedNext.duration, 3, 'end locked: start edit recomputes duration')
+lockedNext = applyDateRule(
+  endLockedPrev,
+  { ...endLockedPrev, duration: 2 },
+  cal,
+  linkConstraints(endLockedPrev)
+)
+assert.equal(lockedNext.planStart, '2024-01-04', 'end locked: duration edit pulls start back')
+
+// both locked: nothing recomputed
+const bothLocked = {
+  ...leaf('x', 'X', '2024-01-01', 5),
+  dependsOn: [link('p', 'FS'), link('q', 'FF')]
+}
+lockedNext = applyDateRule(
+  bothLocked,
+  { ...bothLocked, planStart: '2024-01-03', duration: 9 },
+  cal,
+  linkConstraints(bothLocked)
+)
+assert.equal(lockedNext.planEnd, '2024-01-05', 'both locked: edits do not move derived fields')
+
+// removeTaskLinks strips every link pointing at the removed task
+const withLinks = [
+  leaf('a', 'A', null, null, [link('gone', 'FS')]),
+  leaf('b', 'B', null, null, [link('a', 'SS')]),
+  leaf('gone', 'G', null, null)
+]
+const afterRemove = removeTaskLinks(withLinks, 'gone')
+assert.equal(afterRemove[0].dependsOn, undefined, 'links to the removed task dropped')
+assert.equal(afterRemove[1].dependsOn?.length, 1, 'unrelated links kept')
+
+// eligibleLinkTargets excludes self, ancestors and descendants
+const eligibleTree = [
+  {
+    ...leaf('p', 'P', null, null),
+    children: [leaf('p1', 'P1', '2024-01-01', 1), leaf('p2', 'P2', '2024-01-02', 1)]
+  },
+  leaf('q', 'Q', '2024-01-03', 1)
+]
+const eligibleIds = eligibleLinkTargets(eligibleTree, 'p1').map((t) => t.id)
+assert.deepEqual(eligibleIds, ['p2', 'q'], 'leaves outside the task are eligible (siblings too)')
+assert.deepEqual(
+  eligibleLinkTargets(eligibleTree, 'p').map((t) => t.id),
+  [],
+  'parents are never eligible (leaves only)'
+)
+
+// rollup interaction: parents pick up dependency-shifted child dates
+const rollupDep = applyDependencies(
+  [
+    leaf('a', 'A', '2024-01-01', 3),
+    leaf('b', 'B', '2024-01-10', 2, [link('a', 'FS')]),
+    {
+      ...leaf('p', 'P', null, null),
+      children: [leaf('b2', 'B2', null, 2, [link('a', 'FS')])]
+    }
+  ],
+  cal
+)
+const rolledDeps = rollupScheduleTasks(rollupDep.tasks, cal)
+assert.equal(rolledDeps[2].planStart, '2024-01-04', 'parent rolls up the shifted child start')
+assert.equal(rolledDeps[2].planEnd, '2024-01-05', 'parent rolls up the shifted child end')
 
 // ---- status rules ----
 

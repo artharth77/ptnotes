@@ -51,10 +51,12 @@ import {
 import { slugify } from '@shared/slug'
 import { isImageFile } from '@shared/filesExplorer'
 import {
+  applyDependencies,
   countTasks,
   defaultCalendar,
   normalizeCalendar,
   rollupScheduleTasks,
+  stripInvalidLinks,
   validateScheduleId
 } from '@shared/planner'
 import { detectFileKind } from '../ai/reader'
@@ -2132,7 +2134,10 @@ export class PTNotesService {
         if (!schedule) continue
         await this.writeSchedule(project, {
           ...schedule,
-          tasks: rollupScheduleTasks(schedule.tasks, calendar),
+          tasks: rollupScheduleTasks(
+            applyDependencies(stripInvalidLinks(schedule.tasks).tasks, calendar).tasks,
+            calendar
+          ),
           updatedAt: Date.now()
         })
         reRolled++

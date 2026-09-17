@@ -550,7 +550,12 @@ export type {
   ScheduleMeta,
   ScheduleStatus,
   ScheduleTask,
-  ScheduleTitleWidth
+  ScheduleTitleWidth,
+  TaskLink,
+  TaskLinkType,
+  LinkConstraints,
+  LinkIssue,
+  LinkViolation
 } from './planner'
 
 export type { SnapshotMeta } from './snapshots'

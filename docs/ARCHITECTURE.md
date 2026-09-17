@@ -577,7 +577,9 @@ JSON in `<project>/planner/<slug>.json`; the whole feature is pure data — no m
 - `ScheduleTask`: `id`, `title`, `status` (`not-started` | `in-progress` | `completed` | `on-hold`),
   `owner` (comma-separated multi-value), `duration` (working days, `number|null`),
   `planStart`/`planEnd`/`actualStart`/`actualEnd`
-  (`'YYYY-MM-DD'` or `null`), `percentComplete` (0–100), `note`, `children: ScheduleTask[]`.
+  (`'YYYY-MM-DD'` or `null`), `percentComplete` (0–100), `note`,
+  `dependsOn?: TaskLink[]` (leaf only — see
+  [Planner task dependencies](#planner-task-dependencies)), `children: ScheduleTask[]`.
 - `ProjectCalendar`: `weekStart`/`weekEnd` (weekday 0=Sun..6=Sat, default Mon–Fri = 1..5) +
   `holidays: string[]` — the **shared project working-day config** used for all plan math.
 - Dates are stored as local `YYYY-MM-DD` strings (no timezone); the outline **No.** column is
@@ -623,10 +625,51 @@ JSON in `<project>/planner/<slug>.json`; the whole feature is pure data — no m
   plan/duration/% fields are read-only in the UI (show the rolled-up values); title/actuals/note
   and status (for on-hold) remain editable.
 
+### Planner task dependencies
+
+- **Links** are leaf-task-only: `dependsOn?: TaskLink[]` on the successor, each entry
+  `{ id: predecessor task id, type: 'FS' | 'SS' | 'FF' | 'SF', lag: number }` with `lag` in
+  working days (negative allowed). Old schedule files (no `dependsOn`) load unchanged.
+- **Lag semantics** (all pure in `src/shared/planner.ts`): `FS` successor start =
+  predecessor `planEnd` + lag — lag 0 is the **next working day** after it; `SS` start =
+  predecessor planStart + lag (0 = same day); `FF` end = predecessor planEnd + lag (0 = same
+  day); `SF` end = predecessor planStart + lag (0 = the working day before it starts).
+- **Pinned fields** (`linkConstraints`): incoming FS/SS pin `planStart`, FF/SF pin `planEnd`;
+  when both edges are pinned, `duration` is derived too (`computeDuration` of the two). Pinned
+  fields are read-only everywhere (grid cells disabled with a tooltip naming the controlling
+  predecessor, `applyDateRule` takes the constraints and re-anchors the free edge on the pinned
+  one, Gantt edge drags / whole-bar moves are blocked with the same tooltip). Free edges keep
+  manual editing semantics: a pinned start recomputes the free `planEnd` from `duration` (or
+  recomputes `duration` from the kept end when `duration` is unset); a pinned end recomputes
+  `duration` from the manual start.
+- **Recompute** (`applyDependencies(tasks, calendar)`): runs BEFORE the parent rollup in every
+  mutation path (editor `commit()` — stale links cleaned by `stripInvalidLinks` first — chat
+  tools via `dependencyAwareRollup`, and `rerollSchedules` after a calendar change). It is a
+  topological pass over the leaf-link graph (chained links resolve through freshly computed
+  predecessor dates) and then `rollupScheduleTasks` rolls parents up. Start-fixing links set
+  `planStart` to the max candidate; end-fixing links set `planEnd`; both-pinned derives
+  `duration` (start > end is a violation); an inverted manual start under a pinned end is
+  repaired; unusable links (missing or parent predecessor, predecessor without the needed
+  date) are skipped and reported as violations; a cycle leaves the tree unchanged. All of
+  this happens inside one undo step.
+- **Validation** (`validateLinks` / `detectCycle` / `eligibleLinkTargets`): dangling refs,
+  self/duplicate links, non-leaf participants, ancestor links; cycles reported per task
+  (`applyDependencies` returns violations). The dependency editor (hidden-by-default **Deps**
+  grid column) offers predecessors via `eligibleLinkTargets` (leaves outside the task's
+  ancestor/descendant chain) and validates before applying. Deleting a task strips links that
+  point at it (`removeTaskLinks`); a leaf that gains/loses children loses its invalid links.
+- **Chat tools**: `add_task`/`update_task` accept `dependsOn`
+  (`{ predecessor, type?, lag? }[]`, `"predecessor"` matched like other task references; `[]`
+  clears). Edits of pinned fields are rejected with explanatory errors. Excel export renders a
+  **Dependencies** column (`1.2 FS+1, 1.3 SS`). The Gantt draws **FS/SS/FF/SF arrows** between
+  linked bars (SVG overlay inside the body, measured positions; tooltip shows
+  `predNo type±lag → succNo`) and the bar popup lists predecessors.
+
 ### Editor (PlannerEditor)
 
 - Grid with columns: **Plan Indicator · No. · Title · Status · Owner · Duration · Plan Start ·
-  Plan End · Actual Start · Actual End · %Complete · Note**, plus per-row actions (add subtask,
+  Plan End · Actual Start · Actual End · %Complete · Note · Deps** (Dependencies hidden by
+  default), plus per-row actions (add subtask,
   add sibling, delete — deleting a parent requires a child-confirmation modal).
 - **Plan Indicator**: a 5px color strip rendered before the No. column (sticky with it), computed
   per row by `planIndicator(task, today)` — green when `%Complete = 100`; yellow when `< 100` and
@@ -747,7 +790,10 @@ helpers later).
 - **Capture**: inside `writeSchedule` (so every mutation path — UI save, AI tools, re-rolls,
   create, duplicate — is covered) under the per-project planner lock. Skipped when the newest
   snapshot's filename hash matches (dedup survives restarts); snapshot failure never fails the
-  save. Pruning runs after each capture — no background timers.
+  save. Capture timestamps are kept **strictly increasing** per snapshot dir (a same-millisecond
+  capture bumps past the newest existing ts) so the minute-bucket prune can never treat the
+  later-written (e.g. revert) capture as the duplicate on a readdir-order tie.
+  Pruning runs after each capture — no background timers.
 - **Retention** (GFS cascade, `planSnapshotPrune` in `src/shared/snapshots.ts`, newest-per-bucket):
   1/minute for 10 min → 1/hour for 24 h → 1/day for 7 days → 1/week for 30 days; anything older
   than 30 days is purged. Identical content also collapses to its newest instance (reverting to an

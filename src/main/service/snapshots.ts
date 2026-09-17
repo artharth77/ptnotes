@@ -137,12 +137,19 @@ export async function captureScheduleSnapshot(
 ): Promise<void> {
   const hash16 = scheduleSnapshotHash(schedule).slice(0, 16)
   await fs.mkdir(dir, { recursive: true })
-  if (!opts?.force) {
-    const entries = await listSnapshotEntries(dir)
-    if (entries.length > 0 && entries[0].hash === hash16) return
-  }
-  await atomicWrite(join(dir, snapshotFilename(now, hash16)), JSON.stringify(schedule, null, 2))
-  await pruneSnapshotDir(dir, now)
+  const existing = await listSnapshotEntries(dir)
+  if (!opts?.force && existing.length > 0 && existing[0].hash === hash16) return
+  // Keep capture timestamps strictly increasing within the dir: two captures in the
+  // same millisecond would otherwise race the minute-bucket prune for "newest" (the
+  // readdir order of equal-ts entries decides, which can prune the revert capture).
+  let captureTs = now
+  const maxTs = existing.length > 0 ? existing[0].ts : 0
+  if (captureTs <= maxTs) captureTs = maxTs + 1
+  await atomicWrite(
+    join(dir, snapshotFilename(captureTs, hash16)),
+    JSON.stringify(schedule, null, 2)
+  )
+  await pruneSnapshotDir(dir, captureTs)
 }
 
 /** Set / rename / clear (null) the user tag of the snapshot at `ts`. */

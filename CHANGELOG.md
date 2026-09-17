@@ -1,6 +1,19 @@
 # Changelog
 
-## [dev] — unreleased — 0.20.1
+## [0.21.0] - 2026-09-18
+
+### Added
+
+- **Planner: task dependencies (v1)** — leaf tasks can now depend on each other with the four link types **FS / SS / FF / SF** plus a **lag** in working days (negative allowed; FS lag 0 = the next working day after the predecessor's planEnd). A new hidden-by-default **Deps** column shows a per-task dependency chip that opens a link editor (add: leaf predecessors outside the task's ancestor/descendant chain; per-link type + lag; delete) with cycle and validity checks. Link-pinned plan fields become read-only: incoming FS/SS lock `planStart`, FF/SF lock `planEnd`, and both lock start/end **and** duration (derived from the two dates). The Gantt mirrors the same rules — dragging a locked bar edge or moving a linked bar is disabled with a tooltip naming the controlling predecessor — and draws **FS/SS/FF/SF arrows** between bars (tooltip shows `no type±lag →`); the bar popup lists predecessors. Every edit signal (grid, Gantt, chat tools) funnels through the same commit pipeline: stale links are cleaned, leaf dates recompute topologically from links, then parents roll up — all within one undo step, and the same shift propagates to successors (full auto-reschedule). The `add_task`/`update_task` chat tools accept `dependsOn` (object array: `predecessor` + `type` + `lag`), reject edits of link-pinned fields with explanatory errors, and deleting a task strips links that point at it. Excel export gains a **Dependencies** column (`1.2 FS+1, 1.3 SS`).
+- **Planner: dependencies internals** — links persist as `dependsOn?: TaskLink[]` on tasks (old schedule files load unchanged); the date/link math is pure in `src/shared/planner.ts` (`applyDependencies`, `linkConstraints`, `validateLinks`, `detectCycle`, `eligibleLinkTargets`) and covered by unit tests.
+- **Planner: % slider on the focused cell** — focusing a leaf task's **%** cell in the grid now pops a slider-bar overlay (same style as the context-menu % slider, step 10) anchored under the cell; sliding it changes %Complete live (rollup + autosave apply, one undo step per drag). The overlay stays open while clicking/dragging the slider, follows scroll/resize, flips above the cell when clipped, and closes on Escape, outside click, or moving focus away.
+
+### Fixed
+
+- **Planner: snapshot revert could lose the reverted capture** — when two consecutive captures landed in the same millisecond, the minute-bucket prune treated the later-written (revert) capture as the duplicate because the file enumeration order decided the tie; capture timestamps are now strictly increasing per schedule dir, so "A → B → A" always keeps a single revert instance.
+- **Planner: stale number draft masked recomputed durations** — the duration/% cells keep their typed draft after blur, so a later edit that recomputed the duration (e.g. changing Plan End on a dependency-pinned task) still displayed the old number in the grid; a diverged draft now yields to the committed value (render-time resolution, no effect churn).
+
+## [0.20.1] — 2026-09-17
 
 ### Added
 

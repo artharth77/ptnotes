@@ -14,7 +14,7 @@ import {
   mdiTrashCanOutline
 } from '@mdi/js'
 import { computeDuration, findTaskCtx, formatDate, isWorkingDay, parseDate } from '@shared/planner'
-import type { ProjectCalendar, ScheduleTask } from '@shared/types'
+import type { ProjectCalendar, ScheduleTask, TaskLinkType } from '@shared/types'
 import { MdiIcon } from './MdiIcon'
 import { PlannerResizeHandle } from './PlannerResizeHandle'
 import { nameTipFrom, NameTip, type NameTipState } from './NameTip'
@@ -30,12 +30,20 @@ const PADDING_DAYS = 7
 const TOGGLE_WIDTH = 28
 const NO_WIDTH = 46
 
+/** Per-bar drag locks from dependency links (undefined tooltip = no lock). */
+export interface GanttLinkLock {
+  start?: string
+  end?: string
+  move?: string
+}
+
 interface GanttChartProps {
   tasks: ScheduleTask[]
   calendar: ProjectCalendar
   collapsed: Set<string>
   dayWidth: number
   titleWidth: number
+  linkLocks?: Map<string, GanttLinkLock>
   onToggle: (id: string) => void
   onTitleWidthResize: (width: number) => void
   onTitleWidthCommit: (width: number) => void
@@ -141,6 +149,15 @@ function formatDuration(task: ScheduleTask, calendar: ProjectCalendar): number {
 
 type DragMode = 'start' | 'end' | 'move'
 
+interface GanttArrow {
+  key: string
+  d: string
+  type: TaskLinkType
+  title: string
+  predecessorId: string
+  successorId: string
+}
+
 interface DragSession {
   id: string
   mode: DragMode
@@ -202,6 +219,7 @@ export function GanttChart({
   collapsed,
   dayWidth,
   titleWidth,
+  linkLocks,
   onToggle,
   onTitleWidthResize,
   onTitleWidthCommit,
@@ -233,6 +251,10 @@ export function GanttChart({
     setCurrentMonth(months[0].label)
   }
   const [drag, setDrag] = useState<DragState | null>(null)
+  const [hoveredEdge, setHoveredEdge] = useState<{
+    id: string
+    edge: 'start' | 'end'
+  } | null>(null)
   const [popup, setPopup] = useState<{
     id: string
     left: number
@@ -256,6 +278,75 @@ export function GanttChart({
     for (const t of collectTasks(tasks, [])) m.set(t.id, t)
     return m
   }, [tasks])
+
+  const bodyContentRef = useRef<HTMLDivElement>(null)
+  const [arrows, setArrows] = useState<GanttArrow[]>([])
+
+  useLayoutEffect(() => {
+    const content = bodyContentRef.current
+    if (!content) {
+      setArrows([])
+      return
+    }
+    const bodyRect = content.getBoundingClientRect()
+    const rects = new Map<string, { top: number; height: number }>()
+    for (const task of collectTasks(tasks, [])) {
+      if (task.children.length > 0) continue
+      const el = content.querySelector(`[data-gantt-task="${task.id}"]`)
+      if (!el) continue
+      const rect = el.getBoundingClientRect()
+      rects.set(task.id, { top: rect.top - bodyRect.top, height: rect.height })
+    }
+    const out: GanttArrow[] = []
+    for (const task of collectTasks(tasks, [])) {
+      if (task.children.length > 0 || !task.planStart || !task.planEnd) continue
+      const links = task.dependsOn ?? []
+      if (!links.length) continue
+      const succRect = rects.get(task.id)
+      if (!succRect || succRect.height < 4) continue
+      const succStartX = dayOffset(timeline, task.planStart) * dayWidth
+      const succEndX =
+        succStartX +
+        (dayOffset(timeline, task.planEnd) - dayOffset(timeline, task.planStart) + 1) * dayWidth
+      const succY = succRect.top + Math.min(succRect.height / 2, 14)
+      for (const link of links) {
+        const predTask = taskMap.get(link.id)
+        if (!predTask?.planStart || !predTask.planEnd) continue
+        const predRect = rects.get(link.id)
+        if (!predRect || predRect.height < 4) continue
+        const predStartX = dayOffset(timeline, predTask.planStart) * dayWidth
+        const predEndX =
+          predStartX +
+          (dayOffset(timeline, predTask.planEnd) - dayOffset(timeline, predTask.planStart) + 1) *
+            dayWidth
+        const pointsIn: Record<TaskLinkType, [number, number]> = {
+          FS: [predEndX, succStartX],
+          SS: [predStartX, succStartX],
+          FF: [predEndX, succEndX],
+          SF: [predStartX, succEndX]
+        }
+        const [fromX, toX] = pointsIn[link.type]
+        const fromY = predRect.top + Math.min(predRect.height / 2, 14)
+        const turnX = fromX < toX ? toX - 9 : toX + 9
+        const d =
+          fromY === succY
+            ? `M ${fromX} ${fromY} L ${turnX} ${fromY} L ${toX} ${succY}`
+            : `M ${fromX} ${fromY} L ${turnX} ${fromY} L ${turnX} ${succY} L ${toX} ${succY}`
+        const lag = link.lag === 0 ? '' : link.lag > 0 ? `+${link.lag}` : `${link.lag}`
+        out.push({
+          key: `${task.id}|${link.id}|${link.type}`,
+          d,
+          type: link.type,
+          predecessorId: link.id,
+          successorId: task.id,
+          title: `${noMap.get(link.id) ?? ''} ${predTask.title} —${link.type + lag}→ ${
+            noMap.get(task.id) ?? ''
+          } ${task.title}`
+        })
+      }
+    }
+    setArrows(out)
+  }, [tasks, collapsed, timeline, dayWidth, linkLocks, taskMap, noMap])
 
   useEffect(() => {
     return () => {
@@ -364,9 +455,19 @@ export function GanttChart({
     onResize(session.id, start, end, session.mode)
   }
 
+  function lockReason(task: ScheduleTask, mode: DragMode): string | undefined {
+    if (task.children.length > 0) return undefined
+    const lock = linkLocks?.get(task.id)
+    if (!lock) return undefined
+    if (mode === 'move') return lock.move
+    if (mode === 'start') return lock.start
+    return lock.end
+  }
+
   function startDrag(e: React.PointerEvent, task: ScheduleTask, mode: DragMode): void {
     if (e.button !== 0) return
     if (!task.planStart || !task.planEnd) return
+    if (lockReason(task, mode)) return
     e.preventDefault()
     e.stopPropagation()
     const startOffset = dayOffset(timeline, task.planStart)
@@ -461,7 +562,11 @@ export function GanttChart({
     }
     return (
       <div key={task.id} className="gantt-task-group">
-        <div className="gantt-row" style={{ width: leftWidth + timelineWidth }}>
+        <div
+          className="gantt-row"
+          style={{ width: leftWidth + timelineWidth }}
+          data-gantt-task={task.children.length === 0 ? task.id : undefined}
+        >
           <div
             className="gantt-row-left"
             style={{ width: leftWidth }}
@@ -555,8 +660,19 @@ export function GanttChart({
             ))}
             {hasDates && (
               <div
-                className={`gantt-bar${isParent ? ' gantt-bar-parent' : ' gantt-bar-leaf'}`}
+                className={`gantt-bar${
+                  isParent
+                    ? ' gantt-bar-parent'
+                    : ' gantt-bar-leaf' + (lockReason(task, 'move') ? ' gantt-bar-locked-move' : '')
+                }`}
                 style={{ left: barLeft, width: barW }}
+                title={
+                  isParent
+                    ? undefined
+                    : (lockReason(task, 'move') ??
+                      lockReason(task, 'start') ??
+                      lockReason(task, 'end'))
+                }
                 onPointerDown={isParent ? undefined : (e) => startDrag(e, task, 'move')}
                 onContextMenu={(e) => openPopupFromBar(e, task)}
               >
@@ -568,11 +684,21 @@ export function GanttChart({
                 ) : (
                   <>
                     <span
-                      className="gantt-bar-handle gantt-bar-handle-left"
+                      className={`gantt-bar-handle gantt-bar-handle-left${
+                        lockReason(task, 'start') ? ' gantt-bar-handle-locked' : ''
+                      }`}
+                      title={lockReason(task, 'start')}
+                      onPointerEnter={() => setHoveredEdge({ id: task.id, edge: 'start' })}
+                      onPointerLeave={() => setHoveredEdge(null)}
                       onPointerDown={(e) => startDrag(e, task, 'start')}
                     />
                     <span
-                      className="gantt-bar-handle gantt-bar-handle-right"
+                      className={`gantt-bar-handle gantt-bar-handle-right${
+                        lockReason(task, 'end') ? ' gantt-bar-handle-locked' : ''
+                      }`}
+                      title={lockReason(task, 'end')}
+                      onPointerEnter={() => setHoveredEdge({ id: task.id, edge: 'end' })}
+                      onPointerLeave={() => setHoveredEdge(null)}
                       onPointerDown={(e) => startDrag(e, task, 'end')}
                     />
                   </>
@@ -605,6 +731,15 @@ export function GanttChart({
   const popupDuration = popupTask ? formatDuration(popupTask, calendar) : 0
   const rowMenuCtx = rowMenu ? findTaskCtx(tasks, rowMenu.id) : null
   const rowMenuIsRoot = rowMenuCtx ? rowMenuCtx.parent === tasks : false
+  const arrowLayers: GanttArrow[][] = [[], []]
+  const endpoint = hoveredEdge?.edge === 'start' ? 'S' : 'F'
+  for (const arrow of arrows) {
+    const highlighted =
+      hoveredEdge !== null &&
+      ((arrow.predecessorId === hoveredEdge.id && arrow.type[0] === endpoint) ||
+        (arrow.successorId === hoveredEdge.id && arrow.type[1] === endpoint))
+    arrowLayers[highlighted ? 1 : 0].push(arrow)
+  }
 
   return (
     <div className="gantt-chart">
@@ -661,7 +796,47 @@ export function GanttChart({
           </div>
         </div>
 
-        {renderTree(tasks, null, 0)}
+        <div className="gantt-body-content" ref={bodyContentRef} style={{ position: 'relative' }}>
+          {arrowLayers.map((layer, index) => {
+            const highlighted = index === 1
+            const markerId = highlighted ? 'gantt-arrowhead-highlighted' : 'gantt-arrowhead'
+            return (
+              <svg
+                key={markerId}
+                className={`gantt-arrows${highlighted ? ' gantt-arrows-highlighted' : ''}`}
+                style={{ left: leftWidth, width: timelineWidth }}
+                data-empty={layer.length === 0}
+              >
+                <defs>
+                  <marker
+                    id={markerId}
+                    markerWidth="7"
+                    markerHeight="7"
+                    refX="6"
+                    refY="3.5"
+                    orient="auto"
+                  >
+                    <path
+                      d="M0,0 L7,3.5 L0,7 Z"
+                      className={`gantt-arrow-head${highlighted ? ' gantt-arrow-head-highlighted' : ''}`}
+                    />
+                  </marker>
+                </defs>
+                {layer.map((a) => (
+                  <path
+                    key={a.key}
+                    d={a.d}
+                    className={`gantt-arrow-line${highlighted ? ' gantt-arrow-line-highlighted' : ''}`}
+                    markerEnd={`url(#${markerId})`}
+                  >
+                    <title>{a.title}</title>
+                  </path>
+                ))}
+              </svg>
+            )
+          })}
+          {renderTree(tasks, null, 0)}
+        </div>
       </div>
       <NameTip tip={titleTip} onDismiss={() => setTitleTip(null)} />
       {popup && popupTask && (
@@ -693,6 +868,21 @@ export function GanttChart({
               {popupDuration} working day{popupDuration === 1 ? '' : 's'}
             </span>
           </div>
+          {(popupTask.dependsOn ?? []).length > 0 && (
+            <div className="gantt-popup-row gantt-popup-deps">
+              <span className="gantt-popup-label">Dependencies</span>
+              <span className="gantt-popup-value">
+                {(popupTask.dependsOn ?? [])
+                  .map(
+                    (l) =>
+                      `${noMap.get(l.id) ?? '?'} ${l.type}${
+                        l.lag === 0 ? '' : l.lag > 0 ? `+${l.lag}` : l.lag
+                      }`
+                  )
+                  .join(', ')}
+              </span>
+            </div>
+          )}
           {popupTask.children.length === 0 && !!popupTask.planStart && !!popupTask.planEnd && (
             <div className="gantt-popup-actions">
               <button

@@ -11,6 +11,7 @@ import {
   mdiChartTimeline,
   mdiChevronDown,
   mdiChevronRight,
+  mdiClose,
   mdiContentCopy,
   mdiContentCut,
   mdiContentPaste,
@@ -26,6 +27,7 @@ import {
   mdiRedo,
   mdiTableRowPlusAfter,
   mdiTableRowPlusBefore,
+  mdiTargetVariant,
   mdiTrashCanOutline,
   mdiUndo,
   mdiViewColumnOutline
@@ -46,7 +48,8 @@ import {
   GANTT_DAY_WIDTH_MIN,
   GANTT_TITLE_WIDTH_DEFAULT,
   GANTT_TITLE_WIDTH_MAX,
-  GANTT_TITLE_WIDTH_MIN
+  GANTT_TITLE_WIDTH_MIN,
+  type GanttLinkLock
 } from './GanttChart'
 import { PlannerResizeHandle } from './PlannerResizeHandle'
 import { nameTipFrom, NameTip, type NameTipState } from './NameTip'
@@ -55,6 +58,12 @@ import {
   collectOwners,
   computeDuration,
   computeEndDate,
+  applyDependencies,
+  detectCycle,
+  eligibleLinkTargets,
+  isLeafTask,
+  linkConstraints,
+  validateLinks,
   defaultCalendar,
   deriveTaskNo,
   emptyTask,
@@ -69,6 +78,8 @@ import {
   parseOwners,
   planIndicator,
   rollupScheduleTasks,
+  removeTaskLinks,
+  stripInvalidLinks,
   statusLabel
 } from '@shared/planner'
 import type {
@@ -77,7 +88,9 @@ import type {
   Schedule,
   ScheduleStatus,
   ScheduleTask,
-  ScheduleTitleWidth
+  ScheduleTitleWidth,
+  TaskLink,
+  TaskLinkType
 } from '@shared/types'
 
 type PlannerColumnKey =
@@ -93,6 +106,7 @@ type PlannerColumnKey =
   | 'actualEnd'
   | 'percent'
   | 'note'
+  | 'deps'
 
 const COLUMNS: { key: PlannerColumnKey; label: string }[] = [
   { key: 'indicator', label: 'Plan Indicator' },
@@ -105,6 +119,7 @@ const COLUMNS: { key: PlannerColumnKey; label: string }[] = [
   { key: 'planEnd', label: 'Plan End' },
   { key: 'actualStart', label: 'Actual Start' },
   { key: 'actualEnd', label: 'Actual End' },
+  { key: 'deps', label: 'Dependencies' },
   { key: 'percent', label: '%' },
   { key: 'note', label: 'Note' }
 ]
@@ -121,7 +136,8 @@ const COL_WIDTHS: Record<PlannerColumnKey, string> = {
   actualStart: '125px',
   actualEnd: '125px',
   percent: '84px',
-  note: 'minmax(160px, auto)'
+  note: 'minmax(160px, auto)',
+  deps: '170px'
 }
 
 /** Pinned first, never movable (Plan Indicator stays hideable; No./Title always visible). */
@@ -142,7 +158,8 @@ const MOVABLE_HEADERS: Record<MovableColumnKey, { label: string; className: stri
   actualStart: { label: 'Actual Start', className: 'planner-col-date' },
   actualEnd: { label: 'Actual End', className: 'planner-col-date' },
   percent: { label: '%', className: 'planner-col-num' },
-  note: { label: 'Note', className: 'planner-col-note' }
+  note: { label: 'Note', className: 'planner-col-note' },
+  deps: { label: 'Deps', className: 'planner-col-deps' }
 }
 
 function colTemplate(
@@ -289,9 +306,12 @@ function insertTasksBefore(
 }
 
 function removeTasks(tasks: ScheduleTask[], ids: Set<string>): ScheduleTask[] {
-  return tasks
+  const filtered = tasks
     .filter((t) => !ids.has(t.id))
     .map((t) => (t.children.length > 0 ? { ...t, children: removeTasks(t.children, ids) } : t))
+  let result = filtered
+  for (const id of ids) result = removeTaskLinks(result, id)
+  return result
 }
 
 function countDeletable(tasks: ScheduleTask[]): number {
@@ -405,7 +425,8 @@ function DateField({
   readOnly,
   disabled,
   cellId,
-  col
+  col,
+  title
 }: {
   value: string | null
   onChange: (v: string | null) => void
@@ -413,6 +434,7 @@ function DateField({
   disabled?: boolean
   cellId?: string
   col?: string
+  title?: string
 }): React.JSX.Element {
   const ref = useRef<HTMLInputElement>(null)
   return (
@@ -423,6 +445,7 @@ function DateField({
       value={value ?? ''}
       readOnly={readOnly}
       disabled={disabled}
+      title={title}
       data-cell={cellId}
       data-col={col}
       onChange={(e) => onChange(e.target.value || null)}
@@ -430,6 +453,184 @@ function DateField({
         if (!value && ref.current) ref.current.value = ''
       }}
     />
+  )
+}
+
+const LINK_TYPE_OPTIONS: TaskLinkType[] = ['FS', 'SS', 'FF', 'SF']
+
+/** Preloaded 1x1 transparent GIF drag image: setDragImage shows the platform globe
+ *  fallback when the passed image is not already loaded at dragstart. */
+const DEP_DRAG_BLANK = new Image(1, 1)
+DEP_DRAG_BLANK.src =
+  'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+
+function lagLabel(lag: number): string {
+  return lag > 0 ? `+${lag}` : lag === 0 ? '' : String(lag)
+}
+
+function DepEditorMenu({
+  schedule,
+  task,
+  noById,
+  allTaskMap,
+  onApply,
+  onClose
+}: {
+  schedule: ScheduleTask[]
+  task: ScheduleTask
+  noById: Map<string, string>
+  allTaskMap: Map<string, ScheduleTask>
+  onApply: (links: TaskLink[] | undefined) => void
+  onClose: () => void
+}): React.JSX.Element {
+  const links = task.dependsOn ?? []
+  const eligible = eligibleLinkTargets(schedule, task.id)
+  const [addPred, setAddPred] = useState(eligible[0]?.id ?? '')
+  const [addType, setAddType] = useState<TaskLinkType>('FS')
+  const [addLag, setAddLag] = useState('0')
+  const [addError, setAddError] = useState('')
+
+  const validate = (nextLinks: TaskLink[] | undefined): string | null => {
+    try {
+      const updated: ScheduleTask = { ...task }
+      if (nextLinks?.length) updated.dependsOn = nextLinks
+      else delete updated.dependsOn
+      const patched = updateTask(schedule, task.id, () => updated)
+      const issues = validateLinks(patched)
+      if (issues.length > 0) return issues[0].message
+      const cycle = detectCycle(patched)
+      if (cycle) return 'Dependency cycle detected'
+      return null
+    } catch (err) {
+      return (err as Error).message
+    }
+  }
+
+  const commit = (nextLinks: TaskLink[] | undefined): boolean => {
+    const problem = validate(nextLinks)
+    if (problem) {
+      setAddError(problem)
+      return false
+    }
+    onApply(nextLinks)
+    setAddError('')
+    return true
+  }
+
+  const addLink = (): void => {
+    if (!addPred) return
+    const lag = Number.parseInt(addLag, 10)
+    const next = [...links, { id: addPred, type: addType, lag: Number.isFinite(lag) ? lag : 0 }]
+    if (next.some((l, i) => next.findIndex((x) => x.id === l.id && x.type === l.type) !== i)) {
+      setAddError('That link already exists')
+      return
+    }
+    if (commit(next)) onClose()
+  }
+
+  return (
+    <div className="planner-dep-menu-inner">
+      <div className="planner-dep-header">
+        <div className="planner-dep-title">Dependencies</div>
+        <button type="button" className="icon-btn small" title="Close" onClick={() => onClose()}>
+          <MdiIcon path={mdiClose} size={14} />
+        </button>
+      </div>
+      <div className="planner-dep-subtitle" title={`${noById.get(task.id) ?? ''} ${task.title}`}>
+        {noById.get(task.id)} {task.title || 'Task'}
+      </div>
+      <div className="planner-dep-sep" />
+      {links.length === 0 ? (
+        <div className="planner-owner-empty">No dependencies</div>
+      ) : (
+        <div className="planner-dep-list">
+          {links.map((l, i) => (
+            <div key={`${l.id}|${l.type}|${i}`} className="planner-dep-row">
+              <span
+                className="planner-dep-no"
+                title={`${noById.get(l.id) ?? ''} ${allTaskMap.get(l.id)?.title || ''}`}
+              >
+                {noById.get(l.id) ?? '?'} {allTaskMap.get(l.id)?.title || ''}
+              </span>
+              <select
+                value={l.type}
+                className="planner-dep-select"
+                onChange={(e) => {
+                  const nextLinks = links.map((x, j) =>
+                    j === i ? { ...x, type: e.target.value as TaskLinkType } : x
+                  )
+                  commit(nextLinks)
+                }}
+              >
+                {LINK_TYPE_OPTIONS.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="number"
+                className="planner-dep-input"
+                value={l.lag}
+                onChange={(e) => {
+                  const v = Number.parseInt(e.target.value, 10)
+                  if (!Number.isFinite(v)) return
+                  commit(links.map((x, j) => (j === i ? { ...x, lag: v } : x)))
+                }}
+              />
+              <button
+                type="button"
+                className="btn planner-dep-delete"
+                title="Remove link"
+                onClick={() => commit(links.filter((_, j) => j !== i))}
+              >
+                <MdiIcon path={mdiClose} size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="planner-dep-sep" />
+      {eligible.length > 0 ? (
+        <div className="planner-dep-add-row">
+          <select
+            value={addPred}
+            className="planner-dep-select planner-dep-add-task"
+            onChange={(e) => setAddPred(e.target.value)}
+          >
+            {eligible.map((t) => (
+              <option key={t.id} value={t.id}>
+                {noById.get(t.id)} {t.title || 'Task'}
+              </option>
+            ))}
+          </select>
+          <select
+            value={addType}
+            className="planner-dep-select"
+            onChange={(e) => setAddType(e.target.value as TaskLinkType)}
+          >
+            {LINK_TYPE_OPTIONS.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+          <input
+            type="number"
+            className="planner-dep-input"
+            value={addLag}
+            title="Lag (working days)"
+            onChange={(e) => setAddLag(e.target.value)}
+          />
+          <button type="button" className="btn" title="Add dependency" onClick={addLink}>
+            Add
+          </button>
+        </div>
+      ) : (
+        <div className="planner-owner-empty">No eligible predecessor tasks</div>
+      )}
+      {addError ? <div className="planner-dep-error">{addError}</div> : null}
+    </div>
   )
 }
 
@@ -461,7 +662,16 @@ export function PlannerEditor(): React.JSX.Element {
   } | null>(null)
   const [gridMenu, setGridMenu] = useState<{ x: number; y: number; id: string } | null>(null)
   const [gridPercent, setGridPercent] = useState(0)
+  const [percentMenu, setPercentMenu] = useState<{ id: string; input: HTMLInputElement } | null>(
+    null
+  )
   const [ownerMenu, setOwnerMenu] = useState<{ id: string; x: number; y: number } | null>(null)
+  const [depEditor, setDepEditor] = useState<{ id: string; x: number; y: number } | null>(null)
+  const [depViolations, setDepViolations] = useState<Record<string, string>>({})
+  const [depDragSource, setDepDragSource] = useState<string | null>(null)
+  const [depDragOver, setDepDragOver] = useState<string | null>(null)
+  const [depDragFrom, setDepDragFrom] = useState<{ x: number; y: number } | null>(null)
+  const [depDragCursor, setDepDragCursor] = useState<{ x: number; y: number } | null>(null)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [numberDrafts, setNumberDrafts] = useState<Record<string, string>>({})
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -502,6 +712,7 @@ export function PlannerEditor(): React.JSX.Element {
     )
     setView('table')
     setOwnerMenu(null)
+    setPercentMenu(null)
   }
   const [clipboard, setClipboard] = useState<ScheduleTask[]>([])
   const [clipboardMode, setClipboardMode] = useState<'copy' | 'cut' | null>(null)
@@ -512,6 +723,8 @@ export function PlannerEditor(): React.JSX.Element {
   const statusMenuRef = useRef<HTMLDivElement>(null)
   const gridMenuRef = useRef<HTMLDivElement>(null)
   const ownerMenuRef = useRef<HTMLDivElement>(null)
+  const percentMenuRef = useRef<HTMLDivElement>(null)
+  const depEditorRef = useRef<HTMLDivElement>(null)
   const gridPercentBase = useRef<Schedule | null>(null)
   const pendingFocus = useRef<{ id: string; col: string } | null>(null)
   const saveTimer = useRef<number | null>(null)
@@ -748,6 +961,7 @@ export function PlannerEditor(): React.JSX.Element {
   function switchView(next: 'table' | 'gantt'): void {
     if (next === view) return
     setOwnerMenu(null)
+    setPercentMenu(null)
     endEditSession()
     const current = useAppStore.getState().scheduleContent
     if (current) useAppStore.getState().plannerClearHistory(current.id)
@@ -853,6 +1067,87 @@ export function PlannerEditor(): React.JSX.Element {
     return () => scrollEl?.removeEventListener('scroll', onScroll, true)
   }, [ownerMenu])
 
+  useLayoutEffect(() => {
+    if (!percentMenu) return
+    const menu = percentMenuRef.current
+    if (!menu) return
+    const position = (): void => {
+      const rect = percentMenu.input.getBoundingClientRect()
+      const margin = 8
+      menu.style.left = `${Math.max(margin, Math.min(rect.left, window.innerWidth - menu.offsetWidth - margin))}px`
+      const top =
+        rect.bottom + 2 + menu.offsetHeight <= window.innerHeight - margin
+          ? rect.bottom + 2
+          : rect.top - menu.offsetHeight - 2
+      menu.style.top = `${Math.max(margin, top)}px`
+    }
+    const dismiss = (e: PointerEvent): void => {
+      const target = e.target as Node
+      if (target === percentMenu.input || menu.contains(target)) return
+      const active = document.activeElement
+      if (
+        active instanceof HTMLElement &&
+        (active === percentMenu.input || menu.contains(active))
+      ) {
+        active.blur()
+      }
+      setPercentMenu(null)
+    }
+    position()
+    window.addEventListener('resize', position)
+    document.addEventListener('scroll', position, true)
+    document.addEventListener('pointerdown', dismiss)
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setPercentMenu(null)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('resize', position)
+      document.removeEventListener('scroll', position, true)
+      document.removeEventListener('pointerdown', dismiss)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [percentMenu])
+
+  useEffect(() => {
+    if (!depEditor) return
+    const el = depEditorRef.current
+    if (!el) return
+    const margin = 8
+    const width = el.offsetWidth
+    const height = el.offsetHeight
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const left = Math.max(margin, Math.min(depEditor.x, vw - width - margin))
+    const top = Math.max(margin, Math.min(depEditor.y, vh - height - margin))
+    el.style.left = `${left}px`
+    el.style.top = `${top}px`
+  }, [depEditor])
+
+  useEffect(() => {
+    if (!depEditor) return
+    const onScroll = (): void => setDepEditor(null)
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setDepEditor(null)
+    }
+    const scrollEl = gridScrollRef.current
+    scrollEl?.addEventListener('scroll', onScroll, true)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      scrollEl?.removeEventListener('scroll', onScroll, true)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [depEditor])
+
+  useEffect(() => {
+    if (!depDragSource) return
+    const move = (e: DragEvent): void => {
+      setDepDragCursor({ x: e.clientX, y: e.clientY })
+    }
+    document.addEventListener('dragover', move)
+    return () => document.removeEventListener('dragover', move)
+  }, [depDragSource])
+
   useEffect(() => {
     const update = (): void => {
       const el = document.activeElement as HTMLElement | null
@@ -881,6 +1176,96 @@ export function PlannerEditor(): React.JSX.Element {
 
   if (!schedule) return <></>
   const sc: Schedule = schedule
+  const allTaskMap: Map<string, ScheduleTask> = (() => {
+    const map = new Map<string, ScheduleTask>()
+    const walk = (list: ScheduleTask[]): void => {
+      for (const t of list) {
+        map.set(t.id, t)
+        walk(t.children)
+      }
+    }
+    walk(sc.tasks)
+    return map
+  })()
+
+  const noById: Map<string, string> = (() => {
+    const map = new Map<string, string>()
+    const walk = (list: ScheduleTask[], parentNo: string | null): void => {
+      list.forEach((t, i) => {
+        const no = deriveTaskNo(parentNo, i)
+        map.set(t.id, no)
+        walk(t.children, no)
+      })
+    }
+    walk(sc.tasks, null)
+    return map
+  })()
+
+  function depConstraints(task: ScheduleTask): { startLocked: boolean; endLocked: boolean } {
+    return isLeafTask(task) ? linkConstraints(task) : { startLocked: false, endLocked: false }
+  }
+  function depStartLocked(task: ScheduleTask): boolean {
+    return depConstraints(task).startLocked
+  }
+  function depEndLocked(task: ScheduleTask): boolean {
+    return depConstraints(task).endLocked
+  }
+  function depBothLocked(task: ScheduleTask): boolean {
+    const c = depConstraints(task)
+    return c.startLocked && c.endLocked
+  }
+
+  function depLockedTitle(task: ScheduleTask, edge: 'start' | 'end'): string | undefined {
+    const pred = (task.dependsOn ?? []).find((l) =>
+      edge === 'start' ? l.type === 'FS' || l.type === 'SS' : l.type === 'FF' || l.type === 'SF'
+    )
+    if (!pred) return undefined
+    const predTitle = allTaskMap.get(pred.id)?.title || 'task'
+    return `${edge === 'start' ? 'Start' : 'End'} set by ${predTitle} (${pred.type})`
+  }
+
+  const ganttLinkLocks: Map<string, GanttLinkLock> = (() => {
+    const map = new Map<string, GanttLinkLock>()
+    const walk = (list: ScheduleTask[]): void => {
+      for (const t of list) {
+        if (t.children.length === 0 && t.dependsOn?.length) {
+          const c = linkConstraints(t)
+          if (c.startLocked || c.endLocked) {
+            const lock: GanttLinkLock = {}
+            if (c.startLocked) lock.start = depLockedTitle(t, 'start')
+            if (c.endLocked) lock.end = depLockedTitle(t, 'end')
+            lock.move = 'Move disabled — dates are set by dependency links'
+            map.set(t.id, lock)
+          }
+        }
+        walk(t.children)
+      }
+    }
+    walk(sc.tasks)
+    return map
+  })()
+
+  function applyLinks(id: string, links: TaskLink[] | undefined): void {
+    editTask(sc, id, (prev) => {
+      if (links?.length) return { ...prev, dependsOn: links }
+      const { dependsOn: _drop, ...rest } = prev
+      return rest as ScheduleTask
+    })
+  }
+
+  /** Drop of a Deps chip onto this row: the DRAGGED task gains the drop target as FS predecessor. */
+  function addLinkFromDrag(sourceId: string, targetId: string): void {
+    const ctx = findTaskCtx(sc.tasks, sourceId)
+    if (!ctx) return
+    const source = ctx.parent[ctx.index]
+    if (!isLeafTask(source) || sourceId === targetId) return
+    const links = source.dependsOn ?? []
+    if (links.some((l) => l.id === targetId && l.type === 'FS')) return
+    const next = [...links, { id: targetId, type: 'FS' as const, lag: 0 }]
+    const patched = updateTask(sc.tasks, sourceId, (t) => ({ ...t, dependsOn: next }))
+    if (validateLinks(patched).length > 0 || detectCycle(patched)) return
+    applyLinks(sourceId, next)
+  }
   const cal = calendar ?? defaultCalendar()
   const rows = flattenTasks(sc.tasks, null, 0, collapsed, [])
   const template = colTemplate(visibleCols, columnOrder, titleWidthGrid)
@@ -893,6 +1278,8 @@ export function PlannerEditor(): React.JSX.Element {
   ) as MovableColumnKey[]
   const ownerCtx = ownerMenu ? findTaskCtx(sc.tasks, ownerMenu.id) : null
   const ownerTask = ownerCtx ? ownerCtx.parent[ownerCtx.index] : null
+  const percentCtx = percentMenu ? findTaskCtx(sc.tasks, percentMenu.id) : null
+  const percentTask = percentCtx ? percentCtx.parent[percentCtx.index] : null
   const ownerNames = ownerTask ? collectOwners(sc.tasks) : []
   const ownerChecked = new Set(
     ownerTask ? parseOwners(ownerTask.owner).map((n) => n.toLowerCase()) : []
@@ -983,9 +1370,16 @@ export function PlannerEditor(): React.JSX.Element {
               className="planner-input planner-num"
               data-cell={task.id}
               data-col="duration"
-              value={numberDrafts[numberDraftKey(task.id, 'duration')] ?? task.duration ?? ''}
-              readOnly={isParent}
-              disabled={isParent}
+              value={displayNumber(task, 'duration')}
+              readOnly={isParent || depBothLocked(task)}
+              disabled={isParent || depBothLocked(task)}
+              title={
+                isParent
+                  ? undefined
+                  : depLockedTitle(task, 'start') && depLockedTitle(task, 'end')
+                    ? 'Duration is derived from dependency-linked dates'
+                    : undefined
+              }
               onFocus={startEditSession}
               onChange={(e) => {
                 setNumberDrafts((d) => ({
@@ -1010,8 +1404,11 @@ export function PlannerEditor(): React.JSX.Element {
           <div key={key} className="planner-col-date planner-cell">
             <DateField
               value={task.planStart}
-              readOnly={isParent}
-              disabled={isParent}
+              readOnly={isParent || depStartLocked(task)}
+              disabled={isParent || depStartLocked(task)}
+              title={
+                isParent ? undefined : (depViolations[task.id] ?? depLockedTitle(task, 'start'))
+              }
               cellId={task.id}
               col="planStart"
               onChange={(v) => editField(sc, task.id, 'planStart', v)}
@@ -1023,14 +1420,68 @@ export function PlannerEditor(): React.JSX.Element {
           <div key={key} className="planner-col-date planner-cell">
             <DateField
               value={task.planEnd}
-              readOnly={isParent}
-              disabled={isParent}
+              readOnly={isParent || depEndLocked(task)}
+              disabled={isParent || depEndLocked(task)}
+              title={isParent ? undefined : (depViolations[task.id] ?? depLockedTitle(task, 'end'))}
               cellId={task.id}
               col="planEnd"
               onChange={(v) => editField(sc, task.id, 'planEnd', v)}
             />
           </div>
         )
+      case 'deps': {
+        if (isParent) return <div key={key} className="planner-col-deps planner-cell" />
+        const links = task.dependsOn ?? []
+        return (
+          <div key={key} className="planner-col-deps planner-cell">
+            <button
+              type="button"
+              draggable
+              className={`planner-dep-chip${links.length ? '' : ' planner-dep-empty'}`}
+              data-cell={task.id}
+              data-col="deps"
+              title={
+                (links.length
+                  ? links
+                      .map(
+                        (l) =>
+                          `${noById.get(l.id) ?? '?'} ${l.type}${lagLabel(l.lag)} — ${
+                            allTaskMap.get(l.id)?.title || ''
+                          }`
+                      )
+                      .join('\n')
+                  : 'Add dependencies') +
+                '\nDrag onto another task to depend on it (this task chains after it, FS)'
+              }
+              onClick={(e) => {
+                e.stopPropagation()
+                setSelected(new Set([task.id]))
+                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                setDepEditor({ id: task.id, x: rect.left, y: rect.bottom + 2 })
+              }}
+              onDragStart={(e) => {
+                e.dataTransfer.effectAllowed = 'link'
+                e.dataTransfer.setData('text/plain', `PTNOTES_DEP_FS:${task.id}`)
+                e.dataTransfer.setDragImage(DEP_DRAG_BLANK, 0, 0)
+                setDepDragFrom({ x: e.clientX, y: e.clientY })
+                setDepDragSource(task.id)
+              }}
+              onDragEnd={() => {
+                setDepDragSource(null)
+                setDepDragOver(null)
+                setDepDragFrom(null)
+                setDepDragCursor(null)
+              }}
+            >
+              {links.length
+                ? links
+                    .map((l) => `${noById.get(l.id) ?? '?'} ${l.type}${lagLabel(l.lag)}`)
+                    .join(', ')
+                : '—'}
+            </button>
+          </div>
+        )
+      }
       case 'actualStart':
         return (
           <div key={key} className="planner-col-date planner-cell">
@@ -1063,12 +1514,15 @@ export function PlannerEditor(): React.JSX.Element {
               className="planner-input planner-num"
               data-cell={task.id}
               data-col="percent"
-              value={
-                numberDrafts[numberDraftKey(task.id, 'percentComplete')] ?? task.percentComplete
-              }
+              value={displayNumber(task, 'percentComplete')}
               readOnly={isParent}
               disabled={isParent}
-              onFocus={startEditSession}
+              onFocus={(e) => {
+                startEditSession()
+                if (!isParent) {
+                  setPercentMenu({ id: task.id, input: e.currentTarget })
+                }
+              }}
               onChange={(e) => {
                 setNumberDrafts((d) => ({
                   ...d,
@@ -1076,13 +1530,16 @@ export function PlannerEditor(): React.JSX.Element {
                 }))
                 commitNumber(sc, task.id, 'percentComplete', e.target.value)
               }}
-              onBlur={() => {
+              onBlur={(e) => {
                 normalizeNumber(
                   task.id,
                   'percentComplete',
                   numberDrafts[numberDraftKey(task.id, 'percentComplete')] ?? ''
                 )
+                const rt = e.relatedTarget
+                if (rt instanceof Node && percentMenuRef.current?.contains(rt)) return
                 endEditSession()
+                setPercentMenu((m) => (m && m.id === task.id ? null : m))
               }}
             />
           </div>
@@ -1109,11 +1566,41 @@ export function PlannerEditor(): React.JSX.Element {
     const isParent = task.children.length > 0
     return (
       <div
-        className={`planner-grid-row${selected.has(task.id) ? ' planner-row-selected' : ''}`}
+        className={`planner-grid-row${selected.has(task.id) ? ' planner-row-selected' : ''}${
+          depDragOver === task.id ? ' planner-row-drop-hint' : ''
+        }`}
         data-row={task.id}
         style={{ gridTemplateColumns: template }}
         onClick={(e) => handleRowClick(e, task.id)}
         onContextMenu={(e) => handleRowContext(e, task.id)}
+        onDragOver={(e) => {
+          if (!depDragSource || depDragSource === task.id || task.children.length > 0) return
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'link'
+          setDepDragOver(task.id)
+        }}
+        onDragLeave={(e) => {
+          if (depDragOver === task.id && !e.currentTarget.contains(e.relatedTarget as Node)) {
+            setDepDragOver(null)
+          }
+        }}
+        onDrop={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          const data = e.dataTransfer.getData('text/plain')
+          const sourceId = data.replace('PTNOTES_DEP_FS:', '') || depDragSource
+          if (sourceId) addLinkFromDrag(sourceId, task.id)
+          setDepDragSource(null)
+          setDepDragOver(null)
+          setDepDragFrom(null)
+          setDepDragCursor(null)
+        }}
+        onDragEnd={() => {
+          setDepDragSource(null)
+          setDepDragOver(null)
+          setDepDragFrom(null)
+          setDepDragCursor(null)
+        }}
       >
         <div className="planner-col-toggle planner-cell">
           {isParent ? (
@@ -1223,10 +1710,12 @@ export function PlannerEditor(): React.JSX.Element {
     record = true
   ): void {
     if (record && !editSession.current) recordHistory(base)
+    const dep = applyDependencies(stripInvalidLinks(tasks).tasks, cal)
+    setDepViolations(Object.fromEntries(dep.violations.map((v) => [v.taskId, v.message])))
     const nextSchedule = {
       ...base,
       ...override,
-      tasks: rollupScheduleTasks(tasks, cal)
+      tasks: rollupScheduleTasks(dep.tasks, cal)
     }
     updateScheduleContent(nextSchedule)
     if (saveTimer.current !== null) clearTimeout(saveTimer.current)
@@ -1249,7 +1738,8 @@ export function PlannerEditor(): React.JSX.Element {
     editTask(base, id, (prev) => {
       const next = { ...prev, [field]: value }
       if (field === 'planStart' || field === 'planEnd' || field === 'duration') {
-        return applyDateRule(prev, next, cal)
+        const constr = isLeafTask(prev) ? linkConstraints(prev) : undefined
+        return applyDateRule(prev, next, cal, constr)
       }
       return next
     })
@@ -1651,6 +2141,7 @@ export function PlannerEditor(): React.JSX.Element {
       .filter((k) => k !== 'indicator' && (k === 'no' || k === 'title' || visibleCols.has(k)))
       .map((k) => ({ key: k, label: COLUMNS.find((c) => c.key === k)?.label ?? k }))
     const allRows = flattenTasks(sc.tasks, null, 0, new Set(), [])
+    const noByExportId = new Map(allRows.map((r) => [r.task.id, r.no]))
     const exportRows: PlannerExportRow[] = allRows.map((r) => ({
       no: r.no,
       title: r.task.title,
@@ -1663,6 +2154,17 @@ export function PlannerEditor(): React.JSX.Element {
       actualEnd: r.task.actualEnd,
       percentComplete: r.task.percentComplete,
       note: r.task.note,
+      dependsOn:
+        r.task.dependsOn && r.task.dependsOn.length > 0
+          ? r.task.dependsOn
+              .map(
+                (l) =>
+                  `${noByExportId.get(l.id) ?? '?'} ${l.type}${
+                    l.lag === 0 ? '' : l.lag > 0 ? `+${l.lag}` : l.lag
+                  }`
+              )
+              .join(', ')
+          : null,
       depth: r.depth,
       hasChildren: r.task.children.length > 0
     }))
@@ -2012,6 +2514,43 @@ export function PlannerEditor(): React.JSX.Element {
     return `${field}:${id}`
   }
 
+  function setSliderPercent(id: string, v: number): void {
+    setNumberDrafts((d) => {
+      if (!(numberDraftKey(id, 'percentComplete') in d)) return d
+      const next = { ...d }
+      delete next[numberDraftKey(id, 'percentComplete')]
+      return next
+    })
+    const current = useAppStore.getState().scheduleContent
+    if (!current) return
+    editField(current, id, 'percentComplete', Math.min(100, Math.max(0, Math.round(v))))
+  }
+
+  function handlePercentSliderBlur(e: React.FocusEvent): void {
+    endEditSession()
+    const rt = e.relatedTarget
+    if (!(rt instanceof Node && percentMenuRef.current?.contains(rt))) {
+      setPercentMenu(null)
+    }
+  }
+
+  /** Draft shown while typing; a draft no longer matching the committed value is stale (e.g.
+   *  a later planEnd edit recomputed the duration) — the committed value wins instead. */
+  function displayNumber(
+    task: ScheduleTask,
+    field: 'duration' | 'percentComplete'
+  ): string | number {
+    const committed = field === 'duration' ? task.duration : task.percentComplete
+    const draft = numberDrafts[numberDraftKey(task.id, field)]
+    if (
+      draft !== undefined &&
+      (committed === null || committed === undefined || Number(draft) !== committed)
+    ) {
+      return committed ?? ''
+    }
+    return draft ?? committed ?? ''
+  }
+
   function normalizeNumber(id: string, field: 'duration' | 'percentComplete', raw: string): void {
     const trimmed = raw.trim()
     const key = numberDraftKey(id, field)
@@ -2293,6 +2832,7 @@ export function PlannerEditor(): React.JSX.Element {
                 collapsed={collapsed}
                 dayWidth={ganttDayWidth}
                 titleWidth={titleWidthGantt}
+                linkLocks={ganttLinkLocks}
                 onToggle={toggleCollapse}
                 onTitleWidthResize={setTitleWidthGantt}
                 onTitleWidthCommit={(w) => persistTitleWidth({ gantt: w })}
@@ -2434,6 +2974,78 @@ export function PlannerEditor(): React.JSX.Element {
             )}
           </div>
         </>
+      )}
+
+      {percentMenu && percentTask && percentTask.children.length === 0 && (
+        <div ref={percentMenuRef} className="note-menu planner-percent-menu">
+          <div className="note-menu-slider">
+            <span>%</span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={10}
+              value={percentTask.percentComplete ?? 0}
+              onChange={(e) => setSliderPercent(percentTask.id, Number(e.target.value))}
+              onPointerDown={() => startEditSession()}
+              onPointerUp={() => endEditSession()}
+              onKeyUp={endEditSession}
+              onBlur={handlePercentSliderBlur}
+            />
+            <span className="note-menu-slider-value">{percentTask.percentComplete ?? 0}%</span>
+          </div>
+        </div>
+      )}
+
+      {depEditor &&
+        (() => {
+          const ctx = findTaskCtx(sc.tasks, depEditor.id)
+          const depTask = ctx ? ctx.parent[ctx.index] : null
+          if (!depTask) return null
+          return (
+            <>
+              <div className="menu-overlay" onClick={() => setDepEditor(null)} />
+              <div
+                ref={depEditorRef}
+                className="note-menu planner-dep-menu"
+                style={{ left: depEditor.x, top: depEditor.y }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <DepEditorMenu
+                  schedule={sc.tasks}
+                  task={depTask}
+                  noById={noById}
+                  allTaskMap={allTaskMap}
+                  onApply={(l) => applyLinks(depTask.id, l)}
+                  onClose={() => setDepEditor(null)}
+                />
+              </div>
+            </>
+          )
+        })()}
+
+      {depDragSource && depDragFrom && (
+        <div className="planner-dep-drag-overlay">
+          <svg width="100%" height="100%">
+            {depDragCursor && (
+              <line
+                x1={depDragFrom.x}
+                y1={depDragFrom.y}
+                x2={depDragCursor.x}
+                y2={depDragCursor.y}
+                className="planner-dep-drag-line"
+              />
+            )}
+          </svg>
+          {depDragCursor && (
+            <div
+              className="planner-dep-drag-target"
+              style={{ left: depDragCursor.x, top: depDragCursor.y }}
+            >
+              <MdiIcon path={mdiTargetVariant} size={20} />
+            </div>
+          )}
+        </div>
       )}
 
       {gridMenu && (

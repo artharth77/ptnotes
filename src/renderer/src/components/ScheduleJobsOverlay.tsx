@@ -588,9 +588,9 @@ export function ScheduleJobsOverlay(): React.JSX.Element {
                         )}
                       </div>
                       <div className="sched-jobs-times-add">
-                      <button className="btn" onClick={addTime}>
-                        <MdiIcon path={mdiMenuLeft} size={16} /> Add
-                      </button>
+                        <button className="btn" onClick={addTime}>
+                          <MdiIcon path={mdiMenuLeft} size={16} /> Add
+                        </button>
                         <input
                           className="sched-jobs-times-input"
                           type="text"

@@ -5,6 +5,23 @@
 
 export type ScheduleStatus = 'not-started' | 'in-progress' | 'completed' | 'pending' | 'on-hold'
 
+/** Dependency link type: how a predecessor pins a successor's dates. */
+export type TaskLinkType = 'FS' | 'SS' | 'FF' | 'SF'
+
+/**
+ * One incoming dependency link of a leaf task. `id` is the predecessor task's id,
+ * `lag` is measured in working days (may be negative):
+ * - FS: successor start = predecessor planEnd + lag; lag 0 → next working day.
+ * - SS: successor start = predecessor planStart + lag (lag 0 = same day).
+ * - FF: successor end = predecessor planEnd + lag (lag 0 = same day).
+ * - SF: successor end = predecessor planStart + lag (lag 0 = the working day before it starts).
+ */
+export interface TaskLink {
+  id: string
+  type: TaskLinkType
+  lag: number
+}
+
 /** Project-level working-day configuration, stored at `<project>/planner/calendar.json`. */
 export interface ProjectCalendar {
   /** First working weekday (0 = Sunday … 6 = Saturday). Default 1 (Monday). */
@@ -31,6 +48,8 @@ export interface ScheduleTask {
   /** 0–100. Computed for parents; manual for leaves. */
   percentComplete: number
   note: string
+  /** Incoming links (predecessors). Leaves only — parents are pure rollups. */
+  dependsOn?: TaskLink[]
   children: ScheduleTask[]
 }
 
@@ -178,12 +197,32 @@ export function computeDuration(start: string, end: string, calendar: ProjectCal
  *   `planEnd` is assigned, keep `planEnd` and recompute `duration`.
  * - duration edited → recompute `planEnd` (`start + duration - 1` working days).
  * - end edited → keep the new `planEnd`, recompute `duration`.
+ *
+ * With dependency `constraints` the pinned edge is the anchor instead:
+ * - end locked (FF/SF incoming) → start edited recomputes `duration`; duration edited
+ *   pulls `planStart` back from the pinned `planEnd`. The pinned end is never moved.
+ * - both edges locked → nothing is recomputed (all three fields are derived).
  */
 export function applyDateRule(
   prev: ScheduleTask,
   next: ScheduleTask,
-  calendar: ProjectCalendar
+  calendar: ProjectCalendar,
+  constraints?: LinkConstraints
 ): ScheduleTask {
+  if (constraints?.startLocked && constraints?.endLocked) return { ...next }
+  if (constraints?.endLocked) {
+    const result: ScheduleTask = { ...next }
+    if (next.planStart !== prev.planStart) {
+      if (next.planStart && next.planEnd) {
+        result.duration = computeDuration(next.planStart, next.planEnd, calendar)
+      }
+    } else if (next.duration !== prev.duration) {
+      if (next.planEnd && next.duration && next.duration > 0) {
+        result.planStart = shiftWorkingDaysStr(next.planEnd, -(next.duration - 1), calendar)
+      }
+    }
+    return result
+  }
   const result: ScheduleTask = { ...next }
   if (next.planStart !== prev.planStart) {
     if (next.planStart && next.duration && next.duration > 0) {
@@ -344,6 +383,410 @@ export function rollupScheduleTasks(
   calendar: ProjectCalendar
 ): ScheduleTask[] {
   return tasks.map((t) => rollupTask(t, calendar))
+}
+
+// ---- Task dependencies ----
+
+/** Which plan fields of a task are pinned by its incoming dependency links. */
+export interface LinkConstraints {
+  startLocked: boolean
+  endLocked: boolean
+}
+
+/** A dependency problem reported for a task (`taskId` — the successor carrying `dependsOn`). */
+export interface LinkIssue {
+  taskId: string
+  linkId: string
+  message: string
+}
+
+/** A date conflict or unresolvable link found while applying dependencies. */
+export interface LinkViolation {
+  taskId: string
+  message: string
+}
+
+/** Whether a task is a leaf (no children) — only leaves may participate in links. */
+export function isLeafTask(task: ScheduleTask): boolean {
+  return task.children.length === 0
+}
+
+/**
+ * Which plan fields a task's incoming links pin:
+ * - FS/SS incoming → `startLocked` (start computed from predecessors).
+ * - FF/SF incoming → `endLocked` (end computed from predecessors).
+ * - Both edges pinned → `start`/`end` computed and `duration` derived from the two.
+ */
+export function linkConstraints(task: Pick<ScheduleTask, 'dependsOn'>): LinkConstraints {
+  let startLocked = false
+  let endLocked = false
+  for (const link of task.dependsOn ?? []) {
+    if (link.type === 'FS' || link.type === 'SS') startLocked = true
+    else endLocked = true
+  }
+  return { startLocked, endLocked }
+}
+
+/** Every ancestor id of the task with `id` (empty when it is a top-level task or missing). */
+export function collectAncestorIds(tasks: ScheduleTask[], id: string): Set<string> {
+  let found: Set<string> | null = null
+  const walk = (list: ScheduleTask[], path: string[]): boolean => {
+    for (const task of list) {
+      if (task.id === id) {
+        found = new Set(path)
+        return true
+      }
+      if (walk(task.children, [...path, task.id])) return true
+    }
+    return false
+  }
+  walk(tasks, [])
+  return found ?? new Set()
+}
+
+/**
+ * Leaf tasks that may become predecessors of task `id`: leaves excluding the task itself,
+ * its ancestors and its descendants (a self/descendant link would always be a cycle,
+ * ancestor links are meaningless for leaf-only links).
+ */
+export function eligibleLinkTargets(tasks: ScheduleTask[], id: string): ScheduleTask[] {
+  let target: ScheduleTask | null = null
+  const find = (list: ScheduleTask[]): void => {
+    for (const task of list) {
+      if (task.id === id) target = task
+      find(task.children)
+    }
+  }
+  find(tasks)
+  if (!target || !isLeafTask(target)) return []
+  const ancestors = collectAncestorIds(tasks, id)
+  const out: ScheduleTask[] = []
+  const walk = (list: ScheduleTask[], skip: boolean): void => {
+    for (const task of list) {
+      if (task.id === id) {
+        walk(task.children, true)
+        continue
+      }
+      if (!skip && isLeafTask(task) && !ancestors.has(task.id)) out.push(task)
+      walk(task.children, skip)
+    }
+  }
+  walk(tasks, false)
+  return out
+}
+
+interface TaskIndexEntry {
+  task: ScheduleTask
+  ancestors: Set<string>
+}
+
+function buildTaskIndex(tasks: ScheduleTask[]): Map<string, TaskIndexEntry> {
+  const map = new Map<string, TaskIndexEntry>()
+  const walk = (list: ScheduleTask[], ancestors: string[]): void => {
+    for (const task of list) {
+      map.set(task.id, { task, ancestors: new Set(ancestors) })
+      walk(task.children, [...ancestors, task.id])
+    }
+  }
+  walk(tasks, [])
+  return map
+}
+
+/** Structural problems in the link graph: self/dup links, missing or non-leaf participants, ancestor links. */
+export function validateLinks(tasks: ScheduleTask[]): LinkIssue[] {
+  const index = buildTaskIndex(tasks)
+  const issues: LinkIssue[] = []
+  for (const [id, entry] of index) {
+    const seen = new Set<string>()
+    const leaf = isLeafTask(entry.task)
+    if (!leaf && (entry.task.dependsOn ?? []).length > 0) {
+      issues.push({ taskId: id, linkId: id, message: 'Only leaf tasks can have dependencies' })
+    }
+    for (const link of entry.task.dependsOn ?? []) {
+      const key = `${link.id}|${link.type}`
+      if (link.id === id) {
+        issues.push({ taskId: id, linkId: link.id, message: 'A task cannot depend on itself' })
+        continue
+      }
+      if (seen.has(key)) {
+        issues.push({ taskId: id, linkId: link.id, message: 'Duplicate dependency link' })
+        continue
+      }
+      seen.add(key)
+      const pred = index.get(link.id)
+      if (!pred) {
+        issues.push({ taskId: id, linkId: link.id, message: 'Predecessor no longer exists' })
+        continue
+      }
+      if (!isLeafTask(pred.task)) {
+        issues.push({ taskId: id, linkId: link.id, message: 'Predecessor must be a leaf task' })
+        continue
+      }
+      if (entry.ancestors.has(link.id)) {
+        issues.push({ taskId: id, linkId: link.id, message: 'Predecessor is an ancestor task' })
+        continue
+      }
+      if (pred.ancestors.has(id)) {
+        issues.push({ taskId: id, linkId: link.id, message: 'Predecessor is a descendant task' })
+      }
+    }
+  }
+  return issues
+}
+
+/**
+ * Cycle check over the leaf link graph. Returns the ids stuck in a cycle (null when the
+ * graph is clean). Invalid links (missing/non-leaf/self) are ignored.
+ */
+export function detectCycle(tasks: ScheduleTask[]): string[] | null {
+  const index = buildTaskIndex(tasks)
+  const indeg = new Map<string, number>()
+  const successors = new Map<string, string[]>()
+  for (const [id, entry] of index) {
+    if (!isLeafTask(entry.task)) continue
+    indeg.set(id, 0)
+  }
+  for (const [id, entry] of index) {
+    if (!isLeafTask(entry.task)) continue
+    for (const link of entry.task.dependsOn ?? []) {
+      if (link.id === id) continue
+      const pred = index.get(link.id)
+      if (!pred || !isLeafTask(pred.task)) continue
+      successors.set(link.id, [...(successors.get(link.id) ?? []), id])
+      indeg.set(id, (indeg.get(id) ?? 0) + 1)
+    }
+  }
+  const queue = [...indeg.entries()].filter(([, d]) => d === 0).map(([id]) => id)
+  let processed = 0
+  while (queue.length > 0) {
+    const id = queue.pop() as string
+    processed++
+    for (const succId of successors.get(id) ?? []) {
+      const d = (indeg.get(succId) ?? 0) - 1
+      indeg.set(succId, d)
+      if (d === 0) queue.push(succId)
+    }
+  }
+  if (processed === indeg.size) return null
+  return [...indeg.entries()].filter(([, d]) => d > 0).map(([id]) => id)
+}
+
+/** Shift a `YYYY-MM-DD` date by n working days (0 returns the date unchanged). */
+function shiftWorkingDaysStr(date: string, n: number, calendar: ProjectCalendar): string {
+  if (!date || n === 0) return date
+  let cur = parseDate(date)
+  if (n > 0) {
+    for (let i = 0; i < n; i++) cur = nextWorkingDay(cur, calendar)
+  } else {
+    for (let i = 0; i > n; i--) {
+      cur = addDays(cur, -1)
+      while (!isWorkingDay(cur, calendar)) cur = addDays(cur, -1)
+    }
+  }
+  return formatDate(cur)
+}
+
+/** The dates one link pins on its successor; null when the link cannot be applied. */
+function linkTargetDates(
+  link: TaskLink,
+  successorId: string,
+  current: Map<string, ScheduleTask>,
+  calendar: ProjectCalendar
+): { start?: string; end?: string } | null {
+  if (link.id === successorId) return null
+  const pred = current.get(link.id)
+  if (!pred || !isLeafTask(pred)) return null
+  switch (link.type) {
+    case 'FS':
+      if (!pred.planEnd) return null
+      return { start: shiftWorkingDaysStr(pred.planEnd, link.lag + 1, calendar) }
+    case 'SS':
+      if (!pred.planStart) return null
+      return { start: shiftWorkingDaysStr(pred.planStart, link.lag, calendar) }
+    case 'FF':
+      if (!pred.planEnd) return null
+      return { end: shiftWorkingDaysStr(pred.planEnd, link.lag, calendar) }
+    case 'SF':
+      if (!pred.planStart) return null
+      return { end: shiftWorkingDaysStr(pred.planStart, link.lag - 1, calendar) }
+  }
+}
+
+function mapTree(tasks: ScheduleTask[], fn: (task: ScheduleTask) => ScheduleTask): ScheduleTask[] {
+  return tasks.map((task) => {
+    const updated = fn(task)
+    return { ...updated, children: mapTree(updated.children, fn) }
+  })
+}
+
+/** Remove every link pointing at the removed task id (whole tree). */
+export function removeTaskLinks(tasks: ScheduleTask[], removedId: string): ScheduleTask[] {
+  return mapTree(tasks, (task) => {
+    if (!task.dependsOn?.length) return task
+    const dependsOn = task.dependsOn.filter((l) => l.id !== removedId)
+    if (dependsOn.length === task.dependsOn.length) return task
+    return { ...task, dependsOn: dependsOn.length ? dependsOn : undefined }
+  })
+}
+
+/**
+ * Drop structurally invalid links (non-leaf or missing participants, self/ancestor/
+ * descendant links, duplicates). Returns the cleaned tree and how many links were removed.
+ */
+export function stripInvalidLinks(tasks: ScheduleTask[]): {
+  tasks: ScheduleTask[]
+  removed: number
+} {
+  const index = buildTaskIndex(tasks)
+  let removed = 0
+  const cleaned = mapTree(tasks, (task) => {
+    if (!task.dependsOn?.length) return task
+    const entry = index.get(task.id)
+    if (!entry) return task
+    const links = task.dependsOn
+    const keep = links.filter((link, i) => {
+      if (isLeafTask(task) && link.id !== task.id) {
+        const pred = index.get(link.id)
+        if (
+          pred &&
+          isLeafTask(pred.task) &&
+          !entry.ancestors.has(link.id) &&
+          !pred.ancestors.has(task.id)
+        ) {
+          const firstAt = links.findIndex((l) => l.id === link.id && l.type === link.type)
+          if (firstAt === i) return true
+        }
+      }
+      removed++
+      return false
+    })
+    if (keep.length === task.dependsOn.length) return task
+    return keep.length ? { ...task, dependsOn: keep } : { ...task, dependsOn: undefined }
+  })
+  return { tasks: cleaned, removed }
+}
+
+export interface AppliedDependencies {
+  tasks: ScheduleTask[]
+  violations: LinkViolation[]
+}
+
+/**
+ * Recompute leaf plan dates from dependency links (FS/SS/FF/SF + lag), in topological
+ * order so chained links resolve through freshly computed predecessor dates. Run this
+ * BEFORE `rollupScheduleTasks` so parents roll up from the resolved leaves.
+ *
+ * - Incoming FS/SS pin `planStart` (max over the links), FF/SF pin `planEnd`.
+ * - Both edges pinned → `duration` is derived from the two computed dates; when
+ *   start > end the range is reported as a violation.
+ * - A pinned start recomputes the free end from `duration` (mirror of the date rule);
+ *   when no `duration` is set, the existing end is kept and `duration` recomputed.
+ * - A pinned end recomputes `duration` from the pinned end and the manual start, and
+ *   repairs an inverted manual start by pulling it back from the pinned end.
+ * - Links whose predecessor is missing, is a parent, or lacks the needed date are
+ *   skipped with a violation.
+ * On a cycle, the tasks are returned unchanged with violations.
+ */
+export function applyDependencies(
+  tasks: ScheduleTask[],
+  calendar: ProjectCalendar
+): AppliedDependencies {
+  const cycle = detectCycle(tasks)
+  const violations: LinkViolation[] = []
+  if (cycle) {
+    for (const id of cycle) violations.push({ taskId: id, message: 'Dependency cycle detected' })
+    return { tasks, violations }
+  }
+  const index = buildTaskIndex(tasks)
+  const current = new Map<string, ScheduleTask>()
+  for (const [id, entry] of index) current.set(id, entry.task)
+  // Topological order via Kahn's algorithm (graph already cycle-free).
+  const indeg = new Map<string, number>()
+  const successors = new Map<string, string[]>()
+  for (const [id, entry] of index) {
+    if (!isLeafTask(entry.task)) continue
+    indeg.set(id, 0)
+  }
+  for (const [id, entry] of index) {
+    if (!isLeafTask(entry.task)) continue
+    for (const link of entry.task.dependsOn ?? []) {
+      if (link.id === id) continue
+      const pred = index.get(link.id)
+      if (!pred || !isLeafTask(pred.task)) continue
+      successors.set(link.id, [...(successors.get(link.id) ?? []), id])
+      indeg.set(id, (indeg.get(id) ?? 0) + 1)
+    }
+  }
+  const queue = [...indeg.entries()].filter(([, d]) => d === 0).map(([id]) => id)
+  const order: string[] = []
+  while (queue.length > 0) {
+    const id = queue.pop() as string
+    order.push(id)
+    for (const succId of successors.get(id) ?? []) {
+      const d = (indeg.get(succId) ?? 0) - 1
+      indeg.set(succId, d)
+      if (d === 0) queue.push(succId)
+    }
+  }
+  const maxOf = (list: string[]): string => list.reduce((a, b) => (b > a ? b : a))
+  for (const id of order) {
+    const task = current.get(id)
+    if (!task) continue
+    const links = task.dependsOn ?? []
+    if (links.length === 0) continue
+    const startCands: string[] = []
+    const endCands: string[] = []
+    for (const link of links) {
+      const target = linkTargetDates(link, id, current, calendar)
+      if (!target) {
+        const pred = current.get(link.id)
+        if (pred && isLeafTask(pred)) {
+          const needed = link.type === 'FS' || link.type === 'FF' ? 'end date' : 'start date'
+          violations.push({
+            taskId: id,
+            message: `Predecessor "${pred.title}" has no ${needed}`
+          })
+        }
+        continue
+      }
+      if (target.start) startCands.push(target.start)
+      if (target.end) endCands.push(target.end)
+    }
+    const next: ScheduleTask = { ...task }
+    const newStart = startCands.length ? maxOf(startCands) : null
+    const newEnd = endCands.length ? maxOf(endCands) : null
+    if (newStart) next.planStart = newStart
+    if (newEnd) next.planEnd = newEnd
+    if (newStart && newEnd) {
+      if (newStart <= newEnd) {
+        next.duration = computeDuration(newStart, newEnd, calendar)
+      } else {
+        violations.push({
+          taskId: id,
+          message: `Dependency dates conflict (start ${newStart} after end ${newEnd})`
+        })
+        next.duration = 0
+      }
+    } else if (newStart) {
+      if (next.duration && next.duration > 0) {
+        next.planEnd = computeEndDate(newStart, next.duration, calendar)
+      } else if (next.planEnd) {
+        next.duration = computeDuration(newStart, next.planEnd, calendar)
+      }
+    } else if (newEnd) {
+      if (next.planStart && next.planStart > newEnd) {
+        if (next.duration && next.duration > 0) {
+          next.planStart = shiftWorkingDaysStr(newEnd, -(next.duration - 1), calendar)
+        } else {
+          next.planStart = newEnd
+        }
+      }
+      if (next.planStart) next.duration = computeDuration(next.planStart, newEnd, calendar)
+    }
+    current.set(id, next)
+  }
+  const rebuilt = mapTree(tasks, (task) => current.get(task.id) ?? task)
+  return { tasks: rebuilt, violations }
 }
 
 /**
@@ -581,6 +1024,8 @@ export interface PlannerExportRow {
   actualEnd: string | null
   percentComplete: number
   note: string
+  /** Comma-joined predecessor summary (`1.2 FS+1`), null when the row has no links. */
+  dependsOn?: string | null
   depth: number
   hasChildren: boolean
 }
