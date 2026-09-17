@@ -7313,6 +7313,23 @@ fieldset.kanban-form {
   max-width: 280px;
 }
 
+.planner-percent-menu {
+  padding: 8px 12px;
+  cursor: default;
+}
+
+.planner-percent-menu .note-menu-slider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  width: 220px;
+}
+
+.planner-percent-menu .note-menu-slider-value {
+  min-width: 40px;
+}
+
 .planner-dep-menu {
   min-width: 340px;
   max-width: 420px;

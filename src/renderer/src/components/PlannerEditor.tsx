@@ -662,6 +662,9 @@ export function PlannerEditor(): React.JSX.Element {
   } | null>(null)
   const [gridMenu, setGridMenu] = useState<{ x: number; y: number; id: string } | null>(null)
   const [gridPercent, setGridPercent] = useState(0)
+  const [percentMenu, setPercentMenu] = useState<{ id: string; input: HTMLInputElement } | null>(
+    null
+  )
   const [ownerMenu, setOwnerMenu] = useState<{ id: string; x: number; y: number } | null>(null)
   const [depEditor, setDepEditor] = useState<{ id: string; x: number; y: number } | null>(null)
   const [depViolations, setDepViolations] = useState<Record<string, string>>({})
@@ -709,6 +712,7 @@ export function PlannerEditor(): React.JSX.Element {
     )
     setView('table')
     setOwnerMenu(null)
+    setPercentMenu(null)
   }
   const [clipboard, setClipboard] = useState<ScheduleTask[]>([])
   const [clipboardMode, setClipboardMode] = useState<'copy' | 'cut' | null>(null)
@@ -719,6 +723,7 @@ export function PlannerEditor(): React.JSX.Element {
   const statusMenuRef = useRef<HTMLDivElement>(null)
   const gridMenuRef = useRef<HTMLDivElement>(null)
   const ownerMenuRef = useRef<HTMLDivElement>(null)
+  const percentMenuRef = useRef<HTMLDivElement>(null)
   const depEditorRef = useRef<HTMLDivElement>(null)
   const gridPercentBase = useRef<Schedule | null>(null)
   const pendingFocus = useRef<{ id: string; col: string } | null>(null)
@@ -956,6 +961,7 @@ export function PlannerEditor(): React.JSX.Element {
   function switchView(next: 'table' | 'gantt'): void {
     if (next === view) return
     setOwnerMenu(null)
+    setPercentMenu(null)
     endEditSession()
     const current = useAppStore.getState().scheduleContent
     if (current) useAppStore.getState().plannerClearHistory(current.id)
@@ -1060,6 +1066,48 @@ export function PlannerEditor(): React.JSX.Element {
     scrollEl?.addEventListener('scroll', onScroll, true)
     return () => scrollEl?.removeEventListener('scroll', onScroll, true)
   }, [ownerMenu])
+
+  useLayoutEffect(() => {
+    if (!percentMenu) return
+    const menu = percentMenuRef.current
+    if (!menu) return
+    const position = (): void => {
+      const rect = percentMenu.input.getBoundingClientRect()
+      const margin = 8
+      menu.style.left = `${Math.max(margin, Math.min(rect.left, window.innerWidth - menu.offsetWidth - margin))}px`
+      const top =
+        rect.bottom + 2 + menu.offsetHeight <= window.innerHeight - margin
+          ? rect.bottom + 2
+          : rect.top - menu.offsetHeight - 2
+      menu.style.top = `${Math.max(margin, top)}px`
+    }
+    const dismiss = (e: PointerEvent): void => {
+      const target = e.target as Node
+      if (target === percentMenu.input || menu.contains(target)) return
+      const active = document.activeElement
+      if (
+        active instanceof HTMLElement &&
+        (active === percentMenu.input || menu.contains(active))
+      ) {
+        active.blur()
+      }
+      setPercentMenu(null)
+    }
+    position()
+    window.addEventListener('resize', position)
+    document.addEventListener('scroll', position, true)
+    document.addEventListener('pointerdown', dismiss)
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setPercentMenu(null)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('resize', position)
+      document.removeEventListener('scroll', position, true)
+      document.removeEventListener('pointerdown', dismiss)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [percentMenu])
 
   useEffect(() => {
     if (!depEditor) return
@@ -1230,6 +1278,8 @@ export function PlannerEditor(): React.JSX.Element {
   ) as MovableColumnKey[]
   const ownerCtx = ownerMenu ? findTaskCtx(sc.tasks, ownerMenu.id) : null
   const ownerTask = ownerCtx ? ownerCtx.parent[ownerCtx.index] : null
+  const percentCtx = percentMenu ? findTaskCtx(sc.tasks, percentMenu.id) : null
+  const percentTask = percentCtx ? percentCtx.parent[percentCtx.index] : null
   const ownerNames = ownerTask ? collectOwners(sc.tasks) : []
   const ownerChecked = new Set(
     ownerTask ? parseOwners(ownerTask.owner).map((n) => n.toLowerCase()) : []
@@ -1467,7 +1517,12 @@ export function PlannerEditor(): React.JSX.Element {
               value={displayNumber(task, 'percentComplete')}
               readOnly={isParent}
               disabled={isParent}
-              onFocus={startEditSession}
+              onFocus={(e) => {
+                startEditSession()
+                if (!isParent) {
+                  setPercentMenu({ id: task.id, input: e.currentTarget })
+                }
+              }}
               onChange={(e) => {
                 setNumberDrafts((d) => ({
                   ...d,
@@ -1475,13 +1530,16 @@ export function PlannerEditor(): React.JSX.Element {
                 }))
                 commitNumber(sc, task.id, 'percentComplete', e.target.value)
               }}
-              onBlur={() => {
+              onBlur={(e) => {
                 normalizeNumber(
                   task.id,
                   'percentComplete',
                   numberDrafts[numberDraftKey(task.id, 'percentComplete')] ?? ''
                 )
+                const rt = e.relatedTarget
+                if (rt instanceof Node && percentMenuRef.current?.contains(rt)) return
                 endEditSession()
+                setPercentMenu((m) => (m && m.id === task.id ? null : m))
               }}
             />
           </div>
@@ -2456,6 +2514,26 @@ export function PlannerEditor(): React.JSX.Element {
     return `${field}:${id}`
   }
 
+  function setSliderPercent(id: string, v: number): void {
+    setNumberDrafts((d) => {
+      if (!(numberDraftKey(id, 'percentComplete') in d)) return d
+      const next = { ...d }
+      delete next[numberDraftKey(id, 'percentComplete')]
+      return next
+    })
+    const current = useAppStore.getState().scheduleContent
+    if (!current) return
+    editField(current, id, 'percentComplete', Math.min(100, Math.max(0, Math.round(v))))
+  }
+
+  function handlePercentSliderBlur(e: React.FocusEvent): void {
+    endEditSession()
+    const rt = e.relatedTarget
+    if (!(rt instanceof Node && percentMenuRef.current?.contains(rt))) {
+      setPercentMenu(null)
+    }
+  }
+
   /** Draft shown while typing; a draft no longer matching the committed value is stale (e.g.
    *  a later planEnd edit recomputed the duration) — the committed value wins instead. */
   function displayNumber(
@@ -2896,6 +2974,27 @@ export function PlannerEditor(): React.JSX.Element {
             )}
           </div>
         </>
+      )}
+
+      {percentMenu && percentTask && percentTask.children.length === 0 && (
+        <div ref={percentMenuRef} className="note-menu planner-percent-menu">
+          <div className="note-menu-slider">
+            <span>%</span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={10}
+              value={percentTask.percentComplete ?? 0}
+              onChange={(e) => setSliderPercent(percentTask.id, Number(e.target.value))}
+              onPointerDown={() => startEditSession()}
+              onPointerUp={() => endEditSession()}
+              onKeyUp={endEditSession}
+              onBlur={handlePercentSliderBlur}
+            />
+            <span className="note-menu-slider-value">{percentTask.percentComplete ?? 0}%</span>
+          </div>
+        </div>
       )}
 
       {depEditor &&
