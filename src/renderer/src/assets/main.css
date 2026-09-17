@@ -7628,6 +7628,23 @@ fieldset.kanban-form {
   font-weight: 600;
 }
 
+.gantt-row-left .gantt-col-title {
+  cursor: text;
+}
+
+.gantt-title-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 4px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--bg-elevated, var(--bg));
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  outline: none;
+}
+
 .gantt-row-grid {
   position: relative;
   display: flex;

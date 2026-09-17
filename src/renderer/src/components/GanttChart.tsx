@@ -1,6 +1,19 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { mdiCalendarRemove, mdiChevronDown, mdiChevronRight, mdiClose } from '@mdi/js'
-import { computeDuration, formatDate, isWorkingDay, parseDate } from '@shared/planner'
+import {
+  mdiArrowDownCircleOutline,
+  mdiArrowLeftCircleOutline,
+  mdiArrowRightCircleOutline,
+  mdiArrowUpCircleOutline,
+  mdiCalendarRemove,
+  mdiChevronDown,
+  mdiChevronRight,
+  mdiClose,
+  mdiPencil,
+  mdiTableRowPlusAfter,
+  mdiTableRowPlusBefore,
+  mdiTrashCanOutline
+} from '@mdi/js'
+import { computeDuration, findTaskCtx, formatDate, isWorkingDay, parseDate } from '@shared/planner'
 import type { ProjectCalendar, ScheduleTask } from '@shared/types'
 import { MdiIcon } from './MdiIcon'
 import { PlannerResizeHandle } from './PlannerResizeHandle'
@@ -35,6 +48,16 @@ interface GanttChartProps {
   ) => void
   onSetDates: (id: string, date: string) => void
   onClearPlan: (id: string) => void
+  onInsertBefore: (id: string) => string | null
+  onInsertAfter: (id: string) => string | null
+  onIndent: (id: string) => void
+  onOutdent: (id: string) => void
+  onMoveUp: (id: string) => void
+  onMoveDown: (id: string) => void
+  onDelete: (id: string) => void
+  onTitleEditStart: (id: string) => void
+  onTitleEdit: (id: string, value: string) => void
+  onTitleEditEnd: () => void
   bodyRef?: React.RefObject<HTMLDivElement | null>
 }
 
@@ -186,6 +209,16 @@ export function GanttChart({
   onResize,
   onSetDates,
   onClearPlan,
+  onInsertBefore,
+  onInsertAfter,
+  onIndent,
+  onOutdent,
+  onMoveUp,
+  onMoveDown,
+  onDelete,
+  onTitleEditStart,
+  onTitleEdit,
+  onTitleEditEnd,
   bodyRef
 }: GanttChartProps): React.JSX.Element {
   const timeline = useMemo(() => buildTimeline(tasks), [tasks])
@@ -207,6 +240,10 @@ export function GanttChart({
     bottom: number
   } | null>(null)
   const popupRef = useRef<HTMLDivElement>(null)
+  const [rowMenu, setRowMenu] = useState<{ id: string; x: number; y: number } | null>(null)
+  const rowMenuRef = useRef<HTMLDivElement>(null)
+  const [titleEditId, setTitleEditId] = useState<string | null>(null)
+  const titleInputRef = useRef<HTMLInputElement>(null)
   const dragCleanup = useRef<(() => void) | null>(null)
   const [titleTip, setTitleTip] = useState<NameTipState | null>(null)
   const noMap = useMemo(() => {
@@ -264,6 +301,45 @@ export function GanttChart({
     el.style.left = `${left}px`
     el.style.top = `${top}px`
   }, [popup])
+
+  useEffect(() => {
+    if (!rowMenu) return
+    const onDocMouseDown = (e: MouseEvent): void => {
+      const el = e.target as HTMLElement
+      if (el.closest('.gantt-row-menu')) return
+      setRowMenu(null)
+    }
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setRowMenu(null)
+    }
+    document.addEventListener('mousedown', onDocMouseDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocMouseDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [rowMenu])
+
+  useLayoutEffect(() => {
+    if (!rowMenu) return
+    const el = rowMenuRef.current
+    if (!el) return
+    const margin = 8
+    const width = el.offsetWidth
+    const height = el.offsetHeight
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const left = Math.max(margin, Math.min(rowMenu.x, vw - width - margin))
+    const top = Math.max(margin, Math.min(rowMenu.y, vh - height - margin))
+    el.style.left = `${left}px`
+    el.style.top = `${top}px`
+  }, [rowMenu])
+
+  useEffect(() => {
+    if (!titleEditId) return
+    titleInputRef.current?.focus()
+    titleInputRef.current?.select()
+  }, [titleEditId])
 
   function handleScroll(e: React.UIEvent<HTMLDivElement>): void {
     const idx = Math.min(
@@ -386,7 +462,17 @@ export function GanttChart({
     return (
       <div key={task.id} className="gantt-task-group">
         <div className="gantt-row" style={{ width: leftWidth + timelineWidth }}>
-          <div className="gantt-row-left" style={{ width: leftWidth }}>
+          <div
+            className="gantt-row-left"
+            style={{ width: leftWidth }}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              setTitleTip(null)
+              setTitleEditId(null)
+              onTitleEditEnd()
+              setRowMenu({ id: task.id, x: e.clientX, y: e.clientY })
+            }}
+          >
             <div className="gantt-col-toggle">
               {isParent ? (
                 <button
@@ -401,28 +487,55 @@ export function GanttChart({
               )}
             </div>
             <div className="gantt-col-no">{no}</div>
-            <div
-              className={`gantt-col-title${isParent ? ' gantt-title-parent' : ''}${
-                canSetDates ? ' gantt-title-dim' : ''
-              }`}
-              style={{ paddingLeft: depth * 14 }}
-              onMouseEnter={(e) =>
-                setTitleTip(
-                  nameTipFrom(
-                    e,
-                    task.title || (isParent ? 'Group task' : 'Task title'),
-                    `planner-name-tip gantt-name-tip${isParent ? ' gantt-name-tip-parent' : ''}${
-                      canSetDates ? ' gantt-name-tip-dim' : ''
-                    }`,
-                    depth * 14,
-                    6
+            {titleEditId === task.id ? (
+              <input
+                ref={titleInputRef}
+                className="gantt-title-input"
+                style={{ paddingLeft: depth * 14 }}
+                value={task.title}
+                onFocus={() => onTitleEditStart(task.id)}
+                onChange={(e) => onTitleEdit(task.id, e.target.value)}
+                onBlur={() => {
+                  onTitleEditEnd()
+                  setTitleEditId(null)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.currentTarget.blur()
+                  } else if (e.key === 'Escape') {
+                    onTitleEditEnd()
+                    setTitleEditId(null)
+                  }
+                }}
+              />
+            ) : (
+              <div
+                className={`gantt-col-title${isParent ? ' gantt-title-parent' : ''}${
+                  canSetDates ? ' gantt-title-dim' : ''
+                }`}
+                style={{ paddingLeft: depth * 14 }}
+                onMouseEnter={(e) =>
+                  setTitleTip(
+                    nameTipFrom(
+                      e,
+                      task.title || (isParent ? 'Group task' : 'Task title'),
+                      `planner-name-tip gantt-name-tip${isParent ? ' gantt-name-tip-parent' : ''}${
+                        canSetDates ? ' gantt-name-tip-dim' : ''
+                      }`,
+                      depth * 14,
+                      6
+                    )
                   )
-                )
-              }
-              onMouseLeave={() => setTitleTip(null)}
-            >
-              {task.title || (isParent ? 'Group task' : 'Task title')}
-            </div>
+                }
+                onMouseLeave={() => setTitleTip(null)}
+                onClick={() => {
+                  setTitleEditId(task.id)
+                  onTitleEditStart(task.id)
+                }}
+              >
+                {task.title || (isParent ? 'Group task' : 'Task title')}
+              </div>
+            )}
           </div>
           <div
             className="gantt-row-grid"
@@ -490,6 +603,8 @@ export function GanttChart({
   const popupTask = popup ? taskMap.get(popup.id) : undefined
   const popupNo = popup ? (noMap.get(popup.id) ?? '') : ''
   const popupDuration = popupTask ? formatDuration(popupTask, calendar) : 0
+  const rowMenuCtx = rowMenu ? findTaskCtx(tasks, rowMenu.id) : null
+  const rowMenuIsRoot = rowMenuCtx ? rowMenuCtx.parent === tasks : false
 
   return (
     <div className="gantt-chart">
@@ -592,6 +707,138 @@ export function GanttChart({
             </div>
           )}
         </div>
+      )}
+      {rowMenu && (
+        <>
+          <div className="menu-overlay" onClick={() => setRowMenu(null)} />
+          <div
+            ref={rowMenuRef}
+            className="note-menu planner-grid-menu gantt-row-menu"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="note-menu-item"
+              onClick={() => {
+                if (!rowMenu) return
+                setRowMenu(null)
+                setTitleEditId(rowMenu.id)
+              }}
+            >
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiPencil} size={16} />
+              </span>
+              Edit Title
+            </button>
+            <div className="note-menu-sep" />
+            <button
+              type="button"
+              className="note-menu-item"
+              onClick={() => {
+                if (!rowMenu) return
+                const newId = onInsertBefore(rowMenu.id)
+                setRowMenu(null)
+                if (newId) setTitleEditId(newId)
+              }}
+            >
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiTableRowPlusBefore} size={16} />
+              </span>
+              Insert Before
+            </button>
+            <button
+              type="button"
+              className="note-menu-item"
+              onClick={() => {
+                if (!rowMenu) return
+                const newId = onInsertAfter(rowMenu.id)
+                setRowMenu(null)
+                if (newId) setTitleEditId(newId)
+              }}
+            >
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiTableRowPlusAfter} size={16} />
+              </span>
+              Insert After
+            </button>
+            <div className="note-menu-sep" />
+            <button
+              type="button"
+              className="note-menu-item"
+              disabled={!rowMenuCtx || rowMenuCtx.index === 0}
+              onClick={() => {
+                if (!rowMenu) return
+                onIndent(rowMenu.id)
+                setRowMenu(null)
+              }}
+            >
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiArrowRightCircleOutline} size={16} />
+              </span>
+              Make Child Level
+            </button>
+            <button
+              type="button"
+              className="note-menu-item"
+              disabled={!rowMenuCtx || rowMenuIsRoot}
+              onClick={() => {
+                if (!rowMenu) return
+                onOutdent(rowMenu.id)
+                setRowMenu(null)
+              }}
+            >
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiArrowLeftCircleOutline} size={16} />
+              </span>
+              Make Parent Level
+            </button>
+            <button
+              type="button"
+              className="note-menu-item"
+              disabled={!rowMenuCtx || rowMenuCtx.index === 0}
+              onClick={() => {
+                if (!rowMenu) return
+                onMoveUp(rowMenu.id)
+                setRowMenu(null)
+              }}
+            >
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiArrowUpCircleOutline} size={16} />
+              </span>
+              Move Up
+            </button>
+            <button
+              type="button"
+              className="note-menu-item"
+              disabled={!rowMenuCtx || rowMenuCtx.index === rowMenuCtx.parent.length - 1}
+              onClick={() => {
+                if (!rowMenu) return
+                onMoveDown(rowMenu.id)
+                setRowMenu(null)
+              }}
+            >
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiArrowDownCircleOutline} size={16} />
+              </span>
+              Move Down
+            </button>
+            <div className="note-menu-sep" />
+            <button
+              type="button"
+              className="note-menu-item danger"
+              onClick={() => {
+                if (!rowMenu) return
+                onDelete(rowMenu.id)
+                setRowMenu(null)
+              }}
+            >
+              <span className="note-menu-icon">
+                <MdiIcon path={mdiTrashCanOutline} size={16} />
+              </span>
+              Delete
+            </button>
+          </div>
+        </>
       )}
     </div>
   )
