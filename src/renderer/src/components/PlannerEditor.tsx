@@ -59,6 +59,7 @@ import {
   deriveTaskNo,
   emptyTask,
   estimatePercentComplete,
+  findTaskCtx,
   formatDate,
   nextWorkingDayString,
   normalizeColumnOrder,
@@ -301,20 +302,6 @@ function countDeletable(tasks: ScheduleTask[]): number {
   }
   tasks.forEach(add)
   return ids.size
-}
-
-function findTaskCtx(
-  tasks: ScheduleTask[],
-  id: string
-): { parent: ScheduleTask[]; index: number } | null {
-  for (let i = 0; i < tasks.length; i++) {
-    if (tasks[i].id === id) return { parent: tasks, index: i }
-    if (tasks[i].children.length > 0) {
-      const found = findTaskCtx(tasks[i].children, id)
-      if (found) return found
-    }
-  }
-  return null
 }
 
 function indentTask(tasks: ScheduleTask[], id: string): ScheduleTask[] {
@@ -794,7 +781,7 @@ export function PlannerEditor(): React.JSX.Element {
     )
     if (el) {
       pendingFocus.current = null
-      el.focus()
+      el.focus({ preventScroll: true })
       el.scrollIntoView({ block: 'nearest' })
     }
   })
@@ -1354,6 +1341,65 @@ export function PlannerEditor(): React.JSX.Element {
     }))
   }
 
+  function handleGanttInsertBefore(id: string): string | null {
+    const next = emptyTask()
+    commit(sc, insertTasksBefore(sc.tasks, id, [next]))
+    setSelected(new Set([next.id]))
+    setAnchorId(next.id)
+    return next.id
+  }
+
+  function handleGanttInsertAfter(id: string): string | null {
+    const next = emptyTask()
+    commit(sc, insertTasksAfter(sc.tasks, id, [next]))
+    setSelected(new Set([next.id]))
+    setAnchorId(next.id)
+    return next.id
+  }
+
+  function handleGanttIndent(id: string): void {
+    commit(sc, indentTask(sc.tasks, id))
+  }
+
+  function handleGanttOutdent(id: string): void {
+    commit(sc, outdentTask(sc.tasks, id))
+  }
+
+  function handleGanttMoveUp(id: string): void {
+    const ctx = findTaskCtx(sc.tasks, id)
+    if (!ctx || ctx.index === 0) return
+    commit(sc, moveTask(sc.tasks, id, -1))
+  }
+
+  function handleGanttMoveDown(id: string): void {
+    const ctx = findTaskCtx(sc.tasks, id)
+    if (!ctx || ctx.index === ctx.parent.length - 1) return
+    commit(sc, moveTask(sc.tasks, id, 1))
+  }
+
+  function handleGanttDelete(id: string): void {
+    const ctx = findTaskCtx(sc.tasks, id)
+    if (!ctx) return
+    const task = ctx.parent[ctx.index]
+    if (task.children.length > 0) {
+      setConfirmDelete({ tasks: [task] })
+      return
+    }
+    commit(sc, removeTasks(sc.tasks, new Set([id])))
+  }
+
+  function handleGanttTitleStart(): void {
+    startEditSession()
+  }
+
+  function handleGanttTitleEdit(id: string, value: string): void {
+    editField(sc, id, 'title', value)
+  }
+
+  function handleGanttTitleEnd(): void {
+    endEditSession()
+  }
+
   function setTaskStatusMode(id: string, mode: 'auto' | 'pending' | 'on-hold'): void {
     editTask(sc, id, (prev) => ({
       ...prev,
@@ -1416,20 +1462,20 @@ export function PlannerEditor(): React.JSX.Element {
     const el = e.target as HTMLElement
     const grid = gridRef.current
     if (el.tagName !== 'INPUT') {
-      if (grid) grid.focus()
+      if (grid) grid.focus({ preventScroll: true })
       return
     }
     if (e.shiftKey || e.button === 2) {
       e.preventDefault()
       el.blur()
-      if (grid) grid.focus()
+      if (grid) grid.focus({ preventScroll: true })
       return
     }
     if (el.dataset.col === 'title' && el.dataset.cell && !selected.has(el.dataset.cell)) {
       e.preventDefault()
       const active = document.activeElement
       if (active instanceof HTMLElement && active.tagName === 'INPUT') active.blur()
-      if (grid) grid.focus()
+      if (grid) grid.focus({ preventScroll: true })
     }
   }
 
@@ -1775,7 +1821,7 @@ export function PlannerEditor(): React.JSX.Element {
     }
     const el = gridRef.current?.querySelector<HTMLElement>(`[data-cell="${id}"][data-col="${col}"]`)
     if (!el || (el as HTMLInputElement).disabled) return false
-    el.focus()
+    el.focus({ preventScroll: true })
     el.scrollIntoView({ block: 'nearest' })
     setSelected(new Set([id]))
     setAnchorId(id)
@@ -1839,7 +1885,7 @@ export function PlannerEditor(): React.JSX.Element {
     if (e.key === 'Escape') {
       e.preventDefault()
       cancelEdit()
-      gridRef.current?.focus()
+      gridRef.current?.focus({ preventScroll: true })
       return
     }
 
@@ -2257,6 +2303,16 @@ export function PlannerEditor(): React.JSX.Element {
                 onResize={handleGanttResize}
                 onSetDates={handleGanttSetDates}
                 onClearPlan={handleGanttClearPlan}
+                onInsertBefore={handleGanttInsertBefore}
+                onInsertAfter={handleGanttInsertAfter}
+                onIndent={handleGanttIndent}
+                onOutdent={handleGanttOutdent}
+                onMoveUp={handleGanttMoveUp}
+                onMoveDown={handleGanttMoveDown}
+                onDelete={handleGanttDelete}
+                onTitleEditStart={handleGanttTitleStart}
+                onTitleEdit={handleGanttTitleEdit}
+                onTitleEditEnd={handleGanttTitleEnd}
                 bodyRef={ganttBodyRef}
               />
             )}

@@ -6941,6 +6941,7 @@ fieldset.kanban-form {
   min-height: 0;
   padding-top: var(--planner-header-h, 88px);
   padding-bottom: var(--planner-statusbar-h, 38px);
+  overflow-anchor: none;
 }
 
 /* In gantt view the scroller is .gantt-body, .planner-grid-scroll merely frames it —
@@ -6955,6 +6956,7 @@ fieldset.kanban-form {
 .planner-editor.planner-gantt .planner-grid-scroll .gantt-body {
   padding-top: var(--planner-header-h, 88px);
   padding-bottom: var(--planner-statusbar-h, 38px);
+  overflow-anchor: none;
 }
 
 /* A custom slim scrollbar is rendered above the status bar; hide the native one */
@@ -7370,8 +7372,8 @@ fieldset.kanban-form {
   white-space: nowrap;
 }
 
-.gantt-name-tip-dim {
-  color: var(--text-dim);
+.gantt-name-tip-warn {
+  color: var(--warn);
 }
 
 .gantt-name-tip-parent {
@@ -7618,12 +7620,29 @@ fieldset.kanban-form {
   color: var(--text);
 }
 
-.gantt-row-left .gantt-col-title.gantt-title-dim {
-  color: var(--text-dim);
+.gantt-row-left .gantt-col-title.gantt-title-warn {
+  color: var(--warn);
 }
 
 .gantt-row-left .gantt-col-title.gantt-title-parent {
   font-weight: 600;
+}
+
+.gantt-row-left .gantt-col-title {
+  cursor: text;
+}
+
+.gantt-title-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 4px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--bg-elevated, var(--bg));
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  outline: none;
 }
 
 .gantt-row-grid {

@@ -1,5 +1,15 @@
 # Changelog
 
+## [dev] — unreleased — 0.20.1
+
+### Added
+
+- **Planner: Gantt view task editing** — right-clicking a task's left panel in the Gantt opens a context menu (Edit Title, Insert Before, Insert After, Make Child Level, Make Parent Level, Move Up, Move Down, Delete) that acts on that task only — insert returns the new task and immediately flips it into title edit; delete reuses the parent-with-subtasks confirm dialog. Titles are inline-editable with a single click (live typing, one undo step on blur), and tasks without assigned plan days show their title in warning yellow. All edits go through the same commit/undo/rollup/save pipeline as the table view; the toolbar stays table-only.
+
+### Fixed
+
+- **Planner: grid view jumping on cell select** — focusing a task cell scrolled the grid to unexpected positions (browser auto-scroll on `focus()` plus scroll anchoring fighting the programmatic `scrollIntoView`); all grid focus calls now use `preventScroll` and the grid scroller sets `overflow-anchor: none`, so selection/keyboard navigation scrolls to the target cell only.
+
 ## [0.20.0] — 2026-09-16
 
 ### Changed

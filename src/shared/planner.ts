@@ -403,6 +403,21 @@ export function findTaskByTitle(tasks: ScheduleTask[], title: string): ScheduleT
   return null
 }
 
+/** Locate a task's parent list and index within it by id. */
+export function findTaskCtx(
+  tasks: ScheduleTask[],
+  id: string
+): { parent: ScheduleTask[]; index: number } | null {
+  for (let i = 0; i < tasks.length; i++) {
+    if (tasks[i].id === id) return { parent: tasks, index: i }
+    if (tasks[i].children.length > 0) {
+      const found = findTaskCtx(tasks[i].children, id)
+      if (found) return found
+    }
+  }
+  return null
+}
+
 /** Count all tasks including nested children. */
 export function countTasks(task: ScheduleTask): number {
   let n = 1
