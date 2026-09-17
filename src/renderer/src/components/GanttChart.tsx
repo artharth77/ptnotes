@@ -149,6 +149,15 @@ function formatDuration(task: ScheduleTask, calendar: ProjectCalendar): number {
 
 type DragMode = 'start' | 'end' | 'move'
 
+interface GanttArrow {
+  key: string
+  d: string
+  type: TaskLinkType
+  title: string
+  predecessorId: string
+  successorId: string
+}
+
 interface DragSession {
   id: string
   mode: DragMode
@@ -242,6 +251,10 @@ export function GanttChart({
     setCurrentMonth(months[0].label)
   }
   const [drag, setDrag] = useState<DragState | null>(null)
+  const [hoveredEdge, setHoveredEdge] = useState<{
+    id: string
+    edge: 'start' | 'end'
+  } | null>(null)
   const [popup, setPopup] = useState<{
     id: string
     left: number
@@ -267,9 +280,7 @@ export function GanttChart({
   }, [tasks])
 
   const bodyContentRef = useRef<HTMLDivElement>(null)
-  const [arrows, setArrows] = useState<{ key: string; d: string; type: string; title: string }[]>(
-    []
-  )
+  const [arrows, setArrows] = useState<GanttArrow[]>([])
 
   useLayoutEffect(() => {
     const content = bodyContentRef.current
@@ -286,7 +297,7 @@ export function GanttChart({
       const rect = el.getBoundingClientRect()
       rects.set(task.id, { top: rect.top - bodyRect.top, height: rect.height })
     }
-    const out: { key: string; d: string; type: string; title: string }[] = []
+    const out: GanttArrow[] = []
     for (const task of collectTasks(tasks, [])) {
       if (task.children.length > 0 || !task.planStart || !task.planEnd) continue
       const links = task.dependsOn ?? []
@@ -326,6 +337,8 @@ export function GanttChart({
           key: `${task.id}|${link.id}|${link.type}`,
           d,
           type: link.type,
+          predecessorId: link.id,
+          successorId: task.id,
           title: `${noMap.get(link.id) ?? ''} ${predTask.title} —${link.type + lag}→ ${
             noMap.get(task.id) ?? ''
           } ${task.title}`
@@ -675,6 +688,8 @@ export function GanttChart({
                         lockReason(task, 'start') ? ' gantt-bar-handle-locked' : ''
                       }`}
                       title={lockReason(task, 'start')}
+                      onPointerEnter={() => setHoveredEdge({ id: task.id, edge: 'start' })}
+                      onPointerLeave={() => setHoveredEdge(null)}
                       onPointerDown={(e) => startDrag(e, task, 'start')}
                     />
                     <span
@@ -682,6 +697,8 @@ export function GanttChart({
                         lockReason(task, 'end') ? ' gantt-bar-handle-locked' : ''
                       }`}
                       title={lockReason(task, 'end')}
+                      onPointerEnter={() => setHoveredEdge({ id: task.id, edge: 'end' })}
+                      onPointerLeave={() => setHoveredEdge(null)}
                       onPointerDown={(e) => startDrag(e, task, 'end')}
                     />
                   </>
@@ -714,6 +731,15 @@ export function GanttChart({
   const popupDuration = popupTask ? formatDuration(popupTask, calendar) : 0
   const rowMenuCtx = rowMenu ? findTaskCtx(tasks, rowMenu.id) : null
   const rowMenuIsRoot = rowMenuCtx ? rowMenuCtx.parent === tasks : false
+  const arrowLayers: GanttArrow[][] = [[], []]
+  const endpoint = hoveredEdge?.edge === 'start' ? 'S' : 'F'
+  for (const arrow of arrows) {
+    const highlighted =
+      hoveredEdge !== null &&
+      ((arrow.predecessorId === hoveredEdge.id && arrow.type[0] === endpoint) ||
+        (arrow.successorId === hoveredEdge.id && arrow.type[1] === endpoint))
+    arrowLayers[highlighted ? 1 : 0].push(arrow)
+  }
 
   return (
     <div className="gantt-chart">
@@ -771,34 +797,44 @@ export function GanttChart({
         </div>
 
         <div className="gantt-body-content" ref={bodyContentRef} style={{ position: 'relative' }}>
-          <svg
-            className="gantt-arrows"
-            style={{ left: leftWidth, width: timelineWidth }}
-            data-empty={arrows.length === 0}
-          >
-            <defs>
-              <marker
-                id="gantt-arrowhead"
-                markerWidth="7"
-                markerHeight="7"
-                refX="6"
-                refY="3.5"
-                orient="auto"
+          {arrowLayers.map((layer, index) => {
+            const highlighted = index === 1
+            const markerId = highlighted ? 'gantt-arrowhead-highlighted' : 'gantt-arrowhead'
+            return (
+              <svg
+                key={markerId}
+                className={`gantt-arrows${highlighted ? ' gantt-arrows-highlighted' : ''}`}
+                style={{ left: leftWidth, width: timelineWidth }}
+                data-empty={layer.length === 0}
               >
-                <path d="M0,0 L7,3.5 L0,7 Z" className="gantt-arrow-head" />
-              </marker>
-            </defs>
-            {arrows.map((a) => (
-              <path
-                key={a.key}
-                d={a.d}
-                className="gantt-arrow-line"
-                markerEnd="url(#gantt-arrowhead)"
-              >
-                <title>{a.title}</title>
-              </path>
-            ))}
-          </svg>
+                <defs>
+                  <marker
+                    id={markerId}
+                    markerWidth="7"
+                    markerHeight="7"
+                    refX="6"
+                    refY="3.5"
+                    orient="auto"
+                  >
+                    <path
+                      d="M0,0 L7,3.5 L0,7 Z"
+                      className={`gantt-arrow-head${highlighted ? ' gantt-arrow-head-highlighted' : ''}`}
+                    />
+                  </marker>
+                </defs>
+                {layer.map((a) => (
+                  <path
+                    key={a.key}
+                    d={a.d}
+                    className={`gantt-arrow-line${highlighted ? ' gantt-arrow-line-highlighted' : ''}`}
+                    markerEnd={`url(#${markerId})`}
+                  >
+                    <title>{a.title}</title>
+                  </path>
+                ))}
+              </svg>
+            )
+          })}
           {renderTree(tasks, null, 0)}
         </div>
       </div>
