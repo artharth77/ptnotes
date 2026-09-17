@@ -38,6 +38,8 @@ function isExportPayload(p: unknown): p is PlannerExportPayload {
     }
     if (typeof rr.percentComplete !== 'number' || !Number.isFinite(rr.percentComplete)) return false
     if (typeof rr.note !== 'string') return false
+    if (rr.dependsOn !== undefined && rr.dependsOn !== null && typeof rr.dependsOn !== 'string')
+      return false
     if (typeof rr.depth !== 'number' || !Number.isInteger(rr.depth)) return false
     if (typeof rr.hasChildren !== 'boolean') return false
   }

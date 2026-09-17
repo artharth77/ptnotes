@@ -6,5 +6,6 @@ out
 *.log*
 .dbg
 .trae
+.opencode
 debug-*.md
 *.code-workspace

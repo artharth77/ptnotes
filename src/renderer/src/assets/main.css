@@ -7295,6 +7295,169 @@ fieldset.kanban-form {
   max-width: 280px;
 }
 
+.planner-dep-menu {
+  min-width: 340px;
+  max-width: 420px;
+  padding: 12px;
+}
+
+.planner-dep-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.planner-dep-subtitle {
+  font-size: 12px;
+  opacity: 0.72;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planner-dep-sep {
+  border-top: 1px solid var(--border);
+  margin: 10px -12px;
+  padding: 0;
+}
+
+.planner-dep-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.planner-dep-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px 62px auto;
+  column-gap: 6px;
+  align-items: center;
+}
+
+.planner-dep-no {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.planner-dep-select,
+.planner-dep-input {
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.planner-dep-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.planner-dep-select:focus,
+.planner-dep-input:focus {
+  border-color: var(--accent);
+}
+
+.planner-dep-add-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px 62px auto;
+  column-gap: 6px;
+  align-items: center;
+}
+
+.planner-dep-add-row .planner-dep-select {
+  padding: 8px 10px;
+}
+
+.planner-dep-error {
+  color: var(--danger);
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.planner-dep-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.planner-dep-header .planner-dep-title {
+  flex: 1;
+}
+
+.planner-dep-delete {
+  color: var(--danger);
+}
+
+.planner-dep-chip {
+  width: 100%;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.planner-dep-chip:hover {
+  background: var(--bg-hover);
+}
+
+.planner-dep-chip.planner-dep-empty {
+  opacity: 0.55;
+}
+
+.planner-dep-chip[draggable='true'] {
+  cursor: grab;
+}
+
+.planner-dep-chip[draggable='true']:active {
+  cursor: grabbing;
+}
+
+.planner-grid-row.planner-row-drop-hint {
+  outline: 2px dashed var(--accent);
+  outline-offset: -3px;
+  position: relative;
+}
+
+.planner-grid-row.planner-row-drop-hint > .planner-col-toggle,
+.planner-grid-row.planner-row-drop-hint > .planner-col-indicator,
+.planner-grid-row.planner-row-drop-hint > .planner-col-no,
+.planner-grid-row.planner-row-drop-hint > .planner-col-title {
+  background: transparent;
+}
+
+.planner-grid-row.planner-row-drop-hint::after {
+  content: 'FS';
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  pointer-events: none;
+}
+
 .planner-owner-item {
   display: flex;
   align-items: center;
@@ -7652,6 +7815,35 @@ fieldset.kanban-form {
   border-bottom: 1px solid var(--border);
 }
 
+.gantt-body-content {
+  position: relative;
+}
+
+.gantt-arrows {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.gantt-arrows[data-empty='true'] {
+  display: none;
+}
+
+.gantt-arrow-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.4;
+  marker-end: url(#gantt-arrowhead);
+  pointer-events: stroke;
+}
+
+.gantt-arrow-head {
+  fill: var(--accent);
+}
+
 .gantt-day-cell {
   flex-shrink: 0;
   border-right: 1px solid var(--border);
@@ -7760,6 +7952,18 @@ fieldset.kanban-form {
 
 .gantt-bar-handle-right {
   right: 0;
+}
+
+.gantt-bar-handle-locked {
+  cursor: not-allowed;
+}
+
+.gantt-bar-handle-locked::before {
+  opacity: 0;
+}
+
+.gantt-bar-locked-move {
+  cursor: not-allowed;
 }
 
 .gantt-bar-handle::before {
