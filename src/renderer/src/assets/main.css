@@ -6941,6 +6941,7 @@ fieldset.kanban-form {
   min-height: 0;
   padding-top: var(--planner-header-h, 88px);
   padding-bottom: var(--planner-statusbar-h, 38px);
+  overflow-anchor: none;
 }
 
 /* In gantt view the scroller is .gantt-body, .planner-grid-scroll merely frames it —
@@ -6955,6 +6956,7 @@ fieldset.kanban-form {
 .planner-editor.planner-gantt .planner-grid-scroll .gantt-body {
   padding-top: var(--planner-header-h, 88px);
   padding-bottom: var(--planner-statusbar-h, 38px);
+  overflow-anchor: none;
 }
 
 /* A custom slim scrollbar is rendered above the status bar; hide the native one */

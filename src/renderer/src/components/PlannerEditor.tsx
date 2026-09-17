@@ -794,7 +794,7 @@ export function PlannerEditor(): React.JSX.Element {
     )
     if (el) {
       pendingFocus.current = null
-      el.focus()
+      el.focus({ preventScroll: true })
       el.scrollIntoView({ block: 'nearest' })
     }
   })
@@ -1416,20 +1416,20 @@ export function PlannerEditor(): React.JSX.Element {
     const el = e.target as HTMLElement
     const grid = gridRef.current
     if (el.tagName !== 'INPUT') {
-      if (grid) grid.focus()
+      if (grid) grid.focus({ preventScroll: true })
       return
     }
     if (e.shiftKey || e.button === 2) {
       e.preventDefault()
       el.blur()
-      if (grid) grid.focus()
+      if (grid) grid.focus({ preventScroll: true })
       return
     }
     if (el.dataset.col === 'title' && el.dataset.cell && !selected.has(el.dataset.cell)) {
       e.preventDefault()
       const active = document.activeElement
       if (active instanceof HTMLElement && active.tagName === 'INPUT') active.blur()
-      if (grid) grid.focus()
+      if (grid) grid.focus({ preventScroll: true })
     }
   }
 
@@ -1775,7 +1775,7 @@ export function PlannerEditor(): React.JSX.Element {
     }
     const el = gridRef.current?.querySelector<HTMLElement>(`[data-cell="${id}"][data-col="${col}"]`)
     if (!el || (el as HTMLInputElement).disabled) return false
-    el.focus()
+    el.focus({ preventScroll: true })
     el.scrollIntoView({ block: 'nearest' })
     setSelected(new Set([id]))
     setAnchorId(id)
@@ -1839,7 +1839,7 @@ export function PlannerEditor(): React.JSX.Element {
     if (e.key === 'Escape') {
       e.preventDefault()
       cancelEdit()
-      gridRef.current?.focus()
+      gridRef.current?.focus({ preventScroll: true })
       return
     }
 

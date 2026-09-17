@@ -1,5 +1,11 @@
 # Changelog
 
+## [dev] — unreleased
+
+### Fixed
+
+- **Planner: grid view jumping on cell select** — focusing a task cell scrolled the grid to unexpected positions (browser auto-scroll on `focus()` plus scroll anchoring fighting the programmatic `scrollIntoView`); all grid focus calls now use `preventScroll` and the grid scroller sets `overflow-anchor: none`, so selection/keyboard navigation scrolls to the target cell only.
+
 ## [0.20.0] — 2026-09-16
 
 ### Changed
