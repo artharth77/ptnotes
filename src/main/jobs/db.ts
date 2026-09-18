@@ -281,14 +281,55 @@ export class JobsStore {
       .run(at || Date.now(), nextRunAt ?? null, validateId(id))
   }
 
-  deleteJob(project: string, id: string): boolean {
+  deleteJob(project: string, id: string): Promise<boolean> {
+    return this.deleteJobWithTraces(project, id)
+  }
+
+  /** Delete a job, its run rows, and all of its run trace files. */
+  async deleteJobWithTraces(project: string, id: string): Promise<boolean> {
     const clean = validateId(id)
     const db = this.projectDb(project)
+    const runIds = (
+      db.prepare('SELECT run_id FROM job_runs WHERE job_id = ?').all(clean) as unknown as Array<{
+        run_id: string
+      }>
+    ).map((r) => r.run_id)
     const info = db.prepare('DELETE FROM jobs WHERE id = ?').run(clean)
     if (info.changes > 0) {
       db.prepare('DELETE FROM job_runs WHERE job_id = ?').run(clean)
+      for (const runId of runIds) {
+        await fs.rm(this.tracePath(project, runId), { force: true }).catch(() => {})
+      }
     }
     return info.changes > 0
+  }
+
+  /**
+   * Recreate a job under a different scope: create a new job (fresh id, fresh run
+   * history) in the destination DB with the given fields, then delete the old job
+   * with its run rows and trace files. Create-first so a failed delete can't lose
+   * the job.
+   */
+  async moveJobScope(
+    srcProject: string,
+    destProject: string,
+    id: string,
+    input: ScheduleJobInput
+  ): Promise<ScheduleJob> {
+    const clean = validateId(id)
+    const existing = this.getJob(srcProject, clean)
+    if (!existing) throw new Error(`Job not found: ${id}`)
+    const scope: JobScope = input.scope ?? existing.scope
+    if (scope === existing.scope) throw new Error('Job scope is unchanged.')
+    if (scope === 'global' && destProject !== GLOBAL_PROJECT_KEY) {
+      throw new Error('Global jobs must be saved under the global key.')
+    }
+    if (scope === 'project' && destProject === GLOBAL_PROJECT_KEY) {
+      throw new Error('Project jobs must be saved under a project key.')
+    }
+    const created = this.saveJob(destProject, { ...input, id: undefined, scope })
+    await this.deleteJobWithTraces(srcProject, clean)
+    return created
   }
 
   startRun(project: string, jobId: string, title: string, at = Date.now()): ScheduleJobRun {

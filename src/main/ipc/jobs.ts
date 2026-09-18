@@ -23,6 +23,17 @@ export function registerJobsIpc(store: JobsStore, scheduler: JobScheduler): void
   )
 
   ipcMain.handle(
+    'jobs:moveScope',
+    async (
+      _e: IpcMainInvokeEvent,
+      src: string,
+      dest: string,
+      id: string,
+      input: ScheduleJobInput
+    ): Promise<ScheduleJob> => store.moveJobScope(src, dest, id, input)
+  )
+
+  ipcMain.handle(
     'jobs:setEnabled',
     async (
       _e: IpcMainInvokeEvent,

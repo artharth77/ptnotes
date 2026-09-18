@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.22.1] - 2026-09-18
+
+### Added
+
+- **Scheduled jobs: scope-change confirmation** — changing **Run in** (This project ↔ All projects) while editing an existing job and saving now shows a confirmation: the job is recreated in the new scope and the existing job is deleted, including its run history and AI traces. Confirming recreates the job in the destination scope (new id, fresh run history, all other fields as edited) and deletes the old job with its traces; canceling returns to the editor with the draft untouched.
+
+### Fixed
+
+- **Scheduled jobs: saving after a scope change failed** — the save key was derived from the new scope while the job id was looked up in the old scope's database, so switching a job between project and global scope errored with "Job not found"; scope changes now go through a dedicated recreate-and-delete operation.
+- **Scheduled jobs: deleting a job left orphaned AI trace files** — job deletion now also removes the job's run trace files (previously they lingered until the 30-day retention purge).
+
 ## [0.22.0] - 2026-09-18
 
 ### Added
