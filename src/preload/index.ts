@@ -419,6 +419,12 @@ const api = {
     list: (project: string): Promise<ScheduleJob[]> => ipcRenderer.invoke('jobs:list', project),
     save: (project: string, input: ScheduleJobInput): Promise<ScheduleJob> =>
       ipcRenderer.invoke('jobs:save', project, input),
+    moveScope: (
+      src: string,
+      dest: string,
+      id: string,
+      input: ScheduleJobInput
+    ): Promise<ScheduleJob> => ipcRenderer.invoke('jobs:moveScope', src, dest, id, input),
     setEnabled: (project: string, id: string, enabled: boolean): Promise<ScheduleJob> =>
       ipcRenderer.invoke('jobs:setEnabled', project, id, enabled),
     delete: (project: string, id: string): Promise<boolean> =>

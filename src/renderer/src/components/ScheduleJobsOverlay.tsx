@@ -180,6 +180,7 @@ export function ScheduleJobsOverlay(): React.JSX.Element {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [draft, setDraft] = useState<Draft>(emptyDraft())
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+  const [scopeMove, setScopeMove] = useState<{ srcKey: string; destKey: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [runningIds, setRunningIds] = useState<string[]>([])
   const [timesInput, setTimesInput] = useState('')
@@ -273,6 +274,40 @@ export function ScheduleJobsOverlay(): React.JSX.Element {
   const patchRule = (patch: Partial<ScheduleTimeRule>): void =>
     setDraft((d) => ({ ...d, timeRule: { ...d.timeRule, ...patch } as ScheduleTimeRule }))
 
+  function buildInput(): ScheduleJobInput {
+    return {
+      id: draft.id ?? undefined,
+      title: draft.title,
+      enabled: draft.enabled,
+      days: draft.days,
+      timeRule: draft.timeRule,
+      condition: draft.condition,
+      prompt: draft.prompt,
+      language: draft.language,
+      scope: draft.scope,
+      conditionMeta:
+        draft.condition === 'next'
+          ? {
+              nextRunAt:
+                computeNextRunAt(draft.timeRule, draft.days, Date.now() + 60_000) ?? undefined
+            }
+          : undefined
+    }
+  }
+
+  async function afterSave(saved: ScheduleJob): Promise<void> {
+    await loadJobs()
+    setSelectedId(saved.id)
+    setDraft(draftFromJob(saved))
+    setError(null)
+    setSavedFlash(true)
+    if (savedFlashTimerRef.current !== null) window.clearTimeout(savedFlashTimerRef.current)
+    savedFlashTimerRef.current = window.setTimeout(() => {
+      savedFlashTimerRef.current = null
+      setSavedFlash(false)
+    }, 2000)
+  }
+
   async function saveJob(): Promise<void> {
     const key = draft.scope === 'global' ? GLOBAL_PROJECT_KEY : activeProject
     if (key === null) {
@@ -287,36 +322,32 @@ export function ScheduleJobsOverlay(): React.JSX.Element {
       setError('Add at least one time to the time list.')
       return
     }
-    const days = draft.days
-    const input: ScheduleJobInput = {
-      id: draft.id ?? undefined,
-      title: draft.title,
-      enabled: draft.enabled,
-      days,
-      timeRule: draft.timeRule,
-      condition: draft.condition,
-      prompt: draft.prompt,
-      language: draft.language,
-      scope: draft.scope,
-      conditionMeta:
-        draft.condition === 'next'
-          ? {
-              nextRunAt: computeNextRunAt(draft.timeRule, days, Date.now() + 60_000) ?? undefined
-            }
-          : undefined
+    const input = buildInput()
+    const original = draft.id ? jobs.find((j) => j.id === draft.id) : undefined
+    const srcKey = keyForJob(draft.id)
+    if (original && srcKey !== null && draft.scope !== original.scope) {
+      setScopeMove({ srcKey, destKey: key })
+      return
     }
     try {
       const saved = await window.ptnotes.jobs.save(key, input)
-      await loadJobs()
-      setSelectedId(saved.id)
-      setDraft(draftFromJob(saved))
-      setError(null)
-      setSavedFlash(true)
-      if (savedFlashTimerRef.current !== null) window.clearTimeout(savedFlashTimerRef.current)
-      savedFlashTimerRef.current = window.setTimeout(() => {
-        savedFlashTimerRef.current = null
-        setSavedFlash(false)
-      }, 2000)
+      await afterSave(saved)
+    } catch (err) {
+      setError(friendlyError(err))
+    }
+  }
+
+  async function confirmScopeMove(): Promise<void> {
+    if (!scopeMove || !draft.id) {
+      setScopeMove(null)
+      return
+    }
+    const { srcKey, destKey } = scopeMove
+    const id = draft.id
+    setScopeMove(null)
+    try {
+      const saved = await window.ptnotes.jobs.moveScope(srcKey, destKey, id, buildInput())
+      await afterSave(saved)
     } catch (err) {
       setError(friendlyError(err))
     }
@@ -751,6 +782,19 @@ export function ScheduleJobsOverlay(): React.JSX.Element {
           jobId={selectedId}
           jobTitle={jobs.find((j) => j.id === selectedId)?.title ?? selectedId}
           onClose={() => setRunsOpen(false)}
+        />
+      )}
+      {scopeMove && (
+        <ConfirmModal
+          title="Change job scope"
+          message={`Changing "Run in" recreates the job in ${
+            scopeMove.destKey === GLOBAL_PROJECT_KEY ? 'all projects' : 'this project'
+          } and deletes the existing job in ${
+            scopeMove.srcKey === GLOBAL_PROJECT_KEY ? 'all projects' : 'this project'
+          }, including its run history and AI traces. This cannot be undone.`}
+          confirmLabel="Move & delete"
+          onConfirm={() => void confirmScopeMove()}
+          onClose={() => setScopeMove(null)}
         />
       )}
       {deleteTarget && (

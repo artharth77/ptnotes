@@ -1,5 +1,6 @@
 import Module from 'node:module'
 import { promises as fs } from 'node:fs'
+import { join } from 'node:path'
 import assert from 'node:assert/strict'
 import type { GlobalJobRunnerDeps } from '../src/main/jobs/globalRunner'
 
@@ -240,6 +241,14 @@ assert.ok(trace!.path!.endsWith('.trace.jsonl'), '"path" must point at file')
 
 await store.deleteJob('pj', saved.id)
 assert.equal(store.listJobs('pj').length, 0)
+assert.equal(
+  await fs.access(join(ROOT, 'pj', '.data', 'jobs', 'traces', `${run.runId}.trace.jsonl`)).then(
+    () => true,
+    () => false
+  ),
+  false,
+  'deleteJob removes the run trace file'
+)
 
 // error paths
 assert.throws(() =>
@@ -337,6 +346,109 @@ assert.equal(
   0,
   'global DB empty again for scheduler tests'
 )
+
+// ---- scope move (recreate in the other scope, delete old job + traces) ----
+
+const mvSrc = store.saveJob('mvproj', {
+  title: 'Move me',
+  enabled: true,
+  days: [1],
+  timeRule: { kind: 'hourly', fromHours: 9, toHours: 17, minute: 0 },
+  condition: 'next',
+  prompt: 'move',
+  conditionMeta: { nextRunAt: 999 }
+})
+const mvRun = store.startRun('mvproj', mvSrc.id, 'Move me')
+store.finishRun('mvproj', mvRun.runId, 'done', { notice: 'n' })
+await store.appendRunTrace(
+  'mvproj',
+  mvRun.runId,
+  { type: 'header', project: 'mvproj', key: mvRun.runId, kind: 'module', startedAt: 1 },
+  [JSON.stringify({ role: 'user', ts: 2, content: 'hi', seq: 0 })]
+)
+const mvTracePath = join(ROOT, 'mvproj', '.data', 'jobs', 'traces', `${mvRun.runId}.trace.jsonl`)
+assert.ok(
+  await fs.access(mvTracePath).then(
+    () => true,
+    () => false
+  ),
+  'trace file exists before the move'
+)
+
+const moved = await store.moveJobScope('mvproj', GLOBAL_PROJECT_KEY, mvSrc.id, {
+  title: 'Moved',
+  enabled: false,
+  days: [2],
+  timeRule: { kind: 'list', times: ['10:00'] },
+  condition: 'next',
+  prompt: 'moved',
+  language: 'Thai',
+  scope: 'global',
+  conditionMeta: { nextRunAt: 12345 }
+})
+assert.notEqual(moved.id, mvSrc.id, 'move creates a new job id')
+assert.equal(moved.scope, 'global', 'moved job has the destination scope')
+assert.equal(moved.title, 'Moved', 'moved job carries the edited fields')
+assert.equal(moved.nextRunAt, 12345, 'moved job gets the new nextRunAt')
+assert.equal(moved.lastRunAt, undefined, 'moved job starts with no run history')
+assert.equal(store.getJob('mvproj', mvSrc.id), null, 'old job deleted from the source DB')
+assert.equal(store.listRuns('mvproj', mvSrc.id).length, 0, 'old run rows deleted')
+assert.equal(
+  await fs.access(mvTracePath).then(
+    () => true,
+    () => false
+  ),
+  false,
+  'old trace file deleted'
+)
+assert.ok(store.getJob(GLOBAL_PROJECT_KEY, moved.id), 'new job lives in the global DB')
+assert.equal(store.listJobs('mvproj').length, 0, 'source project DB has no jobs left')
+
+// move back to a project scope
+const movedBack = await store.moveJobScope(GLOBAL_PROJECT_KEY, 'mvproj2', moved.id, {
+  title: 'Moved back',
+  enabled: true,
+  days: [3],
+  timeRule: { kind: 'hourly', fromHours: 9, toHours: 17, minute: 0 },
+  condition: 'exact',
+  prompt: 'back',
+  scope: 'project'
+})
+assert.notEqual(movedBack.id, moved.id, 'second move creates another new id')
+assert.equal(movedBack.scope, 'project', 'moved back to project scope')
+assert.equal(store.getJob(GLOBAL_PROJECT_KEY, moved.id), null, 'old global job deleted')
+assert.ok(store.getJob('mvproj2', movedBack.id), 'job lives in the destination project DB')
+
+// error paths
+assert.rejects(
+  store.moveJobScope('mvproj2', GLOBAL_PROJECT_KEY, movedBack.id, {
+    title: 'X',
+    enabled: true,
+    days: [1],
+    timeRule: { kind: 'hourly', fromHours: 9, toHours: 17, minute: 0 },
+    condition: 'exact',
+    prompt: 'x',
+    scope: 'project'
+  }),
+  /unchanged/,
+  'same scope is rejected'
+)
+assert.rejects(
+  store.moveJobScope('mvproj2', GLOBAL_PROJECT_KEY, 'nope', {
+    title: 'X',
+    enabled: true,
+    days: [1],
+    timeRule: { kind: 'hourly', fromHours: 9, toHours: 17, minute: 0 },
+    condition: 'exact',
+    prompt: 'x',
+    scope: 'global'
+  }),
+  /not found/,
+  'missing source job is rejected'
+)
+
+await store.deleteJob('mvproj2', movedBack.id)
+assert.equal(store.listJobs(GLOBAL_PROJECT_KEY).length, 0, 'global DB empty after move tests')
 
 // ---- scheduler tick (controlled clock + fake runner) ----
 
