@@ -190,6 +190,7 @@ export class ScheduleJobRunner {
       `Current local date/time: ${new Date().toLocaleString()}.`,
       `Job schedule: ${days} (informational).`,
       '',
+      'Modules are not tools: to run a module (e.g. the "subagent" module) call start_module with its id, then wait_modules with the returned runId to get its result. Never call a module id as if it were a tool name.',
       'Write your final answer in the user-preferred response language: ' + lang + '.',
       'The final answer will be shown to the user as a notification when it is useful. If this job produced nothing worth notifying (no notable result, nothing to report), reply with exactly **NO RESPONSE** and nothing else.',
       'Do not ask questions — there is no one to answer them.'
