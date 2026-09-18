@@ -1,8 +1,29 @@
 import Module from 'node:module'
 import { promises as fs } from 'node:fs'
 import assert from 'node:assert/strict'
+import type { GlobalJobRunnerDeps } from '../src/main/jobs/globalRunner'
 
 const ROOT = '/tmp/ptnotes-jobs-test-root'
+
+interface FakeCall {
+  messages: Array<{ role: string; content: string }>
+}
+
+/** Stand-in for the `openai` SDK: records calls, answers via a swappable responder. */
+class FakeOpenAI {
+  static calls: FakeCall[] = []
+  static responder: (n: number, call: FakeCall) => Promise<string> = async () => 'ok'
+  chat = {
+    completions: {
+      create: async (params: { messages: Array<{ role: string; content: string }> }) => {
+        const n = FakeOpenAI.calls.length
+        FakeOpenAI.calls.push({ messages: params.messages })
+        const content = await FakeOpenAI.responder(n, { messages: params.messages })
+        return { choices: [{ message: { content } }] }
+      }
+    }
+  }
+}
 
 const origLoad = (Module as { _load: (r: string, p: unknown, m: boolean) => unknown })._load
 ;(Module as { _load: (r: string, p: unknown, m: boolean) => unknown })._load = function (
@@ -12,6 +33,9 @@ const origLoad = (Module as { _load: (r: string, p: unknown, m: boolean) => unkn
 ) {
   if (request === 'electron') {
     return { app: { getPath: () => ROOT, getAppPath: () => ROOT } }
+  }
+  if (request === 'openai') {
+    return { __esModule: true, OpenAI: FakeOpenAI, default: FakeOpenAI }
   }
   return origLoad.call(this, request, parent, isMain)
 }
@@ -25,10 +49,13 @@ const {
   shouldRunNext,
   computeNextRunAt,
   planJobPrune,
-  isNoResponse
+  isNoResponse,
+  GLOBAL_PROJECT_KEY,
+  projectLabel
 } = await import('../src/shared/scheduleJobs')
 const { JobsStore } = await import('../src/main/jobs/db')
 const { JobScheduler } = await import('../src/main/jobs/scheduler')
+const { GlobalJobRunner } = await import('../src/main/jobs/globalRunner')
 
 const MIN = 60_000
 /** Local wall-clock timestamp: new Date(2026, 5, 17, 12, 3).getTime(). */
@@ -236,6 +263,81 @@ assert.throws(() =>
   })
 )
 
+// ---- job scope (project vs global) ----
+
+assert.equal(projectLabel(''), 'All projects', 'sentinel key labels as All projects')
+assert.equal(projectLabel('my-proj'), 'my-proj', 'project key labels as itself')
+
+const gJob = store.saveJob(GLOBAL_PROJECT_KEY, {
+  title: 'Global job',
+  enabled: false,
+  days: [1],
+  timeRule: { kind: 'hourly', fromHours: 9, toHours: 17, minute: 0 },
+  condition: 'exact',
+  prompt: 'g',
+  scope: 'global'
+})
+assert.equal(gJob.scope, 'global', 'global scope round-trips')
+assert.equal(store.listJobs(GLOBAL_PROJECT_KEY).length, 1, 'global job lives under the root DB key')
+assert.ok(
+  !store.listJobs('pj').some((j) => j.id === gJob.id),
+  'project list unaffected by global job'
+)
+
+const pJob = store.saveJob('pj2', {
+  title: 'Project job',
+  enabled: false,
+  days: [1],
+  timeRule: { kind: 'hourly', fromHours: 9, toHours: 17, minute: 0 },
+  condition: 'exact',
+  prompt: 'p'
+})
+assert.equal(pJob.scope, 'project', 'scope defaults to project')
+
+// cross-scope saves are rejected
+assert.throws(() =>
+  store.saveJob('pj2', {
+    title: 'Bad',
+    enabled: true,
+    days: [1],
+    timeRule: { kind: 'hourly', fromHours: 9, toHours: 17, minute: 0 },
+    condition: 'exact',
+    prompt: 'x',
+    scope: 'global'
+  })
+)
+assert.throws(() =>
+  store.saveJob(GLOBAL_PROJECT_KEY, {
+    title: 'Bad',
+    enabled: true,
+    days: [1],
+    timeRule: { kind: 'hourly', fromHours: 9, toHours: 17, minute: 0 },
+    condition: 'exact',
+    prompt: 'x',
+    scope: 'project'
+  })
+)
+
+// updating without a scope keeps the stored scope
+const gRenamed = store.saveJob(GLOBAL_PROJECT_KEY, {
+  id: gJob.id,
+  title: 'Global job 2',
+  enabled: false,
+  days: [1],
+  timeRule: { kind: 'hourly', fromHours: 9, toHours: 17, minute: 0 },
+  condition: 'exact',
+  prompt: 'g2'
+})
+assert.equal(gRenamed.scope, 'global', 'update without scope keeps stored scope')
+
+await store.deleteJob(GLOBAL_PROJECT_KEY, gJob.id)
+await store.deleteJob('pj2', pJob.id)
+assert.equal(
+  store.listJobs(GLOBAL_PROJECT_KEY).length,
+  0,
+  'global DB empty again for scheduler tests'
+)
+
 // ---- scheduler tick (controlled clock + fake runner) ----
 
 const store2 = new JobsStore(() => ROOT)
@@ -305,7 +407,155 @@ assert.ok(
   'next-condition job fired'
 )
 
+// ---- scheduler global pass (no projects at all) ----
+
+const store3 = new JobsStore(() => ROOT)
+const gfired: string[] = []
+const gScheduler = new JobScheduler({
+  listProjects: async () => [],
+  store: store3,
+  runnerFor: (project) => ({
+    run: async (job) => {
+      gfired.push(project)
+      return {
+        run: { runId: 'r', jobId: job.id, title: job.title, startedAt: Date.now(), status: 'done' },
+        status: 'done' as const,
+        statusNotice: 'global result',
+        notify: true
+      }
+    }
+  }),
+  broadcast: () => {}
+})
+const gj = store3.saveJob(GLOBAL_PROJECT_KEY, {
+  title: 'Global hourly',
+  enabled: true,
+  days: [0, 1, 2, 3, 4, 5, 6],
+  timeRule: { kind: 'hourly', fromHours: 0, toHours: 23, minute: 0 },
+  condition: 'exact',
+  prompt: 'go',
+  scope: 'global'
+})
+await gScheduler.tick(L(5, 17, 12, 1)) // :01 → within the :00 slot window
+assert.equal(gfired.length, 1, 'global job fires with zero projects')
+assert.equal(gfired[0], GLOBAL_PROJECT_KEY, 'global job runs under the empty key')
+assert.ok((store3.getJob(GLOBAL_PROJECT_KEY, gj.id)!.lastRunAt ?? 0) > 0, 'global lastRunAt set')
+
+// ---- GlobalJobRunner fan-out (mocked openai) ----
+
+const fakeConfigStore = {
+  load: async () => ({ baseUrl: 'http://127.0.0.1:9/v1', apiKey: 'k', model: 'm' })
+}
+const runnerDeps = (projects: string[]): GlobalJobRunnerDeps => ({
+  root: () => ROOT,
+  listProjects: async () => projects,
+  service: {} as never,
+  configStore: fakeConfigStore as never,
+  moduleManager: {} as never,
+  moduleRegistry: { list: () => [] } as never,
+  disabledModules: [],
+  db: store3,
+  signal: new AbortController().signal
+})
+// fresh job so the fan-out scenarios see only their own run rows
+const gj2 = store3.saveJob(GLOBAL_PROJECT_KEY, {
+  title: 'Fanout job',
+  enabled: true,
+  days: [0, 1, 2, 3, 4, 5, 6],
+  timeRule: { kind: 'hourly', fromHours: 0, toHours: 23, minute: 0 },
+  condition: 'exact',
+  prompt: 'go',
+  scope: 'global'
+})
+const isSummaryCall = (call: FakeCall): boolean =>
+  call.messages.some((m) => m.role === 'user' && m.content.startsWith('## Project:'))
+
+// A: two projects, both succeed → 2 child calls + 1 summary, children recorded
+FakeOpenAI.calls = []
+FakeOpenAI.responder = async (_n, call) =>
+  isSummaryCall(call) ? 'SUMMARY(alpha,beta)' : 'child answer'
+let grunner = new GlobalJobRunner(runnerDeps(['alpha', 'beta']))
+let gRun = store3.startRun(GLOBAL_PROJECT_KEY, gj2.id, gj2.title)
+let gres = await grunner.run(gj2, gRun)
+assert.equal(gres.status, 'done', 'A: all children done → done')
+assert.equal(gres.notify, true, 'A: summary notifies')
+assert.equal(gres.statusNotice, 'SUMMARY(alpha,beta)', 'A: notice is the summary')
+assert.equal(FakeOpenAI.calls.length, 3, 'A: 2 children + 1 summary call')
+assert.ok(isSummaryCall(FakeOpenAI.calls[2]), 'A: third call is the summarizer')
+const aRuns = store3.listRuns(GLOBAL_PROJECT_KEY, gj2.id)
+assert.equal(aRuns.length, 3, 'A: 2 child rows + 1 parent row')
+assert.ok(aRuns.some((r) => r.title === 'Fanout job · alpha' && r.status === 'done'))
+assert.ok(aRuns.some((r) => r.title === 'Fanout job · beta' && r.status === 'done'))
+assert.equal(aRuns.filter((r) => r.title === gj2.title).length, 1, 'A: one parent row')
+const aTrace = await store3.readRunTraceByRunId(GLOBAL_PROJECT_KEY, gRun.runId)
+assert.ok(aTrace, 'A: parent trace readable')
+assert.equal(
+  aTrace!.entries.filter((e) => e.role === 'tool' && e.name === 'run-project').length,
+  2,
+  'A: parent trace has one run-project entry per child'
+)
+
+// B: one child fails → still done, summary includes the failure
+FakeOpenAI.calls = []
+let bChildCalls = 0
+FakeOpenAI.responder = async (_n, call) => {
+  if (isSummaryCall(call)) return 'SUMMARY-with-failure'
+  bChildCalls++
+  if (bChildCalls === 2) throw new Error('child boom')
+  return 'ok answer'
+}
+grunner = new GlobalJobRunner(runnerDeps(['alpha', 'beta']))
+gRun = store3.startRun(GLOBAL_PROJECT_KEY, gj2.id, gj2.title)
+gres = await grunner.run(gj2, gRun)
+assert.equal(gres.status, 'done', 'B: partial failure → done')
+assert.equal(gres.statusNotice, 'SUMMARY-with-failure', 'B: summary still notifies')
+assert.equal(FakeOpenAI.calls.length, 3, 'B: summary still runs')
+assert.ok(
+  FakeOpenAI.calls[2].messages.some((m) => m.content.includes('(run failed: Error: child boom)')),
+  'B: failure section reaches the summarizer'
+)
+const bRuns = store3.listRuns(GLOBAL_PROJECT_KEY, gj2.id)
+assert.ok(
+  bRuns.some((r) => r.status === 'failed' && r.title.includes(' · ')),
+  'B: failed child row recorded'
+)
+
+// C: all children fail → failed, no summary call
+FakeOpenAI.calls = []
+FakeOpenAI.responder = async (_n, call) => {
+  if (isSummaryCall(call)) return 'must not be called'
+  throw new Error('boom')
+}
+grunner = new GlobalJobRunner(runnerDeps(['alpha', 'beta']))
+gRun = store3.startRun(GLOBAL_PROJECT_KEY, gj2.id, gj2.title)
+gres = await grunner.run(gj2, gRun)
+assert.equal(gres.status, 'failed', 'C: all failed → failed')
+assert.equal(gres.notify, false, 'C: no notification')
+assert.equal(FakeOpenAI.calls.length, 2, 'C: no summarizer call')
+
+// D: single project → passthrough, no summarizer call
+FakeOpenAI.calls = []
+FakeOpenAI.responder = async () => 'solo answer'
+grunner = new GlobalJobRunner(runnerDeps(['solo']))
+gRun = store3.startRun(GLOBAL_PROJECT_KEY, gj2.id, gj2.title)
+gres = await grunner.run(gj2, gRun)
+assert.equal(gres.status, 'done', 'D: single project done')
+assert.equal(gres.statusNotice, 'solo answer', 'D: child answer passed through')
+assert.equal(FakeOpenAI.calls.length, 1, 'D: no summarizer call')
+
+// E: summary is NO RESPONSE → no notification
+FakeOpenAI.calls = []
+FakeOpenAI.responder = async (_n, call) =>
+  isSummaryCall(call) ? '**NO RESPONSE**' : 'child answer'
+grunner = new GlobalJobRunner(runnerDeps(['alpha', 'beta']))
+gRun = store3.startRun(GLOBAL_PROJECT_KEY, gj2.id, gj2.title)
+gres = await grunner.run(gj2, gRun)
+assert.equal(gres.status, 'done', 'E: still done')
+assert.equal(gres.notify, false, 'E: NO RESPONSE suppresses the notification')
+assert.equal(gres.statusNotice, undefined, 'E: notice suppressed')
+
 store.closeAll()
 store2.closeAll()
+store3.closeAll()
 await fs.rm(ROOT, { recursive: true, force: true })
 console.log('test-jobs: all assertions passed')

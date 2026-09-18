@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { mdiCheckBold, mdiClose, mdiContentCopy } from '@mdi/js'
 import type { ScheduleJobEvent } from '@shared/types'
+import { projectLabel } from '@shared/scheduleJobs'
 import { MdiIcon } from './MdiIcon'
 import { MarkdownContent } from './MarkdownContent'
 
@@ -76,6 +77,7 @@ export function JobNotifications(): React.JSX.Element | null {
         >
           <div className="job-notification-head">
             <span className="job-notification-title">{n.jobTitle}</span>
+            <span className="job-notification-project">{projectLabel(n.project)}</span>
             <span className="job-notification-time">
               {new Date(n.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>

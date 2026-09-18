@@ -592,6 +592,7 @@ export type {
 } from './kanban'
 
 export type {
+  JobScope,
   ScheduleCondition,
   ScheduleJob,
   ScheduleJobEvent,
@@ -600,3 +601,4 @@ export type {
   ScheduleJobRunStatus,
   ScheduleTimeRule
 } from './scheduleJobs'
+export { GLOBAL_PROJECT_KEY, projectLabel } from './scheduleJobs'

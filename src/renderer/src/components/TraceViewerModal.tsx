@@ -11,6 +11,8 @@ interface TraceViewerTarget {
   kind: 'chat' | 'module' | 'bots' | 'jobs'
   key: string
   title: string
+  /** DB key to read the trace from; defaults to the active project. */
+  project?: string
 }
 
 type TraceRow = 'prompts' | 'assistance' | 'tools'
@@ -67,7 +69,7 @@ export function TraceViewerModal(): React.JSX.Element | null {
     <TraceViewerContent
       key={`${viewer.kind}:${viewer.key}`}
       viewer={viewer}
-      project={activeProject ?? ''}
+      project={viewer.project ?? activeProject ?? ''}
       onClose={close}
     />
   )

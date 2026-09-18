@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ScheduleJob, ScheduleJobInput, ScheduleJobRun, ScheduleTimeRule } from '@shared/types'
-import { computeNextRunAt } from '@shared/scheduleJobs'
+import type {
+  JobScope,
+  ScheduleJob,
+  ScheduleJobInput,
+  ScheduleJobRun,
+  ScheduleTimeRule
+} from '@shared/types'
+import { GLOBAL_PROJECT_KEY, computeNextRunAt } from '@shared/scheduleJobs'
 import { useAppStore } from '../store/useAppStore'
 import { friendlyError } from '../errors'
 import { ConfirmModal, Modal, TextField } from './Modal'
@@ -33,9 +39,10 @@ interface Draft {
   condition: 'exact' | 'next'
   prompt: string
   language: string
+  scope: JobScope
 }
 
-function emptyDraft(): Draft {
+function emptyDraft(defaultScope: JobScope = 'project'): Draft {
   return {
     id: null,
     title: '',
@@ -44,7 +51,8 @@ function emptyDraft(): Draft {
     timeRule: { kind: 'hourly', fromHours: 9, toHours: 18, minute: 0 },
     condition: 'next',
     prompt: '',
-    language: ''
+    language: '',
+    scope: defaultScope
   }
 }
 
@@ -57,7 +65,8 @@ function draftFromJob(job: ScheduleJob): Draft {
     timeRule: job.timeRule,
     condition: job.condition,
     prompt: job.prompt,
-    language: job.language ?? ''
+    language: job.language ?? '',
+    scope: job.scope
   }
 }
 
@@ -128,6 +137,7 @@ function JobRunsPopup({
                     openTraceViewer({
                       kind: 'jobs',
                       key: run.runId,
+                      project,
                       title: `${jobTitle} · ${new Date(run.startedAt).toLocaleTimeString([], {
                         hour: '2-digit',
                         minute: '2-digit'
@@ -221,38 +231,42 @@ export function ScheduleJobsOverlay(): React.JSX.Element {
     setTimesError(null)
   }
 
-  const loadJobs = useCallback(async (project: string): Promise<void> => {
-    try {
-      setJobs(await window.ptnotes.jobs.list(project))
-    } catch {
-      setJobs([])
-    }
+  const loadJobs = useCallback((): Promise<void> => {
+    const proj = useAppStore.getState().activeProject
+    return Promise.all([
+      proj ? window.ptnotes.jobs.list(proj) : Promise.resolve([] as ScheduleJob[]),
+      window.ptnotes.jobs.list(GLOBAL_PROJECT_KEY)
+    ])
+      .then(([projectJobs, globalJobs]) => setJobs([...projectJobs, ...globalJobs]))
+      .catch(() => setJobs([]))
   }, [])
 
   const select = useCallback((job: ScheduleJob | null): void => {
     setSelectedId(job ? job.id : null)
     setError(null)
     if (job) setDraft(draftFromJob(job))
-    else setDraft(emptyDraft())
+    else setDraft(emptyDraft(useAppStore.getState().activeProject ? 'project' : 'global'))
   }, [])
 
   useEffect(() => {
-    const cur = useAppStore.getState().activeProject
-    if (!cur) return
-    window.ptnotes.jobs
-      .list(cur)
-      .then(setJobs)
-      .catch(() => setJobs([]))
+    void loadJobs()
     return window.ptnotes.jobs.onEvent((evt) => {
-      const projectNow = useAppStore.getState().activeProject
-      if (evt.type !== 'runs-changed' || !projectNow) return
-      window.ptnotes.jobs
-        .list(projectNow)
-        .then(setJobs)
-        .catch(() => setJobs([]))
+      if (evt.type !== 'runs-changed') return
+      void loadJobs()
       setRunningIds((prev) => prev.filter((id) => id !== evt.jobId))
     })
-  }, [loadJobs])
+  }, [loadJobs, activeProject])
+
+  /** DB key for a job by id (global jobs live under the empty key). */
+  const keyForJob = useCallback(
+    (jobId: string | null): string | null => {
+      const job = jobs.find((j) => j.id === jobId)
+      if (!job) return null
+      if (job.scope === 'global') return GLOBAL_PROJECT_KEY
+      return activeProject
+    },
+    [jobs, activeProject]
+  )
 
   const patchDraft = (patch: Partial<Draft>): void => setDraft((d) => ({ ...d, ...patch }))
 
@@ -260,7 +274,11 @@ export function ScheduleJobsOverlay(): React.JSX.Element {
     setDraft((d) => ({ ...d, timeRule: { ...d.timeRule, ...patch } as ScheduleTimeRule }))
 
   async function saveJob(): Promise<void> {
-    if (!activeProject) return
+    const key = draft.scope === 'global' ? GLOBAL_PROJECT_KEY : activeProject
+    if (key === null) {
+      setError('Open a project to create a project-scoped job.')
+      return
+    }
     if (draft.days.length === 0) {
       setError('A job needs at least one day of week selected.')
       return
@@ -279,6 +297,7 @@ export function ScheduleJobsOverlay(): React.JSX.Element {
       condition: draft.condition,
       prompt: draft.prompt,
       language: draft.language,
+      scope: draft.scope,
       conditionMeta:
         draft.condition === 'next'
           ? {
@@ -287,8 +306,8 @@ export function ScheduleJobsOverlay(): React.JSX.Element {
           : undefined
     }
     try {
-      const saved = await window.ptnotes.jobs.save(activeProject, input)
-      await loadJobs(activeProject)
+      const saved = await window.ptnotes.jobs.save(key, input)
+      await loadJobs()
       setSelectedId(saved.id)
       setDraft(draftFromJob(saved))
       setError(null)
@@ -313,10 +332,11 @@ export function ScheduleJobsOverlay(): React.JSX.Element {
   }
 
   async function toggleEnabled(): Promise<void> {
-    if (!activeProject || !draft.id) return
+    const key = keyForJob(draft.id)
+    if (key === null || !draft.id) return
     try {
-      const updated = await window.ptnotes.jobs.setEnabled(activeProject, draft.id, !draft.enabled)
-      await loadJobs(activeProject)
+      const updated = await window.ptnotes.jobs.setEnabled(key, draft.id, !draft.enabled)
+      await loadJobs()
       setDraft(draftFromJob(updated))
     } catch {
       /* keep UI state */
@@ -324,24 +344,25 @@ export function ScheduleJobsOverlay(): React.JSX.Element {
   }
 
   async function runNow(): Promise<void> {
-    if (!activeProject || !draft.id || runningIds.includes(draft.id)) return
+    const key = keyForJob(draft.id)
+    if (key === null || !draft.id || runningIds.includes(draft.id)) return
     setRunningIds([...runningIds, draft.id])
     try {
-      await window.ptnotes.jobs.runNow(activeProject, draft.id)
+      await window.ptnotes.jobs.runNow(key, draft.id)
     } catch {
       // failure lands via runs-changed event
     }
   }
 
   async function deleteJob(): Promise<void> {
-    const project = activeProject
-    if (!project || !deleteTarget) return
+    const key = keyForJob(deleteTarget)
+    if (key === null || !deleteTarget) return
     try {
-      await window.ptnotes.jobs.delete(project, deleteTarget)
-      await loadJobs(project)
+      await window.ptnotes.jobs.delete(key, deleteTarget)
+      await loadJobs()
       if (selectedId === deleteTarget) {
         setSelectedId(null)
-        setDraft(emptyDraft())
+        setDraft(emptyDraft(activeProject ? 'project' : 'global'))
       }
     } catch {
       /* ignore */
@@ -407,22 +428,45 @@ export function ScheduleJobsOverlay(): React.JSX.Element {
 
         <div className="sched-jobs-body">
           <div className="sched-jobs-list">
-            {jobs.length === 0 && <p className="sched-jobs-empty">No jobs yet.</p>}
-            {jobs.map((job) => (
-              <button
-                key={job.id}
-                className={`sched-jobs-item ${job.id === selectedId ? 'active' : ''}`}
-                onClick={() => select(job)}
-              >
-                <span className="sched-jobs-item-title">{job.title}</span>
-                <span className="sched-jobs-item-sub">{ruleSummary(job.timeRule)}</span>
-                {!job.enabled && (
-                  <span className="sched-jobs-item-pause">
-                    <MdiIcon path={mdiPause} size={16} />
-                  </span>
-                )}
-              </button>
-            ))}
+            {(() => {
+              const projectJobs = activeProject ? jobs.filter((j) => j.scope === 'project') : []
+              const globalJobs = jobs.filter((j) => j.scope === 'global')
+              const renderItem = (job: ScheduleJob): React.JSX.Element => (
+                <button
+                  key={job.id}
+                  className={`sched-jobs-item ${job.id === selectedId ? 'active' : ''}`}
+                  onClick={() => select(job)}
+                >
+                  <span className="sched-jobs-item-title">{job.title}</span>
+                  <span className="sched-jobs-item-sub">{ruleSummary(job.timeRule)}</span>
+                  {!job.enabled && (
+                    <span className="sched-jobs-item-pause">
+                      <MdiIcon path={mdiPause} size={16} />
+                    </span>
+                  )}
+                </button>
+              )
+              return (
+                <>
+                  {activeProject ? (
+                    <>
+                      <p className="sched-jobs-section">This project</p>
+                      {projectJobs.length === 0 && (
+                        <p className="sched-jobs-empty">No project jobs yet.</p>
+                      )}
+                      {projectJobs.map(renderItem)}
+                    </>
+                  ) : (
+                    <p className="sched-jobs-empty">Open a project to manage its jobs.</p>
+                  )}
+                  <p className="sched-jobs-section">Global (all projects)</p>
+                  {globalJobs.length === 0 && (
+                    <p className="sched-jobs-empty">No global jobs yet.</p>
+                  )}
+                  {globalJobs.map(renderItem)}
+                </>
+              )
+            })()}
           </div>
 
           <div className="sched-jobs-detail">
@@ -461,6 +505,38 @@ export function ScheduleJobsOverlay(): React.JSX.Element {
                     />
                   </button>
                 </div>
+              </div>
+              <div className="sched-jobs-field">
+                <span>Run in</span>
+                <div className="sched-jobs-rule-seg" role="group" aria-label="Job scope">
+                  <button
+                    type="button"
+                    className={`day-seg ${draft.scope === 'project' ? 'active' : ''}`}
+                    disabled={!activeProject}
+                    title={
+                      activeProject
+                        ? 'Run in the current project only'
+                        : 'Open a project to use project scope'
+                    }
+                    onClick={() => patchDraft({ scope: 'project' })}
+                  >
+                    This project
+                  </button>
+                  <button
+                    type="button"
+                    className={`day-seg ${draft.scope === 'global' ? 'active' : ''}`}
+                    title="Run in every project, then summarize all results into one notification"
+                    onClick={() => patchDraft({ scope: 'global' })}
+                  >
+                    All projects
+                  </button>
+                </div>
+                {draft.scope === 'global' && (
+                  <span className="sched-jobs-scope-hint">
+                    Runs the prompt in every project, then summarizes all results into one
+                    notification.
+                  </span>
+                )}
               </div>
               <div className="sched-jobs-field">
                 <span>Days of week</span>
@@ -641,7 +717,11 @@ export function ScheduleJobsOverlay(): React.JSX.Element {
                   rows={5}
                   value={draft.prompt}
                   onChange={(e) => patchDraft({ prompt: e.target.value })}
-                  placeholder="What the background AI should do for this project (it can use module tools)."
+                  placeholder={
+                    draft.scope === 'global'
+                      ? 'What the background AI should do in every project (it can use module tools). Results are summarized into one answer.'
+                      : 'What the background AI should do for this project (it can use module tools).'
+                  }
                 />
               </label>
               <label className="sched-jobs-field">
@@ -665,9 +745,9 @@ export function ScheduleJobsOverlay(): React.JSX.Element {
           </div>
         </div>
       </div>
-      {runsOpen && activeProject && selectedId && (
+      {runsOpen && selectedId && keyForJob(selectedId) !== null && (
         <JobRunsPopup
-          project={activeProject}
+          project={keyForJob(selectedId)!}
           jobId={selectedId}
           jobTitle={jobs.find((j) => j.id === selectedId)?.title ?? selectedId}
           onClose={() => setRunsOpen(false)}

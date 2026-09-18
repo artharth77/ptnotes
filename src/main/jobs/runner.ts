@@ -24,6 +24,9 @@ export interface JobRunnerDeps {
   db: JobsStore
   /** Abort signal shared with the app shutdown path. */
   signal: AbortSignal
+  /** DB key under which this run's trace file is stored (defaults to `project`).
+   * Global fan-out children trace into the root-level jobs DB. */
+  traceProject?: string
 }
 
 export interface JobRunResult {
@@ -33,6 +36,9 @@ export interface JobRunResult {
   statusNotice?: string
   statusError?: string
   notify: boolean
+  /** Raw final answer (trimmed) when the run reached a final text, regardless of
+   * the NO RESPONSE suppression. */
+  finalText?: string
 }
 
 export class ScheduleJobRunner {
@@ -51,11 +57,12 @@ export class ScheduleJobRunner {
       return this.fail(run, 'AI is not configured. Open AI settings to set your API key.')
     }
 
+    const traceKey = this.deps.traceProject ?? this.project
     const trace = new AiTraceRecorder({
       project: this.project,
       key: run.runId,
       kind: 'module',
-      append: (header, lines) => this.deps.db.appendRunTrace(this.project, run.runId, header, lines)
+      append: (header, lines) => this.deps.db.appendRunTrace(traceKey, run.runId, header, lines)
     })
 
     const ctx: ToolContext = {
@@ -162,7 +169,8 @@ export class ScheduleJobRunner {
       run,
       status: 'done',
       statusNotice: notify ? finalText : undefined,
-      notify
+      notify,
+      finalText: finalText.trim()
     }
   }
 
@@ -182,6 +190,7 @@ export class ScheduleJobRunner {
       `Current local date/time: ${new Date().toLocaleString()}.`,
       `Job schedule: ${days} (informational).`,
       '',
+      'Modules are not tools: to run a module (e.g. the "subagent" module) call start_module with its id, then wait_modules with the returned runId to get its result. Never call a module id as if it were a tool name.',
       'Write your final answer in the user-preferred response language: ' + lang + '.',
       'The final answer will be shown to the user as a notification when it is useful. If this job produced nothing worth notifying (no notable result, nothing to report), reply with exactly **NO RESPONSE** and nothing else.',
       'Do not ask questions — there is no one to answer them.'
