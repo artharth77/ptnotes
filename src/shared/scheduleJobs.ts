@@ -11,6 +11,20 @@ export type ScheduleTimeRule =
 
 export type ScheduleCondition = 'exact' | 'next'
 
+/** Where a job runs: one project, or every project (fan-out + AI summary). */
+export type JobScope = 'project' | 'global'
+
+/**
+ * Project key used for global-scope jobs. Global jobs live in the root-level
+ * DB (`<root>/.data/jobs/jobs.db`) and are addressed with this empty key.
+ */
+export const GLOBAL_PROJECT_KEY = ''
+
+/** Display name for a project key ('' = global scope). */
+export function projectLabel(project: string): string {
+  return project === GLOBAL_PROJECT_KEY ? 'All projects' : project
+}
+
 /** Main → renderer events for the scheduled-jobs system. */
 export type ScheduleJobEvent =
   | {
@@ -33,6 +47,8 @@ export interface ScheduleJob {
   timeRule: ScheduleTimeRule
   condition: ScheduleCondition
   prompt: string
+  /** 'global' jobs run across every project and are stored in the root-level DB. */
+  scope: JobScope
   /** Preferred response language; blank = English. */
   language?: string
   /** Next pre-computed fire time (ms) — only used by the 'next' condition. */
@@ -67,6 +83,8 @@ export interface ScheduleJobInput {
   condition: ScheduleCondition
   prompt: string
   language?: string
+  /** Defaults to 'project' on create; on update, absence keeps the stored scope. */
+  scope?: JobScope
   conditionMeta?: { lastRunAt?: number; nextRunAt?: number }
 }
 

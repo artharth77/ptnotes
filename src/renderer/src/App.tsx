@@ -180,7 +180,7 @@ function VTabs({
         <div className="vtabs-spacer" />
         <div className="vtabs-sep" />
         <button
-          className={`vtabs-btn ${scheduleJobsOpen ? 'active' : ''} ${!activeProject ? 'disabled' : ''}`}
+          className={`vtabs-btn ${scheduleJobsOpen ? 'active' : ''}`}
           onClick={onJobs}
           {...tipHandlers('Jobs')}
         >
@@ -576,7 +576,6 @@ function App(): React.JSX.Element {
 
   function goJobs(): void {
     const s = useAppStore.getState()
-    if (!s.activeProject) return
     s.setScheduleJobsOpen(!s.scheduleJobsOpen)
   }
 
@@ -998,7 +997,7 @@ function App(): React.JSX.Element {
 
       {settingsOpen && <SettingsDialog />}
       {plannerCalendarOpen && <PlannerMiniCalendar />}
-      {scheduleJobsOpen && activeProject && <ScheduleJobsOverlay />}
+      {scheduleJobsOpen && <ScheduleJobsOverlay />}
       <JobNotifications />
       <CommandPalette />
       <GlobalFind />

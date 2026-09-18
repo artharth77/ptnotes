@@ -26,6 +26,8 @@ import { BotsStore } from './bots/db'
 import { JobsStore } from './jobs/db'
 import { JobScheduler } from './jobs/scheduler'
 import { ScheduleJobRunner } from './jobs/runner'
+import { GlobalJobRunner } from './jobs/globalRunner'
+import { GLOBAL_PROJECT_KEY } from '@shared/scheduleJobs'
 import { GroupChatManager } from './bots/orchestrator'
 import { createBotTaskModule } from './bots/botTask'
 import { ModuleRegistry } from './modules/registry'
@@ -414,20 +416,38 @@ app.whenReady().then(async () => {
   groupChatForwarder.current = groupChatManager
 
   // Scheduled jobs: per-project SQLite (`<project>/.data/jobs/jobs.db`) + a minute-tick
-  // scheduler that fires tool-capable background AI runs per project.
+  // scheduler that fires tool-capable background AI runs per project. Global-scope
+  // jobs live in the root-level `<root>/.data/jobs/` and fan out to every project.
   const jobsStore = new JobsStore(() => service.root)
   jobsStoreRef = jobsStore
   const jobAbortController = new AbortController()
   jobAbortControllerRef = jobAbortController
+  const listProjectNames = async (): Promise<string[]> => {
+    await service.ensureRoot()
+    const entries = await fs.readdir(service.root, { withFileTypes: true })
+    return entries.filter((e) => e.isDirectory() && !e.name.startsWith('.')).map((e) => e.name)
+  }
   const jobScheduler = new JobScheduler({
-    listProjects: async () => {
-      await service.ensureRoot()
-      const entries = await fs.readdir(service.root, { withFileTypes: true })
-      return entries.filter((e) => e.isDirectory() && !e.name.startsWith('.')).map((e) => e.name)
-    },
+    listProjects: listProjectNames,
     store: jobsStore,
     runnerFor: (project) => {
-      void project
+      if (project === GLOBAL_PROJECT_KEY) {
+        return {
+          run: async (job, run) => {
+            const runner = new GlobalJobRunner({
+              listProjects: listProjectNames,
+              service,
+              configStore,
+              moduleManager: moduleManager!,
+              moduleRegistry: moduleRegistry,
+              disabledModules: (await settingsStore.load()).disabledModules ?? [],
+              db: jobsStore,
+              signal: jobAbortController.signal
+            })
+            return runner.run(job, run)
+          }
+        }
+      }
       return {
         run: async (job, run) => {
           const runner = new ScheduleJobRunner({

@@ -110,7 +110,13 @@ interface AppState {
   /** Live subagent tool-call lifecycle per run id (transient; never persisted). */
   moduleToolCalls: Record<string, ToolCallInfo[]>
   moduleHistoryRunId: string | null
-  traceViewer: { kind: 'chat' | 'module' | 'bots' | 'jobs'; key: string; title: string } | null
+  traceViewer: {
+    kind: 'chat' | 'module' | 'bots' | 'jobs'
+    key: string
+    title: string
+    /** DB key to read the trace from; defaults to the active project. */
+    project?: string
+  } | null
   chatBusy: boolean
   chatStreamProject: string | null
   chatWaitRuns: string[]
@@ -239,6 +245,7 @@ interface AppState {
     kind: 'chat' | 'module' | 'bots' | 'jobs'
     key: string
     title: string
+    project?: string
   }) => void
   closeTraceViewer: () => void
   // ---- Bots group chat ----

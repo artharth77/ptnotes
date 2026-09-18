@@ -1,5 +1,11 @@
 import type { ScheduleJob, ScheduleJobEvent } from '@shared/scheduleJobs'
-import { computeNextRunAt, planJobPrune, shouldRunExact, shouldRunNext } from '@shared/scheduleJobs'
+import {
+  GLOBAL_PROJECT_KEY,
+  computeNextRunAt,
+  planJobPrune,
+  shouldRunExact,
+  shouldRunNext
+} from '@shared/scheduleJobs'
 import type { JobsStore } from './db'
 import type { ScheduleJobRunner } from './runner'
 
@@ -53,7 +59,7 @@ export class JobScheduler {
     try {
       projects = await this.deps.listProjects()
     } catch {
-      return
+      projects = []
     }
     const waiters: Promise<void>[] = []
     for (const project of projects) {
@@ -71,6 +77,21 @@ export class JobScheduler {
         )
       )
     }
+    // Global-scope jobs: evaluated once per tick (not per project), independent
+    // of the project list so they still fire when enumeration fails.
+    const prevGlobal = this.inflight.get(GLOBAL_PROJECT_KEY) ?? Promise.resolve()
+    const globalRun = prevGlobal.then(
+      () => this.tickProject(GLOBAL_PROJECT_KEY, now),
+      () => undefined
+    )
+    waiters.push(globalRun)
+    this.inflight.set(
+      GLOBAL_PROJECT_KEY,
+      globalRun.then(
+        () => undefined,
+        () => undefined
+      )
+    )
     await Promise.all(waiters)
   }
 

@@ -3,12 +3,13 @@ import { join } from 'path'
 import { randomUUID } from 'crypto'
 import { mkdirSync, promises as fs } from 'fs'
 import type {
+  JobScope,
   ScheduleCondition,
   ScheduleJob,
   ScheduleJobInput,
   ScheduleJobRun
 } from '@shared/scheduleJobs'
-import { sanitizeTimeRule } from '@shared/scheduleJobs'
+import { GLOBAL_PROJECT_KEY, sanitizeTimeRule } from '@shared/scheduleJobs'
 import type { AiTraceFile } from '@shared/types'
 
 function validateId(id: string): string {
@@ -27,6 +28,7 @@ interface JobRow {
   condition: string
   prompt: string
   language: string | null
+  scope: string | null
   next_run_at: number | null
   last_run_at: number | null
   created_at: number
@@ -68,6 +70,7 @@ function rowToJob(r: JobRow): ScheduleJob {
     timeRule: sanitizeTimeRule(JSON.parse(r.time_rule)),
     condition,
     prompt: r.prompt,
+    scope: r.scope === 'global' ? 'global' : 'project',
     ...(r.language ? { language: r.language } : {}),
     ...(r.next_run_at ? { nextRunAt: r.next_run_at } : {}),
     ...(r.last_run_at ? { lastRunAt: r.last_run_at } : {}),
@@ -95,7 +98,8 @@ function rowToRun(r: RunRow): ScheduleJobRun {
 /**
  * SQLite persistence for scheduled jobs — per-project `<project>/.data/jobs/jobs.db`
  * (jobs + run history) plus append-only AI trace files in
- * `<project>/.data/jobs/traces/<runId>.trace.jsonl`.
+ * `<project>/.data/jobs/traces/<runId>.trace.jsonl`. Global-scope jobs use the
+ * empty project key and live in the root-level `<root>/.data/jobs/` instead.
  */
 export class JobsStore {
   private readonly projectDbs = new Map<string, DatabaseSync>()
@@ -145,6 +149,7 @@ export class JobsStore {
       condition TEXT NOT NULL DEFAULT 'exact',
       prompt TEXT NOT NULL DEFAULT '',
       language TEXT,
+      scope TEXT NOT NULL DEFAULT 'project',
       next_run_at INTEGER,
       last_run_at INTEGER,
       created_at INTEGER NOT NULL,
@@ -161,6 +166,11 @@ export class JobsStore {
       error TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_job_runs_started ON job_runs (started_at);`)
+    // Migration: pre-global-scope DBs lack the `scope` column.
+    const cols = db.prepare('PRAGMA table_info(jobs)').all() as unknown as Array<{ name: string }>
+    if (!cols.some((c) => c.name === 'scope')) {
+      db.exec("ALTER TABLE jobs ADD COLUMN scope TEXT NOT NULL DEFAULT 'project'")
+    }
     this.projectDbs.set(project, db)
     return db
   }
@@ -193,14 +203,29 @@ export class JobsStore {
     const language = String(input.language ?? '').trim() || null
     const enabled = input.enabled === false ? 0 : 1
 
+    let scope: JobScope
+    if (input.id) {
+      const existing = this.getJob(project, validateId(input.id))
+      if (!existing) throw new Error(`Job not found: ${input.id}`)
+      scope = input.scope ?? existing.scope
+    } else {
+      scope = input.scope ?? 'project'
+    }
+    if (scope === 'global' && project !== GLOBAL_PROJECT_KEY) {
+      throw new Error('Global jobs must be saved under the global key.')
+    }
+    if (scope === 'project' && project === GLOBAL_PROJECT_KEY) {
+      throw new Error('Project jobs must be saved under a project key.')
+    }
+
     if (input.id) {
       const id = validateId(input.id)
-      const existing = this.getJob(project, id)
-      if (!existing) throw new Error(`Job not found: ${id}`)
       const nextRun =
-        condition === 'next' ? (input.conditionMeta?.nextRunAt ?? existing.nextRunAt ?? null) : null
+        condition === 'next'
+          ? (input.conditionMeta?.nextRunAt ?? this.getJob(project, id)!.nextRunAt ?? null)
+          : null
       db.prepare(
-        `UPDATE jobs SET title = ?, enabled = ?, days = ?, time_rule = ?, condition = ?, prompt = ?, language = ?, next_run_at = ?, updated_at = ? WHERE id = ?`
+        `UPDATE jobs SET title = ?, enabled = ?, days = ?, time_rule = ?, condition = ?, prompt = ?, language = ?, scope = ?, next_run_at = ?, updated_at = ? WHERE id = ?`
       ).run(
         title,
         enabled,
@@ -209,6 +234,7 @@ export class JobsStore {
         condition,
         prompt,
         language,
+        scope,
         nextRun,
         now,
         id
@@ -217,7 +243,7 @@ export class JobsStore {
     }
     const id = randomUUID()
     db.prepare(
-      `INSERT INTO jobs (id, title, enabled, days, time_rule, condition, prompt, language, next_run_at, last_run_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO jobs (id, title, enabled, days, time_rule, condition, prompt, language, scope, next_run_at, last_run_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       id,
       title,
@@ -227,6 +253,7 @@ export class JobsStore {
       condition,
       prompt,
       language,
+      scope,
       condition === 'next' ? (input.conditionMeta?.nextRunAt ?? null) : null,
       null,
       now,
