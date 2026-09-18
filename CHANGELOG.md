@@ -7,6 +7,10 @@
 - **Scheduled jobs: global scope** — jobs can now run in **all projects** at once: the job editor gains a **Run in** selector (This project / All projects), and global jobs persist in a root-level database (`<root>/.data/jobs/jobs.db`) so they survive project switches. When due, the job prompt is **fanned out to every project in parallel** (max 3 concurrent runs) and one AI call then **summarizes all per-project results into a single notification** (per-project sections capped at 4000 chars, failures included as `(run failed: …)`; a single project's answer passes through verbatim; if every project fails the run is marked failed with no notification). Each per-project execution is recorded in the global job's run history as its own row (`<job title> · <project>`) with its own raw AI trace, and the parent run's trace records the whole orchestration. The Jobs tab and overlay now work without an open project (global jobs are always manageable), the job list is grouped into *This project* / *Global (all projects)* sections, and notifications show which project — or "All projects" — they came from.
 - **Scheduled jobs: module-usage guard in the job system prompt** — the job system prompt now states explicitly that modules are not tools: to run a module (e.g. `subagent`) call `start_module` with its id, then `wait_modules` with the returned runId — so the model no longer invents a tool named after a module id.
 
+### Fixed
+
+- **Gallery: images not shown when the project name contains non-ASCII characters (e.g. Thai)** — the `ptfile://` protocol handler only decoded `%20`, so the browser's percent-encoding of non-ASCII path characters was never reversed and the file read 404'd; the pathname is now fully decoded with `decodeURIComponent` (with a fallback for malformed sequences). This also fixes editor images, file-explorer previews and PDF previews in projects with non-ASCII names.
+
 ## [0.21.0] - 2026-09-18
 
 ### Added

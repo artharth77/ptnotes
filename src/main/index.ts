@@ -325,10 +325,13 @@ app.whenReady().then(async () => {
   }
   protocol.handle('ptfile', async (request) => {
     const rawPath = new URL(request.url).pathname
-    let filePath = rawPath
-    if (/^\/[a-zA-Z]:\//.test(filePath))
-      filePath = filePath.replace(/^\//g, '').replace(/%20/g, ' ')
-    else filePath = filePath.replace(/%20/g, ' ')
+    let filePath: string
+    try {
+      filePath = decodeURIComponent(rawPath)
+    } catch {
+      filePath = rawPath
+    }
+    if (/^\/[a-zA-Z]:\//.test(filePath)) filePath = filePath.replace(/^\//g, '')
     try {
       const data = await fs.readFile(filePath)
       const mime = IMAGE_MIME[extname(filePath).toLowerCase()] ?? 'application/octet-stream'
