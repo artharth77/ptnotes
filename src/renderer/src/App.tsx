@@ -20,6 +20,7 @@ import { KanbanCardModal } from './components/KanbanCardModal'
 import { PlannerPanel } from './components/PlannerPanel'
 import { PlannerEditor } from './components/PlannerEditor'
 import { MarkdownEditor } from './components/MarkdownEditor'
+import { runEditorSelectAll } from './editor/selectAll'
 import { FileTreePanel, FileListPanel } from './components/FileExplorer'
 import { ChatDrawer } from './components/ChatDrawer'
 import { GroupChatPanel } from './components/GroupChatPanel'
@@ -834,6 +835,21 @@ function App(): React.JSX.Element {
       openFind(true)
     })
     return dispose
+  }, [])
+
+  // Menu Select All routing: the note editor handles its own selection (code
+  // blocks select just the block); every other focused field falls back to a
+  // native select-all.
+  useEffect(() => {
+    return window.ptnotes.onSelectAll(() => {
+      if (runEditorSelectAll()) return
+      const el = document.activeElement as HTMLElement | null
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+        el.select()
+        return
+      }
+      document.execCommand('selectAll')
+    })
   }, [])
 
   // Show a skeleton briefly while the module panel animates open/close or switches to it
