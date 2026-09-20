@@ -18,7 +18,10 @@ import type {
   AboutInfo,
   AIConfig,
   AIProfile,
+  McpServerCategories,
   McpServerConfig,
+  McpServerSettings,
+  McpServerStatus,
   McpTestResult,
   ModuleSettings,
   SkillContent,
@@ -1124,6 +1127,221 @@ function AppearanceSettings(): React.JSX.Element {
   )
 }
 
+function McpServerPane(): React.JSX.Element {
+  const [status, setStatus] = useState<McpServerStatus | null>(null)
+  const [portText, setPortText] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [copied, setCopied] = useState(false)
+
+  async function reload(): Promise<void> {
+    try {
+      const s = await window.ptnotes.mcpServer.getStatus()
+      setStatus(s)
+      setPortText(String(s.port))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  useEffect(() => {
+    void window.ptnotes.mcpServer
+      .getStatus()
+      .then((s) => {
+        setStatus(s)
+        setPortText(String(s.port))
+      })
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
+  }, [])
+
+  async function update(patch: Partial<McpServerSettings>): Promise<void> {
+    setSaving(true)
+    setError('')
+    try {
+      const s = await window.ptnotes.mcpServer.update(patch)
+      setStatus(s)
+      setPortText(String(s.port))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function regenerate(): Promise<void> {
+    setSaving(true)
+    setError('')
+    try {
+      setStatus(await window.ptnotes.mcpServer.regenerateToken())
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function savePort(): void {
+    const port = Number(portText.trim())
+    if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+      setError('Port must be an integer between 1024 and 65535.')
+      return
+    }
+    void update({ port })
+  }
+
+  function toggleCategory(key: keyof McpServerCategories, value: boolean): void {
+    if (!status) return
+    void update({ categories: { ...status.categories, [key]: value } })
+  }
+
+  async function copy(value: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // clipboard unavailable — ignore
+    }
+  }
+
+  if (!status) return <p className="hint">Loading…</p>
+
+  const url = status.url || `http://127.0.0.1:${status.port}${'/mcp'}`
+  const snippet = `{\n  "mcpServers": {\n    "ptnotes": {\n      "url": "${url}",\n      "headers": {\n        "Authorization": "Bearer ${status.token}"\n      }\n    }\n  }\n}`
+  const categoryRows: { key: keyof McpServerCategories; label: string; desc: string }[] = [
+    { key: 'notes', label: 'Notes', desc: 'list, read, create, update and delete notes' },
+    { key: 'kanban', label: 'Kanban', desc: 'cards, comments, moves' },
+    { key: 'planner', label: 'Planner', desc: 'schedules, tasks and the working-day calendar' }
+  ]
+
+  return (
+    <>
+      <p className="hint">
+        Expose PTNotes projects, notes, kanban cards and planner schedules to external MCP clients
+        (Claude Desktop, Cursor, …). The server listens on localhost only and requires the bearer
+        token below. Every tool requires an explicit project name; clients discover them with
+        list_projects.
+      </p>
+      <div className="module-settings-list">
+        <div
+          className={`module-settings-row${status.enabled ? '' : ' disabled'}`}
+          aria-pressed={status.enabled}
+        >
+          <span className="module-settings-info">
+            <span className="module-settings-name">
+              MCP server
+              <span
+                className={`mcp-status-dot ${status.running ? 'connected' : 'error'}`}
+                title={status.running ? 'Running' : 'Stopped'}
+              />
+            </span>
+            <span className="module-settings-desc">
+              {status.running
+                ? `Running at ${url} — ${status.toolCount} tools, ${status.sessionCount} active session${
+                    status.sessionCount === 1 ? '' : 's'
+                  }`
+                : status.enabled
+                  ? `Enabled but not running${status.error ? `: ${status.error}` : ''}`
+                  : 'Disabled'}
+            </span>
+          </span>
+          <button
+            className={`module-settings-toggle${status.enabled ? ' on' : ''}`}
+            title={status.enabled ? 'Disable the MCP server' : 'Enable the MCP server'}
+            disabled={saving}
+            onClick={() => void update({ enabled: !status.enabled })}
+          >
+            <MdiIcon
+              path={status.enabled ? mdiToggleSwitch : mdiToggleSwitchOffOutline}
+              size={32}
+            />
+          </button>
+        </div>
+      </div>
+
+      <div className="module-settings-list">
+        {categoryRows.map(({ key, label, desc }) => (
+          <div
+            key={key}
+            className={`module-settings-row${status.categories[key] ? '' : ' disabled'}`}
+            aria-pressed={status.categories[key]}
+          >
+            <span className="module-settings-info">
+              <span className="module-settings-name">{label} tools</span>
+              <span className="module-settings-desc">{desc}</span>
+            </span>
+            <button
+              className={`module-settings-toggle${status.categories[key] ? ' on' : ''}`}
+              title={status.categories[key] ? `Disable ${label} tools` : `Enable ${label} tools`}
+              disabled={saving}
+              onClick={() => toggleCategory(key, !status.categories[key])}
+            >
+              <MdiIcon
+                path={status.categories[key] ? mdiToggleSwitch : mdiToggleSwitchOffOutline}
+                size={32}
+              />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <label className="form-label">
+        Port
+        <div className="mcp-inline">
+          <TextField value={portText} onChange={setPortText} />
+          <button
+            className="btn primary"
+            type="button"
+            disabled={saving || portText === String(status.port)}
+            onClick={savePort}
+          >
+            Save
+          </button>
+        </div>
+      </label>
+
+      <label className="form-label">
+        Bearer token
+        <div className="mcp-inline">
+          <TextField value={status.token} readOnly onChange={() => {}} />
+          <button className="btn small" type="button" onClick={() => void copy(status.token)}>
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+          <button
+            className="btn small danger"
+            type="button"
+            disabled={saving}
+            onClick={() => void regenerate()}
+          >
+            Regenerate
+          </button>
+        </div>
+      </label>
+
+      <label className="form-label">
+        Client configuration
+        <textarea
+          className="text-field mcp-field-textarea"
+          value={snippet}
+          readOnly
+          rows={8}
+          spellCheck={false}
+        />
+      </label>
+
+      {error && <p className="form-error">{error}</p>}
+      <div className="modal-actions">
+        <button className="btn" type="button" onClick={() => void reload()}>
+          Refresh
+        </button>
+        <button className="btn" type="button" onClick={() => void copy(snippet)}>
+          Copy config
+        </button>
+      </div>
+    </>
+  )
+}
+
 function AboutPane(): React.JSX.Element {
   const [about, setAbout] = useState<AboutInfo | null>(null)
   const [error, setError] = useState('')
@@ -1680,6 +1898,12 @@ export function SettingsDialog(): React.JSX.Element {
             Toolsets
           </button>
           <button
+            className={category === 'mcpServer' ? 'active' : ''}
+            onClick={() => setSettingsCategory('mcpServer')}
+          >
+            MCP Server
+          </button>
+          <button
             className={category === 'skills' ? 'active' : ''}
             onClick={() => setSettingsCategory('skills')}
           >
@@ -1727,6 +1951,10 @@ export function SettingsDialog(): React.JSX.Element {
           ) : category === 'toolsets' ? (
             <>
               <ToolsetsPane toolsets={toolsets} setToolsets={setToolsets} />
+            </>
+          ) : category === 'mcpServer' ? (
+            <>
+              <McpServerPane />
             </>
           ) : category === 'skills' ? (
             <>

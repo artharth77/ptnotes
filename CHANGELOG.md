@@ -4,6 +4,8 @@
 
 ### Added
 
+- **Built-in MCP server** — Settings ▸ **MCP Server** can now expose PTNotes to external MCP clients (Claude Desktop, Cursor, …) over a **loopback-only Streamable HTTP** endpoint (`http://127.0.0.1:<port>/mcp`, default port 3737, bearer-token auth). Disabled by default; the pane shows live status, tools/sessions, the token (copy/regenerate), a configurable port, **per-category toggles (Notes / Kanban / Planner)**, and a copy-ready client config snippet. The server exposes `list_projects` plus only the enabled categories' tools (up to 19), and **every project tool requires an explicit `project`**; file, skill, web, module and browser tools are not exposed. Destructive deletes require MCP client elicitation support (clients without it get the cancelled result). Config (enabled/port/token/categories) is stored in `userData/ptnotes-settings.json` (chmod 600); new IPC: `mcpServer:getStatus` / `mcpServer:update` / `mcpServer:regenerateToken`.
+
 - **Toolsets: external MCP servers** — Settings ▸ Toolsets now manages user-configured external MCP servers inline (add/edit form with a **stdio** / **HTTP** transport toggle, "Test connection", and a live status dot) alongside the built-in Browser toolset. Each server appears as its own enable/disable row; configs are stored in `userData/mcp-servers.json` (chmod 600). Enabled servers add their tools to the chat **and** module subagent runs, namespaced `mcp__<server>__<tool>`; clients are spawned/connected lazily from the main process, reconnect when the config changes, and a broken server is skipped (the chat keeps working) and retried after a short backoff. New IPC: `mcp:listServers` / `mcp:save` / `mcp:delete` / `mcp:test`.
 
 ### Fixed

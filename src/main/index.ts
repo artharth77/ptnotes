@@ -21,8 +21,10 @@ import { registerDiagramsIpc } from './ipc/diagrams'
 import { registerInfographicIpc } from './ipc/infographic'
 import { registerToolsetsIpc } from './ipc/toolsets'
 import { registerMcpIpc } from './ipc/mcp'
+import { registerMcpServerIpc } from './ipc/mcpServer'
 import { getMcpServerStore } from './mcp/servers'
 import { getMcpClientManager } from './mcp/external'
+import { getMcpServerHost } from './mcp/server'
 import { registerBotsIpc } from './ipc/bots'
 import { registerJobsIpc } from './ipc/jobs'
 import { BotsStore } from './bots/db'
@@ -368,6 +370,7 @@ app.whenReady().then(async () => {
   await service.migrateLegacyFolders()
   const configStore = new AIConfigStore()
   await getMcpServerStore().load()
+  await getMcpServerHost().reconfigure(settings.mcpServer!, service)
 
   const { setDefaultHeadless, setDefaultMaximize, setDefaultIgnoreHttpsErrors } =
     await import('./mcp/browser')
@@ -509,6 +512,7 @@ app.whenReady().then(async () => {
   registerModulesIpc(moduleManager!, settingsStore, moduleRegistry)
   registerToolsetsIpc(settingsStore)
   registerMcpIpc()
+  registerMcpServerIpc(service, settingsStore)
   registerBotsIpc(botsStore, groupChatManager, moduleManager!)
   registerJobsIpc(jobsStore, jobSchedulerRef!)
 
@@ -541,6 +545,7 @@ app.on('will-quit', () => {
 
   void closeBrowser()
   void getMcpClientManager().closeAll()
+  void getMcpServerHost().stop()
   shutdownChartRenderer()
   shutdownDiagramRenderer()
   shutdownInfographicRenderer()

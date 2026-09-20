@@ -5440,6 +5440,17 @@ fieldset.kanban-form {
   gap: 6px;
 }
 
+.mcp-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mcp-inline .text-field {
+  flex: 1;
+  min-width: 0;
+}
+
 .mcp-field-textarea {
   min-height: 60px;
   resize: vertical;

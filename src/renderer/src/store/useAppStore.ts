@@ -125,7 +125,15 @@ interface AppState {
   settingsOpen: boolean
   scheduleJobsOpen: boolean
   settingsCategory:
-    'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets' | 'bots' | 'appearance'
+    | 'storage'
+    | 'ai'
+    | 'modules'
+    | 'about'
+    | 'skills'
+    | 'toolsets'
+    | 'mcpServer'
+    | 'bots'
+    | 'appearance'
   skillEditRequest: string | null
   sidebarVisible: boolean
   /** File explorer location: path relative to the project files root ('' = root). */
@@ -290,11 +298,28 @@ interface AppState {
   setSettingsOpen: (open: boolean) => void
   setScheduleJobsOpen: (open: boolean) => void
   setSettingsCategory: (
-    category: 'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets' | 'bots' | 'appearance'
+    category:
+      | 'storage'
+      | 'ai'
+      | 'modules'
+      | 'about'
+      | 'skills'
+      | 'toolsets'
+      | 'mcpServer'
+      | 'bots'
+      | 'appearance'
   ) => void
   openSettings: (
     category?:
-      'storage' | 'ai' | 'modules' | 'about' | 'skills' | 'toolsets' | 'bots' | 'appearance'
+      | 'storage'
+      | 'ai'
+      | 'modules'
+      | 'about'
+      | 'skills'
+      | 'toolsets'
+      | 'mcpServer'
+      | 'bots'
+      | 'appearance'
   ) => void
   openSkillEditor: (name: string) => void
   clearSkillEditRequest: () => void

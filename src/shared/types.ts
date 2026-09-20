@@ -68,6 +68,8 @@ export interface StorageSettings {
   sidebarVisible?: boolean
   /** User enable/disable choices for builtin (app-shipped, read-only) skills, keyed by skill name. */
   builtinSkillOverrides?: Record<string, boolean>
+  /** Built-in MCP server exposed to external clients over localhost (disabled by default). */
+  mcpServer?: McpServerSettings
 }
 
 export interface AppearanceSettings {
@@ -138,6 +140,35 @@ export interface McpServerConfig {
 export interface McpTestResult {
   ok: boolean
   toolCount?: number
+  error?: string
+}
+
+/** Tool categories the built-in MCP server can expose to external clients. */
+export interface McpServerCategories {
+  notes: boolean
+  kanban: boolean
+  planner: boolean
+}
+
+/** Persisted config for the built-in MCP server exposed to external clients over localhost. */
+export interface McpServerSettings {
+  enabled: boolean
+  port: number
+  token: string
+  categories: McpServerCategories
+}
+
+/** Live status of the built-in MCP server shown in Settings ▸ MCP Server. */
+export interface McpServerStatus {
+  enabled: boolean
+  running: boolean
+  port: number
+  /** Streamable HTTP endpoint, e.g. `http://127.0.0.1:3737/mcp`. */
+  url: string
+  token: string
+  categories: McpServerCategories
+  sessionCount: number
+  toolCount: number
   error?: string
 }
 
