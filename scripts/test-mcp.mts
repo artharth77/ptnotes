@@ -66,12 +66,12 @@ const emptyTools = await buildChatTools(['browser'])
 assert.equal(emptyTools.length, 0, 'disabled browser → no tools')
 
 // prompt section
-const section = buildPromptSection([])
+const section = await buildPromptSection([])
 assert.ok(section, 'prompt section present when browser enabled')
 assert.ok(section!.includes('browser_set_mode'), 'prompt section mentions headless rule')
 assert.ok(section!.includes('ask_user'), 'prompt section mentions ask_user')
 
-const noSection = buildPromptSection(['browser'])
+const noSection = await buildPromptSection(['browser'])
 assert.equal(noSection, null, 'prompt section absent when browser disabled')
 
 console.log('MCP TOOLSET TESTS PASSED')

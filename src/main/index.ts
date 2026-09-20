@@ -20,6 +20,9 @@ import { registerModulesIpc } from './ipc/modules'
 import { registerDiagramsIpc } from './ipc/diagrams'
 import { registerInfographicIpc } from './ipc/infographic'
 import { registerToolsetsIpc } from './ipc/toolsets'
+import { registerMcpIpc } from './ipc/mcp'
+import { getMcpServerStore } from './mcp/servers'
+import { getMcpClientManager } from './mcp/external'
 import { registerBotsIpc } from './ipc/bots'
 import { registerJobsIpc } from './ipc/jobs'
 import { BotsStore } from './bots/db'
@@ -364,6 +367,7 @@ app.whenReady().then(async () => {
   const service = new PTNotesService(settings.rootDir, undefined, settingsStore)
   await service.migrateLegacyFolders()
   const configStore = new AIConfigStore()
+  await getMcpServerStore().load()
 
   const { setDefaultHeadless, setDefaultMaximize, setDefaultIgnoreHttpsErrors } =
     await import('./mcp/browser')
@@ -504,6 +508,7 @@ app.whenReady().then(async () => {
   registerSkillsIpc(service)
   registerModulesIpc(moduleManager!, settingsStore, moduleRegistry)
   registerToolsetsIpc(settingsStore)
+  registerMcpIpc()
   registerBotsIpc(botsStore, groupChatManager, moduleManager!)
   registerJobsIpc(jobsStore, jobSchedulerRef!)
 
@@ -535,6 +540,7 @@ app.on('will-quit', () => {
   jobsStoreRef?.closeAll()
 
   void closeBrowser()
+  void getMcpClientManager().closeAll()
   shutdownChartRenderer()
   shutdownDiagramRenderer()
   shutdownInfographicRenderer()

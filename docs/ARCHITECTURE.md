@@ -9,18 +9,18 @@ on-disk layout, IPC, AI/chat features, module rendering, or the UI.
 
 Read the section(s) relevant to your task rather than the whole file when possible:
 
-| Section                                                                 | Read when touching                                                       |
-| ----------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| [Decisions (locked in)](#decisions-locked-in)                           | Any feature work — product decisions that must not be reverted           |
-| [On-disk layout](#on-disk-layout)                                       | Filesystem paths, `.data/`, project root, storage/config files           |
-| [Architecture](#architecture)                                           | Finding where code lives (main/preload/renderer/shared)                  |
-| [Security invariants (do not break)](#security-invariants-do-not-break) | **Always read** — hard constraints (renderer isolation, render workers)  |
-| [UI layout](#ui-layout)                                                 | Editor, toolbar, format helper, find & replace, top bar                  |
-| [IPC surface (window.ptnotes)](#ipc-surface-windowptnotes)              | Preload/renderer ↔ main IPC handler shapes                               |
-| [AI chat feature](#ai-chat-feature)                                     | Chat session, tools, module orchestration, trace, PDF, chat UI, settings |
-| [Bots group chat](#bots-group-chat)                                     | Bot identities, group chats, routing rules, background tasks, memories   |
+| Section                                                                 | Read when touching                                                               |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| [Decisions (locked in)](#decisions-locked-in)                           | Any feature work — product decisions that must not be reverted                   |
+| [On-disk layout](#on-disk-layout)                                       | Filesystem paths, `.data/`, project root, storage/config files                   |
+| [Architecture](#architecture)                                           | Finding where code lives (main/preload/renderer/shared)                          |
+| [Security invariants (do not break)](#security-invariants-do-not-break) | **Always read** — hard constraints (renderer isolation, render workers)          |
+| [UI layout](#ui-layout)                                                 | Editor, toolbar, format helper, find & replace, top bar                          |
+| [IPC surface (window.ptnotes)](#ipc-surface-windowptnotes)              | Preload/renderer ↔ main IPC handler shapes                                       |
+| [AI chat feature](#ai-chat-feature)                                     | Chat session, tools, module orchestration, trace, PDF, chat UI, settings         |
+| [Bots group chat](#bots-group-chat)                                     | Bot identities, group chats, routing rules, background tasks, memories           |
 | [Scheduled jobs](#scheduled-jobs)                                       | Per-project + global scheduled AI jobs, minute-tick scheduler, job notifications |
-| [Notes & caveats](#notes--caveats)                                      | Behavioral constraints (tool scoping, mention semantics)                 |
+| [Notes & caveats](#notes--caveats)                                      | Behavioral constraints (tool scoping, mention semantics)                         |
 
 ---
 
@@ -36,7 +36,7 @@ PTNotes is a desktop app (Electron) for markdown notes, kanban task boards, an A
 - zustand (app state)
 - `openai` npm SDK with `baseURL` override (works with OpenAI, OpenRouter, Groq, LM Studio, Ollama, etc.)
 - `node:sqlite` (built into Electron's Node 22 — zero-dependency SQLite storage for the bots system)
-- `@modelcontextprotocol/sdk` (v1.30) in-process MCP server + client over `InMemoryTransport` for browser toolset
+- `@modelcontextprotocol/sdk` (v1.30) — in-process MCP server + client over `InMemoryTransport` for the browser toolset, plus `StdioClientTransport` / `StreamableHTTPClientTransport` for user-configured external MCP servers
 - `playwright-core` (drives installed Chrome/Edge; no bundled Chromium)
 - `zod` (v4, peer dep of MCP SDK; input-schema validation for registered tools)
 - cheerio (local HTML → text parsing for `web_fetch`)
@@ -127,6 +127,7 @@ Run `npm run typecheck` and `npm run lint` after any change.
 
 - App AI config stored in Electron `userData/ai-provider.json`, `chmod 600`, never in the renderer bundle. Shape: `{ version, profiles: [{id,name,baseUrl,apiKey,model}], activeProfileId, uploadPdfEnabled }` — a set of named profiles plus the active one and a global PDF toggle. Legacy flat configs migrate into a single "Profile 1".
 - App settings (project root path + `disabledModules` module toggles + `disabledToolsets` toolset toggles + `browserHeadless` preference) stored in Electron `userData/ptnotes-settings.json`, `chmod 600`.
+- External MCP server registry stored in Electron `userData/mcp-servers.json`, `chmod 600`: an array of `McpServerConfig { id, name, transport: 'stdio' | 'http', command?, args?, env?, url?, headers?, enabled }`. The API-key-free config never enters the renderer bundle beyond what the Settings pane reads/writes.
 - Creating a project initializes folder + `kanban/board.json` (default columns) + `welcome.md`.
 - `.ptnotes-projects.json` in the root dir is the persistent project registry so externally-deleted folders still show (missing paths flagged `pathExists: false`).
 
@@ -545,11 +546,13 @@ system`; every utility-process chart/diagram/infographic renderer can request th
   tool description and refused by `ModuleRunManager.start`; the list comes from
   `modules:listAvailable` / `modules:setEnabled`, persisted as `disabledModules` in
   `ptnotes-settings.json`. Toggles apply immediately, no Save button.
-- **Toolsets:** a table of AI tool bundles that add extra chat-side tools the LLM can call (never
-  available to module subagents). Each toolset is listed with an enable/disable toggle and any
-  per-toolset key/value config fields. Driven by IPC: `toolsets:listAvailable`,
-  `toolsets:setEnabled(id, enabled)`, `toolsets:setConfig(id, key, value)`; results are applied
-  immediately.
+- **Toolsets:** a table of AI tool bundles that add extra tools the LLM can call in the chat **and**
+  in module subagent runs. Each toolset is listed with an enable/disable toggle and any per-toolset
+  key/value config fields. Driven by IPC: `toolsets:listAvailable`, `toolsets:setEnabled(id, enabled)`,
+  `toolsets:setConfig(id, key, value)`; results are applied immediately. The pane also manages
+  **external MCP servers** inline (add/edit form with a stdio/HTTP transport toggle, "Test
+  connection", and a live status dot) via `mcp:save` / `mcp:delete` / `mcp:test` — each configured
+  server appears as its own `mcp-<serverId>` toolset row.
 - **Bots:** a CRUD library of global bot identities (kept in `userData/bots.db`) — each bot has a
   display name, avatar emoji, system prompt, default model, temperature, and enabled flag. The pane
   also lets you inspect the per-project bot group-chat memory when a project is open (read-only in
@@ -895,7 +898,7 @@ Scheduled background AI jobs: the user defines a job (title, day-of-week set, ti
 - `note:<notename>` uses the note's slugified file name (as shown in the Notes list), so the `@` picker should insert the exact list name.
 - `kanban:<card title>` uses the card's title, so the `!` picker should insert the exact title.
 - The system prompt instructs the AI to link to skills it mentions as `[skill name](skill:skill name)`; the renderer renders these as clickable pills (book icon) that open **Settings → Skills** and load the skill into the editor (via `openSkillEditor` + the `skillEditRequest` store field).
-- The **Browser toolset** (12 `browser_*` tools) is an in-process MCP server + client over `InMemoryTransport`, implemented in `src/main/mcp/`. The server registers tools via the MCP SDK's `registerTool` (zod schemas); the chat session wraps them as `PTTool` via `client.callTool`. The browser is launched from `playwright-core` driving installed Chrome/Edge (no bundled Chromium). Headful by default; headless mode requires `ask_user` confirmation via the system-prompt guard and persists the preference to `ptnotes-settings.json`. Toolset is **chat-only** (never in module subagents) and toggled in Settings → Toolsets. Each enabled toolset adds tools to every chat turn — more tokens and higher chance of wrong tool selection. If the user closes the browser window/tab between tool calls, the next call self-heals (`src/main/mcp/browser.ts`): with the browser process still connected it reopens a page in the live context (preserving login state) or a fresh context if that closed too; if the process is gone it relaunches; a mid-call disconnect retries once. Page acquisition is serialized through a single ensure-queue so concurrent tool calls share one (re)launch.
+- The **Browser toolset** (12 `browser_*` tools) is an in-process MCP server + client over `InMemoryTransport`, implemented in `src/main/mcp/`. The server registers tools via the MCP SDK's `registerTool` (zod schemas); the chat session wraps them as `PTTool` via `client.callTool`. The browser is launched from `playwright-core` driving installed Chrome/Edge (no bundled Chromium). Headful by default; headless mode requires `ask_user` confirmation via the system-prompt guard and persists the preference to `ptnotes-settings.json`. Toggled in Settings → Toolsets; enabled toolsets are exposed to both the chat and module subagent runs. Each enabled toolset adds tools to every chat turn — more tokens and higher chance of wrong tool selection. If the user closes the browser window/tab between tool calls, the next call self-heals (`src/main/mcp/browser.ts`): with the browser process still connected it reopens a page in the live context (preserving login state) or a fresh context if that closed too; if the process is gone it relaunches; a mid-call disconnect retries once. Page acquisition is serialized through a single ensure-queue so concurrent tool calls share one (re)launch.
 - **`browser_snapshot`** returns a structured JSON accessibility tree with `role`, `name`, and `ref` for each visible element. Hidden elements (`display:none`, `visibility:hidden`, `visibility:collapse`, `opacity:0`, `aria-hidden`, zero-size) are excluded. Interactive elements get unique `ref` strings (`e0`, `e1`, …) set as `data-ptnotes-ref` attributes on the DOM. `browser_click`/`browser_type`/`browser_select_option` accept an optional `ref` parameter for precise targeting; text-based fallback filters to visible elements to avoid clicking hidden matches.
   - **Interactivity detection**: an element is interactive (gets a `ref`) if it has an interactive role (button, link, textbox, …), a `tabindex` (≠ `-1`), is an `<a>`/`<area>` with `href`, carries any inline `on*` event-handler attribute (`onclick`, `onmousedown`, `onpointerdown`, `ontouchstart`, …), has an interactive ARIA attribute (`aria-haspopup`, `aria-expanded`, `aria-pressed`, `aria-activedescendant`, `aria-controls`), or computes to `cursor: pointer`. The last two catch framework-built clickables (React/Vue `onClick`, jQuery `.on()`) on plain `span`/`div` that have no `onclick` attribute; a JS-attached handler on an element with default cursor and no ARIA/`on*` markers is still undetectable without runtime instrumentation.
   - **Naming**: `aria-label` → `aria-labelledby` → `<label>` association (wrapping or `for=`) → placeholder → `title` → `alt` → text content; input buttons (`submit`/`reset`/`button`/`file`) read the `value` attribute; named SVGs use `<title>`. Leaf-only text fallback avoids duplicating child text. Nodes with no accessible name omit the `name` field entirely and instead carry `tag` (the lowercase HTML tag, e.g. `"div"`) so they stay identifiable.
@@ -904,7 +907,7 @@ Scheduled background AI jobs: the user defines a job (title, day-of-week set, ti
   - **Output hygiene**: depth-cut subtrees are marked `truncated: true`; traversal stops at a node cap (default 1500 **visible** elements, overridable per call via the `maxNodes` parameter) and sets top-level `nodesTruncated` instead of slicing JSON mid-string. Supports `depth`, `boxes`, and `maxNodes` parameters.
 - **`browser_screenshot`** saves PNGs to `<project>/screenshots/` via `PTNotesService.screenshotsDir()`. Accepts optional `project` parameter; when omitted, the chat tool wrapper injects the session's active project at call time, and the tool errors if there is no active project.
 - **`ptfile://` custom protocol** serves local image files for chat rendering and PDFs for the explorer's preview. Registered via `protocol.registerSchemesAsPrivileged` (before `app.ready`) and `protocol.handle` (after `app.ready`) with `fs.readFile`. CSP updated (`img-src 'self' data: ptfile:`, `frame-src ptfile:`). Markdown image tags with absolute paths are converted to `ptfile://local/…` in the renderer's `MarkdownContent` component.
-- **Toolsets settings category** holds built-in toolsets (currently: Browser) and is designed for future external MCP connections. Persisted in `ptnotes-settings.json` as `disabledToolsets`.
+- **Toolsets settings category** holds built-in toolsets (Browser) plus user-configured external MCP servers. Enable/disable state is persisted in `ptnotes-settings.json` as `disabledToolsets`; server configs live in `userData/mcp-servers.json`. Implemented in `src/main/mcp/servers.ts` (registry), `src/main/mcp/external.ts` (`McpClientManager`: lazy connect, reconnect-on-config-change, `closeAll()` on quit), `src/main/mcp/toolsets.ts` (dynamic `mcp-<serverId>` toolsets + prompt section), and `src/main/ipc/mcp.ts` (`mcp:listServers` / `mcp:save` / `mcp:delete` / `mcp:test`). External tools are namespaced `mcp__<server>__<tool>`; a broken server is skipped (chat still works) and retried next turn. Enabled-toolset tools are appended to module runs in `ModuleRunManager` so chat and subagents share one tool code path.
 
 ## Docs
 

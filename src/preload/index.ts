@@ -34,6 +34,8 @@ import type {
   ModuleStartResult,
   MermaidRenderResult,
   InfographicRenderResult,
+  McpServerConfig,
+  McpTestResult,
   NewGroupInput,
   StorageSettings,
   ToolsetSettings,
@@ -414,6 +416,14 @@ const api = {
       ipcRenderer.invoke('toolsets:setEnabled', id, enabled),
     setConfig: (id: string, key: string, value: unknown): Promise<ToolsetSettings[]> =>
       ipcRenderer.invoke('toolsets:setConfig', id, key, value)
+  },
+  mcp: {
+    listServers: (): Promise<McpServerConfig[]> => ipcRenderer.invoke('mcp:listServers'),
+    save: (config: McpServerConfig): Promise<McpServerConfig[]> =>
+      ipcRenderer.invoke('mcp:save', config),
+    delete: (id: string): Promise<McpServerConfig[]> => ipcRenderer.invoke('mcp:delete', id),
+    test: (config: McpServerConfig): Promise<McpTestResult> =>
+      ipcRenderer.invoke('mcp:test', config)
   },
   jobs: {
     list: (project: string): Promise<ScheduleJob[]> => ipcRenderer.invoke('jobs:list', project),

@@ -110,6 +110,35 @@ export interface ToolsetSettings {
   headless?: boolean
   maximize?: boolean
   ignoreHttpsErrors?: boolean
+  /** Present for external MCP toolsets: the editable server config. */
+  mcp?: McpServerConfig
+  /** Present for external MCP toolsets: live connection state. */
+  status?: { connected: boolean; error?: string }
+}
+
+/** A user-configured external MCP server (stored in userData/mcp-servers.json). */
+export interface McpServerConfig {
+  id: string
+  name: string
+  transport: 'stdio' | 'http'
+  /** stdio only: executable to spawn. */
+  command?: string
+  /** stdio only: command line arguments. */
+  args?: string[]
+  /** stdio only: extra environment variables (merged over the default environment). */
+  env?: Record<string, string>
+  /** http only: Streamable HTTP endpoint. */
+  url?: string
+  /** http only: extra request headers (e.g. Authorization). */
+  headers?: Record<string, string>
+  enabled: boolean
+}
+
+/** Result of a one-off MCP connection test. */
+export interface McpTestResult {
+  ok: boolean
+  toolCount?: number
+  error?: string
 }
 
 export interface AppSettings {

@@ -3,6 +3,8 @@ import type { IpcMainInvokeEvent } from 'electron'
 import type { SettingsStore } from '../settings'
 import type { ToolsetSettings } from '@shared/types'
 import { listToolsets } from '../mcp/toolsets'
+import { getMcpServerStore } from '../mcp/servers'
+import { getMcpClientManager } from '../mcp/external'
 import {
   getDefaultHeadless,
   setDefaultHeadless,
@@ -13,18 +15,34 @@ import {
 } from '../mcp/browser'
 
 async function toSettings(disabled: Set<string>): Promise<ToolsetSettings[]> {
+  const servers = getMcpServerStore().list()
+  const manager = getMcpClientManager()
   const result: ToolsetSettings[] = []
   for (const ts of listToolsets()) {
-    const count = await ts.toolCount().catch(() => 0)
+    const enabled = !disabled.has(ts.id)
+    const server = servers.find((s) => `mcp-${s.id}` === ts.id)
+    let toolCount = 0
+    let status: ToolsetSettings['status']
+    if (server) {
+      if (enabled) {
+        const live = await manager.status(server)
+        toolCount = live.toolCount
+        status = live.error ? { connected: false, error: live.error } : { connected: true }
+      }
+    } else if (enabled) {
+      toolCount = await ts.toolCount().catch(() => 0)
+    }
     result.push({
       id: ts.id,
       name: ts.name,
       summary: ts.summary,
-      enabled: !disabled.has(ts.id),
-      toolCount: count,
+      enabled,
+      toolCount,
       headless: ts.id === 'browser' ? getDefaultHeadless() : undefined,
       maximize: ts.id === 'browser' ? getDefaultMaximize() : undefined,
-      ignoreHttpsErrors: ts.id === 'browser' ? getDefaultIgnoreHttpsErrors() : undefined
+      ignoreHttpsErrors: ts.id === 'browser' ? getDefaultIgnoreHttpsErrors() : undefined,
+      mcp: server,
+      status
     })
   }
   return result
@@ -32,6 +50,7 @@ async function toSettings(disabled: Set<string>): Promise<ToolsetSettings[]> {
 
 export function registerToolsetsIpc(settingsStore: SettingsStore): void {
   ipcMain.handle('toolsets:listAvailable', async (): Promise<ToolsetSettings[]> => {
+    await getMcpServerStore().load()
     const settings = await settingsStore.load()
     return toSettings(new Set(settings.disabledToolsets ?? []))
   })

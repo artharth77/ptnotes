@@ -1,5 +1,11 @@
 # Changelog
 
+## [dev] - 2026-09-20
+
+### Added
+
+- **Toolsets: external MCP servers** — Settings ▸ Toolsets now manages user-configured external MCP servers inline (add/edit form with a **stdio** / **HTTP** transport toggle, "Test connection", and a live status dot) alongside the built-in Browser toolset. Each server appears as its own enable/disable row; configs are stored in `userData/mcp-servers.json` (chmod 600). Enabled servers add their tools to the chat **and** module subagent runs, namespaced `mcp__<server>__<tool>`; clients are spawned/connected lazily from the main process, reconnect when the config changes, and a broken server is skipped (the chat keeps working) and retried after a short backoff. New IPC: `mcp:listServers` / `mcp:save` / `mcp:delete` / `mcp:test`.
+
 ## [0.22.3] - 2026-09-23
 
 ### Added
