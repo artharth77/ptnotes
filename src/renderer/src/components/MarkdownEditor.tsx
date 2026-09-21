@@ -426,6 +426,7 @@ function FormatButtons({
 
 export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.JSX.Element {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingContent = useRef<string | null>(null)
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const toolbarRef = useRef<HTMLDivElement | null>(null)
   const [contentEl, setContentEl] = useState<HTMLElement | null>(null)
@@ -434,6 +435,20 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
   const txCount = useRef(0)
   const formatHelperEnabled = useAppStore((s) => s.formatHelperEnabled)
   const setFormatHelperEnabled = useAppStore((s) => s.setFormatHelperEnabled)
+
+  // Debounced persistence. `appliedContent` is advanced alongside the store
+  // update so the content-sync effect below never resets the live editor to the
+  // value it just saved (which would drop the caret/selection).
+  function scheduleSave(value: string): void {
+    appliedContent.current = value
+    pendingContent.current = value
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(() => {
+      saveTimer.current = null
+      pendingContent.current = null
+      void useAppStore.getState().saveNote(value, noteId)
+    }, 800)
+  }
 
   useEffect(() => {
     onUpdateCount.current = 0
@@ -491,18 +506,19 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
     },
     onUpdate({ editor: e }) {
       onUpdateCount.current += 1
-      if (saveTimer.current) clearTimeout(saveTimer.current)
-      saveTimer.current = setTimeout(() => {
-        void useAppStore.getState().saveNote(e.getMarkdown())
-      }, 800)
+      scheduleSave(e.getMarkdown())
     }
   })
 
   useEffect(() => {
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current)
+      saveTimer.current = null
+      const pending = pendingContent.current
+      pendingContent.current = null
+      if (pending != null) void useAppStore.getState().saveNote(pending, noteId)
     }
-  }, [])
+  }, [noteId])
 
   useEffect(() => {
     if (!contentEl) return
@@ -811,10 +827,7 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
   function handleRawChange(e: React.ChangeEvent<HTMLTextAreaElement>): void {
     const text = e.target.value
     setRawText(text)
-    if (saveTimer.current) clearTimeout(saveTimer.current)
-    saveTimer.current = setTimeout(() => {
-      void useAppStore.getState().saveNote(text)
-    }, 800)
+    scheduleSave(text)
   }
 
   return (

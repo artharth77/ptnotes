@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.22.2] - 2026-09-21
+
+### Fixed
+
+- **Notes: stale content after switching tabs** — saving a note updated the file on disk but not the editor's stored content, so switching to another tab (e.g. Planner) and back re-rendered the editor with the pre-edit text; `saveNote` now keeps the in-memory content in sync, and the pending debounced save is flushed on unmount so edits made right before a tab/note switch are no longer lost.
+
 ## [0.22.1] - 2026-09-18
 
 ### Added

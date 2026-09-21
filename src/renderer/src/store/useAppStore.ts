@@ -271,7 +271,7 @@ interface AppState {
   applyBotGroupEvent: (evt: BotGroupEvent) => void
   loadBotTasks: (project: string) => Promise<void>
   selectNote: (id: string) => Promise<void>
-  saveNote: (content: string) => Promise<void>
+  saveNote: (content: string, noteId?: string) => Promise<void>
   createNote: (title: string, content?: string) => Promise<void>
   renameNote: (id: string, newTitle: string) => Promise<void>
   deleteNote: (id: string) => Promise<void>
@@ -1510,10 +1510,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ activeNoteId: id, noteContent: content })
   },
 
-  async saveNote(content) {
-    const { activeProject, activeNoteId } = get()
-    if (!activeProject || !activeNoteId) return
-    await window.ptnotes.notes.save(activeProject, activeNoteId, content)
+  async saveNote(content, noteId) {
+    const { activeProject } = get()
+    const id = noteId ?? get().activeNoteId
+    if (!activeProject || !id) return
+    if (get().activeNoteId === id) set({ noteContent: content })
+    await window.ptnotes.notes.save(activeProject, id, content)
   },
 
   async createNote(title, content) {
