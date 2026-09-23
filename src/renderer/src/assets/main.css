@@ -4918,6 +4918,14 @@ fieldset.kanban-form {
   align-items: center;
 }
 
+.planner-mention-popup {
+  position: fixed;
+  right: auto;
+  bottom: auto;
+  min-width: 180px;
+  max-width: 280px;
+}
+
 .command-popup {
   position: absolute;
   bottom: calc(100% - 2px);
@@ -7191,6 +7199,32 @@ fieldset.kanban-form {
   white-space: nowrap;
   text-overflow: ellipsis;
   border: 1px solid transparent;
+}
+
+.planner-note-display {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  border: 1px solid transparent;
+}
+
+a.planner-note-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  text-decoration: none;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 6px;
+  padding: 0 5px;
+  margin: 0 2px;
+  color: var(--accent);
+  vertical-align: baseline;
+}
+
+a.planner-note-link:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .planner-title-placeholder {

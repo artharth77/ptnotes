@@ -5,6 +5,7 @@
 ### Added
 
 - **Planner: resizable table columns** — every table column except **Plan Indicator** and **No.** (Status, Owner, Duration, Plan/Actual dates, %, Note, Deps, plus the existing Title) can be resized by dragging the right edge of its header cell; double-clicking the edge resets the column to its default (auto) width. Widths are clamped to 65–600 px (Title 180–600), stored per schedule in the planner file (`columnWidth`), and survive reloads. The **Columns** dialog's **Reset** button now also clears all column widths, including Title.
+- **Planner: `@`/`!` note mentions + clickable references** — typing `@` (note) or `!` (kanban card) in a planner **Note** cell opens the same mention popup as chat (filter as you type, ↑/↓/Enter/Tab/Esc) and inserts a `note:<name>` / `kanban:<id>` token. The Note cell now has a display mode (click to edit) where `note:`/`kanban:` references that resolve to a real note or card render as clickable pills — clicking opens the note (Notes tab) or the card (Kanban tab); unresolved tokens stay plain text.
 
 ## [0.22.2] - 2026-09-21
 
