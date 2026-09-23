@@ -65,6 +65,8 @@ export interface Schedule {
   columnOrder?: string[]
   /** Per-schedule planner title-column widths (px). Absent keys use the view default. */
   titleWidth?: ScheduleTitleWidth
+  /** Per-schedule editor column width overrides (px). Absent keys use the column default. */
+  columnWidth?: Record<string, number>
 }
 
 /** Title-column width overrides for the planner grid/gantt views. */

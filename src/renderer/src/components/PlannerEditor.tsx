@@ -53,6 +53,9 @@ import {
 } from './GanttChart'
 import { PlannerResizeHandle } from './PlannerResizeHandle'
 import { nameTipFrom, NameTip, type NameTipState } from './NameTip'
+import { resolveKanbanCardNames } from '@shared/bots'
+import type { KanbanCard } from '@shared/kanban'
+import { KANBAN_LINK_ICON, NOTE_LINK_ICON } from './contentIcons'
 import {
   applyDateRule,
   collectOwners,
@@ -83,6 +86,7 @@ import {
   statusLabel
 } from '@shared/planner'
 import type {
+  NoteMeta,
   PlannerExportColumn,
   PlannerExportRow,
   Schedule,
@@ -147,6 +151,9 @@ const TITLE_WIDTH_GRID_MIN = 180
 const TITLE_WIDTH_GRID_MAX = 600
 const TITLE_WIDTH_GRID_DEFAULT = 300
 
+const COL_WIDTH_MIN = 65
+const COL_WIDTH_MAX = 600
+
 type MovableColumnKey = Exclude<PlannerColumnKey, 'indicator' | 'no' | 'title'>
 
 const MOVABLE_HEADERS: Record<MovableColumnKey, { label: string; className: string }> = {
@@ -162,15 +169,26 @@ const MOVABLE_HEADERS: Record<MovableColumnKey, { label: string; className: stri
   deps: { label: 'Deps', className: 'planner-col-deps' }
 }
 
+function colWidth(
+  key: PlannerColumnKey,
+  titleWidth: number | null,
+  widths: Partial<Record<PlannerColumnKey, number>>
+): string {
+  if (key === 'title') return `${titleWidth ?? TITLE_WIDTH_GRID_DEFAULT}px`
+  const w = widths[key]
+  return w !== undefined ? `${w}px` : COL_WIDTHS[key]
+}
+
 function colTemplate(
   visible: Set<PlannerColumnKey>,
   order: PlannerColumnKey[],
-  titleWidth: number | null
+  titleWidth: number | null,
+  widths: Partial<Record<PlannerColumnKey, number>>
 ): string {
   const cols: string[] = ['28px']
   for (const k of order) {
     if (k === 'no' || k === 'title' || visible.has(k)) {
-      cols.push(k === 'title' ? `${titleWidth ?? TITLE_WIDTH_GRID_DEFAULT}px` : COL_WIDTHS[k])
+      cols.push(colWidth(k, titleWidth, widths))
     }
   }
   return cols.join(' ')
@@ -179,16 +197,17 @@ function colTemplate(
 function colTemplateSplit(
   visible: Set<PlannerColumnKey>,
   order: PlannerColumnKey[],
-  titleWidth: number | null
+  titleWidth: number | null,
+  widths: Partial<Record<PlannerColumnKey, number>>
 ): { left: string; right: string; leftCount: number } {
   const left: string[] = ['28px']
   const right: string[] = []
   for (const k of order) {
     if (!(k === 'no' || k === 'title' || visible.has(k))) continue
     if (k === 'indicator' || k === 'no' || k === 'title') {
-      left.push(k === 'title' ? `${titleWidth ?? TITLE_WIDTH_GRID_DEFAULT}px` : COL_WIDTHS[k])
+      left.push(colWidth(k, titleWidth, widths))
     } else {
-      right.push(COL_WIDTHS[k])
+      right.push(colWidth(k, titleWidth, widths))
     }
   }
   return { left: left.join(' '), right: right.join(' '), leftCount: left.length }
@@ -213,6 +232,19 @@ function initVisibleCols(saved: Record<string, boolean> | undefined): Set<Planne
       (c) => c.key
     )
   )
+}
+
+function initColumnWidths(
+  saved: Record<string, number> | undefined
+): Partial<Record<PlannerColumnKey, number>> {
+  const out: Partial<Record<PlannerColumnKey, number>> = {}
+  if (!saved) return out
+  for (const c of COLUMNS) {
+    if (FIXED_COLUMNS.includes(c.key)) continue
+    const w = normalizeTitleWidth(saved[c.key], COL_WIDTH_MIN, COL_WIDTH_MAX)
+    if (w !== null) out[c.key] = w
+  }
+  return out
 }
 
 interface FlatRow {
@@ -643,6 +675,11 @@ export function PlannerEditor(): React.JSX.Element {
   const setSnapshotsOpen = useAppStore((s) => s.setSnapshotsOpen)
   const plannerUndo = useAppStore((s) => s.plannerUndo)
   const plannerRedo = useAppStore((s) => s.plannerRedo)
+  const notes = useAppStore((s) => s.notes)
+  const kanban = useAppStore((s) => s.kanban)
+  const selectNote = useAppStore((s) => s.selectNote)
+  const setTab = useAppStore((s) => s.setTab)
+  const setActiveKanbanCard = useAppStore((s) => s.setActiveKanbanCard)
 
   const [calendarOpen, setCalendarOpen] = useState(false)
   const [columnsOpen, setColumnsOpen] = useState(false)
@@ -677,6 +714,16 @@ export function PlannerEditor(): React.JSX.Element {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [anchorId, setAnchorId] = useState<string | null>(null)
   const [titleEditId, setTitleEditId] = useState<string | null>(null)
+  const [noteEditId, setNoteEditId] = useState<string | null>(null)
+  const [noteMention, setNoteMention] = useState<{
+    id: string
+    kind: 'note' | 'kanban'
+    start: number
+    query: string
+    x: number
+    y: number
+  } | null>(null)
+  const [noteMentionIndex, setNoteMentionIndex] = useState(0)
   const [titleTip, setTitleTip] = useState<NameTipState | null>(null)
   const [visibleCols, setVisibleCols] = useState<Set<PlannerColumnKey>>(() =>
     initVisibleCols(schedule?.columnVisibility)
@@ -686,6 +733,9 @@ export function PlannerEditor(): React.JSX.Element {
   )
   const [titleWidthGrid, setTitleWidthGrid] = useState<number | null>(() =>
     normalizeTitleWidth(schedule?.titleWidth?.grid, TITLE_WIDTH_GRID_MIN, TITLE_WIDTH_GRID_MAX)
+  )
+  const [columnWidths, setColumnWidths] = useState<Partial<Record<PlannerColumnKey, number>>>(() =>
+    initColumnWidths(schedule?.columnWidth)
   )
   const [titleWidthGantt, setTitleWidthGantt] = useState<number>(
     () =>
@@ -700,6 +750,7 @@ export function PlannerEditor(): React.JSX.Element {
     setPrevScheduleId(schedule?.id)
     setVisibleCols(initVisibleCols(schedule?.columnVisibility))
     setColumnOrder(initColumnOrder(schedule?.columnOrder))
+    setColumnWidths(initColumnWidths(schedule?.columnWidth))
     setTitleWidthGrid(
       normalizeTitleWidth(schedule?.titleWidth?.grid, TITLE_WIDTH_GRID_MIN, TITLE_WIDTH_GRID_MAX)
     )
@@ -713,6 +764,8 @@ export function PlannerEditor(): React.JSX.Element {
     setView('table')
     setOwnerMenu(null)
     setPercentMenu(null)
+    setNoteEditId(null)
+    setNoteMention(null)
   }
   const [clipboard, setClipboard] = useState<ScheduleTask[]>([])
   const [clipboardMode, setClipboardMode] = useState<'copy' | 'cut' | null>(null)
@@ -725,6 +778,7 @@ export function PlannerEditor(): React.JSX.Element {
   const ownerMenuRef = useRef<HTMLDivElement>(null)
   const percentMenuRef = useRef<HTMLDivElement>(null)
   const depEditorRef = useRef<HTMLDivElement>(null)
+  const noteInputRef = useRef<HTMLInputElement>(null)
   const gridPercentBase = useRef<Schedule | null>(null)
   const pendingFocus = useRef<{ id: string; col: string } | null>(null)
   const saveTimer = useRef<number | null>(null)
@@ -962,6 +1016,8 @@ export function PlannerEditor(): React.JSX.Element {
     if (next === view) return
     setOwnerMenu(null)
     setPercentMenu(null)
+    setNoteEditId(null)
+    setNoteMention(null)
     endEditSession()
     const current = useAppStore.getState().scheduleContent
     if (current) useAppStore.getState().plannerClearHistory(current.id)
@@ -999,6 +1055,19 @@ export function PlannerEditor(): React.JSX.Element {
       el.scrollIntoView({ block: 'nearest' })
     }
   })
+
+  const noteMentionOpen = noteMention !== null
+  useEffect(() => {
+    if (!noteMentionOpen) return
+    const close = (): void => setNoteMention(null)
+    const scrollEl = gridScrollRef.current
+    scrollEl?.addEventListener('scroll', close, { passive: true })
+    window.addEventListener('resize', close)
+    return () => {
+      scrollEl?.removeEventListener('scroll', close)
+      window.removeEventListener('resize', close)
+    }
+  }, [noteMentionOpen])
 
   useEffect(() => {
     if (!statusMenu) return
@@ -1268,14 +1337,20 @@ export function PlannerEditor(): React.JSX.Element {
   }
   const cal = calendar ?? defaultCalendar()
   const rows = flattenTasks(sc.tasks, null, 0, collapsed, [])
-  const template = colTemplate(visibleCols, columnOrder, titleWidthGrid)
-  const colSplit = colTemplateSplit(visibleCols, columnOrder, titleWidthGrid)
+  const template = colTemplate(visibleCols, columnOrder, titleWidthGrid, columnWidths)
+  const colSplit = colTemplateSplit(visibleCols, columnOrder, titleWidthGrid, columnWidths)
   const today = formatDate(new Date())
   const noLeft = 28 + (visibleCols.has('indicator') ? 5 : 0)
   const titleLeft = noLeft + 46
   const movableCols = columnOrder.filter(
     (k) => !FIXED_COLUMNS.includes(k) && visibleCols.has(k)
   ) as MovableColumnKey[]
+  const noteQuery = noteMention?.query.toLowerCase() ?? ''
+  const noteMentionItems: (NoteMeta | KanbanCard)[] = !noteMention
+    ? []
+    : noteMention.kind === 'kanban'
+      ? (kanban?.cards ?? []).filter((c) => c.title.toLowerCase().includes(noteQuery))
+      : notes.filter((n) => n.name.toLowerCase().includes(noteQuery))
   const ownerCtx = ownerMenu ? findTaskCtx(sc.tasks, ownerMenu.id) : null
   const ownerTask = ownerCtx ? ownerCtx.parent[ownerCtx.index] : null
   const percentCtx = percentMenu ? findTaskCtx(sc.tasks, percentMenu.id) : null
@@ -1284,6 +1359,177 @@ export function PlannerEditor(): React.JSX.Element {
   const ownerChecked = new Set(
     ownerTask ? parseOwners(ownerTask.owner).map((n) => n.toLowerCase()) : []
   )
+
+  function openNoteLink(noteName: string): Promise<void> {
+    const note =
+      notes.find((n) => n.id === noteName) ??
+      notes.find((n) => n.name === noteName) ??
+      notes.find((n) => n.name.includes(noteName))
+    if (!note) return Promise.resolve()
+    return selectNote(note.id).then(() => setTab('notes'))
+  }
+
+  function openKanbanLink(ref: string): void {
+    if (!kanban) return
+    const q = ref.trim().toLowerCase()
+    const card =
+      kanban.cards.find((c) => c.id.toLowerCase() === q) ??
+      kanban.cards.find((c) => c.title.toLowerCase() === q) ??
+      kanban.cards.find((c) => {
+        const t = c.title.toLowerCase()
+        return t.includes(q) || q.includes(t)
+      })
+    if (!card) return
+    setTab('kanban')
+    setActiveKanbanCard(card.id)
+  }
+
+  function updateNoteMention(taskId: string, value: string, sel: number): void {
+    const before = value.slice(0, sel)
+    const at = before.lastIndexOf('@')
+    const bang = before.lastIndexOf('!')
+    const last = Math.max(at, bang)
+    const token = last === -1 ? null : before.slice(last + 1)
+    const rect = noteInputRef.current?.getBoundingClientRect()
+    if (token === null || token.includes(' ') || !rect) {
+      setNoteMention(null)
+      return
+    }
+    setNoteMention({
+      id: taskId,
+      kind: last === at ? 'note' : 'kanban',
+      start: last,
+      query: token,
+      x: Math.max(8, Math.min(rect.left, window.innerWidth - 288)),
+      y: rect.bottom + 194 > window.innerHeight ? Math.max(8, rect.top - 194) : rect.bottom + 4
+    })
+    setNoteMentionIndex(0)
+  }
+
+  function insertNoteMention(item: NoteMeta | KanbanCard): void {
+    if (!noteMention) return
+    const ctx = findTaskCtx(sc.tasks, noteMention.id)
+    if (!ctx) return
+    const value = ctx.parent[ctx.index].note
+    const before = value.slice(0, noteMention.start)
+    const after = value.slice(noteMention.start + 1 + noteMention.query.length)
+    const token =
+      noteMention.kind === 'kanban'
+        ? `kanban:${item.id} `
+        : `note:${'name' in item ? item.name : ''} `
+    editField(sc, noteMention.id, 'note', `${before}${token}${after}`)
+    setNoteMention(null)
+    requestAnimationFrame(() => {
+      const el = noteInputRef.current
+      if (el) {
+        const pos = before.length + token.length
+        el.focus()
+        el.setSelectionRange(pos, pos)
+      }
+    })
+  }
+
+  function handleNoteInputKeyDown(e: React.KeyboardEvent<HTMLInputElement>): void {
+    if (!noteMention) return
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      e.stopPropagation()
+      setNoteMention(null)
+      return
+    }
+    if (noteMentionItems.length === 0) return
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      e.stopPropagation()
+      setNoteMentionIndex((i) => (i + 1) % noteMentionItems.length)
+      return
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      e.stopPropagation()
+      setNoteMentionIndex((i) => (i - 1 + noteMentionItems.length) % noteMentionItems.length)
+      return
+    }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault()
+      e.stopPropagation()
+      const item = noteMentionItems[noteMentionIndex] ?? noteMentionItems[0]
+      if (item) insertNoteMention(item)
+    }
+  }
+
+  /** Does this `note:`/`kanban:` reference resolve to a real note or card? */
+  function noteRefResolves(kind: 'note' | 'kanban', ref: string): boolean {
+    if (!ref) return false
+    const q = ref.toLowerCase()
+    return kind === 'note'
+      ? notes.some((n) => n.id === ref || n.name.toLowerCase().includes(q))
+      : (kanban?.cards ?? []).some(
+          (c) => c.id.toLowerCase() === q || c.title.toLowerCase().includes(q)
+        )
+  }
+
+  /** Longest word-run of `rest` that resolves (multi-word names win); trailing punctuation is trimmed. */
+  function longestNoteRef(kind: 'note' | 'kanban', rest: string): string {
+    const parts = rest.split(/(\s+)/)
+    let candidate = ''
+    let best = ''
+    for (let i = 0; i < parts.length; i += 2) {
+      const word = parts[i]
+      if (!word) break
+      candidate = i === 0 ? word : candidate + parts[i - 1] + word
+      if (candidate.length > 80) break
+      if (noteRefResolves(kind, candidate)) {
+        best = candidate
+        continue
+      }
+      const trimmed = candidate.replace(/[.,;:!?…)\]}>"']+$/, '')
+      if (trimmed !== candidate && noteRefResolves(kind, trimmed)) best = trimmed
+    }
+    return best
+  }
+
+  /** Wrap resolvable `note:`/`kanban:` references in links; everything else stays plain text. */
+  function renderNoteLinks(text: string): React.ReactNode {
+    const display = resolveKanbanCardNames(text, kanban?.cards ?? [])
+    const out: React.ReactNode[] = []
+    const re = /(^|\s)(note|kanban):/g
+    let scanFrom = 0
+    let n = 0
+    let m: RegExpExecArray | null
+    while ((m = re.exec(display)) !== null) {
+      const kind = m[2] as 'note' | 'kanban'
+      const prefixStart = m.index + m[1].length
+      const valueStart = prefixStart + kind.length + 1
+      const ref = longestNoteRef(kind, display.slice(valueStart))
+      if (!ref) continue
+      if (prefixStart > scanFrom) out.push(display.slice(scanFrom, prefixStart))
+      const captured = display.slice(prefixStart, valueStart + ref.length)
+      out.push(
+        <a
+          key={`ref-${n++}`}
+          href="#"
+          className="planner-note-link"
+          title={ref}
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            if (kind === 'note') void openNoteLink(ref)
+            else openKanbanLink(ref)
+          }}
+        >
+          <span className="chat-note-link-icon">
+            <MdiIcon path={kind === 'note' ? NOTE_LINK_ICON : KANBAN_LINK_ICON} size={13} />
+          </span>
+          {captured}
+        </a>
+      )
+      scanFrom = valueStart + ref.length
+      re.lastIndex = scanFrom
+    }
+    if (scanFrom < display.length) out.push(display.slice(scanFrom))
+    return out
+  }
 
   function renderColumnCell(
     key: MovableColumnKey,
@@ -1547,16 +1793,43 @@ export function PlannerEditor(): React.JSX.Element {
       case 'note':
         return (
           <div key={key} className="planner-col-note planner-cell">
-            <input
-              className={`planner-input${!task.note ? ' planner-value-empty' : ''}`}
-              data-cell={task.id}
-              data-col="note"
-              value={task.note}
-              placeholder="Note"
-              onFocus={startEditSession}
-              onBlur={endEditSession}
-              onChange={(e) => editField(sc, task.id, 'note', e.target.value)}
-            />
+            {noteEditId === task.id ? (
+              <input
+                ref={noteInputRef}
+                className={`planner-input${!task.note ? ' planner-value-empty' : ''}`}
+                data-cell={task.id}
+                data-col="note"
+                value={task.note}
+                placeholder="Note"
+                autoFocus
+                onFocus={startEditSession}
+                onBlur={() => {
+                  endEditSession()
+                  setNoteEditId(null)
+                  setNoteMention(null)
+                }}
+                onChange={(e) => {
+                  editField(sc, task.id, 'note', e.target.value)
+                  updateNoteMention(
+                    task.id,
+                    e.target.value,
+                    e.target.selectionStart ?? e.target.value.length
+                  )
+                }}
+                onKeyDown={handleNoteInputKeyDown}
+              />
+            ) : (
+              <div
+                className="planner-input planner-note-display"
+                onClick={() => setNoteEditId(task.id)}
+              >
+                {task.note ? (
+                  renderNoteLinks(task.note)
+                ) : (
+                  <span className="planner-title-placeholder">Note</span>
+                )}
+              </div>
+            )}
           </div>
         )
     }
@@ -1758,6 +2031,20 @@ export function PlannerEditor(): React.JSX.Element {
       current,
       current.tasks,
       { titleWidth: Object.keys(next).length > 0 ? next : undefined },
+      false
+    )
+  }
+
+  function persistColumnWidth(key: PlannerColumnKey, width: number | null): void {
+    const current = useAppStore.getState().scheduleContent
+    if (!current) return
+    const next = { ...(current.columnWidth ?? {}) }
+    if (width === null) delete next[key]
+    else next[key] = width
+    commit(
+      current,
+      current.tasks,
+      { columnWidth: Object.keys(next).length > 0 ? next : undefined },
       false
     )
   }
@@ -2312,11 +2599,12 @@ export function PlannerEditor(): React.JSX.Element {
   }
 
   function focusCell(id: string, col: string): boolean {
-    if (col === 'title') {
-      // Title inputs only render in edit mode — flip the display div, then the
+    if (col === 'title' || col === 'note') {
+      // Title/note inputs only render in edit mode — flip the display div, then the
       // pending-focus effect focuses it once it mounts.
       pendingFocus.current = { id, col }
-      setTitleEditId(id)
+      if (col === 'title') setTitleEditId(id)
+      else setNoteEditId(id)
       setSelected(new Set([id]))
       setAnchorId(id)
       return true
@@ -2818,6 +3106,24 @@ export function PlannerEditor(): React.JSX.Element {
                       {movableCols.map((key) => (
                         <div key={key} className={`${MOVABLE_HEADERS[key].className} planner-cell`}>
                           {MOVABLE_HEADERS[key].label}
+                          <PlannerResizeHandle
+                            width={columnWidths[key] ?? null}
+                            min={COL_WIDTH_MIN}
+                            max={COL_WIDTH_MAX}
+                            onResize={(w) => setColumnWidths((prev) => ({ ...prev, [key]: w }))}
+                            onCommitEnd={(w) => {
+                              setColumnWidths((prev) => ({ ...prev, [key]: w }))
+                              persistColumnWidth(key, w)
+                            }}
+                            onReset={() => {
+                              setColumnWidths((prev) => {
+                                const next = { ...prev }
+                                delete next[key]
+                                return next
+                              })
+                              persistColumnWidth(key, null)
+                            }}
+                          />
                         </div>
                       ))}
                     </div>
@@ -2941,6 +3247,36 @@ export function PlannerEditor(): React.JSX.Element {
             </button>
           </div>
         </>
+      )}
+
+      {noteMention && noteMentionItems.length > 0 && (
+        <div
+          className="mention-popup planner-mention-popup"
+          style={{ left: noteMention.x, top: noteMention.y }}
+        >
+          {noteMentionItems.map((item, i) => (
+            <div
+              key={item.id}
+              ref={(el) => {
+                if (el && i === noteMentionIndex) el.scrollIntoView({ block: 'nearest' })
+              }}
+              className={`mention-item ${i === noteMentionIndex ? 'active' : ''}`}
+              onMouseDown={(e) => {
+                e.preventDefault()
+                insertNoteMention(item)
+              }}
+              onMouseEnter={() => setNoteMentionIndex(i)}
+            >
+              <span className="mention-icon">
+                <MdiIcon
+                  path={noteMention.kind === 'kanban' ? KANBAN_LINK_ICON : NOTE_LINK_ICON}
+                  size={16}
+                />
+              </span>
+              {'name' in item ? item.name : item.title}
+            </div>
+          ))}
+        </div>
       )}
 
       {ownerMenu && ownerTask && (
@@ -3215,13 +3551,23 @@ export function PlannerEditor(): React.JSX.Element {
           onReset={() => {
             setVisibleCols(initVisibleCols(undefined))
             setColumnOrder(initColumnOrder(undefined))
+            setColumnWidths({})
+            setTitleWidthGrid(null)
           }}
           onClose={() => {
             const visibility = { ...(sc.columnVisibility ?? {}) }
             for (const c of COLUMNS) visibility[c.key] = visibleCols.has(c.key)
             visibility.no = true
             visibility.title = true
-            commit(sc, sc.tasks, { columnVisibility: visibility, columnOrder })
+            const titleWidth = { ...(sc.titleWidth ?? {}) }
+            if (titleWidthGrid === null) delete titleWidth.grid
+            else titleWidth.grid = titleWidthGrid
+            commit(sc, sc.tasks, {
+              columnVisibility: visibility,
+              columnOrder,
+              columnWidth: Object.keys(columnWidths).length > 0 ? columnWidths : undefined,
+              titleWidth: Object.keys(titleWidth).length > 0 ? titleWidth : undefined
+            })
             setColumnsOpen(false)
           }}
         />
