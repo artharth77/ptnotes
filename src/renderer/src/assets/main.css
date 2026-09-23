@@ -7206,6 +7206,8 @@ fieldset.kanban-form {
   white-space: nowrap;
   text-overflow: ellipsis;
   border: 1px solid transparent;
+  padding-top: 1px;
+  padding-bottom: 1px;
 }
 
 a.planner-note-link {
