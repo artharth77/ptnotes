@@ -7027,6 +7027,10 @@ fieldset.kanban-form {
   text-align: left;
 }
 
+.planner-grid-head .planner-head-right .planner-cell {
+  position: relative;
+}
+
 .planner-grid-row {
   display: grid;
   align-items: stretch;
@@ -7163,26 +7167,6 @@ fieldset.kanban-form {
 .planner-col-resize-handle:hover::after,
 .planner-col-resize-handle:active::after {
   background: var(--accent);
-}
-
-.planner-col-status {
-  width: 110px;
-}
-
-.planner-col-owner {
-  width: 120px;
-}
-
-.planner-col-num {
-  width: 84px;
-}
-
-.planner-col-date {
-  width: 125px;
-}
-
-.planner-col-note {
-  min-width: 160px;
 }
 
 .planner-input {

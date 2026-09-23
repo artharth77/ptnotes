@@ -147,6 +147,9 @@ const TITLE_WIDTH_GRID_MIN = 180
 const TITLE_WIDTH_GRID_MAX = 600
 const TITLE_WIDTH_GRID_DEFAULT = 300
 
+const COL_WIDTH_MIN = 65
+const COL_WIDTH_MAX = 600
+
 type MovableColumnKey = Exclude<PlannerColumnKey, 'indicator' | 'no' | 'title'>
 
 const MOVABLE_HEADERS: Record<MovableColumnKey, { label: string; className: string }> = {
@@ -162,15 +165,26 @@ const MOVABLE_HEADERS: Record<MovableColumnKey, { label: string; className: stri
   deps: { label: 'Deps', className: 'planner-col-deps' }
 }
 
+function colWidth(
+  key: PlannerColumnKey,
+  titleWidth: number | null,
+  widths: Partial<Record<PlannerColumnKey, number>>
+): string {
+  if (key === 'title') return `${titleWidth ?? TITLE_WIDTH_GRID_DEFAULT}px`
+  const w = widths[key]
+  return w !== undefined ? `${w}px` : COL_WIDTHS[key]
+}
+
 function colTemplate(
   visible: Set<PlannerColumnKey>,
   order: PlannerColumnKey[],
-  titleWidth: number | null
+  titleWidth: number | null,
+  widths: Partial<Record<PlannerColumnKey, number>>
 ): string {
   const cols: string[] = ['28px']
   for (const k of order) {
     if (k === 'no' || k === 'title' || visible.has(k)) {
-      cols.push(k === 'title' ? `${titleWidth ?? TITLE_WIDTH_GRID_DEFAULT}px` : COL_WIDTHS[k])
+      cols.push(colWidth(k, titleWidth, widths))
     }
   }
   return cols.join(' ')
@@ -179,16 +193,17 @@ function colTemplate(
 function colTemplateSplit(
   visible: Set<PlannerColumnKey>,
   order: PlannerColumnKey[],
-  titleWidth: number | null
+  titleWidth: number | null,
+  widths: Partial<Record<PlannerColumnKey, number>>
 ): { left: string; right: string; leftCount: number } {
   const left: string[] = ['28px']
   const right: string[] = []
   for (const k of order) {
     if (!(k === 'no' || k === 'title' || visible.has(k))) continue
     if (k === 'indicator' || k === 'no' || k === 'title') {
-      left.push(k === 'title' ? `${titleWidth ?? TITLE_WIDTH_GRID_DEFAULT}px` : COL_WIDTHS[k])
+      left.push(colWidth(k, titleWidth, widths))
     } else {
-      right.push(COL_WIDTHS[k])
+      right.push(colWidth(k, titleWidth, widths))
     }
   }
   return { left: left.join(' '), right: right.join(' '), leftCount: left.length }
@@ -213,6 +228,19 @@ function initVisibleCols(saved: Record<string, boolean> | undefined): Set<Planne
       (c) => c.key
     )
   )
+}
+
+function initColumnWidths(
+  saved: Record<string, number> | undefined
+): Partial<Record<PlannerColumnKey, number>> {
+  const out: Partial<Record<PlannerColumnKey, number>> = {}
+  if (!saved) return out
+  for (const c of COLUMNS) {
+    if (FIXED_COLUMNS.includes(c.key)) continue
+    const w = normalizeTitleWidth(saved[c.key], COL_WIDTH_MIN, COL_WIDTH_MAX)
+    if (w !== null) out[c.key] = w
+  }
+  return out
 }
 
 interface FlatRow {
@@ -687,6 +715,9 @@ export function PlannerEditor(): React.JSX.Element {
   const [titleWidthGrid, setTitleWidthGrid] = useState<number | null>(() =>
     normalizeTitleWidth(schedule?.titleWidth?.grid, TITLE_WIDTH_GRID_MIN, TITLE_WIDTH_GRID_MAX)
   )
+  const [columnWidths, setColumnWidths] = useState<Partial<Record<PlannerColumnKey, number>>>(() =>
+    initColumnWidths(schedule?.columnWidth)
+  )
   const [titleWidthGantt, setTitleWidthGantt] = useState<number>(
     () =>
       normalizeTitleWidth(
@@ -700,6 +731,7 @@ export function PlannerEditor(): React.JSX.Element {
     setPrevScheduleId(schedule?.id)
     setVisibleCols(initVisibleCols(schedule?.columnVisibility))
     setColumnOrder(initColumnOrder(schedule?.columnOrder))
+    setColumnWidths(initColumnWidths(schedule?.columnWidth))
     setTitleWidthGrid(
       normalizeTitleWidth(schedule?.titleWidth?.grid, TITLE_WIDTH_GRID_MIN, TITLE_WIDTH_GRID_MAX)
     )
@@ -1268,8 +1300,8 @@ export function PlannerEditor(): React.JSX.Element {
   }
   const cal = calendar ?? defaultCalendar()
   const rows = flattenTasks(sc.tasks, null, 0, collapsed, [])
-  const template = colTemplate(visibleCols, columnOrder, titleWidthGrid)
-  const colSplit = colTemplateSplit(visibleCols, columnOrder, titleWidthGrid)
+  const template = colTemplate(visibleCols, columnOrder, titleWidthGrid, columnWidths)
+  const colSplit = colTemplateSplit(visibleCols, columnOrder, titleWidthGrid, columnWidths)
   const today = formatDate(new Date())
   const noLeft = 28 + (visibleCols.has('indicator') ? 5 : 0)
   const titleLeft = noLeft + 46
@@ -1758,6 +1790,20 @@ export function PlannerEditor(): React.JSX.Element {
       current,
       current.tasks,
       { titleWidth: Object.keys(next).length > 0 ? next : undefined },
+      false
+    )
+  }
+
+  function persistColumnWidth(key: PlannerColumnKey, width: number | null): void {
+    const current = useAppStore.getState().scheduleContent
+    if (!current) return
+    const next = { ...(current.columnWidth ?? {}) }
+    if (width === null) delete next[key]
+    else next[key] = width
+    commit(
+      current,
+      current.tasks,
+      { columnWidth: Object.keys(next).length > 0 ? next : undefined },
       false
     )
   }
@@ -2818,6 +2864,24 @@ export function PlannerEditor(): React.JSX.Element {
                       {movableCols.map((key) => (
                         <div key={key} className={`${MOVABLE_HEADERS[key].className} planner-cell`}>
                           {MOVABLE_HEADERS[key].label}
+                          <PlannerResizeHandle
+                            width={columnWidths[key] ?? null}
+                            min={COL_WIDTH_MIN}
+                            max={COL_WIDTH_MAX}
+                            onResize={(w) => setColumnWidths((prev) => ({ ...prev, [key]: w }))}
+                            onCommitEnd={(w) => {
+                              setColumnWidths((prev) => ({ ...prev, [key]: w }))
+                              persistColumnWidth(key, w)
+                            }}
+                            onReset={() => {
+                              setColumnWidths((prev) => {
+                                const next = { ...prev }
+                                delete next[key]
+                                return next
+                              })
+                              persistColumnWidth(key, null)
+                            }}
+                          />
                         </div>
                       ))}
                     </div>
@@ -3215,13 +3279,23 @@ export function PlannerEditor(): React.JSX.Element {
           onReset={() => {
             setVisibleCols(initVisibleCols(undefined))
             setColumnOrder(initColumnOrder(undefined))
+            setColumnWidths({})
+            setTitleWidthGrid(null)
           }}
           onClose={() => {
             const visibility = { ...(sc.columnVisibility ?? {}) }
             for (const c of COLUMNS) visibility[c.key] = visibleCols.has(c.key)
             visibility.no = true
             visibility.title = true
-            commit(sc, sc.tasks, { columnVisibility: visibility, columnOrder })
+            const titleWidth = { ...(sc.titleWidth ?? {}) }
+            if (titleWidthGrid === null) delete titleWidth.grid
+            else titleWidth.grid = titleWidthGrid
+            commit(sc, sc.tasks, {
+              columnVisibility: visibility,
+              columnOrder,
+              columnWidth: Object.keys(columnWidths).length > 0 ? columnWidths : undefined,
+              titleWidth: Object.keys(titleWidth).length > 0 ? titleWidth : undefined
+            })
             setColumnsOpen(false)
           }}
         />
