@@ -1127,18 +1127,35 @@ function AppearanceSettings(): React.JSX.Element {
   )
 }
 
+const MCP_NETWORK_WARNING = (
+  <>
+    <strong>Network access warning:</strong> Enabling this binds the MCP server to 0.0.0.0 and
+    accepts requests addressed to any hostname. Traffic and bearer tokens are not encrypted. Use
+    only on a trusted local network. Anyone who can reach the port and obtain the token can access
+    enabled PTNotes tools; do not expose this port to the internet.
+  </>
+)
+
 function McpServerPane(): React.JSX.Element {
   const [status, setStatus] = useState<McpServerStatus | null>(null)
   const [portText, setPortText] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
+  const [confirmNetworkAccess, setConfirmNetworkAccess] = useState(false)
+  const [selectedNetworkUrl, setSelectedNetworkUrl] = useState('')
+
+  const applyStatus = useCallback((next: McpServerStatus): void => {
+    setStatus(next)
+    setPortText(String(next.port))
+    setSelectedNetworkUrl((current) =>
+      next.networkUrls.includes(current) ? current : (next.networkUrls[0] ?? '')
+    )
+  }, [])
 
   async function reload(): Promise<void> {
     try {
-      const s = await window.ptnotes.mcpServer.getStatus()
-      setStatus(s)
-      setPortText(String(s.port))
+      applyStatus(await window.ptnotes.mcpServer.getStatus())
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -1147,20 +1164,15 @@ function McpServerPane(): React.JSX.Element {
   useEffect(() => {
     void window.ptnotes.mcpServer
       .getStatus()
-      .then((s) => {
-        setStatus(s)
-        setPortText(String(s.port))
-      })
+      .then(applyStatus)
       .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
-  }, [])
+  }, [applyStatus])
 
   async function update(patch: Partial<McpServerSettings>): Promise<void> {
     setSaving(true)
     setError('')
     try {
-      const s = await window.ptnotes.mcpServer.update(patch)
-      setStatus(s)
-      setPortText(String(s.port))
+      applyStatus(await window.ptnotes.mcpServer.update(patch))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -1172,7 +1184,7 @@ function McpServerPane(): React.JSX.Element {
     setSaving(true)
     setError('')
     try {
-      setStatus(await window.ptnotes.mcpServer.regenerateToken())
+      applyStatus(await window.ptnotes.mcpServer.regenerateToken())
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -1194,6 +1206,15 @@ function McpServerPane(): React.JSX.Element {
     void update({ categories: { ...status.categories, [key]: value } })
   }
 
+  function toggleNetworkAccess(): void {
+    if (!status) return
+    if (status.listenOnAllInterfaces) {
+      void update({ listenOnAllInterfaces: false })
+    } else {
+      setConfirmNetworkAccess(true)
+    }
+  }
+
   async function copy(value: string): Promise<void> {
     try {
       await navigator.clipboard.writeText(value)
@@ -1206,8 +1227,10 @@ function McpServerPane(): React.JSX.Element {
 
   if (!status) return <p className="hint">Loading…</p>
 
-  const url = status.url || `http://127.0.0.1:${status.port}${'/mcp'}`
-  const snippet = `{\n  "mcpServers": {\n    "ptnotes": {\n      "url": "${url}",\n      "headers": {\n        "Authorization": "Bearer ${status.token}"\n      }\n    }\n  }\n}`
+  const localUrl = status.url || `http://127.0.0.1:${status.port}${'/mcp'}`
+  const detectedNetwork = selectedNetworkUrl || 'No active network address detected'
+  const clientUrl = status.listenOnAllInterfaces ? selectedNetworkUrl || localUrl : localUrl
+  const snippet = `{\n  "mcpServers": {\n    "ptnotes": {\n      "url": "${clientUrl}",\n      "headers": {\n        "Authorization": "Bearer ${status.token}"\n      }\n    }\n  }\n}`
   const categoryRows: { key: keyof McpServerCategories; label: string; desc: string }[] = [
     { key: 'notes', label: 'Notes', desc: 'list, read, create, update and delete notes' },
     { key: 'kanban', label: 'Kanban', desc: 'cards, comments, moves' },
@@ -1218,9 +1241,9 @@ function McpServerPane(): React.JSX.Element {
     <>
       <p className="hint">
         Expose PTNotes projects, notes, kanban cards and planner schedules to external MCP clients
-        (Claude Desktop, Cursor, …). The server listens on localhost only and requires the bearer
-        token below. Every tool requires an explicit project name; clients discover them with
-        list_projects.
+        (Claude Desktop, Cursor, …). The server listens on localhost only by default and always
+        requires the bearer token below. Every tool requires an explicit project name; clients
+        discover them with list_projects.
       </p>
       <div className="module-settings-list">
         <div
@@ -1237,9 +1260,13 @@ function McpServerPane(): React.JSX.Element {
             </span>
             <span className="module-settings-desc">
               {status.running
-                ? `Running at ${url} — ${status.toolCount} tools, ${status.sessionCount} active session${
-                    status.sessionCount === 1 ? '' : 's'
-                  }`
+                ? status.listenOnAllInterfaces
+                  ? `Listening on ${status.listenAddress}:${status.port} — ${detectedNetwork} — ${status.toolCount} tools, ${status.sessionCount} active session${
+                      status.sessionCount === 1 ? '' : 's'
+                    }`
+                  : `Running at ${localUrl} — ${status.toolCount} tools, ${status.sessionCount} active session${
+                      status.sessionCount === 1 ? '' : 's'
+                    }`
                 : status.enabled
                   ? `Enabled but not running${status.error ? `: ${status.error}` : ''}`
                   : 'Disabled'}
@@ -1258,6 +1285,40 @@ function McpServerPane(): React.JSX.Element {
           </button>
         </div>
       </div>
+
+      {status.enabled && (
+        <>
+          <div className="module-settings-list">
+            <div
+              className={`module-settings-row${status.listenOnAllInterfaces ? '' : ' disabled'}`}
+              aria-pressed={status.listenOnAllInterfaces}
+            >
+              <span className="module-settings-info">
+                <span className="module-settings-name">Allow network access</span>
+                <span className="module-settings-desc">
+                  Accept requests from other devices on all IPv4 interfaces (0.0.0.0)
+                </span>
+              </span>
+              <button
+                className={`module-settings-toggle${status.listenOnAllInterfaces ? ' on' : ''}`}
+                title={
+                  status.listenOnAllInterfaces
+                    ? 'Disable MCP network access'
+                    : 'Allow MCP network access'
+                }
+                disabled={saving}
+                onClick={toggleNetworkAccess}
+              >
+                <MdiIcon
+                  path={status.listenOnAllInterfaces ? mdiToggleSwitch : mdiToggleSwitchOffOutline}
+                  size={32}
+                />
+              </button>
+            </div>
+          </div>
+          <p className="mcp-network-warning">{MCP_NETWORK_WARNING}</p>
+        </>
+      )}
 
       <div className="module-settings-list">
         {categoryRows.map(({ key, label, desc }) => (
@@ -1300,6 +1361,31 @@ function McpServerPane(): React.JSX.Element {
         </div>
       </label>
 
+      {status.listenOnAllInterfaces && (
+        <label className="form-label">
+          Network endpoint
+          {status.networkUrls.length > 0 ? (
+            <select
+              className="text-field mcp-network-select"
+              value={selectedNetworkUrl}
+              onChange={(event) => setSelectedNetworkUrl(event.target.value)}
+            >
+              {status.networkUrls.map((networkUrl) => (
+                <option key={networkUrl} value={networkUrl}>
+                  {networkUrl}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <TextField value="No active network address detected" readOnly onChange={() => {}} />
+          )}
+          <span className="hint">
+            The client configuration below uses the selected network endpoint. Refresh after
+            changing networks.
+          </span>
+        </label>
+      )}
+
       <label className="form-label">
         Bearer token
         <div className="mcp-inline">
@@ -1317,6 +1403,13 @@ function McpServerPane(): React.JSX.Element {
           </button>
         </div>
       </label>
+
+      {status.listenOnAllInterfaces && (
+        <p className="hint">
+          0.0.0.0 is only the bind address, not a destination address. Use the selected endpoint
+          from another device, or replace it with this computer&apos;s hostname.
+        </p>
+      )}
 
       <label className="form-label">
         Client configuration
@@ -1338,6 +1431,20 @@ function McpServerPane(): React.JSX.Element {
           Copy config
         </button>
       </div>
+      {confirmNetworkAccess &&
+        createPortal(
+          <ConfirmModal
+            title="Enable MCP network access"
+            confirmLabel="Enable network access"
+            onClose={() => setConfirmNetworkAccess(false)}
+            onConfirm={() => {
+              setConfirmNetworkAccess(false)
+              void update({ listenOnAllInterfaces: true })
+            }}
+            message={MCP_NETWORK_WARNING}
+          />,
+          document.body
+        )}
     </>
   )
 }

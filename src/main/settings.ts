@@ -20,6 +20,7 @@ export function normalizeMcpServerSettings(value: unknown): McpServerSettings {
     enabled: raw.enabled === true,
     port,
     token: typeof raw.token === 'string' ? raw.token : '',
+    listenOnAllInterfaces: raw.listenOnAllInterfaces === true,
     categories: {
       notes: categories.notes !== false,
       kanban: categories.kanban !== false,
