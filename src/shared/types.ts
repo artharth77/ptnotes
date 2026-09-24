@@ -68,6 +68,8 @@ export interface StorageSettings {
   sidebarVisible?: boolean
   /** User enable/disable choices for builtin (app-shipped, read-only) skills, keyed by skill name. */
   builtinSkillOverrides?: Record<string, boolean>
+  /** Built-in MCP server exposed to external clients (disabled and loopback-only by default). */
+  mcpServer?: McpServerSettings
 }
 
 export interface AppearanceSettings {
@@ -110,6 +112,72 @@ export interface ToolsetSettings {
   headless?: boolean
   maximize?: boolean
   ignoreHttpsErrors?: boolean
+  /** Present for external MCP toolsets: the editable server config. */
+  mcp?: McpServerConfig
+  /** Present for external MCP toolsets: live connection state. */
+  status?: { connected: boolean; error?: string }
+}
+
+/** A user-configured external MCP server (stored in userData/mcp-servers.json). */
+export interface McpServerConfig {
+  id: string
+  name: string
+  transport: 'stdio' | 'http'
+  /** stdio only: executable to spawn. */
+  command?: string
+  /** stdio only: command line arguments. */
+  args?: string[]
+  /** stdio only: extra environment variables (merged over the default environment). */
+  env?: Record<string, string>
+  /** http only: Streamable HTTP endpoint. */
+  url?: string
+  /** http only: extra request headers (e.g. Authorization). */
+  headers?: Record<string, string>
+  enabled: boolean
+}
+
+/** Result of a one-off MCP connection test. */
+export interface McpTestResult {
+  ok: boolean
+  toolCount?: number
+  error?: string
+}
+
+/** Tool categories the built-in MCP server can expose to external clients. */
+export interface McpServerCategories {
+  notes: boolean
+  kanban: boolean
+  planner: boolean
+}
+
+export type McpServerListenAddress = '127.0.0.1' | '0.0.0.0'
+
+/** Persisted config for the built-in MCP server exposed to external clients. */
+export interface McpServerSettings {
+  enabled: boolean
+  port: number
+  token: string
+  categories: McpServerCategories
+  /** Opt in to trusted-network access on all IPv4 interfaces. */
+  listenOnAllInterfaces: boolean
+}
+
+/** Live status of the built-in MCP server shown in Settings ▸ MCP Server. */
+export interface McpServerStatus {
+  enabled: boolean
+  running: boolean
+  port: number
+  /** Loopback Streamable HTTP endpoint, e.g. `http://127.0.0.1:3737/mcp`. */
+  url: string
+  token: string
+  categories: McpServerCategories
+  listenOnAllInterfaces: boolean
+  listenAddress: McpServerListenAddress
+  /** Detected non-internal IPv4 Streamable HTTP endpoints for all-interface mode. */
+  networkUrls: string[]
+  sessionCount: number
+  toolCount: number
+  error?: string
 }
 
 export interface AppSettings {

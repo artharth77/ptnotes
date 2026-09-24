@@ -1,9 +1,33 @@
 import { promises as fs } from 'fs'
 import { join } from 'path'
 import { app } from 'electron'
-import type { StorageSettings } from '@shared/types'
+import type { McpServerSettings, StorageSettings } from '@shared/types'
+import { DEFAULT_MCP_CATEGORIES, DEFAULT_MCP_PORT } from '@shared/mcpServer'
 
 const SETTINGS_FILE = 'ptnotes-settings.json'
+
+export function normalizeMcpServerSettings(value: unknown): McpServerSettings {
+  const raw = value && typeof value === 'object' ? (value as Partial<McpServerSettings>) : {}
+  const port =
+    typeof raw.port === 'number' &&
+    Number.isInteger(raw.port) &&
+    raw.port >= 1024 &&
+    raw.port <= 65535
+      ? raw.port
+      : DEFAULT_MCP_PORT
+  const categories = raw.categories ?? DEFAULT_MCP_CATEGORIES
+  return {
+    enabled: raw.enabled === true,
+    port,
+    token: typeof raw.token === 'string' ? raw.token : '',
+    listenOnAllInterfaces: raw.listenOnAllInterfaces === true,
+    categories: {
+      notes: categories.notes !== false,
+      kanban: categories.kanban !== false,
+      planner: categories.planner !== false
+    }
+  }
+}
 
 function defaultSettings(): StorageSettings {
   return { rootDir: join(app.getPath('documents'), 'PTNotes') }
@@ -77,7 +101,8 @@ export class SettingsStore {
         editorFontFamily,
         surfaceTranslucent,
         sidebarVisible: parsed.sidebarVisible !== false,
-        builtinSkillOverrides
+        builtinSkillOverrides,
+        mcpServer: normalizeMcpServerSettings(parsed.mcpServer)
       }
     } catch {
       return {
@@ -86,7 +111,8 @@ export class SettingsStore {
         fontSize: 'default',
         uiDensity: 'cozy',
         editorFontFamily: 'sans',
-        surfaceTranslucent: true
+        surfaceTranslucent: true,
+        mcpServer: normalizeMcpServerSettings(undefined)
       }
     }
   }
@@ -127,7 +153,8 @@ export class SettingsStore {
           : 'sans',
       surfaceTranslucent: settings.surfaceTranslucent !== false,
       sidebarVisible: settings.sidebarVisible !== false,
-      builtinSkillOverrides: {}
+      builtinSkillOverrides: {},
+      mcpServer: normalizeMcpServerSettings(settings.mcpServer)
     }
     if (settings.builtinSkillOverrides && typeof settings.builtinSkillOverrides === 'object') {
       for (const [key, value] of Object.entries(settings.builtinSkillOverrides)) {

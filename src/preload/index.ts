@@ -34,6 +34,10 @@ import type {
   ModuleStartResult,
   MermaidRenderResult,
   InfographicRenderResult,
+  McpServerConfig,
+  McpServerSettings,
+  McpServerStatus,
+  McpTestResult,
   NewGroupInput,
   StorageSettings,
   ToolsetSettings,
@@ -414,6 +418,20 @@ const api = {
       ipcRenderer.invoke('toolsets:setEnabled', id, enabled),
     setConfig: (id: string, key: string, value: unknown): Promise<ToolsetSettings[]> =>
       ipcRenderer.invoke('toolsets:setConfig', id, key, value)
+  },
+  mcp: {
+    listServers: (): Promise<McpServerConfig[]> => ipcRenderer.invoke('mcp:listServers'),
+    save: (config: McpServerConfig): Promise<McpServerConfig[]> =>
+      ipcRenderer.invoke('mcp:save', config),
+    delete: (id: string): Promise<McpServerConfig[]> => ipcRenderer.invoke('mcp:delete', id),
+    test: (config: McpServerConfig): Promise<McpTestResult> =>
+      ipcRenderer.invoke('mcp:test', config)
+  },
+  mcpServer: {
+    getStatus: (): Promise<McpServerStatus> => ipcRenderer.invoke('mcpServer:getStatus'),
+    update: (patch: Partial<McpServerSettings>): Promise<McpServerStatus> =>
+      ipcRenderer.invoke('mcpServer:update', patch),
+    regenerateToken: (): Promise<McpServerStatus> => ipcRenderer.invoke('mcpServer:regenerateToken')
   },
   jobs: {
     list: (project: string): Promise<ScheduleJob[]> => ipcRenderer.invoke('jobs:list', project),

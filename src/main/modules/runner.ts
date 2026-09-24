@@ -131,6 +131,8 @@ export interface ModuleRunnerOptions {
   notify: (run: ModuleRun, evt: ModuleNotifyEvent) => void
   /** When set, the `ask_user` tool is offered and routed to this handler. */
   ask?: BotAskHandler
+  /** Extra enabled-toolset tools (browser/MCP) appended to the module's own tool list. */
+  extraTools?: PTTool[]
 }
 
 function buildSystemPrompt(
@@ -185,6 +187,7 @@ export class ModuleRunner {
   private readonly notify: (run: ModuleRun, evt: ModuleNotifyEvent) => void
   private readonly clientFn: (config: AIProviderConfig) => OpenAI
   private readonly askHandler?: BotAskHandler
+  private readonly extraTools: PTTool[]
   private config: AIProviderConfig = { baseUrl: '', apiKey: '', model: '' }
   private stopped = false
   private abortController: AbortController | undefined
@@ -208,6 +211,7 @@ export class ModuleRunner {
     this.notify = opts.notify
     this.clientFn = opts.createClientFn ? opts.createClientFn : createClient
     this.askHandler = opts.ask
+    this.extraTools = opts.extraTools ?? []
     this.trace = new AiTraceRecorder({
       project: this.activeProject,
       key: this.run.runId,
@@ -333,9 +337,10 @@ export class ModuleRunner {
     const excluded = new Set(['create_skill', 'delete_skill'])
     if (!this.askHandler) excluded.add('ask_user')
     const base = baseTools.filter((t) => !excluded.has(t.definition.function.name))
+    const extra = this.extraTools.filter((t) => !excluded.has(t.definition.function.name))
     const framework = [setPlanTool(this), updateStepTool(this)]
     if (this.run.expectResult) framework.push(submitResultTool(this))
-    return [...base, ...this.module.tools, ...framework]
+    return [...base, ...this.module.tools, ...extra, ...framework]
   }
 
   /** Run one completion turn (streaming). Returns 'done' when the run produced a final answer. */

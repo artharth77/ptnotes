@@ -18,6 +18,11 @@ import type {
   AboutInfo,
   AIConfig,
   AIProfile,
+  McpServerCategories,
+  McpServerConfig,
+  McpServerSettings,
+  McpServerStatus,
+  McpTestResult,
   ModuleSettings,
   SkillContent,
   SkillList,
@@ -507,6 +512,42 @@ function ModulesPane({
   )
 }
 
+function parseMcpLines(value: string): string[] {
+  return value
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+}
+
+function parseMcpPairs(value: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const line of parseMcpLines(value)) {
+    const idx = line.indexOf('=')
+    if (idx > 0) out[line.slice(0, idx).trim()] = line.slice(idx + 1).trim()
+  }
+  return out
+}
+
+function formatMcpPairs(map?: Record<string, string>): string {
+  return map
+    ? Object.entries(map)
+        .map(([k, v]) => `${k}=${v}`)
+        .join('\n')
+    : ''
+}
+
+function emptyMcpDraft(): McpServerConfig {
+  return {
+    id: '',
+    name: '',
+    transport: 'stdio',
+    command: '',
+    args: [],
+    env: {},
+    enabled: true
+  }
+}
+
 function ToolsetsPane({
   toolsets,
   setToolsets
@@ -515,6 +556,15 @@ function ToolsetsPane({
   setToolsets: (m: ToolsetSettings[]) => void
 }): React.JSX.Element {
   const [toggling, setToggling] = useState<string | null>(null)
+  const [draft, setDraft] = useState<McpServerConfig | null>(null)
+  const [argsText, setArgsText] = useState('')
+  const [envText, setEnvText] = useState('')
+  const [headersText, setHeadersText] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<McpTestResult | null>(null)
+  const [error, setError] = useState('')
+  const [deleting, setDeleting] = useState<McpServerConfig | null>(null)
 
   async function toggle(t: ToolsetSettings): Promise<void> {
     setToggling(t.id)
@@ -531,12 +581,87 @@ function ToolsetsPane({
     setToolsets(next)
   }
 
+  async function reload(): Promise<void> {
+    setToolsets(await window.ptnotes.toolsets.listAvailable())
+  }
+
+  function startAdd(): void {
+    setDraft(emptyMcpDraft())
+    setArgsText('')
+    setEnvText('')
+    setHeadersText('')
+    setTestResult(null)
+    setError('')
+  }
+
+  function startEdit(server: McpServerConfig): void {
+    setDraft({ ...server })
+    setArgsText((server.args ?? []).join('\n'))
+    setEnvText(formatMcpPairs(server.env))
+    setHeadersText(formatMcpPairs(server.headers))
+    setTestResult(null)
+    setError('')
+  }
+
+  async function saveDraft(): Promise<void> {
+    if (!draft) return
+    const config: McpServerConfig = {
+      ...draft,
+      args: draft.transport === 'stdio' ? parseMcpLines(argsText) : undefined,
+      env: draft.transport === 'stdio' ? parseMcpPairs(envText) : undefined,
+      headers: draft.transport === 'http' ? parseMcpPairs(headersText) : undefined
+    }
+    setSaving(true)
+    setError('')
+    try {
+      await window.ptnotes.mcp.save(config)
+      setDraft(null)
+      await reload()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function testDraft(): Promise<void> {
+    if (!draft) return
+    setTesting(true)
+    setTestResult(null)
+    setError('')
+    try {
+      const config: McpServerConfig = {
+        ...draft,
+        args: draft.transport === 'stdio' ? parseMcpLines(argsText) : undefined,
+        env: draft.transport === 'stdio' ? parseMcpPairs(envText) : undefined,
+        headers: draft.transport === 'http' ? parseMcpPairs(headersText) : undefined
+      }
+      setTestResult(await window.ptnotes.mcp.test(config))
+    } catch (err) {
+      setTestResult({ ok: false, error: err instanceof Error ? err.message : String(err) })
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  async function deleteServer(): Promise<void> {
+    if (!deleting) return
+    try {
+      await window.ptnotes.mcp.delete(deleting.id)
+      setDeleting(null)
+      await reload()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+      setDeleting(null)
+    }
+  }
+
   return (
     <>
       <p className="hint">
         Toolsets add extra tools the AI can use during chat. Each enabled toolset adds tools to
         every chat turn — this uses more tokens and increases the chance the AI selects the wrong
-        tool. Toolsets are only active in the AI chat, never in module subagents.
+        tool. Enabled toolsets are also available to module subagents.
       </p>
       <p className="hint">
         If you add many toolsets, the AI may fail to select the correct tool &mdash; this is an LLM
@@ -564,8 +689,19 @@ function ToolsetsPane({
                       ({t.toolCount} tool{t.toolCount !== 1 ? 's' : ''})
                     </span>
                   )}
+                  {t.mcp && (
+                    <span
+                      className={`mcp-status-dot ${t.status?.connected ? 'connected' : 'error'}`}
+                      title={
+                        t.status?.connected ? 'Connected' : (t.status?.error ?? 'Not connected')
+                      }
+                    />
+                  )}
                 </span>
                 <span className="module-settings-desc">{t.summary}</span>
+                {t.status && !t.status.connected && t.status.error && (
+                  <span className="mcp-status-error">{t.status.error}</span>
+                )}
                 {t.id === 'browser' && t.headless !== undefined && (
                   <label className="toolset-sub-config" onClick={(e) => e.stopPropagation()}>
                     <input
@@ -611,6 +747,24 @@ function ToolsetsPane({
                     Disables certificate verification. Only use with trusted sites.
                   </p>
                 )}
+                {t.mcp && (
+                  <span className="mcp-row-actions" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      className="btn small"
+                      type="button"
+                      onClick={() => startEdit(t.mcp as McpServerConfig)}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      className="btn small danger"
+                      type="button"
+                      onClick={() => setDeleting(t.mcp as McpServerConfig)}
+                    >
+                      Delete
+                    </button>
+                  </span>
+                )}
               </span>
               <button
                 className={`module-settings-toggle${t.enabled ? ' on' : ''}`}
@@ -623,6 +777,137 @@ function ToolsetsPane({
           ))}
         </div>
       )}
+
+      {draft ? (
+        <div className="mcp-form">
+          <div className="mcp-form-title">
+            {draft.id ? `Edit "${draft.name}"` : 'Add external MCP server'}
+          </div>
+          <label className="form-label">
+            Name
+            <TextField
+              value={draft.name}
+              autoFocus
+              placeholder="My MCP server"
+              onChange={(v) => setDraft({ ...draft, name: v })}
+            />
+          </label>
+          <div className="mcp-transport-toggle">
+            <button
+              type="button"
+              className={`btn small${draft.transport === 'stdio' ? ' primary' : ''}`}
+              onClick={() => setDraft({ ...draft, transport: 'stdio' })}
+            >
+              stdio
+            </button>
+            <button
+              type="button"
+              className={`btn small${draft.transport === 'http' ? ' primary' : ''}`}
+              onClick={() => setDraft({ ...draft, transport: 'http' })}
+            >
+              HTTP
+            </button>
+          </div>
+          {draft.transport === 'stdio' ? (
+            <>
+              <label className="form-label">
+                Command
+                <TextField
+                  value={draft.command ?? ''}
+                  placeholder="npx"
+                  onChange={(v) => setDraft({ ...draft, command: v })}
+                />
+              </label>
+              <label className="form-label">
+                Arguments (one per line)
+                <textarea
+                  className="text-field mcp-field-textarea"
+                  value={argsText}
+                  placeholder={'-y\n@modelcontextprotocol/server-filesystem\n/path'}
+                  onChange={(e) => setArgsText(e.target.value)}
+                />
+              </label>
+              <label className="form-label">
+                Environment variables (KEY=VALUE per line)
+                <textarea
+                  className="text-field mcp-field-textarea"
+                  value={envText}
+                  placeholder="API_KEY=..."
+                  onChange={(e) => setEnvText(e.target.value)}
+                />
+              </label>
+            </>
+          ) : (
+            <>
+              <label className="form-label">
+                URL
+                <TextField
+                  value={draft.url ?? ''}
+                  placeholder="https://example.com/mcp"
+                  onChange={(v) => setDraft({ ...draft, url: v })}
+                />
+              </label>
+              <label className="form-label">
+                Headers (KEY=VALUE per line)
+                <textarea
+                  className="text-field mcp-field-textarea"
+                  value={headersText}
+                  placeholder="Authorization=Bearer ..."
+                  onChange={(e) => setHeadersText(e.target.value)}
+                />
+              </label>
+            </>
+          )}
+          {testResult && (
+            <p className={`mcp-test-result${testResult.ok ? ' ok' : ' error'}`}>
+              {testResult.ok
+                ? `Connected — ${testResult.toolCount ?? 0} tool${
+                    testResult.toolCount === 1 ? '' : 's'
+                  } found.`
+                : `Connection failed: ${testResult.error ?? 'unknown error'}`}
+            </p>
+          )}
+          {error && <p className="form-error">{error}</p>}
+          <div className="modal-actions">
+            <button className="btn" type="button" onClick={() => setDraft(null)} disabled={saving}>
+              Cancel
+            </button>
+            <button
+              className="btn"
+              type="button"
+              onClick={() => void testDraft()}
+              disabled={testing}
+            >
+              {testing ? 'Testing…' : 'Test connection'}
+            </button>
+            <button
+              className="btn primary"
+              type="button"
+              onClick={() => void saveDraft()}
+              disabled={saving || !draft.name.trim()}
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="modal-actions">
+          <button className="btn" type="button" onClick={startAdd}>
+            Add external MCP server
+          </button>
+        </div>
+      )}
+
+      {deleting &&
+        createPortal(
+          <ConfirmModal
+            title="Delete MCP server"
+            onClose={() => setDeleting(null)}
+            onConfirm={() => void deleteServer()}
+            message={<>Delete the MCP server &quot;{deleting.name}&quot;? This cannot be undone.</>}
+          />,
+          document.body
+        )}
     </>
   )
 }
@@ -838,6 +1123,328 @@ function AppearanceSettings(): React.JSX.Element {
           Solid
         </button>
       </div>
+    </>
+  )
+}
+
+const MCP_NETWORK_WARNING = (
+  <>
+    <strong>Network access warning:</strong> Enabling this binds the MCP server to 0.0.0.0 and
+    accepts requests addressed to any hostname. Traffic and bearer tokens are not encrypted. Use
+    only on a trusted local network. Anyone who can reach the port and obtain the token can access
+    enabled PTNotes tools; do not expose this port to the internet.
+  </>
+)
+
+function McpServerPane(): React.JSX.Element {
+  const [status, setStatus] = useState<McpServerStatus | null>(null)
+  const [portText, setPortText] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [copied, setCopied] = useState(false)
+  const [confirmNetworkAccess, setConfirmNetworkAccess] = useState(false)
+  const [selectedNetworkUrl, setSelectedNetworkUrl] = useState('')
+
+  const applyStatus = useCallback((next: McpServerStatus): void => {
+    setStatus(next)
+    setPortText(String(next.port))
+    setSelectedNetworkUrl((current) =>
+      next.networkUrls.includes(current) ? current : (next.networkUrls[0] ?? '')
+    )
+  }, [])
+
+  async function reload(): Promise<void> {
+    try {
+      applyStatus(await window.ptnotes.mcpServer.getStatus())
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  useEffect(() => {
+    void window.ptnotes.mcpServer
+      .getStatus()
+      .then(applyStatus)
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
+  }, [applyStatus])
+
+  async function update(patch: Partial<McpServerSettings>): Promise<void> {
+    setSaving(true)
+    setError('')
+    try {
+      applyStatus(await window.ptnotes.mcpServer.update(patch))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function regenerate(): Promise<void> {
+    setSaving(true)
+    setError('')
+    try {
+      applyStatus(await window.ptnotes.mcpServer.regenerateToken())
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function savePort(): void {
+    const port = Number(portText.trim())
+    if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+      setError('Port must be an integer between 1024 and 65535.')
+      return
+    }
+    void update({ port })
+  }
+
+  function toggleCategory(key: keyof McpServerCategories, value: boolean): void {
+    if (!status) return
+    void update({ categories: { ...status.categories, [key]: value } })
+  }
+
+  function toggleNetworkAccess(): void {
+    if (!status) return
+    if (status.listenOnAllInterfaces) {
+      void update({ listenOnAllInterfaces: false })
+    } else {
+      setConfirmNetworkAccess(true)
+    }
+  }
+
+  async function copy(value: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // clipboard unavailable — ignore
+    }
+  }
+
+  if (!status) return <p className="hint">Loading…</p>
+
+  const localUrl = status.url || `http://127.0.0.1:${status.port}${'/mcp'}`
+  const detectedNetwork = selectedNetworkUrl || 'No active network address detected'
+  const clientUrl = status.listenOnAllInterfaces ? selectedNetworkUrl || localUrl : localUrl
+  const snippet = `{\n  "mcpServers": {\n    "ptnotes": {\n      "url": "${clientUrl}",\n      "headers": {\n        "Authorization": "Bearer ${status.token}"\n      }\n    }\n  }\n}`
+  const categoryRows: { key: keyof McpServerCategories; label: string; desc: string }[] = [
+    { key: 'notes', label: 'Notes', desc: 'list, read, create, update and delete notes' },
+    { key: 'kanban', label: 'Kanban', desc: 'cards, comments, moves' },
+    { key: 'planner', label: 'Planner', desc: 'schedules, tasks and the working-day calendar' }
+  ]
+
+  return (
+    <>
+      <p className="hint">
+        Expose PTNotes projects, notes, kanban cards and planner schedules to external MCP clients
+        (Claude Desktop, Cursor, …). The server listens on localhost only by default and always
+        requires the bearer token below. Every tool requires an explicit project name; clients
+        discover them with list_projects.
+      </p>
+      <div className="module-settings-list">
+        <div
+          className={`module-settings-row${status.enabled ? '' : ' disabled'}`}
+          aria-pressed={status.enabled}
+        >
+          <span className="module-settings-info">
+            <span className="module-settings-name">
+              MCP server
+              <span
+                className={`mcp-status-dot ${status.running ? 'connected' : 'error'}`}
+                title={status.running ? 'Running' : 'Stopped'}
+              />
+            </span>
+            <span className="module-settings-desc">
+              {status.running
+                ? status.listenOnAllInterfaces
+                  ? `Listening on ${status.listenAddress}:${status.port} — ${detectedNetwork} — ${status.toolCount} tools, ${status.sessionCount} active session${
+                      status.sessionCount === 1 ? '' : 's'
+                    }`
+                  : `Running at ${localUrl} — ${status.toolCount} tools, ${status.sessionCount} active session${
+                      status.sessionCount === 1 ? '' : 's'
+                    }`
+                : status.enabled
+                  ? `Enabled but not running${status.error ? `: ${status.error}` : ''}`
+                  : 'Disabled'}
+            </span>
+          </span>
+          <button
+            className={`module-settings-toggle${status.enabled ? ' on' : ''}`}
+            title={status.enabled ? 'Disable the MCP server' : 'Enable the MCP server'}
+            disabled={saving}
+            onClick={() => void update({ enabled: !status.enabled })}
+          >
+            <MdiIcon
+              path={status.enabled ? mdiToggleSwitch : mdiToggleSwitchOffOutline}
+              size={32}
+            />
+          </button>
+        </div>
+      </div>
+
+      {status.enabled && (
+        <>
+          <div className="module-settings-list">
+            <div
+              className={`module-settings-row${status.listenOnAllInterfaces ? '' : ' disabled'}`}
+              aria-pressed={status.listenOnAllInterfaces}
+            >
+              <span className="module-settings-info">
+                <span className="module-settings-name">Allow network access</span>
+                <span className="module-settings-desc">
+                  Accept requests from other devices on all IPv4 interfaces (0.0.0.0)
+                </span>
+              </span>
+              <button
+                className={`module-settings-toggle${status.listenOnAllInterfaces ? ' on' : ''}`}
+                title={
+                  status.listenOnAllInterfaces
+                    ? 'Disable MCP network access'
+                    : 'Allow MCP network access'
+                }
+                disabled={saving}
+                onClick={toggleNetworkAccess}
+              >
+                <MdiIcon
+                  path={status.listenOnAllInterfaces ? mdiToggleSwitch : mdiToggleSwitchOffOutline}
+                  size={32}
+                />
+              </button>
+            </div>
+          </div>
+          <p className="mcp-network-warning">{MCP_NETWORK_WARNING}</p>
+        </>
+      )}
+
+      <div className="module-settings-list">
+        {categoryRows.map(({ key, label, desc }) => (
+          <div
+            key={key}
+            className={`module-settings-row${status.categories[key] ? '' : ' disabled'}`}
+            aria-pressed={status.categories[key]}
+          >
+            <span className="module-settings-info">
+              <span className="module-settings-name">{label} tools</span>
+              <span className="module-settings-desc">{desc}</span>
+            </span>
+            <button
+              className={`module-settings-toggle${status.categories[key] ? ' on' : ''}`}
+              title={status.categories[key] ? `Disable ${label} tools` : `Enable ${label} tools`}
+              disabled={saving}
+              onClick={() => toggleCategory(key, !status.categories[key])}
+            >
+              <MdiIcon
+                path={status.categories[key] ? mdiToggleSwitch : mdiToggleSwitchOffOutline}
+                size={32}
+              />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <label className="form-label">
+        Port
+        <div className="mcp-inline">
+          <TextField value={portText} onChange={setPortText} />
+          <button
+            className="btn primary"
+            type="button"
+            disabled={saving || portText === String(status.port)}
+            onClick={savePort}
+          >
+            Save
+          </button>
+        </div>
+      </label>
+
+      {status.listenOnAllInterfaces && (
+        <label className="form-label">
+          Network endpoint
+          {status.networkUrls.length > 0 ? (
+            <select
+              className="text-field mcp-network-select"
+              value={selectedNetworkUrl}
+              onChange={(event) => setSelectedNetworkUrl(event.target.value)}
+            >
+              {status.networkUrls.map((networkUrl) => (
+                <option key={networkUrl} value={networkUrl}>
+                  {networkUrl}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <TextField value="No active network address detected" readOnly onChange={() => {}} />
+          )}
+          <span className="hint">
+            The client configuration below uses the selected network endpoint. Refresh after
+            changing networks.
+          </span>
+        </label>
+      )}
+
+      <label className="form-label">
+        Bearer token
+        <div className="mcp-inline">
+          <TextField value={status.token} readOnly onChange={() => {}} />
+          <button className="btn small" type="button" onClick={() => void copy(status.token)}>
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+          <button
+            className="btn small danger"
+            type="button"
+            disabled={saving}
+            onClick={() => void regenerate()}
+          >
+            Regenerate
+          </button>
+        </div>
+      </label>
+
+      {status.listenOnAllInterfaces && (
+        <p className="hint">
+          0.0.0.0 is only the bind address, not a destination address. Use the selected endpoint
+          from another device, or replace it with this computer&apos;s hostname.
+        </p>
+      )}
+
+      <label className="form-label">
+        Client configuration
+        <textarea
+          className="text-field mcp-field-textarea"
+          value={snippet}
+          readOnly
+          rows={8}
+          spellCheck={false}
+        />
+      </label>
+
+      {error && <p className="form-error">{error}</p>}
+      <div className="modal-actions">
+        <button className="btn" type="button" onClick={() => void reload()}>
+          Refresh
+        </button>
+        <button className="btn" type="button" onClick={() => void copy(snippet)}>
+          Copy config
+        </button>
+      </div>
+      {confirmNetworkAccess &&
+        createPortal(
+          <ConfirmModal
+            title="Enable MCP network access"
+            confirmLabel="Enable network access"
+            onClose={() => setConfirmNetworkAccess(false)}
+            onConfirm={() => {
+              setConfirmNetworkAccess(false)
+              void update({ listenOnAllInterfaces: true })
+            }}
+            message={MCP_NETWORK_WARNING}
+          />,
+          document.body
+        )}
     </>
   )
 }
@@ -1398,6 +2005,12 @@ export function SettingsDialog(): React.JSX.Element {
             Toolsets
           </button>
           <button
+            className={category === 'mcpServer' ? 'active' : ''}
+            onClick={() => setSettingsCategory('mcpServer')}
+          >
+            MCP Server
+          </button>
+          <button
             className={category === 'skills' ? 'active' : ''}
             onClick={() => setSettingsCategory('skills')}
           >
@@ -1445,6 +2058,10 @@ export function SettingsDialog(): React.JSX.Element {
           ) : category === 'toolsets' ? (
             <>
               <ToolsetsPane toolsets={toolsets} setToolsets={setToolsets} />
+            </>
+          ) : category === 'mcpServer' ? (
+            <>
+              <McpServerPane />
             </>
           ) : category === 'skills' ? (
             <>

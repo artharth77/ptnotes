@@ -15,6 +15,7 @@ import type { PTNotesService } from '../service/PTNotesService'
 import type { AIConfigStore } from '../ai/config'
 import type { SettingsStore } from '../settings'
 import { isLocalEndpoint } from '../ai/chatSession'
+import type { PTTool } from '../ai/tools'
 import { ModuleRegistry } from './registry'
 import { ModuleRunner } from './runner'
 import type { BotAskHandler, ModuleNotifyEvent } from './runner'
@@ -64,6 +65,18 @@ export class ModuleRunManager {
     this.broadcast = broadcast
     this.clientFn = clientFn
     this.settingsStore = settingsStore
+  }
+
+  /** Enabled-toolset tools (browser/MCP) so subagent runs share the chat's tool code path. */
+  private async toolsetTools(): Promise<PTTool[]> {
+    if (!this.settingsStore) return []
+    try {
+      const settings = await this.settingsStore.load()
+      const { buildChatTools } = await import('../mcp/toolsets')
+      return await buildChatTools(settings.disabledToolsets ?? [], this.service, this.settingsStore)
+    } catch {
+      return []
+    }
   }
 
   /** Start a background module run (fire-and-forget) for the given project. */
@@ -157,6 +170,7 @@ export class ModuleRunManager {
     await this.service.writeModuleRun(project, runId, run)
     this.emit({ runId, project, type: 'status', run })
 
+    const extraTools = await this.toolsetTools()
     const runner = new ModuleRunner({
       service: this.service,
       activeProject: project,
@@ -168,6 +182,7 @@ export class ModuleRunManager {
           : () => this.configStore.load(),
       createClientFn: this.clientFn,
       notify: (snapshot, evt) => this.handleUpdate(snapshot, evt),
+      extraTools,
       ...(botOpts?.ask ? { ask: botOpts.ask } : {})
     })
     this.active.set(runId, runner)
@@ -258,6 +273,7 @@ export class ModuleRunManager {
     await this.service.deleteModuleTrace(project, runId).catch(() => {})
 
     this.active.get(runId)?.stop()
+    const extraTools = await this.toolsetTools()
     const runner = new ModuleRunner({
       service: this.service,
       activeProject: project,
@@ -265,7 +281,8 @@ export class ModuleRunManager {
       run,
       getConfig: () => Promise.resolve(cfg),
       createClientFn: this.clientFn,
-      notify: (snapshot, evt) => this.handleUpdate(snapshot, evt)
+      notify: (snapshot, evt) => this.handleUpdate(snapshot, evt),
+      extraTools
     })
     this.active.set(runId, runner)
     void runner.start()
