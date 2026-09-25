@@ -6,6 +6,7 @@ import { ConfirmModal } from './Modal'
 import { MdiIcon } from './MdiIcon'
 import { fileTypeIcon } from './contentIcons'
 import { STATUS_LABELS } from './moduleStatus'
+import { revealLabel } from '../uiMode'
 
 function stepIcon(step: ModuleStepState): string {
   switch (step.status) {
@@ -189,7 +190,7 @@ export function ModuleCard({
               <button
                 key={file}
                 className={`btn small ghost${revealError ? ' module-output-missing' : ''}`}
-                title={revealError || 'Reveal output file'}
+                title={revealError || revealLabel('Reveal output file')}
                 onClick={(e) => {
                   e.stopPropagation()
                   if (!activeProject) return

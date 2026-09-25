@@ -32,5 +32,14 @@ export default defineConfig(
       ]
     }
   },
+  {
+    files: ['src/shared/api.ts'],
+    rules: {
+      // `PTNotesApi` is derived from this factory (`ReturnType<typeof createApi>`)
+      // so the renderer-facing API keeps exactly one source of truth — an
+      // explicit return type here would have to repeat it.
+      '@typescript-eslint/explicit-function-return-type': 'off'
+    }
+  },
   eslintConfigPrettier
 )

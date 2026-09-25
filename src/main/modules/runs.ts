@@ -1,5 +1,4 @@
 import { randomUUID } from 'crypto'
-import { shell } from 'electron'
 import { promises as fs } from 'fs'
 import OpenAI from 'openai'
 import type {
@@ -12,6 +11,7 @@ import type {
   ModuleStartResult
 } from '@shared/types'
 import type { PTNotesService } from '../service/PTNotesService'
+import { getPlatform } from '../platform'
 import type { AIConfigStore } from '../ai/config'
 import type { SettingsStore } from '../settings'
 import { isLocalEndpoint } from '../ai/chatSession'
@@ -381,7 +381,7 @@ export class ModuleRunManager {
         error: `File not found: ${target.split(/[\\/]/).pop()} (${target})`
       }
     }
-    shell.showItemInFolder(target)
+    getPlatform().reveal(target)
     return { ok: true }
   }
 

@@ -1,87 +1,78 @@
-import { ipcMain } from 'electron'
-import type { IpcMainInvokeEvent } from 'electron'
+import { rpc, type InvokeCtx } from '../rpc/registry'
+
 import type { PTNotesService } from '../service/PTNotesService'
 import type { AiTraceFile, ChatThread } from '@shared/types'
 
 export function registerProjectIpc(service: PTNotesService): void {
-  ipcMain.handle('projects:list', async () => service.listProjects())
-  ipcMain.handle('projects:create', async (_e, name: string) => service.createProject(name))
-  ipcMain.handle('projects:recreate', async (_e, name: string) => service.recreateProject(name))
-  ipcMain.handle('projects:rename', async (_e, oldName: string, newName: string) =>
+  rpc.handle('projects:list', async () => service.listProjects())
+  rpc.handle('projects:create', async (_e, name: string) => service.createProject(name))
+  rpc.handle('projects:recreate', async (_e, name: string) => service.recreateProject(name))
+  rpc.handle('projects:rename', async (_e, oldName: string, newName: string) =>
     service.renameProject(oldName, newName)
   )
-  ipcMain.handle('projects:delete', async (_e, name: string) => service.deleteProject(name))
+  rpc.handle('projects:delete', async (_e, name: string) => service.deleteProject(name))
 }
 
 export function registerNoteIpc(service: PTNotesService): void {
-  ipcMain.handle('notes:list', async (_e: IpcMainInvokeEvent, project: string) =>
-    service.listNotes(project)
-  )
-  ipcMain.handle('notes:read', async (_e: IpcMainInvokeEvent, project: string, noteId: string) =>
+  rpc.handle('notes:list', async (_e: InvokeCtx, project: string) => service.listNotes(project))
+  rpc.handle('notes:read', async (_e: InvokeCtx, project: string, noteId: string) =>
     service.readNote(project, noteId)
   )
-  ipcMain.handle(
+  rpc.handle(
     'notes:save',
-    async (_e: IpcMainInvokeEvent, project: string, noteId: string, content: string) =>
+    async (_e: InvokeCtx, project: string, noteId: string, content: string) =>
       service.saveNote(project, noteId, content)
   )
-  ipcMain.handle('notes:create', async (_e: IpcMainInvokeEvent, project: string, title: string) =>
+  rpc.handle('notes:create', async (_e: InvokeCtx, project: string, title: string) =>
     service.createNote(project, title)
   )
-  ipcMain.handle(
+  rpc.handle(
     'notes:rename',
-    async (_e: IpcMainInvokeEvent, project: string, noteId: string, newTitle: string) =>
+    async (_e: InvokeCtx, project: string, noteId: string, newTitle: string) =>
       service.renameNote(project, noteId, newTitle)
   )
-  ipcMain.handle('notes:delete', async (_e: IpcMainInvokeEvent, project: string, noteId: string) =>
+  rpc.handle('notes:delete', async (_e: InvokeCtx, project: string, noteId: string) =>
     service.deleteNote(project, noteId)
   )
-  ipcMain.handle('notes:reveal', async (_e: IpcMainInvokeEvent, project: string, noteId: string) =>
+  rpc.handle('notes:reveal', async (_e: InvokeCtx, project: string, noteId: string) =>
     service.revealNoteInFolder(project, noteId)
   )
-  ipcMain.handle(
+  rpc.handle(
     'notes:setStarred',
-    async (_e: IpcMainInvokeEvent, project: string, noteId: string, starred: boolean) =>
+    async (_e: InvokeCtx, project: string, noteId: string, starred: boolean) =>
       service.setNoteStarred(project, noteId, starred)
   )
-  ipcMain.handle('notes:search', async (_e: IpcMainInvokeEvent, project: string, query: string) =>
+  rpc.handle('notes:search', async (_e: InvokeCtx, project: string, query: string) =>
     service.searchNotes(project, query)
   )
 }
 
 export function registerChatIpc(service: PTNotesService): void {
-  ipcMain.handle('chat:list', async (_e: IpcMainInvokeEvent, project: string) =>
+  rpc.handle('chat:list', async (_e: InvokeCtx, project: string) =>
     service.listChatSessions(project)
   )
-  ipcMain.handle('chat:read', async (_e: IpcMainInvokeEvent, project: string, sessionId: string) =>
+  rpc.handle('chat:read', async (_e: InvokeCtx, project: string, sessionId: string) =>
     service.readChat(project, sessionId)
   )
-  ipcMain.handle(
-    'chat:write',
-    async (_e: IpcMainInvokeEvent, project: string, thread: ChatThread) =>
-      service.writeChat(project, thread)
+  rpc.handle('chat:write', async (_e: InvokeCtx, project: string, thread: ChatThread) =>
+    service.writeChat(project, thread)
   )
-  ipcMain.handle(
-    'chat:delete',
-    async (_e: IpcMainInvokeEvent, project: string, sessionId: string) =>
-      service.deleteChat(project, sessionId)
+  rpc.handle('chat:delete', async (_e: InvokeCtx, project: string, sessionId: string) =>
+    service.deleteChat(project, sessionId)
   )
-  ipcMain.handle(
+  rpc.handle(
     'chat:rename',
-    async (_e: IpcMainInvokeEvent, project: string, sessionId: string, title: string) =>
+    async (_e: InvokeCtx, project: string, sessionId: string, title: string) =>
       service.renameChat(project, sessionId, title)
   )
-  ipcMain.handle(
+  rpc.handle(
     'chat:readTrace',
-    async (
-      _e: IpcMainInvokeEvent,
-      project: string,
-      sessionId: string
-    ): Promise<AiTraceFile | null> => service.readChatTrace(project, sessionId)
+    async (_e: InvokeCtx, project: string, sessionId: string): Promise<AiTraceFile | null> =>
+      service.readChatTrace(project, sessionId)
   )
-  ipcMain.handle(
+  rpc.handle(
     'chat:traceExists',
-    async (_e: IpcMainInvokeEvent, project: string, sessionId: string): Promise<boolean> => {
+    async (_e: InvokeCtx, project: string, sessionId: string): Promise<boolean> => {
       if (!sessionId) return false
       const meta = await service.chatTraceMeta(project, sessionId)
       return meta.count > 0

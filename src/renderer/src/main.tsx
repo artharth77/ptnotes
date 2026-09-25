@@ -1,243 +1,26 @@
 import './assets/main.css'
+import { installWebBridge } from './webBridge'
 
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/explicit-function-return-type */
-;(function ensurePtnotesStub(): void {
-  if (typeof window === 'undefined') return
-  const noop = (): void => {}
-  const noopAsync = async (): Promise<any> => undefined as any
-  const noopUnsub = (): (() => void) => () => undefined
-  if (!window.electron) {
-    Object.defineProperty(window, 'electron', {
-      value: {
-        process: {
-          platform:
-            typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac')
-              ? 'darwin'
-              : 'linux'
-        }
-      },
-      writable: false,
-      configurable: true
-    })
-  }
-  if (!window.ptnotes) {
-    const emptyList: any[] = []
-    const noopAI = {
-      clear: noopAsync,
-      send: noopAsync,
-      stop: noopAsync,
-      getConfig: async () => ({
-        model: '',
-        apiKey: '',
-        baseUrl: '',
-        temperature: 0.2,
-        systemPrompt: '',
-        activeProfileId: 'default',
-        profiles: []
-      }),
-      getProfiles: async () => ({ activeProfileId: 'default', profiles: [] }),
-      saveProfiles: noopAsync,
-      generateTitle: async () => 'Untitled',
-      confirmResponse: noopAsync,
-      onStreamEvent: noopUnsub
-    }
-    const noopProjects = {
-      list: async () => emptyList,
-      create: async () => ({ name: '' }) as any,
-      recreate: async () => ({ name: '' }) as any,
-      rename: noopAsync,
-      delete: noopAsync
-    }
-    const noopSettings = {
-      changeRoot: noopAsync,
-      getAppearance: async () => ({
-        theme: 'system',
-        fontSize: 'default',
-        uiDensity: 'cozy',
-        vtabStyle: 'labels',
-        vtabIconColor: 'color',
-        editorFontFamily: 'sans',
-        surfaceTranslucent: true,
-        sidebarVisible: true
-      }),
-      setAppearance: noopAsync,
-      get: async () => ({}),
-      set: noopAsync
-    }
-    const noopNotes = {
-      list: async () => emptyList,
-      read: async () => '',
-      save: noopAsync,
-      create: async () => ({ id: '', title: '' }) as any,
-      rename: async () => ({ id: '', title: '' }) as any,
-      delete: noopAsync,
-      setStarred: async () => emptyList,
-      search: async () => emptyList
-    }
-    const noopKanban = {
-      load: async () => ({ columns: [], cards: [] }) as any,
-      loadArchive: async () => ({ columns: [], cards: [] }) as any,
-      createCard: async () => ({ columns: [], cards: [] }) as any,
-      updateCard: async () => ({ columns: [], cards: [] }) as any,
-      moveCard: async () => ({ columns: [], cards: [] }) as any,
-      deleteCard: async () => ({ columns: [], cards: [] }) as any,
-      addComment: async () => ({ columns: [], cards: [] }) as any,
-      updateComment: async () => ({ columns: [], cards: [] }) as any,
-      deleteComment: async () => ({ columns: [], cards: [] }) as any,
-      addColumn: async () => ({ columns: [], cards: [] }) as any,
-      updateColumn: async () => ({ columns: [], cards: [] }) as any,
-      moveColumn: async () => ({ columns: [], cards: [] }) as any,
-      deleteColumn: async () => ({ columns: [], cards: [] }) as any,
-      archiveCard: async () =>
-        ({ board: { columns: [], cards: [] }, archive: { columns: [], cards: [] } }) as any,
-      restoreCard: async () =>
-        ({ board: { columns: [], cards: [] }, archive: { columns: [], cards: [] } }) as any,
-      deleteArchivedCard: async () => ({ columns: [], cards: [] }) as any
-    }
-    const noopPlanner = {
-      list: async () => emptyList,
-      read: async () => ({ id: '', title: '', tasks: [], milestones: [] }) as any,
-      save: noopAsync,
-      create: async () => ({ id: '', title: '' }) as any,
-      rename: async () => ({ id: '', title: '' }) as any,
-      duplicate: async () => ({ id: '', title: '' }) as any,
-      delete: noopAsync,
-      getCalendar: async () => ({ workingDays: [1, 2, 3, 4, 5], holidays: [] }) as any,
-      saveCalendar: noopAsync
-    }
-    const noopFiles = {
-      listEntries: async () => emptyList,
-      getPathForFile: () => '',
-      copyToProject: async () => '',
-      reveal: noop,
-      revealByName: noop
-    }
-    const noopSnapshots = {
-      list: async () => emptyList,
-      restore: async () => ({}) as any,
-      setTag: noopAsync,
-      delete: noopAsync
-    }
-    const noopDashboard = {
-      getSnapshot: async () =>
-        ({
-          projectId: '',
-          projectName: '',
-          generatedAt: Date.now(),
-          workload: [],
-          kanbanStats: {
-            rows: [],
-            totalCards: 0,
-            totalDone: 0,
-            totalActive: 0
-          },
-          overdue: { overdue: [], today: [], upcoming: [], total: 0 },
-          plannerHealth: {
-            scheduleCount: 0,
-            totalTasks: 0,
-            totalLeafTasks: 0,
-            percentComplete: 0,
-            onTimeTasks: 0,
-            lateTasks: 0,
-            ownerCount: 0,
-            criticalPathDays: 0
-          },
-          activity: [],
-          recentNotes: []
-        }) as any
-    }
-    const noopDiagrams = {
-      render: async () => ({ ok: false, error: 'stub' }) as any
-    }
-    const noopInfographic = {
-      render: async () => ({ ok: false, error: 'stub' }) as any
-    }
-    const noopPdf = {
-      supportsUpload: async () => false,
-      upload: async () => ({ ok: false }) as any,
-      info: async () => ({ ok: false }) as any,
-      setViewerOpen: noop,
-      onViewerEscape: noopUnsub,
-      renderPage: async () => ({ ok: false }) as any,
-      rebuild: async () => ({ ok: false }) as any,
-      merge: async () => ({ ok: false }) as any
-    }
-    const noopChat = {
-      list: async () => emptyList,
-      read: async () => ({ id: '', messages: [] }) as any,
-      write: noopAsync,
-      delete: noopAsync
-    }
-    const noopBots = {
-      listBots: async () => emptyList,
-      saveBot: async () => ({ id: '', name: '' }) as any,
-      deleteBot: async () => true,
-      listGroups: async () => emptyList,
-      readGroup: async () => ({ id: '', messages: [] }) as any,
-      createGroup: async () => ({ id: '', name: '' }) as any,
-      updateGroup: noopAsync,
-      deleteGroup: noopAsync,
-      clearGroupMessages: noopAsync,
-      send: noopAsync,
-      stop: noopAsync,
-      askResponse: noopAsync,
-      onEvent: noopUnsub,
-      listTasks: async () => emptyList,
-      clearTaskHistory: noopAsync
-    }
-    const noopModules = {
-      list: async () => emptyList,
-      onEvent: noopUnsub
-    }
-    const noopSkills = {
-      list: async () => emptyList,
-      get: async () => null,
-      save: noopAsync,
-      delete: noopAsync
-    }
-    const stub = {
-      ai: noopAI,
-      projects: noopProjects,
-      settings: noopSettings,
-      notes: noopNotes,
-      kanban: noopKanban,
-      planner: noopPlanner,
-      files: noopFiles,
-      snapshots: noopSnapshots,
-      dashboard: noopDashboard,
-      diagrams: noopDiagrams,
-      infographic: noopInfographic,
-      pdf: noopPdf,
-      chat: noopChat,
-      bots: noopBots,
-      modules: noopModules,
-      skills: noopSkills,
-      onOpenFind: (cb: () => void) => {
-        const handler = (e: KeyboardEvent) => {
-          if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') cb()
-        }
-        if (typeof window !== 'undefined') window.addEventListener('keydown', handler)
-        return () => {
-          if (typeof window !== 'undefined') window.removeEventListener('keydown', handler)
-        }
-      },
-      onSelectAll: (cb: () => void) => {
-        const handler = (e: KeyboardEvent) => {
-          if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') cb()
-        }
-        if (typeof window !== 'undefined') window.addEventListener('keydown', handler)
-        return () => {
-          if (typeof window !== 'undefined') window.removeEventListener('keydown', handler)
-        }
+/** The desktop preload exposes `window.electron`; the web UI only needs its platform hint. */
+;(function ensureElectronShim(): void {
+  if (typeof window === 'undefined' || window.electron) return
+  Object.defineProperty(window, 'electron', {
+    value: {
+      process: {
+        platform:
+          typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac')
+            ? 'darwin'
+            : 'linux'
       }
-    }
-    Object.defineProperty(window, 'ptnotes', {
-      value: stub,
-      writable: false,
-      configurable: true
-    })
-  }
+    },
+    writable: false,
+    configurable: true
+  })
 })()
+
+// Desktop: the preload has already defined `window.ptnotes`. Web: build it from
+// the HTTP/SSE bridge so both modes run the exact same API factory.
+if (!window.ptnotes) installWebBridge()
 
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'

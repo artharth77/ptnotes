@@ -1,5 +1,5 @@
-import { ipcMain } from 'electron'
-import type { IpcMainInvokeEvent } from 'electron'
+import { rpc, type InvokeCtx } from '../rpc/registry'
+
 import type { InfographicRenderResult } from '@shared/types'
 import { renderInfographicIsolated } from '../modules/shared/infographicRenderer'
 import type { InfographicRenderArgs } from '../modules/shared/infographic'
@@ -7,10 +7,10 @@ import type { InfographicRenderArgs } from '../modules/shared/infographic'
 const MAX_SOURCE_LENGTH_BYTES = 256_000
 
 export function registerInfographicIpc(): void {
-  ipcMain.handle(
+  rpc.handle(
     'infographic:render',
     async (
-      _e: IpcMainInvokeEvent,
+      _e: InvokeCtx,
       args: InfographicRenderArgs,
       pixelWidth?: number
     ): Promise<InfographicRenderResult> => {

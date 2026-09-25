@@ -92,6 +92,21 @@ The **Settings** page (⚙ icon in the top bar) is organized by category:
 - **Bots** — the global bot library: create/edit/delete bots (name, role, persona / standing instructions, AI profile + optional model override) and review each bot's **memory** for the current project (forget individual entries). Bots are app-wide; memories are per project.
 - **About** — read-only pane showing the app icon, name, version, description + tech stack, and the Electron / Chromium / Node.js runtime versions.
 
+## Web UI
+
+The same app also runs **headless** — no window, served to any browser. Start it from the terminal:
+
+```bash
+ptnotes web                                # http://127.0.0.1:9380
+ptnotes web --host 0.0.0.0 --port 9380     # also reachable from other devices
+```
+
+- **Signed in by default** — the terminal prints an access link (`http://127.0.0.1:9380/?t=…`); opening it sets an `HttpOnly` session cookie, while anyone else who reaches the server gets a login form asking for the code. `--token <code>` picks your own code, `--no-auth` switches authentication off (trusted networks only).
+- **Options** — `--data-path <dir>` (where app config and state live) and `--doc-path <dir>` (the project root folder — created if missing and stored as Settings ▸ Storage). `ptnotes --help` prints them all.
+- **The whole app** — notes, kanban, planner + Gantt, streaming chat, bots, modules, scheduled jobs, skills, the built-in MCP server and the Browser toolset all keep running in the background process; the browser talks to it over a local HTTP + Server-Sent-Events API.
+- **A few things are browser-shaped** — "Show in Folder" becomes **Download**, "open with system app" opens a new tab, the project root setting is a text field instead of a folder picker, and image picking uses the browser's file chooser. Right-click never opens the browser's own context menu (only PTNotes' menus appear, as on the desktop). The splash screen, application menu, taskbar flash and the PDF preview's `Esc` shortcut are desktop-only.
+- Avoid running the desktop app and a web instance against the same `--data-path` at the same time (settings are plain JSON, last write wins).
+
 ## Screenshots
 
 _Note with AI chat (light / dark theme)_
@@ -118,7 +133,9 @@ _Module run history_
 ## Commands
 
 - `npm run dev` — development with HMR
-- `npm run test` — service / AI tools / chat / markdown / planner / kanban / bots tests
+- `npm run dev:web` — development with HMR against the headless web server (`-- --port 9400` to change it)
+- `npm run start:web` — run the production build as the headless web server
+- `npm run test` — service / AI tools / chat / markdown / planner / kanban / bots / web-transport tests
 - `npm run typecheck` — TypeScript checks (main + renderer)
 - `npm run lint` — ESLint
 - `npm run build` — typecheck + electron-vite production build

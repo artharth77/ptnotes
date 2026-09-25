@@ -12,6 +12,7 @@ import {
 } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
 import { Modal, ConfirmModal, TextField } from './Modal'
+import { isWebUi } from '../uiMode'
 import { MdiIcon } from './MdiIcon'
 import { BotsSettingsPane } from './BotsSettingsPane'
 import type {
@@ -1921,6 +1922,7 @@ export function SettingsDialog(): React.JSX.Element {
   const [error, setError] = useState('')
   const [pendingRoot, setPendingRoot] = useState<string | null>(null)
   const [moving, setMoving] = useState(false)
+  const [rootPathDraft, setRootPathDraft] = useState<string | null>(null)
 
   useEffect(() => {
     void window.ptnotes.settings.get().then(setStorage)
@@ -1930,6 +1932,15 @@ export function SettingsDialog(): React.JSX.Element {
   }, [])
 
   async function chooseNewRoot(): Promise<void> {
+    if (isWebUi()) {
+      // No native folder picker in the browser — the field is editable instead.
+      const path = (rootPathDraft ?? '').trim()
+      if (path && path !== storage?.rootDir) {
+        setPendingRoot(path)
+        setError('')
+      }
+      return
+    }
     const path = await window.ptnotes.settings.chooseRoot()
     if (path && path !== storage?.rootDir) {
       setPendingRoot(path)
@@ -2039,11 +2050,16 @@ export function SettingsDialog(): React.JSX.Element {
               </p>
               <label className="form-label">
                 Project root folder
-                <TextField value={storage.rootDir} readOnly onChange={() => {}} />
+                <TextField
+                  value={rootPathDraft ?? storage.rootDir}
+                  readOnly={!isWebUi()}
+                  placeholder={isWebUi() ? '/absolute/path/to/folder' : undefined}
+                  onChange={setRootPathDraft}
+                />
               </label>
               <div className="modal-actions">
                 <button className="btn primary" onClick={() => void chooseNewRoot()}>
-                  Change…
+                  {isWebUi() ? 'Apply' : 'Change…'}
                 </button>
               </div>
             </>

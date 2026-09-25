@@ -1,7 +1,7 @@
-import { ipcMain, shell } from 'electron'
+import { rpc, type InvokeCtx } from '../rpc/registry'
 import { promises as fs } from 'fs'
 import { basename } from 'path'
-import type { IpcMainInvokeEvent } from 'electron'
+
 import type { PTNotesService } from '../service/PTNotesService'
 import { AIConfigStore } from '../ai/config'
 import { readFileAsText } from '../ai/reader'
@@ -13,88 +13,104 @@ export function registerFilesIpc(
   registry: SessionRegistry,
   configStore: AIConfigStore
 ): void {
-  ipcMain.handle(
+  rpc.handle(
     'files:copyToProject',
-    async (_e: IpcMainInvokeEvent, project: string, sourcePath: string, fileName?: string) => {
+    async (_e: InvokeCtx, project: string, sourcePath: string, fileName?: string) => {
       return service.copyFileToProject(project, sourcePath, fileName)
     }
   )
 
-  ipcMain.handle('files:list', async (_e: IpcMainInvokeEvent, project: string) => {
-    return service.listFiles(project)
-  })
-
-  ipcMain.handle(
-    'files:listEntries',
-    async (_e: IpcMainInvokeEvent, project: string, subpath?: string) => {
-      return service.listFileEntries(project, subpath ?? '')
+  rpc.handle(
+    'files:copyBufferToProject',
+    async (_e: InvokeCtx, project: string, fileName: string, data: Uint8Array) => {
+      if (!(data instanceof Uint8Array)) throw new Error('Invalid upload payload.')
+      return service.copyBufferToProject(project, data, fileName)
     }
   )
 
-  ipcMain.handle(
+  rpc.handle(
+    'files:importDroppedData',
+    async (
+      _e: InvokeCtx,
+      project: string,
+      destSubpath: string,
+      fileName: string,
+      data: Uint8Array
+    ) => {
+      if (!(data instanceof Uint8Array)) throw new Error('Invalid upload payload.')
+      return service.importDroppedData(project, data, destSubpath, fileName)
+    }
+  )
+
+  rpc.handle('files:list', async (_e: InvokeCtx, project: string) => {
+    return service.listFiles(project)
+  })
+
+  rpc.handle('files:listEntries', async (_e: InvokeCtx, project: string, subpath?: string) => {
+    return service.listFileEntries(project, subpath ?? '')
+  })
+
+  rpc.handle(
     'files:absPath',
-    async (_e: IpcMainInvokeEvent, project: string, fileName: string): Promise<string | null> => {
+    async (_e: InvokeCtx, project: string, fileName: string): Promise<string | null> => {
       return service.projectFilePath(project, fileName)
     }
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'files:readText',
-    async (_e: IpcMainInvokeEvent, project: string, fileName: string): Promise<string> => {
+    async (_e: InvokeCtx, project: string, fileName: string): Promise<string> => {
       return service.readFileText(project, fileName)
     }
   )
 
-  ipcMain.handle(
-    'files:explorerList',
-    async (_e: IpcMainInvokeEvent, project: string, subpath?: string) => {
-      return service.listExplorerEntries(project, subpath ?? '')
-    }
-  )
+  rpc.handle('files:explorerList', async (_e: InvokeCtx, project: string, subpath?: string) => {
+    return service.listExplorerEntries(project, subpath ?? '')
+  })
 
-  ipcMain.handle('files:explorerTree', async (_e: IpcMainInvokeEvent, project: string) => {
+  rpc.handle('files:explorerTree', async (_e: InvokeCtx, project: string) => {
     return service.listExplorerTree(project)
   })
 
-  ipcMain.handle(
+  rpc.handle(
     'files:explorerCreateFolder',
-    async (_e: IpcMainInvokeEvent, project: string, parentSubpath: string, name: string) => {
+    async (_e: InvokeCtx, project: string, parentSubpath: string, name: string) => {
       return service.createFilesFolder(project, parentSubpath, name)
     }
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'files:explorerCopy',
-    async (_e: IpcMainInvokeEvent, project: string, fromPaths: string[], destSubpath: string) => {
+    async (_e: InvokeCtx, project: string, fromPaths: string[], destSubpath: string) => {
       return service.copyFilesEntries(project, fromPaths, destSubpath)
     }
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'files:explorerMove',
-    async (_e: IpcMainInvokeEvent, project: string, fromPaths: string[], destSubpath: string) => {
+    async (_e: InvokeCtx, project: string, fromPaths: string[], destSubpath: string) => {
       return service.moveFilesEntries(project, fromPaths, destSubpath)
     }
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'files:explorerRename',
-    async (_e: IpcMainInvokeEvent, project: string, itemPath: string, newName: string) => {
+    async (_e: InvokeCtx, project: string, itemPath: string, newName: string) => {
       return service.renameFilesEntry(project, itemPath, newName)
     }
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'files:explorerDelete',
-    async (_e: IpcMainInvokeEvent, project: string, itemPaths: string[]) => {
+    async (_e: InvokeCtx, project: string, itemPaths: string[]) => {
       return service.deleteFilesEntries(project, itemPaths)
     }
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'files:importDropped',
     async (
-      _e: IpcMainInvokeEvent,
+      _e: InvokeCtx,
       project: string,
       sourcePath: string,
       destSubpath: string,
@@ -104,43 +120,40 @@ export function registerFilesIpc(
     }
   )
 
-  ipcMain.handle(
-    'files:extract',
-    async (_e: IpcMainInvokeEvent, path: string): Promise<PdfExtractResult> => {
-      return readFileAsText(path)
-    }
-  )
-
-  ipcMain.handle('files:reveal', async (_e: IpcMainInvokeEvent, path: string): Promise<void> => {
-    shell.showItemInFolder(path)
+  rpc.handle('files:extract', async (_e: InvokeCtx, path: string): Promise<PdfExtractResult> => {
+    return readFileAsText(path)
   })
 
-  ipcMain.handle(
+  rpc.handle('files:reveal', async (ctx: InvokeCtx, path: string): Promise<void> => {
+    ctx.platform.reveal(path)
+  })
+
+  rpc.handle(
     'files:revealByName',
-    async (_e: IpcMainInvokeEvent, project: string, fileName: string): Promise<void> => {
+    async (ctx: InvokeCtx, project: string, fileName: string): Promise<void> => {
       const full = await service.projectFilePath(project, fileName)
-      if (full) shell.showItemInFolder(full)
+      if (full) ctx.platform.reveal(full)
     }
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'files:openExternal',
-    async (_e: IpcMainInvokeEvent, project: string, fileName: string): Promise<string> => {
+    async (ctx: InvokeCtx, project: string, fileName: string): Promise<string> => {
       const full = await service.projectFilePath(project, fileName)
       if (!full) return 'File not found'
-      return shell.openPath(full)
+      return ctx.platform.openPath(full)
     }
   )
 
-  ipcMain.handle('pdf:supportsUpload', async (): Promise<boolean> => {
+  rpc.handle('pdf:supportsUpload', async (): Promise<boolean> => {
     const config = await configStore.load()
     return config.uploadPdfEnabled ?? true
   })
 
-  ipcMain.handle(
+  rpc.handle(
     'pdf:upload',
     async (
-      event: IpcMainInvokeEvent,
+      event: InvokeCtx,
       project: string,
       sessionId: string,
       path: string,
@@ -153,17 +166,17 @@ export function registerFilesIpc(
     }
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'pdf:info',
-    async (_e: IpcMainInvokeEvent, project: string, subpath: string): Promise<PdfInfo> => {
+    async (_e: InvokeCtx, project: string, subpath: string): Promise<PdfInfo> => {
       return service.pdfInfo(project, subpath)
     }
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'pdf:renderPage',
     async (
-      _e: IpcMainInvokeEvent,
+      _e: InvokeCtx,
       project: string,
       subpath: string,
       page: number,
@@ -173,10 +186,10 @@ export function registerFilesIpc(
     }
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'pdf:rebuild',
     async (
-      _e: IpcMainInvokeEvent,
+      _e: InvokeCtx,
       project: string,
       subpath: string,
       edits: PdfPageEdit[]
@@ -185,10 +198,10 @@ export function registerFilesIpc(
     }
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'pdf:merge',
     async (
-      _e: IpcMainInvokeEvent,
+      _e: InvokeCtx,
       project: string,
       sourceSubpaths: string[],
       destSubpath: string,

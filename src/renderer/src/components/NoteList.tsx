@@ -17,6 +17,7 @@ import { useAppStore } from '../store/useAppStore'
 import { Modal, ConfirmModal, TextField } from './Modal'
 import { MdiIcon } from './MdiIcon'
 import { NOTE_TEMPLATES, getNoteTemplate } from '../noteTemplates'
+import { revealIcon, revealLabel } from '../uiMode'
 
 const SORT_MENU_W = 200
 const SORT_MENU_H = 220
@@ -172,6 +173,7 @@ export function NoteList(): React.JSX.Element {
   }
 
   function openMenu(e: React.MouseEvent, id: string): void {
+    if (e.type === 'contextmenu') e.preventDefault()
     e.stopPropagation()
     if (menuFor === id) {
       setMenuFor(null)
@@ -446,9 +448,9 @@ export function NoteList(): React.JSX.Element {
                   </button>
                   <button className="note-menu-item" onClick={() => void handleReveal(menuFor)}>
                     <span className="note-menu-icon">
-                      <MdiIcon path={mdiFolderOpenOutline} size={16} />
+                      <MdiIcon path={revealIcon(mdiFolderOpenOutline)} size={16} />
                     </span>{' '}
-                    Show in Folder
+                    {revealLabel('Show in Folder')}
                   </button>
                   <button
                     className="note-menu-item danger"

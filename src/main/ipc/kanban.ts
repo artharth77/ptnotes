@@ -1,5 +1,5 @@
-import { ipcMain } from 'electron'
-import type { IpcMainInvokeEvent } from 'electron'
+import { rpc, type InvokeCtx } from '../rpc/registry'
+
 import type { PTNotesService } from '../service/PTNotesService'
 import type {
   KanbanCardPatch,
@@ -10,99 +10,82 @@ import type {
 } from '@shared/types'
 
 export function registerKanbanIpc(service: PTNotesService): void {
-  ipcMain.handle('kanban:load', async (_e: IpcMainInvokeEvent, project: string) =>
-    service.loadKanban(project)
-  )
-  ipcMain.handle(
+  rpc.handle('kanban:load', async (_e: InvokeCtx, project: string) => service.loadKanban(project))
+  rpc.handle(
     'kanban:createCard',
-    async (_e: IpcMainInvokeEvent, project: string, input: NewKanbanCardInput) =>
+    async (_e: InvokeCtx, project: string, input: NewKanbanCardInput) =>
       service.createKanbanCard(project, input)
   )
-  ipcMain.handle(
+  rpc.handle(
     'kanban:updateCard',
-    async (_e: IpcMainInvokeEvent, project: string, cardId: string, patch: KanbanCardPatch) =>
+    async (_e: InvokeCtx, project: string, cardId: string, patch: KanbanCardPatch) =>
       service.updateKanbanCard(project, cardId, patch)
   )
-  ipcMain.handle(
+  rpc.handle(
     'kanban:moveCard',
-    async (
-      _e: IpcMainInvokeEvent,
-      project: string,
-      cardId: string,
-      columnId: string,
-      index?: number
-    ) => service.moveKanbanCard(project, cardId, columnId, index)
+    async (_e: InvokeCtx, project: string, cardId: string, columnId: string, index?: number) =>
+      service.moveKanbanCard(project, cardId, columnId, index)
   )
-  ipcMain.handle(
-    'kanban:deleteCard',
-    async (_e: IpcMainInvokeEvent, project: string, cardId: string) =>
-      service.deleteKanbanCard(project, cardId)
+  rpc.handle('kanban:deleteCard', async (_e: InvokeCtx, project: string, cardId: string) =>
+    service.deleteKanbanCard(project, cardId)
   )
-  ipcMain.handle(
+  rpc.handle(
     'kanban:addComment',
-    async (_e: IpcMainInvokeEvent, project: string, cardId: string, input: KanbanCommentInput) =>
+    async (_e: InvokeCtx, project: string, cardId: string, input: KanbanCommentInput) =>
       service.addKanbanComment(project, cardId, input)
   )
-  ipcMain.handle(
+  rpc.handle(
     'kanban:updateComment',
     async (
-      _e: IpcMainInvokeEvent,
+      _e: InvokeCtx,
       project: string,
       cardId: string,
       commentId: string,
       input: KanbanCommentInput
     ) => service.updateKanbanComment(project, cardId, commentId, input)
   )
-  ipcMain.handle(
+  rpc.handle(
     'kanban:deleteComment',
-    async (_e: IpcMainInvokeEvent, project: string, cardId: string, commentId: string) =>
+    async (_e: InvokeCtx, project: string, cardId: string, commentId: string) =>
       service.deleteKanbanComment(project, cardId, commentId)
   )
-  ipcMain.handle(
+  rpc.handle(
     'kanban:addColumn',
-    async (_e: IpcMainInvokeEvent, project: string, input: NewKanbanColumnInput) =>
+    async (_e: InvokeCtx, project: string, input: NewKanbanColumnInput) =>
       service.addKanbanColumn(project, input)
   )
-  ipcMain.handle(
+  rpc.handle(
     'kanban:updateColumn',
-    async (_e: IpcMainInvokeEvent, project: string, columnId: string, patch: KanbanColumnPatch) =>
+    async (_e: InvokeCtx, project: string, columnId: string, patch: KanbanColumnPatch) =>
       service.updateKanbanColumn(project, columnId, patch)
   )
-  ipcMain.handle(
+  rpc.handle(
     'kanban:moveColumn',
-    async (_e: IpcMainInvokeEvent, project: string, columnId: string, toIndex: number) =>
+    async (_e: InvokeCtx, project: string, columnId: string, toIndex: number) =>
       service.moveKanbanColumn(project, columnId, toIndex)
   )
-  ipcMain.handle(
+  rpc.handle(
     'kanban:deleteColumn',
     async (
-      _e: IpcMainInvokeEvent,
+      _e: InvokeCtx,
       project: string,
       columnId: string,
       options: { mode: 'move' | 'delete'; targetColumnId?: string }
     ) => service.deleteKanbanColumn(project, columnId, options)
   )
-  ipcMain.handle('kanban:loadArchive', async (_e: IpcMainInvokeEvent, project: string) =>
+  rpc.handle('kanban:loadArchive', async (_e: InvokeCtx, project: string) =>
     service.loadKanbanArchive(project)
   )
-  ipcMain.handle(
-    'kanban:archiveColumn',
-    async (_e: IpcMainInvokeEvent, project: string, columnId: string) =>
-      service.archiveKanbanColumn(project, columnId)
+  rpc.handle('kanban:archiveColumn', async (_e: InvokeCtx, project: string, columnId: string) =>
+    service.archiveKanbanColumn(project, columnId)
   )
-  ipcMain.handle(
-    'kanban:archiveCard',
-    async (_e: IpcMainInvokeEvent, project: string, cardId: string) =>
-      service.archiveKanbanCard(project, cardId)
+  rpc.handle('kanban:archiveCard', async (_e: InvokeCtx, project: string, cardId: string) =>
+    service.archiveKanbanCard(project, cardId)
   )
-  ipcMain.handle(
-    'kanban:restoreCard',
-    async (_e: IpcMainInvokeEvent, project: string, cardId: string) =>
-      service.restoreKanbanCard(project, cardId)
+  rpc.handle('kanban:restoreCard', async (_e: InvokeCtx, project: string, cardId: string) =>
+    service.restoreKanbanCard(project, cardId)
   )
-  ipcMain.handle(
-    'kanban:deleteArchivedCard',
-    async (_e: IpcMainInvokeEvent, project: string, cardId: string) =>
-      service.deleteArchivedKanbanCard(project, cardId)
+  rpc.handle('kanban:deleteArchivedCard', async (_e: InvokeCtx, project: string, cardId: string) =>
+    service.deleteArchivedKanbanCard(project, cardId)
   )
 }

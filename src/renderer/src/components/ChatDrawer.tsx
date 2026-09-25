@@ -1025,9 +1025,15 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
       const tokens: string[] = []
       for (const file of dropped) {
         const path = window.ptnotes.files.getPathForFile(file)
-        if (!path) continue
         try {
-          const savedPath = await window.ptnotes.files.copyToProject(project, path, file.name)
+          // Web UI: no dropped-file paths — send the bytes instead.
+          const savedPath = path
+            ? await window.ptnotes.files.copyToProject(project, path, file.name)
+            : await window.ptnotes.files.copyBufferToProject(
+                project,
+                file.name,
+                new Uint8Array(await file.arrayBuffer())
+              )
           const idx = Math.max(savedPath.lastIndexOf('/'), savedPath.lastIndexOf('\\'))
           const fileName = idx === -1 ? savedPath : savedPath.slice(idx + 1)
           tokens.push(`file:${fileName}`)

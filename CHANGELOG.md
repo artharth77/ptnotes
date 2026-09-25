@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Web UI mode** — PTNotes now also runs headless in a browser: `ptnotes web [--host <addr>] [--port <n>]` (defaults `127.0.0.1:9380`) serves the whole app — notes, kanban, planner + Gantt, streaming chat, bots, modules, scheduled jobs, skills, the built-in MCP server and the Browser toolset — from a `node:http` server in the main process, over exactly the same RPC channel set the desktop renderer uses. Auth is on by default: the terminal prints a one-time `/?t=<token>` access link that exchanges for an `HttpOnly; SameSite=Strict` session cookie (constant-time compare, loopback `Host` allowlist, same-host `Origin` check, `Authorization: Bearer` accepted for scripts); `--token <code>` pins a code and `--no-auth` disables authentication (trusted networks only). Transport is `POST /api/invoke` + `GET /api/events` (SSE push) + `GET /api/blob/<id>` (one-shot exports) + `GET /api/file` (realpath-restricted to the project root) with **zero new dependencies**; uploads ride through invoke as base64. The renderer API now has a single source of truth, `createApi(transport)` in `src/shared/api.ts`, bound to IPC by the preload and to HTTP+SSE by the new web bridge. Browser-shaped differences: "Show in Folder" → **Download**, "open with system app" → new tab, project root → text field, gallery picker → file input, and right-click never opens the browser's context menu (the app's own menus only, as on the desktop); splash screen, application menu, taskbar flash and the PDF preview's `Esc` shortcut stay desktop-only. New flags `--data-path` (app state) and `--doc-path` (project root, persisted as Settings ▸ Storage) work in both modes. **Launching the desktop app without `web` is unchanged.**
+
 ## [0.23.0] - 2026-09-24
 
 ### Added

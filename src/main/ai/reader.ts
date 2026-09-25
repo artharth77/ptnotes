@@ -22,20 +22,25 @@ export type FileKind = 'text' | 'pdf' | 'excel' | 'docx' | 'unsupported'
  * - otherwise any other binary (NUL bytes present, not a PDF) -> 'unsupported'
  * - everything else (text, markdown, JSON, YAML, logs, etc.) -> 'text'
  */
+export function detectFileKindFromBuffer(buf: Uint8Array, pathHint: string): FileKind {
+  const sample = buf.subarray(0, 4096)
+  if (Buffer.from(sample.subarray(0, PDF_MAGIC.length)).toString('latin1') === PDF_MAGIC)
+    return 'pdf'
+  if (Buffer.from(sample.subarray(0, ZIP_MAGIC.length)).toString('latin1') === ZIP_MAGIC) {
+    const ext = extname(pathHint).toLowerCase()
+    if (ext === '.xlsx' || ext === '.xlsm') return 'excel'
+    if (ext === '.docx') return 'docx'
+  }
+  if (sample.includes(0)) return 'unsupported'
+  return 'text'
+}
+
 export async function detectFileKind(path: string): Promise<FileKind> {
   const handle = await fs.open(path, 'r')
   try {
     const sample = Buffer.alloc(4096)
     const { bytesRead } = await handle.read(sample, 0, sample.length, 0)
-    const buf = sample.subarray(0, bytesRead)
-    if (buf.subarray(0, PDF_MAGIC.length).toString('latin1') === PDF_MAGIC) return 'pdf'
-    if (buf.subarray(0, ZIP_MAGIC.length).toString('latin1') === ZIP_MAGIC) {
-      const ext = extname(path).toLowerCase()
-      if (ext === '.xlsx' || ext === '.xlsm') return 'excel'
-      if (ext === '.docx') return 'docx'
-    }
-    if (buf.includes(0)) return 'unsupported'
-    return 'text'
+    return detectFileKindFromBuffer(sample.subarray(0, bytesRead), path)
   } finally {
     await handle.close()
   }
