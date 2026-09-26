@@ -10,6 +10,8 @@
 
 - **Notes: two different "New Note" dialogs** — the **+ New Note** button on the editor's empty state opened a bare title prompt, while the notes panel offered the full dialog with a title field **and template picker**. The template dialog is now one shared component (`NewNoteModal`) rendered once at the app level, and both entry points (plus the dashboard's New Note) open it through the same store action, so the two can no longer drift apart.
 
+- **Web UI: buttons that mint ids did nothing outside a secure context** — **+ New Chat**, **Delete chat**, project switching, the first streamed assistant message, planner **new task** / paste-with-new-ids and kanban **new comment** all called `crypto.randomUUID()` directly, which browsers only expose in secure contexts — so over plain HTTP on a non-loopback host (`--host 0.0.0.0` / a LAN IP) the call threw `TypeError: crypto.randomUUID is not a function` and the action silently aborted (New Chat archived the thread, then failed before the fresh session id was set). A shared `newUid()` helper (`src/shared/uid.ts`) now falls back to an RFC-4122 v4 id built from `crypto.getRandomValues()` (available in any context) and finally `Math.random`, keeping ids UUID-shaped and path-safe; all renderer/shared call sites use it, and job notifications no longer assume `navigator.clipboard` exists. Desktop behavior is unchanged.
+
 ## [0.23.0] - 2026-09-24
 
 ### Added
