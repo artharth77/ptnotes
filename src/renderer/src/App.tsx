@@ -42,6 +42,7 @@ import { JobNotifications } from './components/JobNotifications'
 import { mdiAlarm } from '@mdi/js'
 import type { Tab, ToolCallInfo } from '@shared/types'
 import { addUsage, normalizeUsage } from '@shared/usage'
+import { newUid } from '@shared/uid'
 
 function isMacPlatform(): boolean {
   try {
@@ -630,7 +631,7 @@ function App(): React.JSX.Element {
             if (chatNewTurnRef.current) {
               chatNewTurnRef.current = false
               state.appendChatMessage(project, {
-                id: crypto.randomUUID(),
+                id: newUid(),
                 role: 'assistant',
                 content: '',
                 toolCalls: []

@@ -25,6 +25,7 @@ import { KANBAN_LINK_ICON, NOTE_LINK_ICON } from './contentIcons'
 import { isReasoningOpen, splitContent } from './chatContent'
 import { ThinkBox, UserBubble } from './chatBubbles'
 import { builtinSlashCommands, builtinSlashNames } from '../commands'
+import { newUid } from '@shared/uid'
 import {
   MAX_COMMAND_ROWS,
   buildSkillCommandList,
@@ -70,12 +71,6 @@ function deriveLocalTitle(text: string): string {
   const words = clean.split(' ')
   const sliced = words.slice(0, 8).join(' ')
   return sliced.length > 60 ? `${sliced.slice(0, 60).trimEnd()}…` : sliced
-}
-
-function uid(): string {
-  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
 function noteIdFromToolCall(name: string, result?: string): string | null {
@@ -965,8 +960,13 @@ export function ChatDrawer({ width }: { width?: number }): React.JSX.Element {
     const isFirstMessage = list.length === 0
     const history = list
     const sessionId = getActiveSessionId(project)
-    const userMsg: ChatMessage = { id: uid(), role: 'user', content: text, toolCalls: [] }
-    const assistantMsg: ChatMessage = { id: uid(), role: 'assistant', content: '', toolCalls: [] }
+    const userMsg: ChatMessage = { id: newUid(), role: 'user', content: text, toolCalls: [] }
+    const assistantMsg: ChatMessage = {
+      id: newUid(),
+      role: 'assistant',
+      content: '',
+      toolCalls: []
+    }
     appendChatMessage(project, userMsg)
     appendChatMessage(project, assistantMsg)
     if (isFirstMessage) {

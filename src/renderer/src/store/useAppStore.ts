@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { rollupScheduleTasks } from '@shared/planner'
+import { newUid } from '@shared/uid'
 import { GROUP_CHAT_PAGE_SIZE } from '@shared/bots'
 import { ancestorsOf, visibleExplorerEntries } from '@shared/filesExplorer'
 import type {
@@ -572,7 +573,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!state.chatSessionIds[name]) {
         return {
           loading: false,
-          chatSessionIds: { ...state.chatSessionIds, [name]: crypto.randomUUID() },
+          chatSessionIds: { ...state.chatSessionIds, [name]: newUid() },
           chatTitles: { ...state.chatTitles, [name]: '' }
         }
       }
@@ -1413,7 +1414,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           [groupId]: [
             ...(s.botGroupMessages[groupId] ?? []),
             {
-              id: crypto.randomUUID(),
+              id: newUid(),
               seq: Number.MAX_SAFE_INTEGER,
               senderKind: 'system',
               senderName: 'System',
@@ -1667,7 +1668,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       })
     }
     await window.ptnotes.ai.clear(project)
-    const freshId = crypto.randomUUID()
+    const freshId = newUid()
     set((s) => ({
       chatMessages: { ...s.chatMessages, [project]: [] },
       chatSessionIds: { ...s.chatSessionIds, [project]: freshId },
@@ -1695,7 +1696,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     await window.ptnotes.chat.delete(project, sessionId)
     const isActive = get().chatSessionIds[project] === sessionId
     if (isActive) {
-      const freshId = crypto.randomUUID()
+      const freshId = newUid()
       set((s) => ({
         chatSessionIds: { ...s.chatSessionIds, [project]: freshId },
         chatMessages: { ...s.chatMessages, [project]: [] },
