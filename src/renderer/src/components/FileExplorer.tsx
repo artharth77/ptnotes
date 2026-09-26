@@ -45,7 +45,7 @@ import {
 } from '@shared/filesExplorer'
 import { useAppStore } from '../store/useAppStore'
 import { ptFileUrl } from '../editor/imageNodeView'
-import { revealIcon, revealLabel } from '../uiMode'
+import { isWebUi, revealIcon, revealLabel } from '../uiMode'
 import {
   confirmExplorerDelete,
   copyExplorerPaths,
@@ -346,9 +346,10 @@ export function FileTreePanel(): React.JSX.Element {
               </span>
               Rename
             </button>
+            {/* A tree target is always a folder, and folders cannot be downloaded. */}
             <button
               className="note-menu-item"
-              disabled={menu.path === ''}
+              disabled={menu.path === '' || isWebUi()}
               onClick={() => {
                 closeMenu()
                 revealExplorerPath(menu.path)
@@ -797,6 +798,8 @@ export function FileListPanel(): React.JSX.Element {
     () => entries.filter((e) => selected.includes(e.path)),
     [entries, selected]
   )
+  // Web mode downloads instead of revealing, and there is no download for a folder.
+  const revealDirSelected = isWebUi() && selectedEntries[0]?.isDir === true
   const selectedPdfEntries = useMemo(
     () => selectedEntries.filter((e) => !e.isDir && isPdfFile(e.name)),
     [selectedEntries]
@@ -892,7 +895,7 @@ export function FileListPanel(): React.JSX.Element {
         </button>
         <button
           className="icon-btn"
-          disabled={selected.length !== 1}
+          disabled={selected.length !== 1 || revealDirSelected}
           onClick={revealSelected}
           title={revealLabel('Show in folder')}
         >
@@ -1172,7 +1175,7 @@ export function FileListPanel(): React.JSX.Element {
             </button>
             <button
               className="note-menu-item"
-              disabled={selected.length !== 1}
+              disabled={selected.length !== 1 || revealDirSelected}
               onClick={() => {
                 closeMenu()
                 revealSelected()

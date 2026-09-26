@@ -3,7 +3,7 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http'
 import type { Socket } from 'node:net'
 import { request as httpRequest } from 'node:http'
 import { promises as fs, createReadStream } from 'node:fs'
-import { extname, resolve, sep } from 'node:path'
+import { resolve, sep } from 'node:path'
 import { networkInterfaces } from 'node:os'
 import { timingSafeEqual } from 'node:crypto'
 import { rpc, createInvokeCtx } from './registry'
@@ -11,34 +11,12 @@ import { setBroadcastSink } from './bus'
 import { decodeRpc, encodeRpc } from '@shared/rpcCodec'
 import { runWithActionSink, type ClientAction } from '../platform'
 import { takeBlob } from './blobs'
+import { mimeType } from './mime'
 
 const SESSION_COOKIE = 'ptnotes_session'
 const MAX_BODY_BYTES = 128 * 1024 * 1024
 const HEARTBEAT_MS = 25_000
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]'])
-
-const MIME: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.map': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.bmp': 'image/bmp',
-  '.ico': 'image/x-icon',
-  '.pdf': 'application/pdf',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-  '.ttf': 'font/ttf',
-  '.txt': 'text/plain; charset=utf-8',
-  '.wasm': 'application/wasm'
-}
 
 export interface WebServerOptions {
   host: string
@@ -116,10 +94,10 @@ async function realpathOrNull(path: string): Promise<string | null> {
   }
 }
 
-/** RFC 5987 `Content-Disposition` for a download whose name is not plain ASCII. */
-function attachmentDisposition(fileName: string): string {
+/** RFC 5987 `Content-Disposition` whose name is not plain ASCII. */
+function contentDisposition(kind: 'inline' | 'attachment', fileName: string): string {
   const ascii = fileName.replace(/[^ -~]/g, '_').replace(/["\\]/g, '_')
-  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
+  return `${kind}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
 }
 
 function loginPageHtml(): string {
@@ -211,7 +189,7 @@ async function serveStatic(
     }
     target = index
   }
-  const type = MIME[extname(target).toLowerCase()] ?? 'application/octet-stream'
+  const type = mimeType(target)
   res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache' })
   createReadStream(target).pipe(res)
 }
@@ -390,7 +368,7 @@ export async function startWebServer(opts: WebServerOptions): Promise<WebServer>
       res.writeHead(200, {
         'Content-Type': blob.mime,
         'Content-Length': blob.data.length,
-        'Content-Disposition': attachmentDisposition(blob.fileName),
+        'Content-Disposition': contentDisposition('attachment', blob.fileName),
         'Cache-Control': 'no-store'
       })
       res.end(blob.data)
@@ -416,13 +394,16 @@ export async function startWebServer(opts: WebServerOptions): Promise<WebServer>
         return
       }
       const download = url.searchParams.get('download') === '1'
+      // The name always rides along (derived here, never from the query string) so the
+      // browser suggests the real file instead of the URL's last segment ("file").
       const headers: Record<string, string> = {
-        'Content-Type': MIME[extname(real).toLowerCase()] ?? 'application/octet-stream',
+        'Content-Type': mimeType(real),
         'Content-Length': String(st.size),
-        'Cache-Control': 'no-cache'
-      }
-      if (download) {
-        headers['Content-Disposition'] = attachmentDisposition(real.split(/[\\/]/).pop() ?? 'file')
+        'Cache-Control': 'no-cache',
+        'Content-Disposition': contentDisposition(
+          download ? 'attachment' : 'inline',
+          real.split(/[\\/]/).pop() ?? 'file'
+        )
       }
       res.writeHead(200, headers)
       createReadStream(real).pipe(res)

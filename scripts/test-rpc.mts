@@ -51,20 +51,25 @@ runWithActionSink(
   () => {
     webPlatform.reveal('/tmp/notes/report.pdf')
     void webPlatform.openPath('/tmp/notes/plan.xlsx')
+    void webPlatform.openPath('/tmp/notes/diagram.png')
     emitClientAction({ kind: 'download', url: '/api/blob/abc' })
   }
 )
 assert.deepEqual(
   actions.map((a) => a.kind),
-  ['download', 'open', 'download']
+  ['download', 'download', 'open', 'download']
 )
 assert.equal(actions[0].url, webFileUrl('/tmp/notes/report.pdf', true))
 assert.ok(actions[0].url.includes(encodeURIComponent('/tmp/notes/report.pdf')))
+// The browser can't display Office files: they download (the response names them)
+// instead of opening a tab that immediately closes on a download.
+assert.equal(actions[1].url, webFileUrl('/tmp/notes/plan.xlsx', true))
+assert.equal(actions[2].url, webFileUrl('/tmp/notes/diagram.png', false))
 // Outside a request the sink is absent — no throw, no action.
 webPlatform.reveal('/tmp/never')
 assert.deepEqual(await webPlatform.showOpenDialog({}), [])
 assert.equal(await webPlatform.showSaveDialog({}), null)
-assert.equal(actions.length, 3)
+assert.equal(actions.length, 4)
 
 // --- HTTP server ---------------------------------------------------------
 const root = await mkdtemp(join(tmpdir(), 'ptnotes-rpc-root-'))
@@ -74,6 +79,14 @@ await writeFile(join(root, 'ok.txt'), 'inside')
 await writeFile(join(rendererDir, 'index.html'), '<!doctype html><title>PTNotes</title>')
 const outside = join(tmpdir(), `ptnotes-outside-${Date.now()}.txt`)
 await writeFile(outside, 'outside')
+
+// A folder has no download (`/api/file` only serves files) — reveal stays silent for it.
+const dirActions: { kind: string; url: string }[] = []
+runWithActionSink(
+  (action) => dirActions.push(action),
+  () => webPlatform.reveal(root)
+)
+assert.equal(dirActions.length, 0)
 
 const TOKEN = 's3cret-token'
 rpc.handle('test:echo', (_ctx, ...args: unknown[]) => args)
@@ -169,22 +182,17 @@ assert.equal(
 )
 
 // Static shell + file allowlist (project root only, never outside it).
-assert.equal(
-  (
-    await fetch(`${base}/api/file?path=${encodeURIComponent(join(root, 'ok.txt'))}`, {
-      headers: auth
-    })
-  ).status,
-  200
-)
-assert.equal(
-  await (
-    await fetch(`${base}/api/file?path=${encodeURIComponent(join(root, 'ok.txt'))}`, {
-      headers: auth
-    })
-  ).text(),
-  'inside'
-)
+const okFile = await fetch(`${base}/api/file?path=${encodeURIComponent(join(root, 'ok.txt'))}`, {
+  headers: auth
+})
+assert.equal(okFile.status, 200)
+// The name always rides along (derived from the path, not the query string), so a
+// browser download gets `report.docx` instead of the URL's last segment (`file`).
+const inlineDisposition = okFile.headers.get('content-disposition') ?? ''
+assert.match(inlineDisposition, /^inline;/)
+assert.match(inlineDisposition, /filename="ok\.txt"/)
+assert.match(inlineDisposition, /filename\*=UTF-8''ok\.txt/)
+assert.equal(await okFile.text(), 'inside')
 assert.equal(
   (await fetch(`${base}/api/file?path=${encodeURIComponent(outside)}`, { headers: auth })).status,
   403
@@ -196,12 +204,15 @@ const pctFile = await fetch(
   { headers: auth }
 )
 assert.equal(pctFile.status, 200)
+assert.match(pctFile.headers.get('content-disposition') ?? '', /^inline;.*progress 50% done\.txt/)
 assert.equal(await pctFile.text(), 'pct')
 const pctDownload = await fetch(
   `${base}/api/file?path=${encodeURIComponent(join(root, 'progress 50% done.txt'))}&download=1`,
   { headers: auth }
 )
-assert.match(pctDownload.headers.get('content-disposition') ?? '', /progress 50% done\.txt/)
+const pctDisposition = pctDownload.headers.get('content-disposition') ?? ''
+assert.match(pctDisposition, /^attachment;/)
+assert.match(pctDisposition, /progress 50% done\.txt/)
 assert.equal(
   (
     await fetch(`${base}/api/file?path=${encodeURIComponent(join(root, 'nested'))}`, {
@@ -210,7 +221,6 @@ assert.equal(
   ).status,
   404
 )
-
 // Generated downloads (Excel / diagrams) are served once from memory.
 const blobUrl = (await post('test:blob')).result as string
 assert.match(blobUrl, /^\/api\/blob\//)

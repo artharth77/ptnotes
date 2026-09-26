@@ -1,6 +1,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { statSync } from 'node:fs'
 import type { OpenDialogOptions, SaveDialogOptions } from 'electron'
 import type { UiMode } from '@shared/api'
+import { isOpenInTab } from './rpc/mime'
 
 /**
  * A request the main process wants the *client* to perform, because the file
@@ -30,6 +32,14 @@ export function webFileUrl(absPath: string, download: boolean): string {
   return download ? `${url}&download=1` : url
 }
 
+function isDirectory(absPath: string): boolean {
+  try {
+    return statSync(absPath).isDirectory()
+  } catch {
+    return false
+  }
+}
+
 /**
  * Desktop-only host operations (dialogs, file manager). Both modes share every
  * handler; only these differ, so a headless run never touches `dialog`/`shell`.
@@ -38,7 +48,7 @@ export interface PlatformServices {
   readonly mode: UiMode
   /** Reveal in the OS file manager, or queue a browser download. */
   reveal(absPath: string): void
-  /** Open with the OS default app, or in a browser tab. Resolves to an error message (or ''). */
+  /** Open with the OS default app, or in a browser tab (download when the browser can't display it). Resolves to an error message (or ''). */
   openPath(absPath: string): Promise<string>
   showOpenDialog(options: OpenDialogOptions): Promise<string[]>
   showSaveDialog(options: SaveDialogOptions): Promise<string | null>
@@ -48,10 +58,15 @@ export interface PlatformServices {
 export const webPlatform: PlatformServices = {
   mode: 'web',
   reveal(absPath) {
+    // No download for a folder: `/api/file` only serves files (it would 404).
+    if (isDirectory(absPath)) return
     emitClientAction({ kind: 'download', url: webFileUrl(absPath, true) })
   },
   async openPath(absPath) {
-    emitClientAction({ kind: 'open', url: webFileUrl(absPath, false) })
+    // Only types the browser displays itself get a tab; the rest download straight
+    // away (named by the response's Content-Disposition) instead of leaving a blank one.
+    const tab = isOpenInTab(absPath)
+    emitClientAction({ kind: tab ? 'open' : 'download', url: webFileUrl(absPath, !tab) })
     return ''
   },
   async showOpenDialog() {
