@@ -55,6 +55,7 @@ import { PlannerResizeHandle } from './PlannerResizeHandle'
 import { nameTipFrom, NameTip, type NameTipState } from './NameTip'
 import { resolveKanbanCardNames } from '@shared/bots'
 import type { KanbanCard } from '@shared/kanban'
+import { newUid } from '@shared/uid'
 import { KANBAN_LINK_ICON, NOTE_LINK_ICON } from './contentIcons'
 import {
   applyDateRule,
@@ -446,7 +447,7 @@ function cloneTask(t: ScheduleTask): ScheduleTask {
 function cloneWithNewIds(t: ScheduleTask): ScheduleTask {
   return {
     ...cloneTask(t),
-    id: crypto.randomUUID(),
+    id: newUid(),
     children: t.children.map(cloneWithNewIds)
   }
 }

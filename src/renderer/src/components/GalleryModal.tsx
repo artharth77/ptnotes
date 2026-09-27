@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { mdiImageOutline, mdiPlus, mdiTrashCanOutline } from '@mdi/js'
 import { isImageFile } from '@shared/filesExplorer'
 import type { GalleryImage } from '@shared/types'
 import { useAppStore } from '../store/useAppStore'
 import { ptFileUrl } from '../editor/imageNodeView'
+import { isWebUi } from '../uiMode'
 import { Modal, ConfirmModal } from './Modal'
 import { MdiIcon } from './MdiIcon'
 
@@ -19,19 +20,27 @@ export function GalleryModal({ onClose, onInsert }: GalleryModalProps): React.JS
   const [dragActive, setDragActive] = useState(false)
   const [busy, setBusy] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     if (!project) return
     void window.ptnotes.gallery.list(project).then(setImages)
   }, [project])
 
-  const importPaths = async (paths: { path: string; name: string }[]): Promise<void> => {
-    if (!project || !paths.length) return
+  const importFiles = async (files: File[]): Promise<void> => {
+    if (!project || !files.length) return
     setBusy(true)
     try {
-      for (const p of paths) {
+      for (const file of files) {
         try {
-          await window.ptnotes.gallery.import(project, p.path, p.name)
+          const path = window.ptnotes.files.getPathForFile(file)
+          if (path) {
+            await window.ptnotes.gallery.import(project, path, file.name)
+          } else {
+            // Web UI: no dropped-file paths — send the bytes instead.
+            const data = new Uint8Array(await file.arrayBuffer())
+            await window.ptnotes.gallery.importData(project, file.name, data)
+          }
         } catch {
           // skip files the gallery rejects
         }
@@ -44,6 +53,10 @@ export function GalleryModal({ onClose, onInsert }: GalleryModalProps): React.JS
 
   const choose = async (): Promise<void> => {
     if (!project) return
+    if (isWebUi()) {
+      fileInputRef.current?.click()
+      return
+    }
     setBusy(true)
     try {
       await window.ptnotes.gallery.choose(project)
@@ -84,9 +97,7 @@ export function GalleryModal({ onClose, onInsert }: GalleryModalProps): React.JS
     e.preventDefault()
     setDragActive(false)
     const files = Array.from(e.dataTransfer.files).filter((f) => isImageFile(f.name))
-    void importPaths(
-      files.map((f) => ({ path: window.ptnotes.files.getPathForFile(f), name: f.name }))
-    )
+    void importFiles(files)
   }
 
   const selectedNames = images.filter((i) => selected.has(i.name)).length
@@ -142,6 +153,18 @@ export function GalleryModal({ onClose, onInsert }: GalleryModalProps): React.JS
         )}
         {dragActive && <div className="gallery-drop-overlay">Drop images to add</div>}
       </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const files = Array.from(e.target.files ?? [])
+          e.target.value = ''
+          void importFiles(files)
+        }}
+      />
       <div className="modal-actions">
         <button className="btn" onClick={() => void choose()} disabled={busy || !project}>
           <MdiIcon path={mdiPlus} size={16} />

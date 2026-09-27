@@ -7,31 +7,43 @@ import { TextSelection } from '@tiptap/pm/state'
 import { MdiIcon } from '../components/MdiIcon'
 import { ImageViewer } from '../components/ImageViewer'
 import { useAppStore } from '../store/useAppStore'
+import { isWebUi } from '../uiMode'
 
 /** Path of the active project, or null when no project is open. */
 export function useActiveProjectPath(): string | null {
   return useAppStore((s) => s.projects.find((p) => p.name === s.activeProject)?.path ?? null)
 }
 
-/** Build a `ptfile://` URL for an absolute local file path. */
+/** Turn a legacy `ptfile://local/…` URL back into an absolute path. */
+function fromPtFileUrl(url: string): string {
+  const path = decodeURIComponent(url.replace(/^ptfile:\/\//i, '')).replace(/^local/, '')
+  return /^\/[a-zA-Z]:\//.test(path) ? path.replace(/^\//, '') : path
+}
+
+/**
+ * URL for an absolute local file: `ptfile://` in the desktop app, `/api/file`
+ * (same-origin, root-restricted) in the web UI.
+ */
 export function ptFileUrl(absPath: string): string {
+  if (isWebUi()) return `/api/file?path=${encodeURIComponent(absPath)}`
   if (/^[a-zA-Z]:/.test(absPath)) return `ptfile://local/${absPath.replace(/\\/g, '/')}`
   return `ptfile://local${absPath}`
 }
 
 /**
  * Resolve a markdown image src to a URL the renderer can load. Absolute local
- * paths go through the `ptfile://` protocol; relative paths (e.g. gallery
- * images) resolve against `<project>/notes/`.
+ * paths go through the `ptfile://` protocol (or `/api/file` in the web UI);
+ * relative paths (e.g. gallery images) resolve against `<project>/notes/`.
  */
 export function resolveImageSrc(src: string, projectPath: string | null): string {
   if (!src) return src
-  if (/^(https?|data|ptfile):/i.test(src)) return src
-  if (/^[a-zA-Z]:/.test(src)) return `ptfile://local/${src.replace(/\\/g, '/')}`
-  if (src.startsWith('/')) return `ptfile://local${src}`
+  if (/^(https?|data):/i.test(src)) return src
+  if (/^ptfile:/i.test(src)) return isWebUi() ? ptFileUrl(fromPtFileUrl(src)) : src
+  if (/^[a-zA-Z]:/.test(src)) return ptFileUrl(src)
+  if (src.startsWith('/')) return ptFileUrl(src)
   if (projectPath) {
     const base = `${projectPath.replace(/\\/g, '/').replace(/\/$/, '')}/notes`
-    return `ptfile://local/${base}/${src.replace(/^\.\//, '')}`
+    return ptFileUrl(`${base}/${src.replace(/^\.\//, '')}`)
   }
   return src
 }

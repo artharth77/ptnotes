@@ -6,6 +6,7 @@ import { MarkdownContent } from './MarkdownContent'
 import type { AiTraceEntry, AiTraceFile, AiTraceRole } from '@shared/types'
 import { normalizeUsage } from '@shared/usage'
 import { mdiCheck, mdiCodeTags, mdiContentCopy, mdiLanguageMarkdown } from '@mdi/js'
+import { revealLabel } from '../uiMode'
 
 interface TraceViewerTarget {
   kind: 'chat' | 'module' | 'bots' | 'jobs'
@@ -159,10 +160,10 @@ function TraceViewerContent({
               {trace.path && (
                 <button
                   className="btn small"
-                  title="Show the trace file in Finder"
+                  title={revealLabel('Show the trace file in Finder')}
                   onClick={() => void window.ptnotes.files.reveal(trace.path!)}
                 >
-                  Reveal in Finder
+                  {revealLabel('Reveal in Finder')}
                 </button>
               )}
               <button

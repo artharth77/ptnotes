@@ -1,7 +1,8 @@
-import { ipcMain, dialog, app, BrowserWindow } from 'electron'
+import { rpc, type InvokeCtx } from '../rpc/registry'
+import { app } from 'electron'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import type { IpcMainInvokeEvent, OpenDialogOptions } from 'electron'
+import type { OpenDialogOptions } from 'electron'
 import type { PTNotesService } from '../service/PTNotesService'
 import type { SettingsStore } from '../settings'
 import type { AboutInfo, AppearanceSettings, StorageSettings } from '@shared/types'
@@ -56,17 +57,17 @@ export function registerSettingsIpc(
   store: SettingsStore,
   onRootChanged?: (newRoot: string) => void
 ): void {
-  ipcMain.handle('settings:get', async (): Promise<StorageSettings> => store.load())
+  rpc.handle('settings:get', async (): Promise<StorageSettings> => store.load())
 
-  ipcMain.handle(
+  rpc.handle(
     'settings:getTheme',
     async (): Promise<'light' | 'dark' | 'system'> => (await store.load()).theme ?? 'system'
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'settings:setTheme',
     async (
-      _e: IpcMainInvokeEvent,
+      _e: InvokeCtx,
       theme: 'light' | 'dark' | 'system'
     ): Promise<'light' | 'dark' | 'system'> => {
       const current = await store.load()
@@ -77,16 +78,13 @@ export function registerSettingsIpc(
     }
   )
 
-  ipcMain.handle('settings:getAppearance', async (): Promise<AppearanceSettings> =>
+  rpc.handle('settings:getAppearance', async (): Promise<AppearanceSettings> =>
     toAppearance(await store.load())
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'settings:setAppearance',
-    async (
-      _e: IpcMainInvokeEvent,
-      input: Partial<AppearanceSettings>
-    ): Promise<AppearanceSettings> => {
+    async (_e: InvokeCtx, input: Partial<AppearanceSettings>): Promise<AppearanceSettings> => {
       const current = await store.load()
       const patch: Partial<StorageSettings> = {}
       if (input.theme === 'light' || input.theme === 'dark' || input.theme === 'system') {
@@ -126,7 +124,7 @@ export function registerSettingsIpc(
     }
   )
 
-  ipcMain.handle('settings:getAbout', async (): Promise<AboutInfo> => ({
+  rpc.handle('settings:getAbout', async (): Promise<AboutInfo> => ({
     name: app.getName(),
     version: app.getVersion(),
     electron: process.versions.electron,
@@ -135,25 +133,19 @@ export function registerSettingsIpc(
     dependencies: loadDependencies()
   }))
 
-  ipcMain.handle(
-    'settings:chooseRoot',
-    async (event: IpcMainInvokeEvent): Promise<string | null> => {
-      const win = BrowserWindow.fromWebContents(event.sender)
-      const options: OpenDialogOptions = {
-        title: 'Choose project root folder',
-        buttonLabel: 'Use this folder',
-        properties: ['openDirectory', 'createDirectory']
-      }
-      const result = win
-        ? await dialog.showOpenDialog(win, options)
-        : await dialog.showOpenDialog(options)
-      return result.canceled || !result.filePaths[0] ? null : result.filePaths[0]
+  rpc.handle('settings:chooseRoot', async (ctx: InvokeCtx): Promise<string | null> => {
+    const options: OpenDialogOptions = {
+      title: 'Choose project root folder',
+      buttonLabel: 'Use this folder',
+      properties: ['openDirectory', 'createDirectory']
     }
-  )
+    const paths = await ctx.platform.showOpenDialog(options)
+    return paths[0] ?? null
+  })
 
-  ipcMain.handle(
+  rpc.handle(
     'settings:changeRoot',
-    async (_e: IpcMainInvokeEvent, newRoot: string): Promise<StorageSettings> => {
+    async (_e: InvokeCtx, newRoot: string): Promise<StorageSettings> => {
       await service.changeRootDir(newRoot)
       onRootChanged?.(service.root)
       return store.save({ rootDir: service.root })

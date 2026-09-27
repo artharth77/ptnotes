@@ -1,5 +1,5 @@
-import { ipcMain } from 'electron'
-import type { IpcMainInvokeEvent } from 'electron'
+import { rpc, type InvokeCtx } from '../rpc/registry'
+
 import type { McpServerSettings, McpServerStatus } from '@shared/types'
 import type { SettingsStore } from '../settings'
 import { normalizeMcpServerSettings } from '../settings'
@@ -14,11 +14,11 @@ export function registerMcpServerIpc(service: PTNotesService, settingsStore: Set
     return host.getStatus(normalizeMcpServerSettings(settings.mcpServer).enabled)
   }
 
-  ipcMain.handle('mcpServer:getStatus', async (): Promise<McpServerStatus> => status())
+  rpc.handle('mcpServer:getStatus', async (): Promise<McpServerStatus> => status())
 
-  ipcMain.handle(
+  rpc.handle(
     'mcpServer:update',
-    async (_e: IpcMainInvokeEvent, patch: Partial<McpServerSettings>): Promise<McpServerStatus> => {
+    async (_e: InvokeCtx, patch: Partial<McpServerSettings>): Promise<McpServerStatus> => {
       const settings = await settingsStore.load()
       const next = normalizeMcpServerSettings({
         ...normalizeMcpServerSettings(settings.mcpServer),
@@ -31,7 +31,7 @@ export function registerMcpServerIpc(service: PTNotesService, settingsStore: Set
     }
   )
 
-  ipcMain.handle('mcpServer:regenerateToken', async (): Promise<McpServerStatus> => {
+  rpc.handle('mcpServer:regenerateToken', async (): Promise<McpServerStatus> => {
     const settings = await settingsStore.load()
     const next = {
       ...normalizeMcpServerSettings(settings.mcpServer),

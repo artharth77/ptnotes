@@ -1,5 +1,5 @@
-import { ipcMain } from 'electron'
-import type { IpcMainInvokeEvent } from 'electron'
+import { rpc, type InvokeCtx } from '../rpc/registry'
+
 import type { ModuleRunManager } from '../modules/runs'
 import type { ModuleRegistry } from '../modules/registry'
 import type { RegisteredModule } from '../modules/types'
@@ -35,18 +35,16 @@ export function registerModulesIpc(
   settingsStore: SettingsStore,
   registry: ModuleRegistry
 ): void {
-  ipcMain.handle('modules:list', async (_e: IpcMainInvokeEvent, project: string) =>
-    manager.list(project)
-  )
+  rpc.handle('modules:list', async (_e: InvokeCtx, project: string) => manager.list(project))
 
-  ipcMain.handle('modules:listAvailable', async (): Promise<ModuleSettings[]> => {
+  rpc.handle('modules:listAvailable', async (): Promise<ModuleSettings[]> => {
     const settings = await settingsStore.load()
     return toSettings(registry, new Set(settings.disabledModules ?? []))
   })
 
-  ipcMain.handle(
+  rpc.handle(
     'modules:setEnabled',
-    async (_e: IpcMainInvokeEvent, id: string, enabled: boolean): Promise<ModuleSettings[]> => {
+    async (_e: InvokeCtx, id: string, enabled: boolean): Promise<ModuleSettings[]> => {
       const settings = await settingsStore.load()
       const disabled = new Set(settings.disabledModules ?? [])
       if (enabled) {
@@ -59,38 +57,32 @@ export function registerModulesIpc(
     }
   )
 
-  ipcMain.handle(
-    'modules:stop',
-    async (_e: IpcMainInvokeEvent, _project: string, runId: string) => {
-      manager.stop(runId)
-    }
-  )
+  rpc.handle('modules:stop', async (_e: InvokeCtx, _project: string, runId: string) => {
+    manager.stop(runId)
+  })
 
-  ipcMain.handle(
-    'modules:retry',
-    async (_e: IpcMainInvokeEvent, project: string, runId: string) => {
-      return manager.retry(project, runId)
-    }
-  )
+  rpc.handle('modules:retry', async (_e: InvokeCtx, project: string, runId: string) => {
+    return manager.retry(project, runId)
+  })
 
-  ipcMain.handle(
+  rpc.handle(
     'modules:reveal',
-    async (_e: IpcMainInvokeEvent, project: string, runId: string, filePath?: string) => {
+    async (_e: InvokeCtx, project: string, runId: string, filePath?: string) => {
       return manager.reveal(project, runId, filePath)
     }
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'modules:clearHistory',
-    async (_e: IpcMainInvokeEvent, project: string, deleteOutputFiles = false): Promise<number> => {
+    async (_e: InvokeCtx, project: string, deleteOutputFiles = false): Promise<number> => {
       return manager.clearHistory(project, deleteOutputFiles)
     }
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'modules:deleteRun',
     async (
-      _e: IpcMainInvokeEvent,
+      _e: InvokeCtx,
       project: string,
       runId: string,
       deleteOutputFiles = false
@@ -99,15 +91,15 @@ export function registerModulesIpc(
     }
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'modules:readChat',
-    async (_e: IpcMainInvokeEvent, project: string, runId: string): Promise<ModuleChatMessage[]> =>
+    async (_e: InvokeCtx, project: string, runId: string): Promise<ModuleChatMessage[]> =>
       manager.readChat(project, runId)
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'modules:readTrace',
-    async (_e: IpcMainInvokeEvent, project: string, runId: string): Promise<AiTraceFile | null> =>
+    async (_e: InvokeCtx, project: string, runId: string): Promise<AiTraceFile | null> =>
       manager.readTrace(project, runId)
   )
 }

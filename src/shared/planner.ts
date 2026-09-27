@@ -1,7 +1,8 @@
 /**
  * Pure planner engine — schedule/calendar types + working-day math + rollups.
- * Mirrors `find.ts` / `slash.ts`: no imports, fully unit-testable.
+ * Mirrors `find.ts` / `slash.ts` (only `./uid` for id generation): fully unit-testable.
  */
+import { newUid } from './uid'
 
 export type ScheduleStatus = 'not-started' | 'in-progress' | 'completed' | 'pending' | 'on-hold'
 
@@ -990,7 +991,7 @@ export function ownerStats(tasks: ScheduleTask[]): OwnerStats[] {
 /** A fresh leaf task with empty fields (used by the editor + AI tools). */
 export function emptyTask(): ScheduleTask {
   return {
-    id: crypto.randomUUID(),
+    id: newUid(),
     title: '',
     status: 'not-started',
     owner: '',

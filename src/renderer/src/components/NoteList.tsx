@@ -16,7 +16,7 @@ import {
 import { useAppStore } from '../store/useAppStore'
 import { Modal, ConfirmModal, TextField } from './Modal'
 import { MdiIcon } from './MdiIcon'
-import { NOTE_TEMPLATES, getNoteTemplate } from '../noteTemplates'
+import { revealIcon, revealLabel } from '../uiMode'
 
 const SORT_MENU_W = 200
 const SORT_MENU_H = 220
@@ -37,7 +37,6 @@ export function NoteList(): React.JSX.Element {
   const notesSort = useAppStore((s) => s.notesSort)
   const notesSortDir = useAppStore((s) => s.notesSortDir)
   const selectNote = useAppStore((s) => s.selectNote)
-  const createNote = useAppStore((s) => s.createNote)
   const renameNote = useAppStore((s) => s.renameNote)
   const deleteNote = useAppStore((s) => s.deleteNote)
   const refreshNotes = useAppStore((s) => s.refreshNotes)
@@ -47,11 +46,9 @@ export function NoteList(): React.JSX.Element {
   const openNoteCreate = useAppStore((s) => s.openNoteCreate)
   const closeNoteCreate = useAppStore((s) => s.closeNoteCreate)
 
-  const creating = useAppStore((s) => s.noteCreating)
   const setCreating = (v: boolean): void => (v ? openNoteCreate() : closeNoteCreate())
   const [renaming, setRenaming] = useState<string | null>(null)
   const [name, setName] = useState('')
-  const [selectedTemplate, setSelectedTemplate] = useState<string>('blank')
   const [filter, setFilter] = useState('')
   const [menuFor, setMenuFor] = useState<string | null>(null)
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null)
@@ -133,18 +130,6 @@ export function NoteList(): React.JSX.Element {
     }
   }, [sortMenuOpen])
 
-  async function handleCreate(): Promise<void> {
-    const trimmed = name.trim()
-    if (!trimmed) return
-    const template = getNoteTemplate(selectedTemplate)
-    const content =
-      template && template.id !== 'blank' ? template.content(trimmed, new Date()) : undefined
-    await createNote(trimmed, content)
-    setName('')
-    setSelectedTemplate('blank')
-    setCreating(false)
-  }
-
   async function handleRename(): Promise<void> {
     const trimmed = name.trim()
     if (!trimmed || !renaming) return
@@ -172,6 +157,7 @@ export function NoteList(): React.JSX.Element {
   }
 
   function openMenu(e: React.MouseEvent, id: string): void {
+    if (e.type === 'contextmenu') e.preventDefault()
     e.stopPropagation()
     if (menuFor === id) {
       setMenuFor(null)
@@ -446,9 +432,9 @@ export function NoteList(): React.JSX.Element {
                   </button>
                   <button className="note-menu-item" onClick={() => void handleReveal(menuFor)}>
                     <span className="note-menu-icon">
-                      <MdiIcon path={mdiFolderOpenOutline} size={16} />
+                      <MdiIcon path={revealIcon(mdiFolderOpenOutline)} size={16} />
                     </span>{' '}
-                    Show in Folder
+                    {revealLabel('Show in Folder')}
                   </button>
                   <button
                     className="note-menu-item danger"
@@ -464,87 +450,6 @@ export function NoteList(): React.JSX.Element {
             })()}
           </div>
         </>
-      )}
-
-      {creating && (
-        <Modal
-          title="New Note"
-          onClose={() => {
-            setCreating(false)
-            setSelectedTemplate('blank')
-          }}
-        >
-          <TextField
-            value={name}
-            onChange={setName}
-            onEnter={() => void handleCreate()}
-            placeholder="Note title"
-            autoFocus
-          />
-          <div className="form-label" style={{ marginTop: 12, marginBottom: 6 }}>
-            Template
-          </div>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(2, 1fr)',
-              gap: 8,
-              maxHeight: 260,
-              overflowY: 'auto',
-              padding: 4
-            }}
-          >
-            {NOTE_TEMPLATES.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setSelectedTemplate(t.id)}
-                className={`note-template-card${selectedTemplate === t.id ? ' active' : ''}`}
-                style={{
-                  textAlign: 'left',
-                  padding: '10px 12px',
-                  border: '1px solid var(--border)',
-                  borderRadius: 10,
-                  background: selectedTemplate === t.id ? 'var(--accent-soft)' : 'var(--bg)',
-                  cursor: 'pointer',
-                  color: 'var(--text)'
-                }}
-              >
-                <div style={{ fontSize: 16, marginBottom: 2 }}>
-                  <span style={{ marginRight: 6 }}>{t.icon}</span>
-                  <span style={{ fontWeight: 600, fontSize: 13 }}>{t.name}</span>
-                </div>
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: 'var(--text-dim)',
-                    lineHeight: 1.4
-                  }}
-                >
-                  {t.description}
-                </div>
-              </button>
-            ))}
-          </div>
-          <div className="modal-actions">
-            <button
-              className="btn"
-              onClick={() => {
-                setCreating(false)
-                setSelectedTemplate('blank')
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              className="btn primary"
-              onClick={() => void handleCreate()}
-              disabled={!name.trim()}
-            >
-              Create
-            </button>
-          </div>
-        </Modal>
       )}
 
       {renaming && (

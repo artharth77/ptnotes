@@ -1,5 +1,7 @@
-import { app, shell, BrowserWindow, Menu, ipcMain, protocol, type WebContents } from 'electron'
-import { join, extname } from 'path'
+import { app, shell, BrowserWindow, Menu, protocol, type WebContents } from 'electron'
+import { join, extname, resolve } from 'path'
+import { homedir } from 'os'
+import { randomBytes } from 'crypto'
 import { promises as fs } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -54,21 +56,85 @@ import { SettingsStore } from './settings'
 import { AIConfigStore } from './ai/config'
 import { WindowStateStore } from './windowState'
 import type { WindowState } from '@shared/types'
+import { parseCliArgs, cliUsage, type CliOptions, type WebCliOptions } from '@shared/cliArgs'
+import { rpc } from './rpc/registry'
+import { bindRegistryToIpc } from './rpc/ipcAdapter'
+import { broadcast, setBroadcastSink } from './rpc/bus'
+import { setPlatform, webPlatform } from './platform'
+import { desktopPlatform } from './platformDesktop'
+import { startWebServer, type WebServer } from './rpc/httpServer'
 
 app.setName('PTNotes')
 
-// Custom protocol for serving local images in chat (must be before app.ready)
-protocol.registerSchemesAsPrivileged([
-  {
-    scheme: 'ptfile',
-    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
+let cli: CliOptions
+try {
+  cli = parseCliArgs(process.argv)
+} catch (err) {
+  console.error(err instanceof Error ? err.message : String(err))
+  console.error('')
+  console.error(cliUsage())
+  process.exit(1)
+}
+if (process.argv.includes('--help') || process.argv.includes('-h')) {
+  console.log(cliUsage())
+  process.exit(0)
+}
+
+/** Hosts that need no "reachable beyond loopback" warning. */
+const LOOPBACK_ONLY_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
+
+/** `ptnotes web …` → headless HTTP mode; everything else → the desktop UI, unchanged. */
+const webMode = cli.mode === 'web'
+const webCli: WebCliOptions | null = cli.mode === 'web' ? cli : null
+
+if (cli.dataPath) app.setPath('userData', expandHome(cli.dataPath))
+
+setPlatform(webMode ? webPlatform : desktopPlatform)
+
+let webServer: WebServer | null = null
+
+/** CLI paths may be written with a leading `~`. */
+function expandHome(path: string): string {
+  if (path === '~') return homedir()
+  if (path.startsWith('~/')) return join(homedir(), path.slice(2))
+  return resolve(path)
+}
+
+/** Fan events out to every window (web mode binds its own SSE sink instead). */
+function desktopBroadcast(channel: string, payload: unknown): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send(channel, payload)
+    if (channel === 'jobs:event') {
+      const evt = payload as { type?: string }
+      if (evt.type === 'notify' && !win.isFocused()) win.flashFrame(true)
+    }
   }
-])
+}
+
+// Custom protocol for serving local images in chat (must be before app.ready)
+if (!webMode) {
+  protocol.registerSchemesAsPrivileged([
+    {
+      scheme: 'ptfile',
+      privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
+    }
+  ])
+}
 
 let mainWindow: BrowserWindow | null = null
 let splashWindow: BrowserWindow | null = null
 let plannerEditActive = false
 let pdfViewerOpen = false
+
+// Send-only channels: renderer → main (no reply). They live on the shared
+// registry so the web transport can drive the same flags client-side.
+rpc.on('planner:set-edit-active', (_ctx, active: boolean) => {
+  plannerEditActive = !!active
+})
+
+rpc.on('pdf-viewer:set-open', (_ctx, open: boolean) => {
+  pdfViewerOpen = !!open
+})
 let windowStateStore: WindowStateStore
 let moduleManager: ModuleRunManager | undefined
 /** Lets the module broadcast (created before the bots system) forward bot-task events. */
@@ -94,12 +160,14 @@ function interceptPdfViewerEscape(webContents: WebContents): void {
   })
 }
 
-app.on('web-contents-created', (_event, webContents) => {
-  // OOPIF guests (the PDF preview iframe) need their own interception;
-  // 'iframe' is a runtime type Electron's typings don't declare yet
-  const type = webContents.getType() as string
-  if (type === 'iframe') interceptPdfViewerEscape(webContents)
-})
+if (!webMode) {
+  app.on('web-contents-created', (_event, webContents) => {
+    // OOPIF guests (the PDF preview iframe) need their own interception;
+    // 'iframe' is a runtime type Electron's typings don't declare yet
+    const type = webContents.getType() as string
+    if (type === 'iframe') interceptPdfViewerEscape(webContents)
+  })
+}
 
 function buildAppMenu(): Menu {
   const isMac = process.platform === 'darwin'
@@ -311,61 +379,23 @@ function createWindow(windowState: WindowState): void {
   }
 }
 
-app.whenReady().then(async () => {
-  electronApp.setAppUserModelId('com.ptnotes.app')
-
-  createSplashWindow()
-
-  // Handle ptfile:// protocol — serves local files for chat images and PDF preview
-  const IMAGE_MIME: Record<string, string> = {
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.gif': 'image/gif',
-    '.svg': 'image/svg+xml',
-    '.webp': 'image/webp',
-    '.bmp': 'image/bmp',
-    '.ico': 'image/x-icon',
-    '.pdf': 'application/pdf'
-  }
-  protocol.handle('ptfile', async (request) => {
-    const rawPath = new URL(request.url).pathname
-    let filePath: string
-    try {
-      filePath = decodeURIComponent(rawPath)
-    } catch {
-      filePath = rawPath
-    }
-    if (/^\/[a-zA-Z]:\//.test(filePath)) filePath = filePath.replace(/^\//g, '')
-    try {
-      const data = await fs.readFile(filePath)
-      const mime = IMAGE_MIME[extname(filePath).toLowerCase()] ?? 'application/octet-stream'
-      return new Response(data, { headers: { 'Content-Type': mime } })
-    } catch {
-      return new Response('Not found', { status: 404 })
-    }
-  })
-
-  Menu.setApplicationMenu(buildAppMenu())
-
-  ipcMain.on('planner:set-edit-active', (_e, active: boolean) => {
-    plannerEditActive = !!active
-  })
-
-  ipcMain.on('pdf-viewer:set-open', (_e, open: boolean) => {
-    pdfViewerOpen = !!open
-  })
-
-  if (process.platform === 'darwin' && !app.isPackaged && app.dock) {
-    app.dock.setIcon(icon)
-  }
-
-  app.on('browser-window-created', (_, window) => {
-    optimizer.watchWindowShortcuts(window)
-  })
-
+/**
+ * Everything both modes share: stores, services, bots/jobs/modules and the RPC
+ * registrations. No windows, menus or native dialogs — those stay desktop-only.
+ */
+async function initCore(): Promise<PTNotesService> {
   const settingsStore = new SettingsStore()
-  const settings = await settingsStore.load()
+  let settings = await settingsStore.load()
+  // `--doc-path` pins the project root (same setting as Settings ▸ Storage).
+  const docPath = cli.docPath?.trim()
+  if (docPath) {
+    const target = expandHome(docPath)
+    await fs.mkdir(target, { recursive: true })
+    if (target !== settings.rootDir) {
+      settings = await settingsStore.save({ ...settings, rootDir: target })
+      console.log(`  Project root:  ${target}`)
+    }
+  }
   const service = new PTNotesService(settings.rootDir, undefined, settingsStore)
   await service.migrateLegacyFolders()
   const configStore = new AIConfigStore()
@@ -390,9 +420,7 @@ app.whenReady().then(async () => {
     moduleRegistry,
     (evt) => {
       groupChatForwarder.current?.handleModuleEvent(evt)
-      for (const win of BrowserWindow.getAllWindows()) {
-        win.webContents.send('modules:event', evt)
-      }
+      broadcast('modules:event', evt)
     },
     undefined,
     settingsStore
@@ -417,11 +445,7 @@ app.whenReady().then(async () => {
     store: botsStore,
     configStore,
     moduleManager: moduleManager!,
-    broadcast: (evt) => {
-      for (const win of BrowserWindow.getAllWindows()) {
-        win.webContents.send('bots:event', evt)
-      }
-    }
+    broadcast: (evt) => broadcast('bots:event', evt)
   })
   groupChatForwarder.current = groupChatManager
 
@@ -474,12 +498,7 @@ app.whenReady().then(async () => {
         }
       }
     },
-    broadcast: (evt) => {
-      for (const win of BrowserWindow.getAllWindows()) {
-        win.webContents.send('jobs:event', evt)
-        if (evt.type === 'notify' && !win.isFocused()) win.flashFrame(true)
-      }
-    },
+    broadcast: (evt) => broadcast('jobs:event', evt),
     aiConfigured: async () => {
       const cfg = await configStore.load()
       return !!cfg.model && (!!cfg.apiKey || isLocalEndpoint(cfg.baseUrl))
@@ -519,6 +538,89 @@ app.whenReady().then(async () => {
   registerDiagramsIpc()
   registerInfographicIpc()
 
+  return service
+}
+
+app.whenReady().then(async () => {
+  if (webMode) {
+    if (process.platform === 'darwin' && app.dock) app.dock.hide()
+  } else {
+    electronApp.setAppUserModelId('com.ptnotes.app')
+
+    createSplashWindow()
+
+    // Handle ptfile:// protocol — serves local files for chat images and PDF preview
+    const IMAGE_MIME: Record<string, string> = {
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.svg': 'image/svg+xml',
+      '.webp': 'image/webp',
+      '.bmp': 'image/bmp',
+      '.ico': 'image/x-icon',
+      '.pdf': 'application/pdf'
+    }
+    protocol.handle('ptfile', async (request) => {
+      const rawPath = new URL(request.url).pathname
+      let filePath: string
+      try {
+        filePath = decodeURIComponent(rawPath)
+      } catch {
+        filePath = rawPath
+      }
+      if (/^\/[a-zA-Z]:\//.test(filePath)) filePath = filePath.replace(/^\//g, '')
+      try {
+        const data = await fs.readFile(filePath)
+        const mime = IMAGE_MIME[extname(filePath).toLowerCase()] ?? 'application/octet-stream'
+        return new Response(data, { headers: { 'Content-Type': mime } })
+      } catch {
+        return new Response('Not found', { status: 404 })
+      }
+    })
+
+    Menu.setApplicationMenu(buildAppMenu())
+
+    if (process.platform === 'darwin' && !app.isPackaged && app.dock) {
+      app.dock.setIcon(icon)
+    }
+
+    app.on('browser-window-created', (_, window) => {
+      optimizer.watchWindowShortcuts(window)
+    })
+
+    setBroadcastSink(desktopBroadcast)
+  }
+
+  const service = await initCore()
+
+  if (webCli) {
+    webServer = await startWebServer({
+      host: webCli.host,
+      port: webCli.port,
+      token: webCli.noAuth ? null : (webCli.token ?? randomBytes(16).toString('hex')),
+      getRootDir: () => service.root,
+      rendererDir: join(__dirname, '../renderer'),
+      devUrl: process.env['ELECTRON_RENDERER_URL']
+    })
+    const [primary, ...rest] = webServer.urls
+    console.log('')
+    console.log(`  PTNotes web UI: ${primary}/`)
+    for (const url of rest) console.log(`                  ${url}/`)
+    if (webServer.token) console.log(`  Access link:    ${primary}/?t=${webServer.token}`)
+    if (!LOOPBACK_ONLY_HOSTS.has(webCli.host)) {
+      console.log(
+        webServer.token
+          ? '  WARNING: reachable beyond loopback — anyone with the access code can use the app.'
+          : '  WARNING: reachable beyond loopback with --no-auth — anyone can use the app.'
+      )
+    }
+    console.log('')
+    return
+  }
+
+  bindRegistryToIpc()
+
   windowStateStore = new WindowStateStore()
   const windowState = await windowStateStore.load()
   createWindow(windowState)
@@ -529,12 +631,22 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
+  if (webMode) return
   if (process.platform !== 'darwin') {
     app.quit()
   }
 })
 
+if (webMode) {
+  // Headless: keep running until the operator stops the process.
+  const shutdown = (): void => app.quit()
+  process.on('SIGINT', shutdown)
+  process.on('SIGTERM', shutdown)
+  process.on('SIGHUP', shutdown)
+}
+
 app.on('will-quit', () => {
+  void webServer?.close()
   // Mark any in-flight module runs as cancelled before the process exits.
   void moduleManager?.cancelActive()
   groupChatForwarder.current?.closeAll()

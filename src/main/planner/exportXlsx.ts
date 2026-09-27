@@ -203,10 +203,7 @@ function sheetNameOf(name: string): string {
  *     containing the planner date tinted light red); same "PLAN" banner; a week cell is
  *     filled when the task's plan range overlaps the week; no non-working-day shading
  */
-export async function buildPlannerExportXlsx(
-  payload: PlannerExportPayload,
-  outPath: string
-): Promise<void> {
+export async function renderPlannerExportXlsx(payload: PlannerExportPayload): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook()
   const ws = workbook.addWorksheet(sheetNameOf(payload.scheduleName))
   const cols = payload.columns
@@ -564,6 +561,14 @@ export async function buildPlannerExportXlsx(
     ws.mergeCells(top, left, bottomRow, rightCol)
   )
 
+  return Buffer.from(await workbook.xlsx.writeBuffer())
+}
+
+export async function buildPlannerExportXlsx(
+  payload: PlannerExportPayload,
+  outPath: string
+): Promise<void> {
+  const data = await renderPlannerExportXlsx(payload)
   await fs.mkdir(dirname(outPath), { recursive: true })
-  await workbook.xlsx.writeFile(outPath)
+  await fs.writeFile(outPath, data)
 }

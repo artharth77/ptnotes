@@ -44,6 +44,8 @@ import {
   visibleExplorerEntries
 } from '@shared/filesExplorer'
 import { useAppStore } from '../store/useAppStore'
+import { ptFileUrl } from '../editor/imageNodeView'
+import { isWebUi, revealIcon, revealLabel } from '../uiMode'
 import {
   confirmExplorerDelete,
   copyExplorerPaths,
@@ -344,18 +346,19 @@ export function FileTreePanel(): React.JSX.Element {
               </span>
               Rename
             </button>
+            {/* A tree target is always a folder, and folders cannot be downloaded. */}
             <button
               className="note-menu-item"
-              disabled={menu.path === ''}
+              disabled={menu.path === '' || isWebUi()}
               onClick={() => {
                 closeMenu()
                 revealExplorerPath(menu.path)
               }}
             >
               <span className="note-menu-icon">
-                <MdiIcon path={mdiFolderSearchOutline} size={16} />
+                <MdiIcon path={revealIcon(mdiFolderSearchOutline)} size={16} />
               </span>
-              Show in Folder
+              {revealLabel('Show in Folder')}
             </button>
             <div className="note-menu-sep" />
             <button
@@ -531,9 +534,14 @@ export function FileListPanel(): React.JSX.Element {
       let imported = 0
       for (const file of dropped) {
         const path = window.ptnotes.files.getPathForFile(file)
-        if (!path) continue
         try {
-          await window.ptnotes.files.importDropped(project, path, cwd, file.name)
+          if (path) {
+            await window.ptnotes.files.importDropped(project, path, cwd, file.name)
+          } else {
+            // Web UI: no dropped-file paths — send the bytes instead.
+            const data = new Uint8Array(await file.arrayBuffer())
+            await window.ptnotes.files.importDroppedData(project, cwd, file.name, data)
+          }
           imported++
         } catch (err) {
           console.error('Failed to import dropped file:', file.name, err)
@@ -620,7 +628,7 @@ export function FileListPanel(): React.JSX.Element {
       if (!project) return
       const abs = await window.ptnotes.files.absPath(project, entry.path)
       if (!abs) return
-      show(/^[a-zA-Z]:/.test(abs) ? `ptfile://local/${abs}` : `ptfile://local${abs}`)
+      show(ptFileUrl(abs))
     }
     if (isImageFile(entry.name)) {
       void openLocalViewer(entry, (src) => setViewer({ src, alt: entry.name }))
@@ -790,6 +798,8 @@ export function FileListPanel(): React.JSX.Element {
     () => entries.filter((e) => selected.includes(e.path)),
     [entries, selected]
   )
+  // Web mode downloads instead of revealing, and there is no download for a folder.
+  const revealDirSelected = isWebUi() && selectedEntries[0]?.isDir === true
   const selectedPdfEntries = useMemo(
     () => selectedEntries.filter((e) => !e.isDir && isPdfFile(e.name)),
     [selectedEntries]
@@ -885,12 +895,12 @@ export function FileListPanel(): React.JSX.Element {
         </button>
         <button
           className="icon-btn"
-          disabled={selected.length !== 1}
+          disabled={selected.length !== 1 || revealDirSelected}
           onClick={revealSelected}
-          title="Show in folder"
+          title={revealLabel('Show in folder')}
         >
-          <MdiIcon path={mdiFolderSearchOutline} size={16} />
-          <span>Show in Folder</span>
+          <MdiIcon path={revealIcon(mdiFolderSearchOutline)} size={16} />
+          <span>{revealLabel('Show in Folder')}</span>
         </button>
         {selectedPdfEntries.length === 1 && (
           <button
@@ -1165,16 +1175,16 @@ export function FileListPanel(): React.JSX.Element {
             </button>
             <button
               className="note-menu-item"
-              disabled={selected.length !== 1}
+              disabled={selected.length !== 1 || revealDirSelected}
               onClick={() => {
                 closeMenu()
                 revealSelected()
               }}
             >
               <span className="note-menu-icon">
-                <MdiIcon path={mdiFolderSearchOutline} size={16} />
+                <MdiIcon path={revealIcon(mdiFolderSearchOutline)} size={16} />
               </span>
-              Show in Folder
+              {revealLabel('Show in Folder')}
             </button>
             {selectedPdfEntries.length === 1 && (
               <button

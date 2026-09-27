@@ -1,5 +1,5 @@
-import { ipcMain } from 'electron'
-import type { IpcMainInvokeEvent } from 'electron'
+import { rpc, type InvokeCtx } from '../rpc/registry'
+
 import { promises as fs } from 'node:fs'
 import { basename, join, relative } from 'node:path'
 import type { PTNotesService } from '../service/PTNotesService'
@@ -9,9 +9,9 @@ import type { DashboardSnapshot } from '@shared/dashboard'
 import { defaultCalendar, formatDate } from '@shared/planner'
 
 export function registerDashboardIpc(service: PTNotesService): void {
-  ipcMain.handle(
+  rpc.handle(
     'dashboard:getSnapshot',
-    async (_e: IpcMainInvokeEvent, project: string): Promise<DashboardSnapshot> => {
+    async (_e: InvokeCtx, project: string): Promise<DashboardSnapshot> => {
       const todayIso = formatDate(new Date())
       const ctx = service.dashboardContext(project)
 

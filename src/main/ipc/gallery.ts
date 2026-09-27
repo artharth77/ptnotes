@@ -1,54 +1,48 @@
-import { BrowserWindow, dialog, ipcMain } from 'electron'
-import type { IpcMainInvokeEvent, OpenDialogOptions } from 'electron'
+import { rpc, type InvokeCtx } from '../rpc/registry'
+import type { OpenDialogOptions } from 'electron'
 import type { PTNotesService } from '../service/PTNotesService'
 
 export function registerGalleryIpc(service: PTNotesService): void {
-  ipcMain.handle('gallery:list', async (_e: IpcMainInvokeEvent, project: string) =>
+  rpc.handle('gallery:list', async (_e: InvokeCtx, project: string) =>
     service.listGalleryImages(project)
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'gallery:import',
-    async (_e: IpcMainInvokeEvent, project: string, sourcePath: string, fileName?: string) =>
+    async (_e: InvokeCtx, project: string, sourcePath: string, fileName?: string) =>
       service.importGalleryImage(project, sourcePath, fileName)
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'gallery:importData',
-    async (_e: IpcMainInvokeEvent, project: string, fileName: string, data: Uint8Array) =>
+    async (_e: InvokeCtx, project: string, fileName: string, data: Uint8Array) =>
       service.importGalleryImageData(project, fileName, data)
   )
 
-  ipcMain.handle(
-    'gallery:choose',
-    async (event: IpcMainInvokeEvent, project: string): Promise<string[]> => {
-      const win = BrowserWindow.fromWebContents(event.sender)
-      const options: OpenDialogOptions = {
-        title: 'Add images to gallery',
-        buttonLabel: 'Add',
-        properties: ['openFile', 'multiSelections'],
-        filters: [
-          { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'] }
-        ]
-      }
-      const result = win
-        ? await dialog.showOpenDialog(win, options)
-        : await dialog.showOpenDialog(options)
-      const names: string[] = []
-      for (const path of result.filePaths) {
-        try {
-          names.push(await service.importGalleryImage(project, path))
-        } catch {
-          // skip files the gallery rejects
-        }
-      }
-      return names
+  rpc.handle('gallery:choose', async (ctx: InvokeCtx, project: string): Promise<string[]> => {
+    const options: OpenDialogOptions = {
+      title: 'Add images to gallery',
+      buttonLabel: 'Add',
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'] }
+      ]
     }
-  )
+    const paths = await ctx.platform.showOpenDialog(options)
+    const names: string[] = []
+    for (const path of paths) {
+      try {
+        names.push(await service.importGalleryImage(project, path))
+      } catch {
+        // skip files the gallery rejects
+      }
+    }
+    return names
+  })
 
-  ipcMain.handle(
+  rpc.handle(
     'gallery:delete',
-    async (_e: IpcMainInvokeEvent, project: string, name: string): Promise<void> =>
+    async (_e: InvokeCtx, project: string, name: string): Promise<void> =>
       service.deleteGalleryImage(project, name)
   )
 }

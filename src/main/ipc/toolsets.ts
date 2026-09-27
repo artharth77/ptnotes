@@ -1,5 +1,5 @@
-import { ipcMain } from 'electron'
-import type { IpcMainInvokeEvent } from 'electron'
+import { rpc, type InvokeCtx } from '../rpc/registry'
+
 import type { SettingsStore } from '../settings'
 import type { ToolsetSettings } from '@shared/types'
 import { listToolsets } from '../mcp/toolsets'
@@ -49,15 +49,15 @@ async function toSettings(disabled: Set<string>): Promise<ToolsetSettings[]> {
 }
 
 export function registerToolsetsIpc(settingsStore: SettingsStore): void {
-  ipcMain.handle('toolsets:listAvailable', async (): Promise<ToolsetSettings[]> => {
+  rpc.handle('toolsets:listAvailable', async (): Promise<ToolsetSettings[]> => {
     await getMcpServerStore().load()
     const settings = await settingsStore.load()
     return toSettings(new Set(settings.disabledToolsets ?? []))
   })
 
-  ipcMain.handle(
+  rpc.handle(
     'toolsets:setEnabled',
-    async (_e: IpcMainInvokeEvent, id: string, enabled: boolean): Promise<ToolsetSettings[]> => {
+    async (_e: InvokeCtx, id: string, enabled: boolean): Promise<ToolsetSettings[]> => {
       const settings = await settingsStore.load()
       const disabled = new Set(settings.disabledToolsets ?? [])
       if (enabled) {
@@ -70,14 +70,9 @@ export function registerToolsetsIpc(settingsStore: SettingsStore): void {
     }
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'toolsets:setConfig',
-    async (
-      _e: IpcMainInvokeEvent,
-      id: string,
-      key: string,
-      value: unknown
-    ): Promise<ToolsetSettings[]> => {
+    async (_e: InvokeCtx, id: string, key: string, value: unknown): Promise<ToolsetSettings[]> => {
       if (id === 'browser' && key === 'headless' && typeof value === 'boolean') {
         setDefaultHeadless(value)
         const settings = await settingsStore.load()

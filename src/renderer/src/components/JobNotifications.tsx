@@ -58,7 +58,7 @@ export function JobNotifications(): React.JSX.Element | null {
   }, [])
 
   const copy = useCallback((id: string, text: string): void => {
-    void navigator.clipboard.writeText(text)
+    void navigator.clipboard?.writeText(text).catch(() => {})
     setCopiedId(id)
     if (copiedTimerRef.current !== null) window.clearTimeout(copiedTimerRef.current)
     copiedTimerRef.current = window.setTimeout(() => {

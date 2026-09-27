@@ -1,6 +1,6 @@
-import { ipcMain, BrowserWindow } from 'electron'
+import { rpc, type InvokeCtx } from '../rpc/registry'
 import { randomUUID } from 'crypto'
-import type { IpcMainInvokeEvent } from 'electron'
+
 import type { PTNotesService } from '../service/PTNotesService'
 import { AIConfigStore } from '../ai/config'
 import { ChatSession, isLocalEndpoint } from '../ai/chatSession'
@@ -27,7 +27,7 @@ export interface AskResult {
 }
 
 export interface SessionRegistry {
-  getSession(event: IpcMainInvokeEvent, project: string): ChatSession
+  getSession(ctx: InvokeCtx, project: string): ChatSession
   clear(project: string): void
   stop(project: string): void
   respond(resp: ConfirmResponse): void
@@ -52,8 +52,7 @@ export function createSessionRegistry(
       let session = sessions.get(project)
       if (!session) {
         const send = (evt: ChatStreamEvent): void => {
-          const win = BrowserWindow.fromWebContents(event.sender)
-          win?.webContents.send('ai:stream', evt)
+          event.send('ai:stream', evt)
         }
         session = new ChatSession(
           () => configStore.load(),
@@ -145,15 +144,15 @@ export function registerAiIpc(
   configStore: AIConfigStore,
   service: PTNotesService
 ): void {
-  ipcMain.handle('ai:getConfig', async (): Promise<AIProviderConfig> => configStore.load())
+  rpc.handle('ai:getConfig', async (): Promise<AIProviderConfig> => configStore.load())
 
-  ipcMain.handle('ai:getProfiles', async (): Promise<AIConfig> => configStore.getAll())
+  rpc.handle('ai:getProfiles', async (): Promise<AIConfig> => configStore.getAll())
 
-  ipcMain.handle('ai:saveProfiles', async (_e, config: AIConfig): Promise<AIConfig> =>
+  rpc.handle('ai:saveProfiles', async (_e, config: AIConfig): Promise<AIConfig> =>
     configStore.saveAll(config)
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'ai:listModels',
     async (_e, baseUrl: string, apiKey: string): Promise<ListModelsResult> => {
       if (!baseUrl) return { error: 'Base URL is required' }
@@ -171,11 +170,11 @@ export function registerAiIpc(
     }
   )
 
-  ipcMain.handle('ai:clear', async (_e, project: string): Promise<void> => {
+  rpc.handle('ai:clear', async (_e, project: string): Promise<void> => {
     registry.clear(project)
   })
 
-  ipcMain.handle(
+  rpc.handle(
     'ai:generateTitle',
     async (_e, _project: string, sessionId: string, firstMessage: string): Promise<string> => {
       const config = await configStore.load()
@@ -236,22 +235,22 @@ export function registerAiIpc(
     }
   )
 
-  ipcMain.handle('ai:stop', async (_e, project: string): Promise<void> => {
+  rpc.handle('ai:stop', async (_e, project: string): Promise<void> => {
     registry.stop(project)
   })
 
-  ipcMain.handle('ai:confirmResponse', async (_e, resp: ConfirmResponse): Promise<void> => {
+  rpc.handle('ai:confirmResponse', async (_e, resp: ConfirmResponse): Promise<void> => {
     registry.respond(resp)
   })
 
-  ipcMain.handle('ai:askResponse', async (_e, resp: AskResponse): Promise<void> => {
+  rpc.handle('ai:askResponse', async (_e, resp: AskResponse): Promise<void> => {
     registry.askResponse(resp)
   })
 
-  ipcMain.handle(
+  rpc.handle(
     'ai:send',
     async (
-      event: IpcMainInvokeEvent,
+      event: InvokeCtx,
       project: string,
       sessionId: string,
       text: string,

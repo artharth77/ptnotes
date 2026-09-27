@@ -11,6 +11,7 @@ import {
   mdiTrashCanOutline
 } from '@mdi/js'
 import { useAppStore } from '../store/useAppStore'
+import { revealIcon, revealLabel } from '../uiMode'
 import { friendlyError } from '../errors'
 import { Modal, ConfirmModal, TextField } from './Modal'
 import { MdiIcon } from './MdiIcon'
@@ -115,6 +116,7 @@ export function PlannerPanel(): React.JSX.Element {
   }
 
   function openMenu(e: React.MouseEvent, id: string): void {
+    if (e.type === 'contextmenu') e.preventDefault()
     e.stopPropagation()
     if (menuFor === id) {
       setMenuFor(null)
@@ -246,9 +248,9 @@ export function PlannerPanel(): React.JSX.Element {
                   </button>
                   <button className="note-menu-item" onClick={() => void handleReveal(menuFor)}>
                     <span className="note-menu-icon">
-                      <MdiIcon path={mdiFolderOpenOutline} size={16} />
+                      <MdiIcon path={revealIcon(mdiFolderOpenOutline)} size={16} />
                     </span>{' '}
-                    Show in Folder
+                    {revealLabel('Show in Folder')}
                   </button>
                   <button
                     className="note-menu-item"

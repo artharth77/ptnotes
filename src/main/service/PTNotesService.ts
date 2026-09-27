@@ -1,7 +1,8 @@
 import { promises as fs, type Dirent } from 'fs'
 import { createHash, randomUUID } from 'crypto'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'path'
-import { app, shell } from 'electron'
+import { app } from 'electron'
+import { getPlatform } from '../platform'
 import type {
   AiTraceEntry,
   AiTraceFile,
@@ -59,7 +60,7 @@ import {
   stripInvalidLinks,
   validateScheduleId
 } from '@shared/planner'
-import { detectFileKind } from '../ai/reader'
+import { detectFileKind, detectFileKindFromBuffer, type FileKind } from '../ai/reader'
 import {
   captureScheduleSnapshot,
   deleteSnapshotDir,
@@ -761,11 +762,11 @@ export class PTNotesService {
   }
 
   async revealNoteInFolder(project: string, noteId: string): Promise<void> {
-    shell.showItemInFolder(this.notePath(project, noteId))
+    getPlatform().reveal(this.notePath(project, noteId))
   }
 
   async revealScheduleInFolder(project: string, id: string): Promise<void> {
-    shell.showItemInFolder(this.schedulePath(project, id))
+    getPlatform().reveal(this.schedulePath(project, id))
   }
 
   // ---- Skills ----
@@ -1129,11 +1130,8 @@ export class PTNotesService {
     await fs.unlink(this.legacyChatTracePath(project, sessionId)).catch(() => {})
   }
 
-  async copyFileToProject(project: string, sourcePath: string, fileName?: string): Promise<string> {
-    const dir = this.filesDir(project)
-    await fs.mkdir(dir, { recursive: true })
-    const original = fileName || basename(sourcePath)
-    const kind = await detectFileKind(sourcePath)
+  /** Stored file name for a chat-drop import: content-derived extension, slugified stem. */
+  private uploadFileName(original: string, kind: FileKind): { base: string; ext: string } {
     const originalExt = extname(original)
     const stem = originalExt ? original.slice(0, -originalExt.length) : original
     const base = slugify(stem)
@@ -1151,6 +1149,15 @@ export class PTNotesService {
         `Unsupported file: "${original}" is a binary file. Only PDF, Word (.docx), Excel (.xlsx/.xlsm) and text files can be added.`
       )
     }
+    return { base, ext }
+  }
+
+  async copyFileToProject(project: string, sourcePath: string, fileName?: string): Promise<string> {
+    const dir = this.filesDir(project)
+    await fs.mkdir(dir, { recursive: true })
+    const original = fileName || basename(sourcePath)
+    const kind = await detectFileKind(sourcePath)
+    const { base, ext } = this.uploadFileName(original, kind)
     const name = `${base}${ext}`
 
     const srcSize = (await fs.stat(sourcePath)).size
@@ -1172,6 +1179,35 @@ export class PTNotesService {
     }
     const dest = join(dir, candidate)
     await fs.copyFile(sourcePath, dest)
+    return dest
+  }
+
+  /** Chat-drop import from an in-memory buffer (web UI has no dropped-file paths). */
+  async copyBufferToProject(project: string, data: Uint8Array, fileName: string): Promise<string> {
+    const dir = this.filesDir(project)
+    await fs.mkdir(dir, { recursive: true })
+    const kind = detectFileKindFromBuffer(data, fileName)
+    const { base, ext } = this.uploadFileName(fileName, kind)
+    const name = `${base}${ext}`
+    const srcSize = data.byteLength
+    const srcHash = createHash('sha256').update(data).digest('hex')
+
+    for (const f of await fs.readdir(dir).catch(() => [])) {
+      if (f !== name) continue
+      const p = join(dir, f)
+      const st = await fs.stat(p).catch(() => null)
+      if (st && st.size === srcSize && (await hashFile(p)) === srcHash) {
+        return p
+      }
+    }
+
+    let candidate = name
+    let i = 2
+    while (await this.pathExists(join(dir, candidate))) {
+      candidate = `${base}-${i++}${ext}`
+    }
+    const dest = join(dir, candidate)
+    await fs.writeFile(dest, data)
     return dest
   }
 
@@ -1523,6 +1559,26 @@ export class PTNotesService {
     } else {
       await fs.copyFile(sourcePath, target)
     }
+    return relative(this.filesDir(project), target)
+  }
+
+  /** Import a dropped file from memory into `<project>/files/<destSubpath>` (raw copy, any type). */
+  async importDroppedData(
+    project: string,
+    data: Uint8Array,
+    destSubpath: string,
+    fileName: string
+  ): Promise<string> {
+    const dest = this.resolveFilesPath(project, destSubpath)
+    if (!dest) throw new Error(`Invalid destination folder: "${destSubpath}"`)
+    const raw = fileName.trim()
+    if (!raw || raw === '.' || raw === '..' || raw.includes('/') || raw.includes('\\')) {
+      throw new Error(`Invalid file name: "${raw}"`)
+    }
+    await fs.mkdir(dest, { recursive: true })
+    const finalName = await this.uniqueEntryName(dest, raw)
+    const target = join(dest, finalName)
+    await fs.writeFile(target, data)
     return relative(this.filesDir(project), target)
   }
 

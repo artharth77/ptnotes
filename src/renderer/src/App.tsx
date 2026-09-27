@@ -14,6 +14,7 @@ import {
   mdiCalendarMonth
 } from '@mdi/js'
 import { NoteList } from './components/NoteList'
+import { NewNoteModal } from './components/NewNoteModal'
 import { KanbanPanel } from './components/KanbanPanel'
 import { KanbanBoard } from './components/KanbanBoard'
 import { KanbanCardModal } from './components/KanbanCardModal'
@@ -41,6 +42,7 @@ import { JobNotifications } from './components/JobNotifications'
 import { mdiAlarm } from '@mdi/js'
 import type { Tab, ToolCallInfo } from '@shared/types'
 import { addUsage, normalizeUsage } from '@shared/usage'
+import { newUid } from '@shared/uid'
 
 function isMacPlatform(): boolean {
   try {
@@ -236,27 +238,14 @@ function EmptyProject(): React.JSX.Element {
 }
 
 function EmptyNote(): React.JSX.Element {
-  const createNote = useAppStore((s) => s.createNote)
-  const [creating, setCreating] = useState(false)
+  const openNoteCreate = useAppStore((s) => s.openNoteCreate)
 
   return (
     <div className="empty-state">
       <p>Select a note or create a new one.</p>
-      <button className="btn primary" onClick={() => setCreating(true)}>
+      <button className="btn primary" onClick={openNoteCreate}>
         + New Note
       </button>
-      {creating && (
-        <PromptModal
-          title="New Note"
-          placeholder="Note title"
-          submitLabel="Create"
-          onClose={() => setCreating(false)}
-          onSubmit={(title) => {
-            setCreating(false)
-            void createNote(title)
-          }}
-        />
-      )}
     </div>
   )
 }
@@ -642,7 +631,7 @@ function App(): React.JSX.Element {
             if (chatNewTurnRef.current) {
               chatNewTurnRef.current = false
               state.appendChatMessage(project, {
-                id: crypto.randomUUID(),
+                id: newUid(),
                 role: 'assistant',
                 content: '',
                 toolCalls: []
@@ -1016,6 +1005,7 @@ function App(): React.JSX.Element {
       {scheduleJobsOpen && <ScheduleJobsOverlay />}
       <JobNotifications />
       <CommandPalette />
+      <NewNoteModal />
       <GlobalFind />
       {(kanbanEditingId || kanbanCreatingColumnId || kanbanViewingId) && (
         <KanbanCardModal key={kanbanEditingId ?? kanbanCreatingColumnId ?? kanbanViewingId} />

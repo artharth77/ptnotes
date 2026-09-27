@@ -1,8 +1,11 @@
-import { ipcMain, dialog, app, BrowserWindow } from 'electron'
-import type { IpcMainInvokeEvent, SaveDialogOptions } from 'electron'
+import { rpc, type InvokeCtx } from '../rpc/registry'
+import { app } from 'electron'
+import type { SaveDialogOptions } from 'electron'
 import { join } from 'path'
 import type { PTNotesService } from '../service/PTNotesService'
-import { buildPlannerExportXlsx } from '../planner/exportXlsx'
+import { buildPlannerExportXlsx, renderPlannerExportXlsx } from '../planner/exportXlsx'
+import { emitClientAction } from '../platform'
+import { putBlob } from '../rpc/blobs'
 import type {
   PlannerExportPayload,
   PlannerExportResult,
@@ -55,60 +58,71 @@ function isExportPayload(p: unknown): p is PlannerExportPayload {
 }
 
 export function registerPlannerIpc(service: PTNotesService): void {
-  ipcMain.handle('planner:list', async (_e: IpcMainInvokeEvent, project: string) =>
+  rpc.handle('planner:list', async (_e: InvokeCtx, project: string) =>
     service.listSchedules(project)
   )
-  ipcMain.handle('planner:read', async (_e: IpcMainInvokeEvent, project: string, id: string) =>
+  rpc.handle('planner:read', async (_e: InvokeCtx, project: string, id: string) =>
     service.readSchedule(project, id)
   )
-  ipcMain.handle(
-    'planner:save',
-    async (_e: IpcMainInvokeEvent, project: string, schedule: Schedule) =>
-      service.saveSchedule(project, schedule)
+  rpc.handle('planner:save', async (_e: InvokeCtx, project: string, schedule: Schedule) =>
+    service.saveSchedule(project, schedule)
   )
-  ipcMain.handle('planner:create', async (_e: IpcMainInvokeEvent, project: string, name: string) =>
+  rpc.handle('planner:create', async (_e: InvokeCtx, project: string, name: string) =>
     service.createSchedule(project, name)
   )
-  ipcMain.handle(
+  rpc.handle(
     'planner:rename',
-    async (_e: IpcMainInvokeEvent, project: string, id: string, newName: string) =>
+    async (_e: InvokeCtx, project: string, id: string, newName: string) =>
       service.renameSchedule(project, id, newName)
   )
-  ipcMain.handle('planner:duplicate', async (_e: IpcMainInvokeEvent, project: string, id: string) =>
+  rpc.handle('planner:duplicate', async (_e: InvokeCtx, project: string, id: string) =>
     service.duplicateSchedule(project, id)
   )
-  ipcMain.handle('planner:delete', async (_e: IpcMainInvokeEvent, project: string, id: string) =>
+  rpc.handle('planner:delete', async (_e: InvokeCtx, project: string, id: string) =>
     service.deleteSchedule(project, id)
   )
-  ipcMain.handle('planner:reveal', async (_e: IpcMainInvokeEvent, project: string, id: string) =>
+  rpc.handle('planner:reveal', async (_e: InvokeCtx, project: string, id: string) =>
     service.revealScheduleInFolder(project, id)
   )
-  ipcMain.handle('planner:getCalendar', async (_e: IpcMainInvokeEvent, project: string) =>
+  rpc.handle('planner:getCalendar', async (_e: InvokeCtx, project: string) =>
     service.readCalendar(project)
   )
-  ipcMain.handle(
+  rpc.handle(
     'planner:saveCalendar',
-    async (_e: IpcMainInvokeEvent, project: string, calendar: ProjectCalendar) =>
+    async (_e: InvokeCtx, project: string, calendar: ProjectCalendar) =>
       service.saveCalendar(project, calendar)
   )
-  ipcMain.handle(
+  rpc.handle(
     'planner:exportExcel',
-    async (event: IpcMainInvokeEvent, payload: unknown): Promise<PlannerExportResult> => {
+    async (ctx: InvokeCtx, payload: unknown): Promise<PlannerExportResult> => {
       if (!isExportPayload(payload)) return { ok: false, error: 'Invalid export payload.' }
       const name = payload.scheduleName.trim() || 'Schedule'
-      const win = BrowserWindow.fromWebContents(event.sender)
+      if (ctx.platform.mode === 'web') {
+        try {
+          const data = await renderPlannerExportXlsx(payload)
+          emitClientAction({
+            kind: 'download',
+            url: putBlob(
+              data,
+              'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+              `${name}.xlsx`
+            )
+          })
+          return { ok: true, path: `${name}.xlsx` }
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) }
+        }
+      }
       const options: SaveDialogOptions = {
         title: 'Export schedule to Excel',
         defaultPath: join(app.getPath('downloads'), `${name}.xlsx`),
         filters: [{ name: 'Excel Workbook', extensions: ['xlsx'] }]
       }
-      const result = win
-        ? await dialog.showSaveDialog(win, options)
-        : await dialog.showSaveDialog(options)
-      if (result.canceled || !result.filePath) return { ok: false, canceled: true }
+      const filePath = await ctx.platform.showSaveDialog(options)
+      if (!filePath) return { ok: false, canceled: true }
       try {
-        await buildPlannerExportXlsx(payload, result.filePath)
-        return { ok: true, path: result.filePath }
+        await buildPlannerExportXlsx(payload, filePath)
+        return { ok: true, path: filePath }
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) }
       }

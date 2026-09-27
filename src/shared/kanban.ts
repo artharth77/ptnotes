@@ -1,4 +1,5 @@
 import { slugify } from './slug'
+import { newUid } from './uid'
 
 export type KanbanPriority = 'high' | 'medium' | 'low'
 
@@ -101,11 +102,11 @@ export function defaultArchive(): KanbanArchive {
 }
 
 export function newCardId(): string {
-  return crypto.randomUUID()
+  return newUid()
 }
 
 export function newCommentId(): string {
-  return crypto.randomUUID()
+  return newUid()
 }
 
 export interface NewKanbanColumnInput {

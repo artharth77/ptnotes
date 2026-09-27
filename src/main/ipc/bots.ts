@@ -1,5 +1,5 @@
-import { ipcMain } from 'electron'
-import type { IpcMainInvokeEvent } from 'electron'
+import { rpc, type InvokeCtx } from '../rpc/registry'
+
 import type { AiTraceFile, AskAnswer, ModuleRun } from '@shared/types'
 import type {
   BotProfile,
@@ -20,39 +20,37 @@ export function registerBotsIpc(
   moduleManager: ModuleRunManager
 ): void {
   // ---- bot library (global) ----
-  ipcMain.handle('bots:listBots', async (): Promise<BotProfile[]> => store.listBots())
+  rpc.handle('bots:listBots', async (): Promise<BotProfile[]> => store.listBots())
 
-  ipcMain.handle('bots:saveBot', async (_e: IpcMainInvokeEvent, input: BotUpsertInput) => {
+  rpc.handle('bots:saveBot', async (_e: InvokeCtx, input: BotUpsertInput) => {
     store.saveBot(input)
     return store.listBots()
   })
 
-  ipcMain.handle('bots:deleteBot', async (_e: IpcMainInvokeEvent, id: string) => {
+  rpc.handle('bots:deleteBot', async (_e: InvokeCtx, id: string) => {
     return store.deleteBot(id)
   })
 
-  ipcMain.handle('bots:getUserName', async (): Promise<string> => store.getUserName())
+  rpc.handle('bots:getUserName', async (): Promise<string> => store.getUserName())
 
-  ipcMain.handle('bots:setUserName', async (_e: IpcMainInvokeEvent, name: string) =>
+  rpc.handle('bots:setUserName', async (_e: InvokeCtx, name: string) =>
     store.setUserName(String(name ?? ''))
   )
 
-  ipcMain.handle(
-    'bots:listMemories',
-    async (_e: IpcMainInvokeEvent, project: string, botId?: string) =>
-      store.listMemories(project, botId)
+  rpc.handle('bots:listMemories', async (_e: InvokeCtx, project: string, botId?: string) =>
+    store.listMemories(project, botId)
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'bots:deleteMemory',
-    async (_e: IpcMainInvokeEvent, project: string, botId: string, memoryId: string) =>
+    async (_e: InvokeCtx, project: string, botId: string, memoryId: string) =>
       store.deleteMemory(project, botId, memoryId)
   )
 
   // ---- group chats (per project) ----
-  ipcMain.handle(
+  rpc.handle(
     'bots:listGroups',
-    async (_e: IpcMainInvokeEvent, project: string): Promise<GroupChatMeta[]> => {
+    async (_e: InvokeCtx, project: string): Promise<GroupChatMeta[]> => {
       // Drop task-queue rows left running by a previous crash/quit before showing anything.
       store.reconcileQueue(project)
       manager.reconcileAsks(project)
@@ -60,51 +58,51 @@ export function registerBotsIpc(
     }
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'bots:readGroup',
     async (
-      _e: IpcMainInvokeEvent,
+      _e: InvokeCtx,
       project: string,
       groupId: string,
       opts?: GroupMessagePageOpts
     ): Promise<GroupChatData | null> => store.readGroup(project, groupId, opts)
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'bots:createGroup',
-    async (_e: IpcMainInvokeEvent, project: string, input: NewGroupInput): Promise<GroupChatMeta> =>
+    async (_e: InvokeCtx, project: string, input: NewGroupInput): Promise<GroupChatMeta> =>
       store.createGroup(project, input)
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'bots:updateGroup',
     async (
-      _e: IpcMainInvokeEvent,
+      _e: InvokeCtx,
       project: string,
       groupId: string,
       patch: GroupPatch
     ): Promise<GroupChatMeta> => store.updateGroup(project, groupId, patch)
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'bots:deleteGroup',
-    async (_e: IpcMainInvokeEvent, project: string, groupId: string): Promise<boolean> => {
+    async (_e: InvokeCtx, project: string, groupId: string): Promise<boolean> => {
       manager.stop(project, groupId)
       manager.cancelAsksForGroup(project, groupId)
       return store.deleteGroup(project, groupId)
     }
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'bots:clearGroupMessages',
-    async (_e: IpcMainInvokeEvent, project: string, groupId: string): Promise<void> =>
+    async (_e: InvokeCtx, project: string, groupId: string): Promise<void> =>
       manager.clearGroupHistory(project, groupId)
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'bots:askResponse',
     async (
-      _e: IpcMainInvokeEvent,
+      _e: InvokeCtx,
       project: string,
       groupId: string,
       messageId: string,
@@ -114,29 +112,23 @@ export function registerBotsIpc(
   )
 
   // ---- orchestration ----
-  ipcMain.handle(
-    'bots:send',
-    async (_e: IpcMainInvokeEvent, project: string, groupId: string, text: string) => {
-      await manager.send(project, groupId, text)
-    }
-  )
+  rpc.handle('bots:send', async (_e: InvokeCtx, project: string, groupId: string, text: string) => {
+    await manager.send(project, groupId, text)
+  })
 
-  ipcMain.handle('bots:stop', (_e: IpcMainInvokeEvent, project: string, groupId: string) => {
+  rpc.handle('bots:stop', (_e: InvokeCtx, project: string, groupId: string) => {
     manager.stop(project, groupId)
   })
 
   // ---- background bot tasks ----
-  ipcMain.handle(
-    'bots:listTasks',
-    async (_e: IpcMainInvokeEvent, project: string): Promise<ModuleRun[]> => {
-      const runs = await moduleManager.list(project)
-      return runs.filter((r) => r.module.id === 'bot-task')
-    }
-  )
+  rpc.handle('bots:listTasks', async (_e: InvokeCtx, project: string): Promise<ModuleRun[]> => {
+    const runs = await moduleManager.list(project)
+    return runs.filter((r) => r.module.id === 'bot-task')
+  })
 
-  ipcMain.handle(
+  rpc.handle(
     'bots:clearTaskHistory',
-    async (_e: IpcMainInvokeEvent, project: string, deleteOutputFiles = false): Promise<number> => {
+    async (_e: InvokeCtx, project: string, deleteOutputFiles = false): Promise<number> => {
       const runs = await moduleManager.list(project)
       const terminal = runs.filter(
         (r) => r.module.id === 'bot-task' && ['done', 'failed', 'cancelled'].includes(r.status)
@@ -149,9 +141,9 @@ export function registerBotsIpc(
     }
   )
 
-  ipcMain.handle(
+  rpc.handle(
     'bots:readTrace',
-    async (_e: IpcMainInvokeEvent, project: string, groupId: string): Promise<AiTraceFile | null> =>
+    async (_e: InvokeCtx, project: string, groupId: string): Promise<AiTraceFile | null> =>
       store.readGroupTrace(project, groupId)
   )
 }
