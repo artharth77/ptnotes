@@ -653,7 +653,6 @@ app.on('will-quit', () => {
   botsStoreRef?.closeAll()
   jobAbortControllerRef?.abort()
   jobSchedulerRef?.stop()
-  jobsStoreRef?.closeAll()
 
   void closeBrowser()
   void getMcpClientManager().closeAll()

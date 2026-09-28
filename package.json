@@ -1,6 +1,6 @@
 {
   "name": "ptnotes",
-  "version": "0.24.0",
+  "version": "0.24.1",
   "description": "Write notes, track tasks, plan schedules, and chat with an AI assistant — all organized by project",
   "main": "./out/main/index.js",
   "author": "",
@@ -85,6 +85,7 @@
     "zustand": "^5.0.14"
   },
   "overrides": {
+    "@napi-rs/canvas": "$@napi-rs/canvas",
     "exceljs": {
       "uuid": "^11.1.1"
     }

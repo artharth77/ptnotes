@@ -433,7 +433,7 @@ let alice: BotProfile, bob: BotProfile
   assert.deepEqual(store.listGroups('Other'), [])
   ok('projects isolated')
 
-  // a deleted bot's roster id is healed on listGroups even when deleteBot couldn't scrub it
+  // deleteBot scrubs the roster in every project that already has a group chat DB
   {
     const ghost = store.saveBot({ name: 'Ghost' })
     const ghostGroup = store.createGroup(PROJECT, {
@@ -441,15 +441,62 @@ let alice: BotProfile, bob: BotProfile
       botIds: ['alice', ghost.id],
       leaderBotId: ghost.id
     })
-    // A second store instance has no open project DBs, so deleteBot skips roster scrubbing.
+    // A second store instance never holds the project DB open, yet still scrubs it.
     const store2 = new BotsStore(() => join(ROOT, 'root'), join(ROOT, 'userdata'))
     assert.equal(store2.deleteBot(ghost.id), true)
     store2.closeAll()
-    assert.deepEqual(store.getGroup(PROJECT, ghostGroup.groupId)?.botIds, ['alice', ghost.id])
-    const healed = store.listGroups(PROJECT).find((g) => g.groupId === ghostGroup.groupId)
+    const scrubbed = store.getGroup(PROJECT, ghostGroup.groupId)
+    assert.deepEqual(scrubbed?.botIds, ['alice'], 'roster scrubbed by deleteBot')
+    assert.equal(scrubbed?.leaderBotId, 'alice', 'leader falls back to first remaining member')
+
+    // a roster pointing at a bot the library never had is healed on first view
+    const stale = store.createGroup(PROJECT, {
+      title: 'Stale roster',
+      botIds: ['alice', 'ghost-bot'],
+      leaderBotId: 'ghost-bot'
+    })
+    const healed = store.listGroups(PROJECT).find((g) => g.groupId === stale.groupId)
     assert.deepEqual(healed?.botIds, ['alice'], 'ghost id pruned')
     assert.equal(healed?.leaderBotId, 'alice', 'leader falls back to first remaining member')
-    ok('groups: deleted-bot roster ids reconciled on listGroups')
+    ok('groups: deleteBot scrubs rosters, listGroups heals stale ids')
+  }
+
+  // the group chat DB is never left open or in WAL: a cloud drive must be able to sync it
+  {
+    const botsDir = join(ROOT, 'root', PROJECT, '.data', 'bots')
+    const sidecars = (await fs.readdir(botsDir)).filter((f) => f.startsWith('groupchat.db-'))
+    assert.deepEqual(sidecars, [], 'no groupchat.db-wal / -shm next to the DB at rest')
+    const raw = new DatabaseSync(join(botsDir, 'groupchat.db'))
+    assert.equal(
+      (raw.prepare('PRAGMA journal_mode').get() as { journal_mode: string }).journal_mode,
+      'delete',
+      'groupchat.db stays out of WAL mode'
+    )
+    raw.close()
+
+    assert.deepEqual(store.listGroups('No Bots Here'), [])
+    assert.equal(
+      await fs.access(join(ROOT, 'root', 'No Bots Here')).then(
+        () => true,
+        () => false
+      ),
+      false,
+      'reads never stamp an empty groupchat.db into a project'
+    )
+
+    // a DB an older version left in WAL mode is converted back on first use
+    const rawWal = new DatabaseSync(join(botsDir, 'groupchat.db'))
+    rawWal.exec('PRAGMA journal_mode = WAL;')
+    rawWal.close()
+    assert.ok(store.listGroups(PROJECT).length > 0, 'groups survive the WAL migration')
+    const migrated = new DatabaseSync(join(botsDir, 'groupchat.db'))
+    assert.equal(
+      (migrated.prepare('PRAGMA journal_mode').get() as { journal_mode: string }).journal_mode,
+      'delete',
+      'a WAL database is converted to DELETE on first use'
+    )
+    migrated.close()
+    ok('group chat store: no sidecar files, no handle kept, no empty DB on read')
   }
 }
 
