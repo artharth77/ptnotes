@@ -250,6 +250,55 @@ assert.equal(
   'deleteJob removes the run trace file'
 )
 
+// ---- the DB is never left open or in WAL: a cloud drive must be able to sync it ----
+{
+  const jobsDir = join(ROOT, 'pj', '.data', 'jobs')
+  const sidecars = (await fs.readdir(jobsDir)).filter((f) => f.startsWith('jobs.db-'))
+  assert.deepEqual(sidecars, [], 'no jobs.db-wal / jobs.db-shm next to the DB at rest')
+  const { DatabaseSync } = await import('node:sqlite')
+  const raw = new DatabaseSync(join(jobsDir, 'jobs.db'))
+  assert.equal(
+    (raw.prepare('PRAGMA journal_mode').get() as { journal_mode: string }).journal_mode,
+    'delete',
+    'jobs.db stays out of WAL mode'
+  )
+  raw.close()
+
+  // reads must not stamp an empty DB into a project that never had a job
+  assert.equal(store.listJobs('never-had-jobs').length, 0)
+  assert.equal(
+    await fs.access(join(ROOT, 'never-had-jobs')).then(
+      () => true,
+      () => false
+    ),
+    false,
+    'listing jobs in a project without one creates nothing'
+  )
+
+  // a DB an older version left in WAL mode is converted back on first use
+  store.saveJob('walproj', {
+    title: 'Old install',
+    enabled: true,
+    days: [0, 1, 2, 3, 4, 5, 6],
+    timeRule: { kind: 'list', times: ['09:00'] },
+    condition: 'exact',
+    prompt: 'Hi',
+    language: ''
+  })
+  const walPath = join(ROOT, 'walproj', '.data', 'jobs', 'jobs.db')
+  const rawWal = new DatabaseSync(walPath)
+  rawWal.exec('PRAGMA journal_mode = WAL;')
+  rawWal.close()
+  assert.equal(store.listJobs('walproj').length, 1, 'job survives the WAL migration')
+  const migrated = new DatabaseSync(walPath)
+  assert.equal(
+    (migrated.prepare('PRAGMA journal_mode').get() as { journal_mode: string }).journal_mode,
+    'delete',
+    'a WAL database is converted to DELETE on first use'
+  )
+  migrated.close()
+}
+
 // error paths
 assert.throws(() =>
   store.saveJob('pj', {
@@ -666,8 +715,5 @@ assert.equal(gres.status, 'done', 'E: still done')
 assert.equal(gres.notify, false, 'E: NO RESPONSE suppresses the notification')
 assert.equal(gres.statusNotice, undefined, 'E: notice suppressed')
 
-store.closeAll()
-store2.closeAll()
-store3.closeAll()
 await fs.rm(ROOT, { recursive: true, force: true })
 console.log('test-jobs: all assertions passed')

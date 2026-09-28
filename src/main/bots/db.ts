@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
-import { mkdirSync, promises as fs } from 'fs'
+import { existsSync, mkdirSync, readdirSync, promises as fs, type Dirent } from 'fs'
 import type {
   BotMemoryEntry,
   BotProfile,
@@ -149,16 +149,66 @@ function rowToQueueItem(r: QueueRow): BotTaskQueueItem {
   }
 }
 
+const GROUP_DDL = `CREATE TABLE IF NOT EXISTS group_chats (
+  group_id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  bot_ids TEXT NOT NULL,
+  leader_bot_id TEXT NOT NULL,
+  summary TEXT,
+  summarized_up_to_seq INTEGER,
+  memorized_up_to_seq INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS group_messages (
+  id TEXT PRIMARY KEY,
+  group_id TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  sender_kind TEXT NOT NULL,
+  bot_id TEXT,
+  sender_name TEXT NOT NULL,
+  role TEXT,
+  is_leader INTEGER,
+  content TEXT NOT NULL,
+  ts INTEGER NOT NULL,
+  error INTEGER,
+  task_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_group_messages ON group_messages (group_id, seq);
+CREATE TABLE IF NOT EXISTS bot_memories (
+  bot_id TEXT NOT NULL,
+  id TEXT NOT NULL,
+  content TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (bot_id, id)
+);
+CREATE TABLE IF NOT EXISTS bot_task_queue (
+  queue_id TEXT PRIMARY KEY,
+  group_id TEXT NOT NULL,
+  bot_id TEXT NOT NULL,
+  run_id TEXT,
+  title TEXT NOT NULL,
+  task TEXT NOT NULL,
+  requested_by TEXT NOT NULL,
+  origin_msg TEXT,
+  status TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);`
+
 /**
  * SQLite persistence for the bots system:
- * - global bot profiles in `userData/bots.db`
+ * - global bot profiles in `userData/bots.db` (the one handle kept open)
  * - per-project group chats / messages / memories / task queue in
  *   `<project>/.data/bots/groupchat.db` (follows the project root)
  * - per-group raw AI trace JSONL files in `<project>/.data/bots/<groupId>.trace.jsonl`
+ *
+ * A project DB is opened for a single call and closed straight after it, so no
+ * handle, lock or journal sidecar is kept between calls and a cloud drive can
+ * sync the file. `journal_mode = DELETE` (converted from WAL on open) keeps the
+ * `groupchat.db-wal` / `groupchat.db-shm` sidecars from ever existing.
  */
 export class BotsStore {
   private botsDb: DatabaseSync | null = null
-  private readonly projectDbs = new Map<string, DatabaseSync>()
   private getRoot: () => string
   private readonly userDataDir: string
 
@@ -168,23 +218,11 @@ export class BotsStore {
   }
 
   setRootDir(root: string): void {
-    this.closeAllProjects()
     this.getRoot = () => root
   }
 
-  closeAllProjects(): void {
-    for (const db of this.projectDbs.values()) {
-      try {
-        db.close()
-      } catch {
-        // already closed
-      }
-    }
-    this.projectDbs.clear()
-  }
-
+  /** Closes the global bot library DB — project DBs are never held between calls. */
   closeAll(): void {
-    this.closeAllProjects()
     if (this.botsDb) {
       try {
         this.botsDb.close()
@@ -296,31 +334,35 @@ export class BotsStore {
 
   /** Delete a bot and remove it from every group roster (leader falls back to the first remaining member). */
   deleteBot(id: string): boolean {
-    const db = this.globalDb()
     const clean = validateId(id)
-    const info = db.prepare('DELETE FROM bots WHERE id = ?').run(clean)
+    const info = this.globalDb().prepare('DELETE FROM bots WHERE id = ?').run(clean)
     if (info.changes === 0) return false
-    for (const [project, pdb] of this.projectDbs) {
-      const groups = pdb.prepare('SELECT * FROM group_chats').all() as unknown as GroupRow[]
-      for (const g of groups) {
-        let botIds: string[] = []
-        try {
-          const parsed = JSON.parse(g.bot_ids) as unknown
-          if (Array.isArray(parsed))
-            botIds = parsed.filter((b): b is string => typeof b === 'string')
-        } catch {
-          botIds = []
-        }
-        if (!botIds.includes(clean)) continue
-        const nextIds = botIds.filter((b) => b !== clean)
-        const nextLeader = g.leader_bot_id === clean ? (nextIds[0] ?? '') : g.leader_bot_id
-        pdb
-          .prepare('UPDATE group_chats SET bot_ids = ?, leader_bot_id = ? WHERE group_id = ?')
-          .run(JSON.stringify(nextIds), nextLeader, g.group_id)
-        void project
-      }
+    for (const project of this.projectsWithGroupDb()) {
+      this.withProjectDb(project, (db) => this.scrubRoster(db, clean))
     }
     return true
+  }
+
+  /** Drop `botId` from every roster of one project's group chat DB. */
+  private scrubRoster(db: DatabaseSync, botId: string): void {
+    const groups = db.prepare('SELECT * FROM group_chats').all() as unknown as GroupRow[]
+    for (const g of groups) {
+      let botIds: string[] = []
+      try {
+        const parsed = JSON.parse(g.bot_ids) as unknown
+        if (Array.isArray(parsed)) botIds = parsed.filter((b): b is string => typeof b === 'string')
+      } catch {
+        botIds = []
+      }
+      if (!botIds.includes(botId)) continue
+      const nextIds = botIds.filter((b) => b !== botId)
+      const nextLeader = g.leader_bot_id === botId ? (nextIds[0] ?? '') : g.leader_bot_id
+      db.prepare('UPDATE group_chats SET bot_ids = ?, leader_bot_id = ? WHERE group_id = ?').run(
+        JSON.stringify(nextIds),
+        nextLeader,
+        g.group_id
+      )
+    }
   }
 
   // ---- per-project group chat DB ----
@@ -329,102 +371,103 @@ export class BotsStore {
     return join(this.getRoot(), project, '.data', 'bots')
   }
 
-  private projectDb(project: string): DatabaseSync {
-    const existing = this.projectDbs.get(project)
-    if (existing) return existing
-    const dir = this.botsDir(project)
-    mkdirSync(dir, { recursive: true })
-    const db = new DatabaseSync(join(dir, 'groupchat.db'))
-    db.exec('PRAGMA journal_mode = WAL;')
-    db.exec(`CREATE TABLE IF NOT EXISTS group_chats (
-      group_id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      bot_ids TEXT NOT NULL,
-      leader_bot_id TEXT NOT NULL,
-      summary TEXT,
-      summarized_up_to_seq INTEGER,
-      memorized_up_to_seq INTEGER,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS group_messages (
-      id TEXT PRIMARY KEY,
-      group_id TEXT NOT NULL,
-      seq INTEGER NOT NULL,
-      sender_kind TEXT NOT NULL,
-      bot_id TEXT,
-      sender_name TEXT NOT NULL,
-      role TEXT,
-      is_leader INTEGER,
-      content TEXT NOT NULL,
-      ts INTEGER NOT NULL,
-      error INTEGER,
-      task_id TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_group_messages ON group_messages (group_id, seq);
-    CREATE TABLE IF NOT EXISTS bot_memories (
-      bot_id TEXT NOT NULL,
-      id TEXT NOT NULL,
-      content TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      PRIMARY KEY (bot_id, id)
-    );
-    CREATE TABLE IF NOT EXISTS bot_task_queue (
-      queue_id TEXT PRIMARY KEY,
-      group_id TEXT NOT NULL,
-      bot_id TEXT NOT NULL,
-      run_id TEXT,
-      title TEXT NOT NULL,
-      task TEXT NOT NULL,
-      requested_by TEXT NOT NULL,
-      origin_msg TEXT,
-      status TEXT NOT NULL,
-      created_at INTEGER NOT NULL
-    );`)
-    const queueCols = db.prepare('PRAGMA table_info(bot_task_queue)').all() as unknown as {
-      name: string
-    }[]
-    if (!queueCols.some((c) => c.name === 'origin_msg')) {
-      db.exec('ALTER TABLE bot_task_queue ADD COLUMN origin_msg TEXT')
-    }
-    const groupCols = db.prepare('PRAGMA table_info(group_chats)').all() as unknown as {
-      name: string
-    }[]
-    if (!groupCols.some((c) => c.name === 'memorized_up_to_seq')) {
-      db.exec('ALTER TABLE group_chats ADD COLUMN memorized_up_to_seq INTEGER')
-    }
-    this.projectDbs.set(project, db)
-    return db
+  private groupDbPath(project: string): string {
+    return join(this.botsDir(project), 'groupchat.db')
   }
 
-  private metaFromRow(project: string, r: GroupRow): GroupChatMeta {
-    const countRow = this.projectDb(project)
+  private hasProjectDb(project: string): boolean {
+    return existsSync(this.groupDbPath(project))
+  }
+
+  /**
+   * Open the project's group chat DB, run `fn` on it, close it again — always in a
+   * `finally`, so a throw can never leave a handle behind. Re-running the schema on
+   * every open also repairs a file replaced by a copy synced from another machine.
+   */
+  private withProjectDb<T>(project: string, fn: (db: DatabaseSync) => T): T {
+    mkdirSync(this.botsDir(project), { recursive: true })
+    const db = new DatabaseSync(this.groupDbPath(project))
+    try {
+      db.exec('PRAGMA journal_mode = DELETE;')
+      db.exec(GROUP_DDL)
+      const queueCols = db.prepare('PRAGMA table_info(bot_task_queue)').all() as unknown as {
+        name: string
+      }[]
+      if (!queueCols.some((c) => c.name === 'origin_msg')) {
+        db.exec('ALTER TABLE bot_task_queue ADD COLUMN origin_msg TEXT')
+      }
+      const groupCols = db.prepare('PRAGMA table_info(group_chats)').all() as unknown as {
+        name: string
+      }[]
+      if (!groupCols.some((c) => c.name === 'memorized_up_to_seq')) {
+        db.exec('ALTER TABLE group_chats ADD COLUMN memorized_up_to_seq INTEGER')
+      }
+      return fn(db)
+    } finally {
+      db.close()
+    }
+  }
+
+  /**
+   * Reads and cleanups run only when the DB is already there — the bots UI lists a
+   * project's groups whether or not it ever used bots, and that must not stamp an
+   * empty `groupchat.db` into it.
+   */
+  private withExistingProjectDb<T>(project: string, fallback: T, fn: (db: DatabaseSync) => T): T {
+    return this.hasProjectDb(project) ? this.withProjectDb(project, fn) : fallback
+  }
+
+  /** Project keys whose group chat DB already exists — never one that would be created. */
+  private projectsWithGroupDb(): string[] {
+    let entries: Dirent[]
+    try {
+      entries = readdirSync(this.getRoot(), { withFileTypes: true })
+    } catch {
+      return []
+    }
+    return entries
+      .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+      .map((e) => e.name)
+      .filter((name) => this.hasProjectDb(name))
+  }
+
+  private metaFromRow(db: DatabaseSync, project: string, r: GroupRow): GroupChatMeta {
+    const countRow = db
       .prepare('SELECT COUNT(*) AS c FROM group_messages WHERE group_id = ?')
       .get(r.group_id) as unknown as { c: number }
     return rowToGroup(r, project, countRow.c)
   }
 
+  private groupOn(db: DatabaseSync, project: string, groupId: string): GroupChatMeta | null {
+    const row = db
+      .prepare('SELECT * FROM group_chats WHERE group_id = ?')
+      .get(validateId(groupId)) as unknown as GroupRow | undefined
+    return row ? this.metaFromRow(db, project, row) : null
+  }
+
   listGroups(project: string): GroupChatMeta[] {
-    this.reconcileRosters(project)
-    const rows = this.projectDb(project)
-      .prepare('SELECT * FROM group_chats ORDER BY updated_at DESC')
-      .all() as unknown as GroupRow[]
-    return rows.map((r) => this.metaFromRow(project, r))
+    return this.withExistingProjectDb<GroupChatMeta[]>(project, [], (db) => {
+      this.reconcileRosters(db)
+      const rows = db
+        .prepare('SELECT * FROM group_chats ORDER BY updated_at DESC')
+        .all() as unknown as GroupRow[]
+      return rows.map((r) => this.metaFromRow(db, project, r))
+    })
   }
 
   /**
    * Drop roster ids of bots that no longer exist in the global library and fall a dead
-   * leader back to the first remaining member. deleteBot can only scrub rosters of
-   * project DBs that are open at that moment; this heals the rest on first view.
+   * leader back to the first remaining member. `deleteBot` scrubs every project DB that
+   * exists at the time, but a project added later (or a roster arriving over sync) still
+   * needs healing on first view.
    */
-  private reconcileRosters(project: string): void {
-    const pdb = this.projectDb(project)
+  private reconcileRosters(db: DatabaseSync): void {
     const valid = new Set(
       (this.globalDb().prepare('SELECT id FROM bots').all() as unknown as { id: string }[]).map(
         (r) => r.id
       )
     )
-    const groups = pdb.prepare('SELECT * FROM group_chats').all() as unknown as GroupRow[]
+    const groups = db.prepare('SELECT * FROM group_chats').all() as unknown as GroupRow[]
     for (const g of groups) {
       let botIds: string[] = []
       try {
@@ -436,9 +479,11 @@ export class BotsStore {
       const nextIds = botIds.filter((b) => valid.has(b))
       const nextLeader = nextIds.includes(g.leader_bot_id) ? g.leader_bot_id : (nextIds[0] ?? '')
       if (nextIds.length === botIds.length && nextLeader === g.leader_bot_id) continue
-      pdb
-        .prepare('UPDATE group_chats SET bot_ids = ?, leader_bot_id = ? WHERE group_id = ?')
-        .run(JSON.stringify(nextIds), nextLeader, g.group_id)
+      db.prepare('UPDATE group_chats SET bot_ids = ?, leader_bot_id = ? WHERE group_id = ?').run(
+        JSON.stringify(nextIds),
+        nextLeader,
+        g.group_id
+      )
     }
   }
 
@@ -455,123 +500,138 @@ export class BotsStore {
     }
     const now = Date.now()
     const groupId = randomUUID()
-    this.projectDb(project)
-      .prepare(
+    return this.withProjectDb(project, (db) => {
+      db.prepare(
         `INSERT INTO group_chats (group_id, title, bot_ids, leader_bot_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
-      )
-      .run(groupId, title, JSON.stringify(botIds), leaderBotId, now, now)
-    return this.getGroup(project, groupId)!
+      ).run(groupId, title, JSON.stringify(botIds), leaderBotId, now, now)
+      return this.groupOn(db, project, groupId)!
+    })
   }
 
   getGroup(project: string, groupId: string): GroupChatMeta | null {
-    const row = this.projectDb(project)
-      .prepare('SELECT * FROM group_chats WHERE group_id = ?')
-      .get(validateId(groupId)) as unknown as GroupRow | undefined
-    return row ? this.metaFromRow(project, row) : null
+    return this.withExistingProjectDb<GroupChatMeta | null>(project, null, (db) =>
+      this.groupOn(db, project, groupId)
+    )
   }
 
   updateGroup(project: string, groupId: string, patch: GroupPatch): GroupChatMeta {
-    const current = this.getGroup(project, groupId)
-    if (!current) throw new Error(`Group chat not found: ${groupId}`)
-    const title =
-      patch.title !== undefined ? String(patch.title).trim() || current.title : current.title
-    let botIds = current.botIds
-    if (patch.botIds !== undefined) {
-      botIds = [...new Set(patch.botIds.filter((b) => typeof b === 'string' && b))]
-      if (botIds.length === 0) throw new Error('A group chat needs at least one bot.')
-      if (botIds.length > MAX_GROUP_BOTS) {
-        throw new Error(`A group chat can have at most ${MAX_GROUP_BOTS} bots.`)
+    if (!this.hasProjectDb(project)) throw new Error(`Group chat not found: ${groupId}`)
+    return this.withProjectDb(project, (db) => {
+      const current = this.groupOn(db, project, groupId)
+      if (!current) throw new Error(`Group chat not found: ${groupId}`)
+      const title =
+        patch.title !== undefined ? String(patch.title).trim() || current.title : current.title
+      let botIds = current.botIds
+      if (patch.botIds !== undefined) {
+        botIds = [...new Set(patch.botIds.filter((b) => typeof b === 'string' && b))]
+        if (botIds.length === 0) throw new Error('A group chat needs at least one bot.')
+        if (botIds.length > MAX_GROUP_BOTS) {
+          throw new Error(`A group chat can have at most ${MAX_GROUP_BOTS} bots.`)
+        }
       }
-    }
-    let leaderBotId = current.leaderBotId
-    if (patch.leaderBotId !== undefined) {
-      leaderBotId = patch.leaderBotId
-    }
-    if (!leaderBotId || !botIds.includes(leaderBotId)) {
-      throw new Error('The group leader must be one of the assigned bots.')
-    }
-    this.projectDb(project)
-      .prepare(
+      let leaderBotId = current.leaderBotId
+      if (patch.leaderBotId !== undefined) {
+        leaderBotId = patch.leaderBotId
+      }
+      if (!leaderBotId || !botIds.includes(leaderBotId)) {
+        throw new Error('The group leader must be one of the assigned bots.')
+      }
+      db.prepare(
         'UPDATE group_chats SET title = ?, bot_ids = ?, leader_bot_id = ?, updated_at = ? WHERE group_id = ?'
-      )
-      .run(title, JSON.stringify(botIds), leaderBotId, Date.now(), groupId)
-    return this.getGroup(project, groupId)!
+      ).run(title, JSON.stringify(botIds), leaderBotId, Date.now(), groupId)
+      return this.groupOn(db, project, groupId)!
+    })
   }
 
   deleteGroup(project: string, groupId: string): boolean {
-    const db = this.projectDb(project)
     const clean = validateId(groupId)
-    const info = db.prepare('DELETE FROM group_chats WHERE group_id = ?').run(clean)
-    db.prepare('DELETE FROM group_messages WHERE group_id = ?').run(clean)
-    db.prepare('DELETE FROM bot_task_queue WHERE group_id = ?').run(clean)
+    const deleted = this.withExistingProjectDb<boolean>(project, false, (db) => {
+      const info = db.prepare('DELETE FROM group_chats WHERE group_id = ?').run(clean)
+      db.prepare('DELETE FROM group_messages WHERE group_id = ?').run(clean)
+      db.prepare('DELETE FROM bot_task_queue WHERE group_id = ?').run(clean)
+      return info.changes > 0
+    })
     void fs.rm(join(this.botsDir(project), `${clean}.trace.jsonl`), { force: true }).catch(() => {})
     void fs.rm(join(this.botsDir(project), `${clean}.trace.json`), { force: true }).catch(() => {})
-    return info.changes > 0
+    return deleted
   }
 
   async clearGroupMessages(project: string, groupId: string): Promise<void> {
-    const db = this.projectDb(project)
     const clean = validateId(groupId)
-    db.prepare('DELETE FROM group_messages WHERE group_id = ?').run(clean)
-    db.prepare('DELETE FROM bot_task_queue WHERE group_id = ?').run(clean)
-    db.prepare(
-      'UPDATE group_chats SET summary = NULL, summarized_up_to_seq = NULL, memorized_up_to_seq = NULL, updated_at = ? WHERE group_id = ?'
-    ).run(Date.now(), clean)
+    if (this.hasProjectDb(project)) {
+      this.withProjectDb(project, (db) => {
+        db.prepare('DELETE FROM group_messages WHERE group_id = ?').run(clean)
+        db.prepare('DELETE FROM bot_task_queue WHERE group_id = ?').run(clean)
+        db.prepare(
+          'UPDATE group_chats SET summary = NULL, summarized_up_to_seq = NULL, memorized_up_to_seq = NULL, updated_at = ? WHERE group_id = ?'
+        ).run(Date.now(), clean)
+      })
+    }
     await this.deleteGroupTrace(project, clean)
   }
 
   readGroup(project: string, groupId: string, opts?: GroupMessagePageOpts): GroupChatData | null {
-    const meta = this.getGroup(project, groupId)
-    if (!meta) return null
-    const row = this.projectDb(project)
-      .prepare(
-        'SELECT summary, summarized_up_to_seq, memorized_up_to_seq FROM group_chats WHERE group_id = ?'
-      )
-      .get(groupId) as unknown as {
-      summary: string | null
-      summarized_up_to_seq: number | null
-      memorized_up_to_seq: number | null
-    }
-    const base = {
-      ...meta,
-      ...(row.summary ? { summary: row.summary } : {}),
-      ...(row.summarized_up_to_seq ? { summarizedUpToSeq: row.summarized_up_to_seq } : {}),
-      ...(row.memorized_up_to_seq ? { memorizedUpToSeq: row.memorized_up_to_seq } : {})
-    }
-    const paged = opts && (opts.limit !== undefined || opts.beforeSeq !== undefined)
-    if (!paged) {
-      return { ...base, messages: this.listMessages(project, groupId) }
-    }
-    const page = this.listMessagePage(project, groupId, opts)
-    return {
-      ...base,
-      messages: page.messages,
-      hasMore: page.hasMore,
-      oldestSeq: page.oldestSeq ?? undefined
-    }
+    const clean = validateId(groupId)
+    return this.withExistingProjectDb<GroupChatData | null>(project, null, (db) => {
+      const meta = this.groupOn(db, project, clean)
+      if (!meta) return null
+      const row = db
+        .prepare(
+          'SELECT summary, summarized_up_to_seq, memorized_up_to_seq FROM group_chats WHERE group_id = ?'
+        )
+        .get(clean) as unknown as {
+        summary: string | null
+        summarized_up_to_seq: number | null
+        memorized_up_to_seq: number | null
+      }
+      const base = {
+        ...meta,
+        ...(row.summary ? { summary: row.summary } : {}),
+        ...(row.summarized_up_to_seq ? { summarizedUpToSeq: row.summarized_up_to_seq } : {}),
+        ...(row.memorized_up_to_seq ? { memorizedUpToSeq: row.memorized_up_to_seq } : {})
+      }
+      const paged = opts && (opts.limit !== undefined || opts.beforeSeq !== undefined)
+      if (!paged) {
+        return { ...base, messages: this.messagesOn(db, clean) }
+      }
+      const page = this.listMessagePage(db, clean, opts)
+      return {
+        ...base,
+        messages: page.messages,
+        hasMore: page.hasMore,
+        oldestSeq: page.oldestSeq ?? undefined
+      }
+    })
   }
 
   listMessages(project: string, groupId: string): GroupMessage[] {
-    const rows = this.projectDb(project)
+    const clean = validateId(groupId)
+    return this.withExistingProjectDb<GroupMessage[]>(project, [], (db) =>
+      this.messagesOn(db, clean)
+    )
+  }
+
+  private messagesOn(db: DatabaseSync, groupId: string): GroupMessage[] {
+    const rows = db
       .prepare('SELECT * FROM group_messages WHERE group_id = ? ORDER BY seq ASC')
-      .all(validateId(groupId)) as unknown as MessageRow[]
+      .all(groupId) as unknown as MessageRow[]
     return rows.map(rowToMessage)
   }
 
   private listMessagePage(
-    project: string,
+    db: DatabaseSync,
     groupId: string,
     opts: GroupMessagePageOpts
   ): { messages: GroupMessage[]; hasMore: boolean; oldestSeq: number | null } {
     const limit = Math.max(1, Math.floor(opts.limit ?? GROUP_CHAT_PAGE_SIZE))
     const where = ['group_id = ?']
-    const params: (string | number)[] = [validateId(groupId)]
+    const params: (string | number)[] = [groupId]
     if (opts.beforeSeq !== undefined) {
       where.push('seq < ?')
       params.push(opts.beforeSeq)
     }
     // Fetch one extra row to detect whether older messages remain (gap-safe, single query).
-    const rows = this.projectDb(project)
+    const rows = db
       .prepare(
         `SELECT * FROM group_messages WHERE ${where.join(' AND ')} ORDER BY seq DESC LIMIT ?`
       )
@@ -587,48 +647,59 @@ export class BotsStore {
     groupId: string,
     msg: Omit<GroupMessage, 'id' | 'seq'> & { id?: string }
   ): GroupMessage {
-    const db = this.projectDb(project)
-    const row = db
-      .prepare('SELECT COALESCE(MAX(seq), 0) AS maxSeq FROM group_messages WHERE group_id = ?')
-      .get(groupId) as unknown as { maxSeq: number }
-    const full: GroupMessage = {
-      id: msg.id ?? randomUUID(),
-      seq: row.maxSeq + 1,
-      senderKind: msg.senderKind,
-      ...(msg.botId ? { botId: msg.botId } : {}),
-      senderName: msg.senderName,
-      ...(msg.role ? { role: msg.role } : {}),
-      ...(msg.isLeader ? { isLeader: true } : {}),
-      content: msg.content,
-      ts: msg.ts,
-      ...(msg.error ? { error: true } : {}),
-      ...(msg.taskId ? { taskId: msg.taskId } : {})
-    }
-    db.prepare(
-      `INSERT INTO group_messages (id, group_id, seq, sender_kind, bot_id, sender_name, role, is_leader, content, ts, error, task_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      full.id,
-      groupId,
-      full.seq,
-      full.senderKind,
-      full.botId ?? null,
-      full.senderName,
-      full.role ?? null,
-      full.isLeader ? 1 : null,
-      full.content,
-      full.ts,
-      full.error ? 1 : null,
-      full.taskId ?? null
-    )
-    db.prepare('UPDATE group_chats SET updated_at = ? WHERE group_id = ?').run(Date.now(), groupId)
-    return full
+    return this.withProjectDb(project, (db) => {
+      const row = db
+        .prepare('SELECT COALESCE(MAX(seq), 0) AS maxSeq FROM group_messages WHERE group_id = ?')
+        .get(groupId) as unknown as { maxSeq: number }
+      const full: GroupMessage = {
+        id: msg.id ?? randomUUID(),
+        seq: row.maxSeq + 1,
+        senderKind: msg.senderKind,
+        ...(msg.botId ? { botId: msg.botId } : {}),
+        senderName: msg.senderName,
+        ...(msg.role ? { role: msg.role } : {}),
+        ...(msg.isLeader ? { isLeader: true } : {}),
+        content: msg.content,
+        ts: msg.ts,
+        ...(msg.error ? { error: true } : {}),
+        ...(msg.taskId ? { taskId: msg.taskId } : {})
+      }
+      db.prepare(
+        `INSERT INTO group_messages (id, group_id, seq, sender_kind, bot_id, sender_name, role, is_leader, content, ts, error, task_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        full.id,
+        groupId,
+        full.seq,
+        full.senderKind,
+        full.botId ?? null,
+        full.senderName,
+        full.role ?? null,
+        full.isLeader ? 1 : null,
+        full.content,
+        full.ts,
+        full.error ? 1 : null,
+        full.taskId ?? null
+      )
+      db.prepare('UPDATE group_chats SET updated_at = ? WHERE group_id = ?').run(
+        Date.now(),
+        groupId
+      )
+      return full
+    })
   }
 
   getMessage(project: string, groupId: string, messageId: string): GroupMessage | null {
-    const row = this.projectDb(project)
+    const clean = validateId(groupId)
+    return this.withExistingProjectDb<GroupMessage | null>(project, null, (db) =>
+      this.messageOn(db, clean, messageId)
+    )
+  }
+
+  private messageOn(db: DatabaseSync, groupId: string, messageId: string): GroupMessage | null {
+    const row = db
       .prepare('SELECT * FROM group_messages WHERE group_id = ? AND id = ?')
-      .get(validateId(groupId), messageId) as unknown as MessageRow | undefined
+      .get(groupId, messageId) as unknown as MessageRow | undefined
     return row ? rowToMessage(row) : null
   }
 
@@ -643,20 +714,21 @@ export class BotsStore {
     messageId: string,
     patch: { status: GroupAskPayload['status']; answers?: AskAnswer[] }
   ): GroupMessage | null {
-    const msg = this.getMessage(project, groupId, messageId)
-    if (!msg) return null
-    const ask = parseGroupAsk(msg.content)
-    if (!ask) return null
-    const next: GroupAskPayload = {
-      ...ask,
-      status: patch.status,
-      ...(patch.answers ? { answers: patch.answers } : {})
-    }
-    const content = JSON.stringify(next)
-    this.projectDb(project)
-      .prepare('UPDATE group_messages SET content = ? WHERE id = ?')
-      .run(content, messageId)
-    return { ...msg, content }
+    const clean = validateId(groupId)
+    return this.withExistingProjectDb<GroupMessage | null>(project, null, (db) => {
+      const msg = this.messageOn(db, clean, messageId)
+      if (!msg) return null
+      const ask = parseGroupAsk(msg.content)
+      if (!ask) return null
+      const next: GroupAskPayload = {
+        ...ask,
+        status: patch.status,
+        ...(patch.answers ? { answers: patch.answers } : {})
+      }
+      const content = JSON.stringify(next)
+      db.prepare('UPDATE group_messages SET content = ? WHERE id = ?').run(content, messageId)
+      return { ...msg, content }
+    })
   }
 
   /**
@@ -668,56 +740,66 @@ export class BotsStore {
     project: string,
     keepIds: Set<string>
   ): { groupId: string; message: GroupMessage }[] {
-    const db = this.projectDb(project)
-    const rows = db
-      .prepare("SELECT * FROM group_messages WHERE sender_kind = 'ask' ORDER BY seq ASC")
-      .all() as unknown as MessageRow[]
-    const updated: { groupId: string; message: GroupMessage }[] = []
-    for (const row of rows) {
-      const msg = rowToMessage(row)
-      const ask = parseGroupAsk(msg.content)
-      if (!ask || ask.status !== 'pending' || keepIds.has(msg.id)) continue
-      const content = JSON.stringify({ ...ask, status: 'cancelled' } satisfies GroupAskPayload)
-      db.prepare('UPDATE group_messages SET content = ? WHERE id = ?').run(content, msg.id)
-      updated.push({ groupId: row.group_id, message: { ...msg, content } })
-    }
-    return updated
+    return this.withExistingProjectDb<{ groupId: string; message: GroupMessage }[]>(
+      project,
+      [],
+      (db) => {
+        const rows = db
+          .prepare("SELECT * FROM group_messages WHERE sender_kind = 'ask' ORDER BY seq ASC")
+          .all() as unknown as MessageRow[]
+        const updated: { groupId: string; message: GroupMessage }[] = []
+        for (const row of rows) {
+          const msg = rowToMessage(row)
+          const ask = parseGroupAsk(msg.content)
+          if (!ask || ask.status !== 'pending' || keepIds.has(msg.id)) continue
+          const content = JSON.stringify({ ...ask, status: 'cancelled' } satisfies GroupAskPayload)
+          db.prepare('UPDATE group_messages SET content = ? WHERE id = ?').run(content, msg.id)
+          updated.push({ groupId: row.group_id, message: { ...msg, content } })
+        }
+        return updated
+      }
+    )
   }
 
   setSummary(project: string, groupId: string, summary: string, upToSeq: number): void {
-    this.projectDb(project)
-      .prepare('UPDATE group_chats SET summary = ?, summarized_up_to_seq = ? WHERE group_id = ?')
-      .run(summary, upToSeq, groupId)
+    this.withProjectDb(project, (db) => {
+      db.prepare(
+        'UPDATE group_chats SET summary = ?, summarized_up_to_seq = ? WHERE group_id = ?'
+      ).run(summary, upToSeq, groupId)
+    })
   }
 
   /** Advance the per-group cursor marking messages already folded into bot memory extraction. */
   setMemorizedUpTo(project: string, groupId: string, upToSeq: number): void {
-    this.projectDb(project)
-      .prepare('UPDATE group_chats SET memorized_up_to_seq = ? WHERE group_id = ?')
-      .run(upToSeq, groupId)
+    this.withProjectDb(project, (db) => {
+      db.prepare('UPDATE group_chats SET memorized_up_to_seq = ? WHERE group_id = ?').run(
+        upToSeq,
+        groupId
+      )
+    })
   }
 
   // ---- bot memories (per project) ----
 
   listMemories(project: string, botId?: string): BotMemoryEntry[] {
-    const db = this.projectDb(project)
-    const rows = botId
-      ? (db
+    return this.withExistingProjectDb<BotMemoryEntry[]>(project, [], (db) =>
+      this.memoriesOn(db, botId)
+    )
+  }
+
+  private memoriesOn(db: DatabaseSync, botId?: string): BotMemoryEntry[] {
+    const rows = (botId
+      ? db
           .prepare('SELECT * FROM bot_memories WHERE bot_id = ? ORDER BY created_at ASC, id ASC')
-          .all(botId) as unknown as {
-          id: string
-          bot_id: string
-          content: string
-          created_at: number
-        }[])
-      : (db
+          .all(botId)
+      : db
           .prepare('SELECT * FROM bot_memories ORDER BY bot_id, created_at ASC, id ASC')
-          .all() as unknown as {
-          id: string
-          bot_id: string
-          content: string
-          created_at: number
-        }[])
+          .all()) as unknown as {
+      id: string
+      bot_id: string
+      content: string
+      created_at: number
+    }[]
     return rows.map((r) => ({
       id: r.id,
       botId: r.bot_id,
@@ -731,24 +813,27 @@ export class BotsStore {
    * outputs the complete updated memory), deduped case-insensitively and capped.
    */
   saveMemories(project: string, botId: string, fresh: string[]): BotMemoryEntry[] {
-    const db = this.projectDb(project)
     const merged = mergeMemoryEntries([], fresh, MAX_MEMORY_ENTRIES)
-    db.prepare('DELETE FROM bot_memories WHERE bot_id = ?').run(botId)
-    const insert = db.prepare(
-      'INSERT INTO bot_memories (bot_id, id, content, created_at) VALUES (?, ?, ?, ?)'
-    )
-    const now = Date.now()
-    merged.forEach((content, i) => {
-      insert.run(botId, `${now}-${i}`, content, now)
+    return this.withProjectDb(project, (db) => {
+      db.prepare('DELETE FROM bot_memories WHERE bot_id = ?').run(botId)
+      const insert = db.prepare(
+        'INSERT INTO bot_memories (bot_id, id, content, created_at) VALUES (?, ?, ?, ?)'
+      )
+      const now = Date.now()
+      merged.forEach((content, i) => {
+        insert.run(botId, `${now}-${i}`, content, now)
+      })
+      return this.memoriesOn(db, botId)
     })
-    return this.listMemories(project, botId)
   }
 
   deleteMemory(project: string, botId: string, memoryId: string): boolean {
-    const info = this.projectDb(project)
-      .prepare('DELETE FROM bot_memories WHERE bot_id = ? AND id = ?')
-      .run(botId, memoryId)
-    return info.changes > 0
+    return this.withExistingProjectDb<boolean>(project, false, (db) => {
+      const info = db
+        .prepare('DELETE FROM bot_memories WHERE bot_id = ? AND id = ?')
+        .run(botId, memoryId)
+      return info.changes > 0
+    })
   }
 
   // ---- background task queue (single-flight per bot) ----
@@ -772,12 +857,11 @@ export class BotsStore {
       status: 'queued',
       createdAt: Date.now()
     }
-    this.projectDb(project)
-      .prepare(
+    this.withProjectDb(project, (db) => {
+      db.prepare(
         `INSERT INTO bot_task_queue (queue_id, group_id, bot_id, run_id, title, task, requested_by, origin_msg, status, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
+      ).run(
         full.queueId,
         full.groupId,
         full.botId,
@@ -789,38 +873,49 @@ export class BotsStore {
         'queued',
         full.createdAt
       )
+    })
     return full
   }
 
   listQueue(project: string, groupId?: string): BotTaskQueueItem[] {
-    const rows = groupId
-      ? (this.projectDb(project)
-          .prepare('SELECT * FROM bot_task_queue WHERE group_id = ? ORDER BY created_at ASC')
-          .all(groupId) as unknown as QueueRow[])
-      : (this.projectDb(project)
-          .prepare('SELECT * FROM bot_task_queue ORDER BY created_at ASC')
-          .all() as unknown as QueueRow[])
-    return rows.map(rowToQueueItem)
+    return this.withExistingProjectDb<BotTaskQueueItem[]>(project, [], (db) => {
+      const rows = groupId
+        ? (db
+            .prepare('SELECT * FROM bot_task_queue WHERE group_id = ? ORDER BY created_at ASC')
+            .all(groupId) as unknown as QueueRow[])
+        : (db
+            .prepare('SELECT * FROM bot_task_queue ORDER BY created_at ASC')
+            .all() as unknown as QueueRow[])
+      return rows.map(rowToQueueItem)
+    })
   }
 
   /** Oldest still-queued task for a bot across the whole project (single-flight). */
   nextQueuedTask(project: string, botId: string): BotTaskQueueItem | null {
-    const row = this.projectDb(project)
-      .prepare(
-        "SELECT * FROM bot_task_queue WHERE bot_id = ? AND status = 'queued' ORDER BY created_at ASC LIMIT 1"
-      )
-      .get(botId) as unknown as QueueRow | undefined
-    return row ? rowToQueueItem(row) : null
+    return this.withExistingProjectDb<BotTaskQueueItem | null>(project, null, (db) => {
+      const row = db
+        .prepare(
+          "SELECT * FROM bot_task_queue WHERE bot_id = ? AND status = 'queued' ORDER BY created_at ASC LIMIT 1"
+        )
+        .get(botId) as unknown as QueueRow | undefined
+      return row ? rowToQueueItem(row) : null
+    })
   }
 
   setTaskRunning(project: string, queueId: string, runId: string): void {
-    this.projectDb(project)
-      .prepare("UPDATE bot_task_queue SET status = 'running', run_id = ? WHERE queue_id = ?")
-      .run(runId, queueId)
+    this.withProjectDb(project, (db) => {
+      db.prepare("UPDATE bot_task_queue SET status = 'running', run_id = ? WHERE queue_id = ?").run(
+        runId,
+        queueId
+      )
+    })
   }
 
   finishTask(project: string, queueId: string): void {
-    this.projectDb(project).prepare('DELETE FROM bot_task_queue WHERE queue_id = ?').run(queueId)
+    this.withExistingProjectDb<boolean>(project, false, (db) => {
+      const info = db.prepare('DELETE FROM bot_task_queue WHERE queue_id = ?').run(queueId)
+      return info.changes > 0
+    })
   }
 
   /**
@@ -828,7 +923,10 @@ export class BotsStore {
    * is dropped — its run is already marked cancelled by the module manager's crash recovery.
    */
   reconcileQueue(project: string): void {
-    this.projectDb(project).prepare("DELETE FROM bot_task_queue WHERE status = 'running'").run()
+    if (!this.hasProjectDb(project)) return
+    this.withProjectDb(project, (db) => {
+      db.prepare("DELETE FROM bot_task_queue WHERE status = 'running'").run()
+    })
   }
 
   // ---- per-group AI trace (JSONL, append-only) ----

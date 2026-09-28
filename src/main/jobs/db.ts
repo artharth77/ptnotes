@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
-import { mkdirSync, promises as fs } from 'fs'
+import { existsSync, mkdirSync, promises as fs } from 'fs'
 import type {
   JobScope,
   ScheduleCondition,
@@ -47,6 +47,33 @@ interface RunRow {
 }
 
 const VALID_DAYS = new Set([0, 1, 2, 3, 4, 5, 6])
+
+const JOBS_DDL = `CREATE TABLE IF NOT EXISTS jobs (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  days TEXT NOT NULL,
+  time_rule TEXT NOT NULL,
+  condition TEXT NOT NULL DEFAULT 'exact',
+  prompt TEXT NOT NULL DEFAULT '',
+  language TEXT,
+  scope TEXT NOT NULL DEFAULT 'project',
+  next_run_at INTEGER,
+  last_run_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS job_runs (
+  run_id TEXT PRIMARY KEY,
+  job_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  finished_at INTEGER,
+  status TEXT NOT NULL,
+  notice TEXT,
+  error TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_job_runs_started ON job_runs (started_at);`
 
 function parseDays(raw: string | null): number[] {
   try {
@@ -100,9 +127,14 @@ function rowToRun(r: RunRow): ScheduleJobRun {
  * (jobs + run history) plus append-only AI trace files in
  * `<project>/.data/jobs/traces/<runId>.trace.jsonl`. Global-scope jobs use the
  * empty project key and live in the root-level `<root>/.data/jobs/` instead.
+ *
+ * The DB is opened for a single call and closed straight after it, so no handle,
+ * lock or journal sidecar is kept between calls and a cloud drive can sync the
+ * file. `journal_mode = DELETE` (converted from WAL on open) keeps the
+ * `jobs.db-wal` / `jobs.db-shm` sidecars from ever existing — WAL is unusable on
+ * network/replicated filesystems anyway.
  */
 export class JobsStore {
-  private readonly projectDbs = new Map<string, DatabaseSync>()
   private getRoot: () => string
 
   constructor(getRoot: () => string) {
@@ -110,87 +142,71 @@ export class JobsStore {
   }
 
   setRootDir(root: string): void {
-    this.closeAllProjects()
     this.getRoot = () => root
-  }
-
-  closeAllProjects(): void {
-    for (const db of this.projectDbs.values()) {
-      try {
-        db.close()
-      } catch {
-        // already closed
-      }
-    }
-    this.projectDbs.clear()
-  }
-
-  closeAll(): void {
-    this.closeAllProjects()
   }
 
   private jobsDir(project: string): string {
     return join(this.getRoot(), project, '.data', 'jobs')
   }
 
-  private projectDb(project: string): DatabaseSync {
-    const existing = this.projectDbs.get(project)
-    if (existing) return existing
-    const dir = this.jobsDir(project)
-    mkdirSync(dir, { recursive: true })
-    const db = new DatabaseSync(join(dir, 'jobs.db'))
-    db.exec('PRAGMA journal_mode = WAL;')
-    db.exec(`CREATE TABLE IF NOT EXISTS jobs (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      enabled INTEGER NOT NULL DEFAULT 1,
-      days TEXT NOT NULL,
-      time_rule TEXT NOT NULL,
-      condition TEXT NOT NULL DEFAULT 'exact',
-      prompt TEXT NOT NULL DEFAULT '',
-      language TEXT,
-      scope TEXT NOT NULL DEFAULT 'project',
-      next_run_at INTEGER,
-      last_run_at INTEGER,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS job_runs (
-      run_id TEXT PRIMARY KEY,
-      job_id TEXT NOT NULL,
-      title TEXT NOT NULL,
-      started_at INTEGER NOT NULL,
-      finished_at INTEGER,
-      status TEXT NOT NULL,
-      notice TEXT,
-      error TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_job_runs_started ON job_runs (started_at);`)
-    // Migration: pre-global-scope DBs lack the `scope` column.
-    const cols = db.prepare('PRAGMA table_info(jobs)').all() as unknown as Array<{ name: string }>
-    if (!cols.some((c) => c.name === 'scope')) {
-      db.exec("ALTER TABLE jobs ADD COLUMN scope TEXT NOT NULL DEFAULT 'project'")
+  private dbPath(project: string): string {
+    return join(this.jobsDir(project), 'jobs.db')
+  }
+
+  private hasDb(project: string): boolean {
+    return existsSync(this.dbPath(project))
+  }
+
+  /**
+   * Open the project DB, run `fn` on it, close it again — always in a `finally`,
+   * so a throw can never leave a handle behind. Re-running the schema on every
+   * open also repairs a file replaced by a copy synced from another machine.
+   */
+  private withDb<T>(project: string, fn: (db: DatabaseSync) => T): T {
+    mkdirSync(this.jobsDir(project), { recursive: true })
+    const db = new DatabaseSync(this.dbPath(project))
+    try {
+      db.exec('PRAGMA journal_mode = DELETE;')
+      db.exec(JOBS_DDL)
+      // Migration: pre-global-scope DBs lack the `scope` column.
+      const cols = db.prepare('PRAGMA table_info(jobs)').all() as unknown as Array<{ name: string }>
+      if (!cols.some((c) => c.name === 'scope')) {
+        db.exec("ALTER TABLE jobs ADD COLUMN scope TEXT NOT NULL DEFAULT 'project'")
+      }
+      return fn(db)
+    } finally {
+      db.close()
     }
-    this.projectDbs.set(project, db)
-    return db
   }
 
-  listJobs(project: string): ScheduleJob[] {
-    const rows = this.projectDb(project)
-      .prepare('SELECT * FROM jobs ORDER BY created_at')
-      .all() as unknown as JobRow[]
-    return rows.map(rowToJob)
+  /**
+   * Reads and cleanups run only when the DB is already there: the minute-tick
+   * scheduler polls every project, and that must not stamp an empty `jobs.db`
+   * into projects that never had a job.
+   */
+  private withExistingDb<T>(project: string, fallback: T, fn: (db: DatabaseSync) => T): T {
+    return this.hasDb(project) ? this.withDb(project, fn) : fallback
   }
 
-  getJob(project: string, id: string): ScheduleJob | null {
-    const row = this.projectDb(project)
-      .prepare('SELECT * FROM jobs WHERE id = ?')
-      .get(validateId(id)) as unknown as JobRow | undefined
+  private jobOn(db: DatabaseSync, id: string): ScheduleJob | null {
+    const row = db.prepare('SELECT * FROM jobs WHERE id = ?').get(validateId(id)) as unknown as
+      JobRow | undefined
     return row ? rowToJob(row) : null
   }
 
+  listJobs(project: string): ScheduleJob[] {
+    return this.withExistingDb<ScheduleJob[]>(project, [], (db) =>
+      (db.prepare('SELECT * FROM jobs ORDER BY created_at').all() as unknown as JobRow[]).map(
+        rowToJob
+      )
+    )
+  }
+
+  getJob(project: string, id: string): ScheduleJob | null {
+    return this.withExistingDb<ScheduleJob | null>(project, null, (db) => this.jobOn(db, id))
+  }
+
   saveJob(project: string, input: ScheduleJobInput): ScheduleJob {
-    const db = this.projectDb(project)
     const now = Date.now()
     const title = String(input.title ?? '').trim()
     if (!title) throw new Error('Job title is required.')
@@ -202,31 +218,52 @@ export class JobsStore {
     const condition: ScheduleCondition = input.condition === 'next' ? 'next' : 'exact'
     const language = String(input.language ?? '').trim() || null
     const enabled = input.enabled === false ? 0 : 1
+    if (input.id && !this.hasDb(project)) throw new Error(`Job not found: ${input.id}`)
 
-    let scope: JobScope
-    if (input.id) {
-      const existing = this.getJob(project, validateId(input.id))
-      if (!existing) throw new Error(`Job not found: ${input.id}`)
-      scope = input.scope ?? existing.scope
-    } else {
-      scope = input.scope ?? 'project'
-    }
-    if (scope === 'global' && project !== GLOBAL_PROJECT_KEY) {
-      throw new Error('Global jobs must be saved under the global key.')
-    }
-    if (scope === 'project' && project === GLOBAL_PROJECT_KEY) {
-      throw new Error('Project jobs must be saved under a project key.')
-    }
+    return this.withDb(project, (db) => {
+      let scope: JobScope
+      if (input.id) {
+        const existing = this.jobOn(db, validateId(input.id))
+        if (!existing) throw new Error(`Job not found: ${input.id}`)
+        scope = input.scope ?? existing.scope
+      } else {
+        scope = input.scope ?? 'project'
+      }
+      if (scope === 'global' && project !== GLOBAL_PROJECT_KEY) {
+        throw new Error('Global jobs must be saved under the global key.')
+      }
+      if (scope === 'project' && project === GLOBAL_PROJECT_KEY) {
+        throw new Error('Project jobs must be saved under a project key.')
+      }
 
-    if (input.id) {
-      const id = validateId(input.id)
-      const nextRun =
-        condition === 'next'
-          ? (input.conditionMeta?.nextRunAt ?? this.getJob(project, id)!.nextRunAt ?? null)
-          : null
+      if (input.id) {
+        const id = validateId(input.id)
+        const nextRun =
+          condition === 'next'
+            ? (input.conditionMeta?.nextRunAt ?? this.jobOn(db, id)!.nextRunAt ?? null)
+            : null
+        db.prepare(
+          `UPDATE jobs SET title = ?, enabled = ?, days = ?, time_rule = ?, condition = ?, prompt = ?, language = ?, scope = ?, next_run_at = ?, updated_at = ? WHERE id = ?`
+        ).run(
+          title,
+          enabled,
+          JSON.stringify(days),
+          JSON.stringify(rule),
+          condition,
+          prompt,
+          language,
+          scope,
+          nextRun,
+          now,
+          id
+        )
+        return this.jobOn(db, id)!
+      }
+      const id = randomUUID()
       db.prepare(
-        `UPDATE jobs SET title = ?, enabled = ?, days = ?, time_rule = ?, condition = ?, prompt = ?, language = ?, scope = ?, next_run_at = ?, updated_at = ? WHERE id = ?`
+        `INSERT INTO jobs (id, title, enabled, days, time_rule, condition, prompt, language, scope, next_run_at, last_run_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
+        id,
         title,
         enabled,
         JSON.stringify(days),
@@ -235,50 +272,35 @@ export class JobsStore {
         prompt,
         language,
         scope,
-        nextRun,
+        condition === 'next' ? (input.conditionMeta?.nextRunAt ?? null) : null,
+        null,
         now,
-        id
+        now
       )
-      return this.getJob(project, id)!
-    }
-    const id = randomUUID()
-    db.prepare(
-      `INSERT INTO jobs (id, title, enabled, days, time_rule, condition, prompt, language, scope, next_run_at, last_run_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      id,
-      title,
-      enabled,
-      JSON.stringify(days),
-      JSON.stringify(rule),
-      condition,
-      prompt,
-      language,
-      scope,
-      condition === 'next' ? (input.conditionMeta?.nextRunAt ?? null) : null,
-      null,
-      now,
-      now
-    )
-    return this.getJob(project, id)!
+      return this.jobOn(db, id)!
+    })
   }
 
   setJobEnabled(project: string, id: string, enabled: boolean): ScheduleJob {
     const clean = validateId(id)
-    const db = this.projectDb(project)
-    const info = db
-      .prepare('UPDATE jobs SET enabled = ?, updated_at = ? WHERE id = ?')
-      .run(enabled ? 1 : 0, Date.now(), clean)
-    if (info.changes === 0) throw new Error(`Job not found: ${id}`)
-    return this.getJob(project, clean)!
+    if (!this.hasDb(project)) throw new Error(`Job not found: ${id}`)
+    return this.withDb(project, (db) => {
+      const info = db
+        .prepare('UPDATE jobs SET enabled = ?, updated_at = ? WHERE id = ?')
+        .run(enabled ? 1 : 0, Date.now(), clean)
+      if (info.changes === 0) throw new Error(`Job not found: ${id}`)
+      return this.jobOn(db, clean)!
+    })
   }
 
   /** Record a run; `nextRunAt === undefined` keeps the stored next fire time. */
   setLastRun(project: string, id: string, at: number, nextRunAt?: number | null): void {
-    this.projectDb(project)
-      .prepare(
+    const clean = validateId(id)
+    this.withDb(project, (db) => {
+      db.prepare(
         'UPDATE jobs SET last_run_at = ?, next_run_at = COALESCE(?, next_run_at) WHERE id = ?'
-      )
-      .run(at || Date.now(), nextRunAt ?? null, validateId(id))
+      ).run(at || Date.now(), nextRunAt ?? null, clean)
+    })
   }
 
   deleteJob(project: string, id: string): Promise<boolean> {
@@ -288,20 +310,23 @@ export class JobsStore {
   /** Delete a job, its run rows, and all of its run trace files. */
   async deleteJobWithTraces(project: string, id: string): Promise<boolean> {
     const clean = validateId(id)
-    const db = this.projectDb(project)
-    const runIds = (
-      db.prepare('SELECT run_id FROM job_runs WHERE job_id = ?').all(clean) as unknown as Array<{
-        run_id: string
-      }>
-    ).map((r) => r.run_id)
-    const info = db.prepare('DELETE FROM jobs WHERE id = ?').run(clean)
-    if (info.changes > 0) {
-      db.prepare('DELETE FROM job_runs WHERE job_id = ?').run(clean)
-      for (const runId of runIds) {
-        await fs.rm(this.tracePath(project, runId), { force: true }).catch(() => {})
-      }
+    if (!this.hasDb(project)) return false
+    // All DB work happens in one synchronous block; the trace files are removed
+    // afterwards so no handle is open across an await.
+    const { deleted, runIds } = this.withDb(project, (db) => {
+      const runIds = (
+        db.prepare('SELECT run_id FROM job_runs WHERE job_id = ?').all(clean) as unknown as Array<{
+          run_id: string
+        }>
+      ).map((r) => r.run_id)
+      const info = db.prepare('DELETE FROM jobs WHERE id = ?').run(clean)
+      if (info.changes > 0) db.prepare('DELETE FROM job_runs WHERE job_id = ?').run(clean)
+      return { deleted: info.changes > 0, runIds: info.changes > 0 ? runIds : [] }
+    })
+    for (const runId of runIds) {
+      await fs.rm(this.tracePath(project, runId), { force: true }).catch(() => {})
     }
-    return info.changes > 0
+    return deleted
   }
 
   /**
@@ -333,7 +358,6 @@ export class JobsStore {
   }
 
   startRun(project: string, jobId: string, title: string, at = Date.now()): ScheduleJobRun {
-    const db = this.projectDb(project)
     const run: ScheduleJobRun = {
       runId: randomUUID(),
       jobId: validateId(jobId),
@@ -341,9 +365,11 @@ export class JobsStore {
       startedAt: at,
       status: 'running'
     }
-    db.prepare(
-      `INSERT INTO job_runs (run_id, job_id, title, started_at, finished_at, status, notice, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(run.runId, run.jobId, run.title, run.startedAt, null, 'running', null, null)
+    this.withDb(project, (db) => {
+      db.prepare(
+        `INSERT INTO job_runs (run_id, job_id, title, started_at, finished_at, status, notice, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(run.runId, run.jobId, run.title, run.startedAt, null, 'running', null, null)
+    })
     return run
   }
 
@@ -353,34 +379,41 @@ export class JobsStore {
     status: ScheduleJobRun['status'],
     extra?: { notice?: string; error?: string }
   ): void {
-    this.projectDb(project)
-      .prepare(
+    const clean = validateId(runId)
+    this.withDb(project, (db) => {
+      db.prepare(
         `UPDATE job_runs SET finished_at = ?, status = ?, notice = ?, error = ? WHERE run_id = ?`
-      )
-      .run(Date.now(), status, extra?.notice ?? null, extra?.error ?? null, validateId(runId))
+      ).run(Date.now(), status, extra?.notice ?? null, extra?.error ?? null, clean)
+    })
   }
 
   /** Mark runs still 'running' as cancelled — crash recovery on first open of a project. */
   reconcileRuns(project: string): void {
-    this.projectDb(project)
-      .prepare(
+    if (!this.hasDb(project)) return
+    this.withDb(project, (db) => {
+      db.prepare(
         `UPDATE job_runs SET finished_at = ?, status = 'cancelled', error = 'interrupted' WHERE status = 'running' AND started_at < ?`
-      )
-      .run(Date.now(), Date.now() - 24 * 60 * 60 * 1000)
+      ).run(Date.now(), Date.now() - 24 * 60 * 60 * 1000)
+    })
   }
 
   listRuns(project: string, jobId: string, limit = 5): ScheduleJobRun[] {
-    const rows = this.projectDb(project)
-      .prepare('SELECT * FROM job_runs WHERE job_id = ? ORDER BY started_at DESC LIMIT ?')
-      .all(validateId(jobId), limit) as unknown as RunRow[]
-    return rows.map(rowToRun)
+    const clean = validateId(jobId)
+    return this.withExistingDb<ScheduleJobRun[]>(project, [], (db) =>
+      (
+        db
+          .prepare('SELECT * FROM job_runs WHERE job_id = ? ORDER BY started_at DESC LIMIT ?')
+          .all(clean, limit) as unknown as RunRow[]
+      ).map(rowToRun)
+    )
   }
 
   listAllRuns(project: string): ScheduleJobRun[] {
-    const rows = this.projectDb(project)
-      .prepare('SELECT * FROM job_runs ORDER BY started_at')
-      .all() as unknown as RunRow[]
-    return rows.map(rowToRun)
+    return this.withExistingDb<ScheduleJobRun[]>(project, [], (db) =>
+      (db.prepare('SELECT * FROM job_runs ORDER BY started_at').all() as unknown as RunRow[]).map(
+        rowToRun
+      )
+    )
   }
 
   readRunTraceByRunId(project: string, runId: string): Promise<AiTraceFile | null> {
@@ -444,16 +477,20 @@ export class JobsStore {
   /** Delete run rows older than cutoff together with their trace files. */
   async purgeRuns(project: string, runIds: string[]): Promise<number> {
     if (runIds.length === 0) return 0
-    const db = this.projectDb(project)
-    const del = db.prepare('DELETE FROM job_runs WHERE run_id = ?')
-    let removed = 0
-    for (const runId of runIds) {
-      try {
-        del.run(validateId(runId))
-        removed++
-      } catch {
-        // skip invalid ids
+    const removed = this.withExistingDb<number>(project, 0, (db) => {
+      const del = db.prepare('DELETE FROM job_runs WHERE run_id = ?')
+      let count = 0
+      for (const runId of runIds) {
+        try {
+          del.run(validateId(runId))
+          count++
+        } catch {
+          // skip invalid ids
+        }
       }
+      return count
+    })
+    for (const runId of runIds) {
       await fs.rm(this.tracePath(project, runId), { force: true }).catch(() => {})
     }
     return removed
