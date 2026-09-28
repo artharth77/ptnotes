@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.24.1] - 2026-09-28
+
+### Fixed
+
+- **Duplicate `@napi-rs/canvas` in the built app (~25 MB)** — `pdfjs-dist` pins `@napi-rs/canvas ^0.1.80` while PTNotes uses `^1.0.5`, so npm installed a second copy (0.1.100) under `pdfjs-dist/node_modules` with its own `skia.*.node` binary, and both were shipped: `app.asar.unpacked` carried 52 MB of the 56 MB total. An npm `overrides` entry now makes `pdfjs-dist` resolve the single root copy (pdf.js only needs `createCanvas`/`DOMMatrix`/`ImageData`/`Path2D`, and PTNotes already supplies its own `CanvasFactory` and pre-sets those globals), and the `electron-builder` exclusion `!**/node_modules/pdfjs-dist/node_modules` — which never matched a single file, because excludes are matched per file and electron-builder appends a trailing slash to `…/node_modules` paths — now ends in `/**` as a guard. The packaged app's `app.asar.unpacked` drops from 56 MB to 31 MB.
+
 ## [0.24.0] - 2026-09-27
 
 ### Added
