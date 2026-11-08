@@ -10,7 +10,7 @@ PTNotes is a desktop app (Electron) for markdown notes, kanban task boards, proj
 
 ## Stack
 
-- Electron 39 + electron-vite 5 + Vite 7
+- Electron 44 + electron-vite 5 + Vite 7
 - React 19 + TypeScript
 - TipTap v3 (markdown in/out via `@tiptap/markdown`)
 - zustand (app state)
