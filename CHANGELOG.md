@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.24.2] - 2026-11-08
+
+### Changed
+
+- **Electron 44.3.0 → 44.10.2** — a patch-level runtime upgrade within Electron 44: Chromium 152, Node.js 24 (ABI 149) and V8 15.2 are unchanged, so `@types/node` 24 stays aligned and `electron-builder` / `electron-vite` need no changes. No app-facing API changes; the macOS 13 (Ventura) minimum is unchanged.
+
 ## [0.24.1] - 2026-09-28
 
 ### Fixed
