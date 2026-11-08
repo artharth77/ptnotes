@@ -224,7 +224,6 @@ function initColumnOrder(saved: string[] | undefined): PlannerColumnKey[] {
 
 function initVisibleCols(saved: Record<string, boolean> | undefined): Set<PlannerColumnKey> {
   const defaults: Record<string, boolean> = {
-    owner: false,
     actualStart: false,
     actualEnd: false
   }

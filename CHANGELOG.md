@@ -6,6 +6,10 @@
 
 - **Electron 44.3.0 → 44.10.2** — a patch-level runtime upgrade within Electron 44: Chromium 152, Node.js 24 (ABI 149) and V8 15.2 are unchanged, so `@types/node` 24 stays aligned and `electron-builder` / `electron-vite` need no changes. No app-facing API changes; the macOS 13 (Ventura) minimum is unchanged.
 
+### Fixed
+
+- **Planner: the Owner column is visible by default on a new schedule** — a newly created schedule (planner panel, app menu, or the AI `create_schedule` tool) started with the Owner column hidden, so owners were only discoverable through the **Columns** dialog. Owner now starts visible right after Status; it remains per-schedule and can still be turned off there (the choice is saved when the dialog closes), and schedules that already saved their column visibility keep it unchanged. Since the Excel export follows the visible columns, new schedules' exports now include Owner as well.
+
 ## [0.24.1] - 2026-09-28
 
 ### Fixed
