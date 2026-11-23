@@ -45,6 +45,7 @@ import type {
   NewGroupInput,
   NewKanbanCardInput,
   NewKanbanColumnInput,
+  NoteExportResult,
   NoteMeta,
   NoteSearchMatch,
   PdfExtractResult,
@@ -123,6 +124,8 @@ export function createApi(t: Transport) {
         invoke('notes:rename', project, id, newTitle),
       delete: (project: string, id: string): Promise<void> => invoke('notes:delete', project, id),
       reveal: (project: string, id: string): Promise<void> => invoke('notes:reveal', project, id),
+      export: (project: string, id: string): Promise<NoteExportResult> =>
+        invoke('notes:export', project, id),
       setStarred: (project: string, id: string, starred: boolean): Promise<NoteMeta[]> =>
         invoke('notes:setStarred', project, id, starred),
       search: (project: string, query: string): Promise<NoteSearchMatch[]> =>

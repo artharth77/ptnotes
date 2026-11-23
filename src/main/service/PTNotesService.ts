@@ -2,6 +2,7 @@ import { promises as fs, type Dirent } from 'fs'
 import { createHash, randomUUID } from 'crypto'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'path'
 import { app } from 'electron'
+import JSZip from 'jszip'
 import { getPlatform } from '../platform'
 import type {
   AiTraceEntry,
@@ -51,6 +52,7 @@ import {
 } from '@shared/kanban'
 import { slugify } from '@shared/slug'
 import { isImageFile } from '@shared/filesExplorer'
+import { extractNoteImageRefs } from '@shared/noteExport'
 import {
   applyDependencies,
   countTasks,
@@ -111,6 +113,12 @@ This is your first note. Everything you write here is stored as markdown in:
 - Use the **Kanban** tab to keep track of your tasks.
 - Open the **AI assistant** (💬 chat icon, top-right) to create or update notes and kanban cards, or research the web and save the findings here.
 `
+
+export interface NoteExportPayload {
+  data: Buffer
+  fileName: string
+  mime: string
+}
 
 export class PTNotesService {
   private rootDir: string
@@ -654,6 +662,41 @@ export class PTNotesService {
     } catch {
       return ''
     }
+  }
+
+  /**
+   * Export payload for a note: the markdown alone, or a zip holding it plus
+   * every existing gallery image (`images/...`) it references.
+   */
+  async buildNoteExport(project: string, noteId: string): Promise<NoteExportPayload> {
+    const safeId = validateNoteId(noteId)
+    let markdown: string
+    try {
+      markdown = await fs.readFile(this.notePath(project, safeId), 'utf8')
+    } catch {
+      throw new Error(`Note "${safeId}" not found`)
+    }
+    const notesDir = this.notesDir(project)
+    const images: { ref: string; data: Buffer }[] = []
+    for (const ref of extractNoteImageRefs(markdown)) {
+      const abs = resolve(notesDir, ref)
+      if (!isInside(notesDir, abs) || !isImageFile(abs)) continue
+      const stat = await fs.stat(abs).catch(() => null)
+      if (!stat?.isFile()) continue
+      images.push({ ref, data: await fs.readFile(abs) })
+    }
+    if (images.length === 0) {
+      return {
+        data: Buffer.from(markdown, 'utf8'),
+        fileName: `${safeId}.md`,
+        mime: 'text/markdown; charset=utf-8'
+      }
+    }
+    const zip = new JSZip()
+    zip.file(`${safeId}.md`, markdown)
+    for (const image of images) zip.file(image.ref, image.data)
+    const data = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
+    return { data, fileName: `${safeId}.zip`, mime: 'application/zip' }
   }
 
   /**
@@ -2192,7 +2235,8 @@ export class PTNotesService {
           ...schedule,
           tasks: rollupScheduleTasks(
             applyDependencies(stripInvalidLinks(schedule.tasks).tasks, calendar).tasks,
-            calendar
+            calendar,
+            schedule.percentBasis
           ),
           updatedAt: Date.now()
         })

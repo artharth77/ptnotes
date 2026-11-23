@@ -54,6 +54,9 @@ function isExportPayload(p: unknown): p is PlannerExportPayload {
   )
     return false
   if (o.ganttMode !== 'none' && o.ganttMode !== 'day' && o.ganttMode !== 'week') return false
+  if (o.percentBasis !== undefined && o.percentBasis !== 'time' && o.percentBasis !== 'cost') {
+    return false
+  }
   return true
 }
 

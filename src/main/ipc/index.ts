@@ -1,7 +1,13 @@
 import { rpc, type InvokeCtx } from '../rpc/registry'
+import type { SaveDialogOptions } from 'electron'
+import { app } from 'electron'
+import { join } from 'path'
+import { writeFile } from 'fs/promises'
 
 import type { PTNotesService } from '../service/PTNotesService'
-import type { AiTraceFile, ChatThread } from '@shared/types'
+import { emitClientAction } from '../platform'
+import { putBlob } from '../rpc/blobs'
+import type { AiTraceFile, ChatThread, NoteExportResult } from '@shared/types'
 
 export function registerProjectIpc(service: PTNotesService): void {
   rpc.handle('projects:list', async () => service.listProjects())
@@ -36,6 +42,32 @@ export function registerNoteIpc(service: PTNotesService): void {
   )
   rpc.handle('notes:reveal', async (_e: InvokeCtx, project: string, noteId: string) =>
     service.revealNoteInFolder(project, noteId)
+  )
+  rpc.handle(
+    'notes:export',
+    async (ctx: InvokeCtx, project: string, noteId: string): Promise<NoteExportResult> => {
+      try {
+        const { data, fileName, mime } = await service.buildNoteExport(project, noteId)
+        if (ctx.platform.mode === 'web') {
+          emitClientAction({ kind: 'download', url: putBlob(data, mime, fileName) })
+          return { ok: true, path: fileName }
+        }
+        const zip = fileName.endsWith('.zip')
+        const options: SaveDialogOptions = {
+          title: zip ? 'Export note with images' : 'Export note',
+          defaultPath: join(app.getPath('downloads'), fileName),
+          filters: zip
+            ? [{ name: 'Zip Archive', extensions: ['zip'] }]
+            : [{ name: 'Markdown', extensions: ['md'] }]
+        }
+        const filePath = await ctx.platform.showSaveDialog(options)
+        if (!filePath) return { ok: false, canceled: true }
+        await writeFile(filePath, data)
+        return { ok: true, path: filePath }
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    }
   )
   rpc.handle(
     'notes:setStarred',

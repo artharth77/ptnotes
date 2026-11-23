@@ -6,6 +6,7 @@ const OUT = '/tmp/ptnotes-planner-export-test.xlsx'
 const OUT2 = '/tmp/ptnotes-planner-export-test-2.xlsx'
 const OUT3 = '/tmp/ptnotes-planner-export-test-3.xlsx'
 const OUT4 = '/tmp/ptnotes-planner-export-test-4.xlsx'
+const OUT5 = '/tmp/ptnotes-planner-export-test-5.xlsx'
 
 const { overallPercentComplete, statusLabel } = await import('../src/shared/planner')
 const { buildPlannerExportXlsx } = await import('../src/main/planner/exportXlsx')
@@ -58,6 +59,14 @@ assert.equal(
   15,
   'plain mean when no durations'
 )
+assert.equal(
+  overallPercentComplete(
+    [mkTask({ duration: 1, percentComplete: 0 }), mkTask({ duration: 2, percentComplete: 100 })],
+    2
+  ),
+  66.67,
+  'two-decimal precision when requested'
+)
 
 // ---- workbook build + read back ----
 
@@ -65,6 +74,7 @@ await fs.rm(OUT, { force: true })
 await fs.rm(OUT2, { force: true })
 await fs.rm(OUT3, { force: true })
 await fs.rm(OUT4, { force: true })
+await fs.rm(OUT5, { force: true })
 
 const payload: PlannerExportPayload = {
   scheduleName: 'Roadmap',
@@ -453,8 +463,23 @@ assert.ok(xml4.includes('<mergeCell ref="M5:O5"/>'), 'week: Sep month band merge
 assert.ok(xml4.includes('<mergeCell ref="L8:O8"/>'), 'week: PLAN banner merged across the gantt')
 assert.ok(!xml4.includes('<mergeCell ref="L5:'), 'week: single-week Aug band is not merged')
 
+// cost basis without the Duration column: no live formula is possible, so the rolled
+// numeric value is written directly instead of a misleading plain AVERAGE
+const payloadCost: PlannerExportPayload = {
+  ...payload,
+  percentBasis: 'cost',
+  columns: payload.columns.filter((c) => c.key !== 'duration')
+}
+await buildPlannerExportXlsx(payloadCost, OUT5)
+const xmlCost = await sheetXml(OUT5)
+const costH9 = cellXml(xmlCost, 'H9')
+assert.ok(costH9, 'cost no-duration: H9 cell present')
+assert.ok(!costH9.includes('<f>'), 'cost no-duration: parent % is a plain value')
+assert.ok(costH9.includes('<v>50</v>'), 'cost no-duration: rolled value cached')
+
 await fs.rm(OUT, { force: true })
 await fs.rm(OUT2, { force: true })
 await fs.rm(OUT3, { force: true })
 await fs.rm(OUT4, { force: true })
+await fs.rm(OUT5, { force: true })
 console.log('test-planner-export: OK')

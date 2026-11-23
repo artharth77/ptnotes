@@ -1057,7 +1057,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (active) {
       const recomputed = {
         ...active,
-        tasks: rollupScheduleTasks(active.tasks, calendar),
+        tasks: rollupScheduleTasks(active.tasks, calendar, active.percentBasis),
         updatedAt: Date.now()
       }
       set({ scheduleContent: recomputed })

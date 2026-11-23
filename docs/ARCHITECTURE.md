@@ -212,7 +212,7 @@ src/
 │   ├── src/
 │   │   ├── App.tsx
 │   │   ├── webBridge.ts  # web mode: createApi(httpTransport) over fetch + EventSource (installed only when no preload ran)
-│   │   ├── uiMode.ts     # isWebUi() + reveal label/icon switching (Show in Folder → Download)
+│   │   ├── uiMode.ts     # isWebUi() + reveal/export label/icon switching (desktop action → Download in web)
 │   │   ├── store/useAppStore.ts    # zustand store (active project/note/tab, chat)
 │   │   ├── components/
 │   │   │   ├── TopBar.tsx           # project dropdown + New Project + Settings + chat toggle
@@ -298,7 +298,7 @@ src/
 The channel names and shapes below are the contract for **both** transports: the desktop preload maps them 1:1 onto `ipcRenderer`, and the web UI maps them 1:1 onto `POST /api/invoke` (see [Web UI mode](#web-ui-mode)). Add a channel in `src/shared/api.ts` (`createApi`) **and** register it with `rpc.handle` — the two must stay in step.
 
 - **Projects:** `list` (returns `pathExists` per project), `create`, `rename`, `delete`, `recreate` (rebuild folder for a project whose path is missing)
-- **Notes:** `list`, `read`, `save`, `create`, `rename`, `delete`
+- **Notes:** `list`, `read`, `save`, `create`, `rename`, `delete`; `export` builds `<note>.md`, or `<note>.zip` with the note plus its referenced gallery `images/` (native save dialog on desktop, blob download in the web UI)
 - **Kanban:** `load` (board; migrates a legacy `TODO.md` on first load and deletes it); granular mutators, each returning the updated board: cards (`createCard`, `updateCard` — may replace `comments` as a whole array, `moveCard` with in-column index, `deleteCard`), comments (`addComment`, `updateComment`, `deleteComment`), columns (`addColumn` slugified + uniqueness-checked, `updateColumn` — re-slugs and remaps the column's cards, `moveColumn`, `deleteColumn` with `move`/`delete` card mode and a ≥1-column guard); archive (`loadArchive`, `archiveCard`, `restoreCard`, `deleteArchivedCard`). All mutations run under the per-project kanban lock (atomic tmp+rename).
 - **Planner:** `list` (schedule metas), `read` (full schedule or `null`), `save` (atomic tmp+rename), `create` (slugified id), `rename`, `delete`; `getCalendar` (defaults to Mon–Fri), `saveCalendar` (normalized); `exportExcel` (validated `PlannerExportPayload` → native save dialog → ExcelJS workbook written in the main process, `{ ok, path?, canceled?, error? }`). All ids validated with `validateScheduleId` (same rule as the note-id guard). Plus `setEditActive` (renderer→main `send`: gates the main-process `before-input-event` shortcut interception) and `onUndoRedo` (main→renderer: forwards `⌘Z`/`⇧⌘Z`/`Ctrl+Y` to the planner editor — see [Editor (PlannerEditor)](#editor-plannereditor)).
 - **Snapshots:** `list(project, scheduleId)` (metas newest-first, tags merged), `read` (one snapshot's `Schedule` or `null`), `restore` (captures the current content first, then writes the snapshot back with the current id + fresh `updatedAt`), `setTag` (`null` clears), `delete` (explicit removal — the only way a tagged snapshot disappears). See [Planner snapshots](#planner-snapshots).
@@ -612,6 +612,9 @@ JSON in `<project>/planner/<slug>.json`; the whole feature is pure data — no m
   preferences: which columns are shown and their left-to-right order. `normalizeColumnOrder`
   (shared) repairs a saved order against the known keys: fixed keys first, then saved order,
   then missing keys in default order.
+- `Schedule.percentBasis` (optional, `'time'` when absent) selects the parent rollup basis:
+  `'time'` keeps the elapsed-span duration, `'cost'` makes a parent's `duration` the sum of its
+  children's durations so nested `%Complete` weighting is effort-based.
 
 ### Rules
 
@@ -625,13 +628,15 @@ JSON in `<project>/planner/<slug>.json`; the whole feature is pure data — no m
 - **Status rules** (`deriveStatus`): `On Hold` is manual only — never auto-changed. Otherwise
   `%Complete ≤ 0` → Not Started, `< 100` → In Progress, `100` → Completed. Derived on every recompute.
 - **Parent rollup** (`rollupChildren`): `planStart` = min child, `planEnd` = max child,
-  `duration` = working days between them, `%Complete` = duration-weighted mean (plain average when
-  children have no durations), `status` = derived (on-hold preserved). `rollupScheduleTasks` recurses
-  bottom-up; the editor and AI tools recompute the whole tree after every edit.
+  `duration` = working days between them in `time` mode (the default) or the sum of the direct
+  children's durations in `cost` mode, `%Complete` = duration-weighted mean (plain average when
+  children have no durations), `status` = derived (on-hold preserved). `rollupScheduleTasks`
+  recurses bottom-up; the editor and AI tools recompute the whole tree after every edit.
 - **Estimate** (`estimatePercentComplete`): the projected root `%Complete` as of a date — a leaf
   counts as 100 when it is already 100% or its `planEnd` is on/before the estimate date, otherwise
   it keeps its user-filled value (also when `planEnd` is missing); parents and the root level use
-  the same duration-weighted mean as the rollup. Read-only — never written back.
+  the same duration-weighted mean as the rollup, honouring the schedule's `percentBasis`.
+  Read-only — never written back.
 - **Owner** (`parseOwners`/`normalizeOwner`/`collectOwners`/`ownerStats`): `owner` is a
   comma-separated multi-value string. On apply (blur/Enter in the editor, `add_task`/`update_task`
   in the AI tools) it is normalized: split on commas, trim, drop empties, dedupe case-insensitively
@@ -734,7 +739,13 @@ JSON in `<project>/planner/<slug>.json`; the whole feature is pure data — no m
 - **Estimate %Completed**: toolbar button (between the move group and the View-columns group,
   separated by a divider; works in both views) opens a read-only modal showing the current root
   `%Complete`, an estimate date picker (default today), and the live-computed estimated
-  `%Complete` for that date via `estimatePercentComplete`.
+  `%Complete` for that date via `estimatePercentComplete`; both values are shown to two decimals.
+- **Percent basis**: segmented **Time / Cost** control (clock / dollar icons, immediately right of
+  the Estimate button; works in both views) switches the per-schedule rollup basis between **Time** (parent
+  `duration` = date span, default) and **Cost** (parent `duration` = sum of children,
+  effort-based nested `%Complete` weighting). The choice is stored in
+  `Schedule.percentBasis`, re-rolls the tree immediately, and participates in undo/redo and
+  snapshots.
 - **Resources**: toolbar button (`mdiAccountGroup`, immediately left of the Estimate button;
   works in both views) opens a modal with a scrollable grid of per-owner workload from
   `ownerStats` — columns **Name · Assigned · Not Started · In Progress · Completed · %Completed**
@@ -744,15 +755,18 @@ JSON in `<project>/planner/<slug>.json`; the whole feature is pure data — no m
   a **progress line** choice (Progress only / Progress + plan), and a **Gantt chart** choice
   (None / Day / Week, default Day). Export sends the visible columns/rows plus
   `progressDate` / `progressMode` / `planPercent` (the `estimatePercentComplete` projection for
-  the planner date, `null` in percent-only mode) / `ganttMode` over `planner:exportExcel`; the
-  main process writes the workbook in `src/main/planner/exportXlsx.ts` (ExcelJS) to a
-  user-chosen path via a native save dialog. Sheet layout: column-C title block (C2 schedule
+  the planner date, `null` in percent-only mode) / `ganttMode` / `percentBasis` over
+  `planner:exportExcel`; the main process writes the workbook in
+  `src/main/planner/exportXlsx.ts` (ExcelJS) to a user-chosen path via a native save dialog.
+  Sheet layout: column-C title block (C2 schedule
   name Calibri 14 bold, C3 `Date: <min plan start> - <max plan end>`, C4 `Progress date:
 <planner date>`, C5 `Progress: N%` or `Progress: N% (plan M%)`, rows 3–5 Calibri 12); the
   table from row 8 (visible columns in order, uppercased header, depth-indented titles,
   bold rows with children, root-with-children rows Blue Accent 5 Lighter 60%, status accent
   fills, `dd-mmm-yyyy` dates, `%`-suffixed numbers — parent % cells are live
-  duration-weighted-mean formulas over their direct children); 2.33-wide margin columns;
+  duration-weighted-mean formulas over their direct children; in `cost` mode the exported
+  Duration cells already hold the summed values, and the numeric rollup is written when the
+  Duration column is hidden); 2.33-wide margin columns;
   Calibri 11 + thin white borders swept across the whole styled area (the sweep stops at the
   table's right margin column when no Gantt is exported). Gantt (when enabled) starts two
   columns right of the table: **day** mode = one 2.6-wide column per day (min planStart − 7
@@ -941,7 +955,7 @@ ptnotes web --no-auth                         # no access code (trusted networks
 - **Platform services** (`src/main/platform.ts`, `platformDesktop.ts`): dialogs/reveal/open behind `PlatformServices`. Web `showOpenDialog()` → `[]` and `showSaveDialog()` → `null`, so handlers branch on `ctx.platform.mode === 'web'` and answer with `putBlob(...)` + `emitClientAction(...)`. Client actions (`download` / `open`) are collected per request through an `AsyncLocalStorage` sink set by the HTTP adapter (the handler signatures are unchanged, and desktop never collects any) and executed by the web bridge: download via a synthetic `<a download>`, open via `window.open` with a download fallback.
 - **Broadcast bus** (`src/main/rpc/bus.ts`) replaces the `BrowserWindow.getAllWindows()` loops. Desktop sink: every window (`jobs:event` `notify` still flashes the taskbar when unfocused). Web sink: every SSE client.
 - **Uploads**: `files.getPathForFile` returns `''` in a browser, so the two new channels that carry bytes instead of a path exist: `files:copyBufferToProject(project, fileName, data)` (chat + editor drops, content-checked) and `files:importDroppedData(project, destSubpath, fileName, data)` (raw explorer drop). Gallery drops and "Add images" fall back to `gallery.importData`.
-- **Renderer branches** (`src/renderer/src/uiMode.ts`, `isWebUi()`): reveal affordances relabel to **Download** with a download icon; Settings ▸ Storage edits the root path in a text field instead of opening a native picker; the gallery picker uses a hidden `<input type="file">`; `ptfile://` URLs become `/api/file?path=…` (`ptFileUrl` / `resolveImageSrc`); keyboard fallbacks for global find, menu Select All and the planner's undo/redo interception live in `webBridge.ts` (gated by the local `planner:set-edit-active` flag), and a capture-phase `contextmenu` listener cancels the browser's own menu so only the app's menus appear (Electron never showed one either).
+- **Renderer branches** (`src/renderer/src/uiMode.ts`, `isWebUi()`): reveal/export affordances relabel to **Download** with a download icon (the notes list drops Show in Folder in web mode — exporting a note, with its images when it references them, is the Download item); Settings ▸ Storage edits the root path in a text field instead of opening a native picker; the gallery picker uses a hidden `<input type="file">`; `ptfile://` URLs become `/api/file?path=…` (`ptFileUrl` / `resolveImageSrc`); keyboard fallbacks for global find, menu Select All and the planner's undo/redo interception live in `webBridge.ts` (gated by the local `planner:set-edit-active` flag), and a capture-phase `contextmenu` listener cancels the browser's own menu so only the app's menus appear (Electron never showed one either).
 - **Not run alongside the desktop UI**: don't point both at the same `--data-path` at the same time — `ptnotes-settings.json` is plain JSON with last-write-wins.
 
 ## Notes & caveats

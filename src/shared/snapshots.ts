@@ -64,7 +64,8 @@ export function canonicalScheduleString(schedule: Schedule): string {
     createdAt: schedule.createdAt,
     tasks: schedule.tasks,
     columnVisibility: schedule.columnVisibility,
-    columnOrder: schedule.columnOrder
+    columnOrder: schedule.columnOrder,
+    percentBasis: schedule.percentBasis
   })
 }
 

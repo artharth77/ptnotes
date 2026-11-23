@@ -16,3 +16,12 @@ export function revealLabel(desktopLabel: string): string {
 export function revealIcon(desktopIcon: string): string {
   return isWebUi() ? mdiDownload : desktopIcon
 }
+
+/** "Export" saves through a native dialog on desktop and downloads in the browser. */
+export function exportLabel(desktopLabel: string): string {
+  return isWebUi() ? 'Download' : desktopLabel
+}
+
+export function exportIcon(desktopIcon: string): string {
+  return isWebUi() ? mdiDownload : desktopIcon
+}

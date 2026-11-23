@@ -40,6 +40,7 @@ const {
   normalizeColumnOrder,
   normalizeOwner,
   normalizeTitleWidth,
+  overallPercentComplete,
   ownerStats,
   parseOwners,
   planIndicator,
@@ -496,6 +497,64 @@ const onHoldRollup = rollupScheduleTasks(
 )
 assert.equal(onHoldRollup[0].status, 'on-hold', 'parent on-hold preserved through rollup')
 
+// ---- cost basis rollup ----
+
+const costRolled = rollupScheduleTasks(
+  [
+    {
+      ...emptyTask(),
+      id: 'cost-parent',
+      children: [
+        mk('ca', 100, '2024-01-01', '2024-01-05'),
+        mk('cb', 50, '2024-01-01', '2024-01-05')
+      ]
+    }
+  ],
+  cal,
+  'cost'
+)
+assert.equal(costRolled[0].duration, 10, 'cost duration = sum of children durations')
+assert.equal(costRolled[0].percentComplete, 75, 'cost percent still duration-weighted')
+assert.equal(costRolled[0].planStart, '2024-01-01', 'cost mode keeps min start')
+assert.equal(costRolled[0].planEnd, '2024-01-05', 'cost mode keeps max end')
+
+const costNoDur = rollupScheduleTasks(
+  [
+    {
+      ...emptyTask(),
+      id: 'cost-no-dur',
+      children: [mk('cx', 100, null, null), mk('cy', 0, null, null)]
+    }
+  ],
+  cal,
+  'cost'
+)
+assert.equal(costNoDur[0].duration, null, 'cost duration is null when no child has one')
+assert.equal(costNoDur[0].percentComplete, 50, 'cost percent falls back to plain mean')
+
+const nestedTree = (): ScheduleTask[] => [
+  {
+    ...emptyTask(),
+    id: 'p1',
+    children: [mk('a1', 100, '2024-01-01', '2024-01-05'), mk('a2', 0, '2024-01-01', '2024-01-05')]
+  },
+  {
+    ...emptyTask(),
+    id: 'p2',
+    children: [mk('b1', 100, '2024-01-08', '2024-01-12')]
+  }
+]
+assert.equal(
+  overallPercentComplete(rollupScheduleTasks(nestedTree(), cal, 'time')),
+  75,
+  'time basis weights parallel subtrees by elapsed span'
+)
+assert.equal(
+  overallPercentComplete(rollupScheduleTasks(nestedTree(), cal, 'cost')),
+  67,
+  'cost basis weights parallel subtrees by summed duration'
+)
+
 // ---- plan indicator ----
 
 const today = '2024-01-10'
@@ -750,6 +809,26 @@ assert.equal(
   ),
   78,
   'multiple roots weighted (100*5 + 50*4) / 9'
+)
+assert.equal(
+  estimatePercentComplete(nestedTree(), '2024-01-03', 'time'),
+  75,
+  'estimate uses time basis by default'
+)
+assert.equal(
+  estimatePercentComplete(nestedTree(), '2024-01-03', 'cost'),
+  67,
+  'estimate honours the cost basis'
+)
+assert.equal(
+  estimatePercentComplete(
+    [mk('r1', 0, '2024-01-08', '2024-01-12'), mk('r2', 100, '2024-01-08', '2024-01-09')],
+    today,
+    'time',
+    2
+  ),
+  28.57,
+  'estimate supports two-decimal precision'
 )
 
 // ---- search / count / validate ----

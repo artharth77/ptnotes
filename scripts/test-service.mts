@@ -2,6 +2,8 @@ import Module from 'node:module'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import assert from 'node:assert/strict'
+import JSZip from 'jszip'
+import { extractNoteImageRefs } from '../src/shared/noteExport'
 
 const ROOT = '/tmp/ptnotes-test-root'
 
@@ -70,6 +72,42 @@ assert.equal(thaiRenamed.id, 'บันทึกใหม่')
 await service.deleteNote('Work', 'บันทึกใหม่')
 notes = await service.listNotes('Work')
 assert.equal(notes.length, 1)
+
+// Note export: gallery images referenced from the note ride along in a zip
+assert.deepEqual(
+  extractNoteImageRefs(
+    [
+      '![a](images/one.png "title")',
+      '![b](./images/two%20space.png)',
+      '<img src="images/one.png">',
+      '[link](images/three.png)',
+      '![bad](../../secret.png)',
+      '![remote](https://example.com/images/x.png)'
+    ].join('\n')
+  ),
+  ['images/one.png', 'images/two space.png', 'images/three.png'],
+  'only local gallery refs are collected, deduped'
+)
+
+const imageName = await service.importGalleryImageData(
+  'Work',
+  'shot.png',
+  Buffer.from([1, 2, 3, 4])
+)
+await service.saveNote('Work', 'welcome', `# Welcome\n\n![shot](images/${imageName})\n`)
+const bundled = await service.buildNoteExport('Work', 'welcome')
+assert.equal(bundled.fileName, 'welcome.zip')
+assert.equal(bundled.mime, 'application/zip')
+const exportZip = await JSZip.loadAsync(bundled.data)
+assert.ok(exportZip.file('welcome.md'), 'note markdown is in the zip')
+const exportedImage = exportZip.file(`images/${imageName}`)
+assert.ok(exportedImage, 'referenced image is in the zip')
+assert.deepEqual([...(await exportedImage.async('nodebuffer'))], [1, 2, 3, 4], 'image bytes match')
+
+await service.saveNote('Work', 'welcome', '![missing](images/missing.png)\n')
+const fallbackExport = await service.buildNoteExport('Work', 'welcome')
+assert.equal(fallbackExport.fileName, 'welcome.md', 'missing images fall back to markdown')
+assert.equal(await fallbackExport.data.toString('utf8'), '![missing](images/missing.png)\n')
 
 // Kanban
 let board = await service.loadKanban('Work')

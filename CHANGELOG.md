@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.25.0] - 2026-11-23
+
+### Added
+
+- **Planner: Time / Cost rollup basis** — a new per-schedule segmented control (clock / dollar icons) switches how parent rows are rolled up. **Time** (the default, unchanged) computes a parent's duration from the earliest start to the latest end and weights `%Complete` by that elapsed span; **Cost** computes a parent's duration as the sum of its direct children's durations, so nested `%Complete` weighting follows total effort instead of elapsed time. The choice is stored in the schedule (`percentBasis`), applies to the Estimate %Completed projection, the Excel export, the dashboard and the AI planner tools, and participates in undo/redo and snapshots. Existing schedules keep the time basis.
+- **Notes: export a note together with its images** — the note list context menu now has **Export…**, which saves the note to a chosen location through the native save dialog. When the note references gallery images (`images/…` in markdown or an `<img src>`), it saves `<note>.zip` containing `<note>.md` plus the referenced `images/` files, so the relative links keep working after unzipping; without image references it saves a plain `<note>.md`. Traversal, absolute and remote references are ignored, missing images fall back to the markdown file, and a cancel is a no-op. In the web UI the same action is the note's **Download** menu item (it previously downloaded the raw `.md`), served by the same `notes:export` IPC through `/api/blob`.
+
+### Changed
+
+- **Electron 44.10.2 → 44.11.5** — a patch-level runtime upgrade within Electron 44: Chromium 152.0.7977.169, V8 15.2 and the Node 24 ABI (149) are unchanged (Node itself moves 24.22.2 → 24.22.3), so `@types/node` 24, `electron-builder`, `electron-vite` and the N-API prebuilds (`@napi-rs/canvas`, `@resvg/resvg-js`) need no changes. No removed or changed app-facing APIs; the only addition is `Menu.setHighlightColors()` (Windows). Relevant fixes: non-network Web Worker requests (custom schemes, `file://`) no longer bypass `protocol.handle()` / `webRequest`, macOS default menu icons/titles survive a menu refresh, revoked `eMudhra` RSA intermediates are no longer trusted, plus upstream ANGLE / Chromium / Dawn / FFmpeg / PDFium / Skia / V8 backports. The macOS 13 (Ventura) minimum is unchanged.
+- **Planner: Estimate %Completed shows two decimals** — the current and projected values in the Estimate dialog are now computed and displayed to two decimal places (e.g. `66.67%`) instead of being rounded to whole percentages.
+
+### Fixed
+
+- **Files: PDF actions no longer leak into mixed selections** — **Manage Pages** and **Merge PDFs** are now shown only when the selection is PDFs and nothing else (a PDF mixed with any other file type, or with a folder, hides both). When the selection is all PDFs, both stay visible and enable per action: **Manage Pages** only for a single PDF, **Merge PDFs** from two PDFs up (disabled otherwise). The toolbar and the context menu use the same rule, and a row hidden by the file filter still counts toward the selection.
+
 ## [0.24.2] - 2026-11-08
 
 ### Changed
