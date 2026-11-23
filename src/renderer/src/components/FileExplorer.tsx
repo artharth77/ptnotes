@@ -794,9 +794,10 @@ export function FileListPanel(): React.JSX.Element {
     openDelete
   ])
 
+  // Use the unfiltered list so a selection hidden by the filter still counts as selected.
   const selectedEntries = useMemo(
-    () => entries.filter((e) => selected.includes(e.path)),
-    [entries, selected]
+    () => rawEntries.filter((e) => selected.includes(e.path)),
+    [rawEntries, selected]
   )
   // Web mode downloads instead of revealing, and there is no download for a folder.
   const revealDirSelected = isWebUi() && selectedEntries[0]?.isDir === true
@@ -804,6 +805,10 @@ export function FileListPanel(): React.JSX.Element {
     () => selectedEntries.filter((e) => !e.isDir && isPdfFile(e.name)),
     [selectedEntries]
   )
+  const pdfOnlySelection =
+    selectedEntries.length > 0 && selectedPdfEntries.length === selectedEntries.length
+  const canManagePages = pdfOnlySelection && selectedPdfEntries.length === 1
+  const canMergePdfs = pdfOnlySelection && selectedPdfEntries.length >= 2
   const cutPaths = clipboard?.mode === 'cut' ? clipboard.paths : null
   const canPaste = !!clipboard && clipboard.paths.length > 0
 
@@ -902,9 +907,10 @@ export function FileListPanel(): React.JSX.Element {
           <MdiIcon path={revealIcon(mdiFolderSearchOutline)} size={16} />
           <span>{revealLabel('Show in Folder')}</span>
         </button>
-        {selectedPdfEntries.length === 1 && (
+        {pdfOnlySelection && (
           <button
             className="icon-btn"
+            disabled={!canManagePages}
             onClick={openPageManager}
             title="Manage pages of the selected PDF"
           >
@@ -912,9 +918,10 @@ export function FileListPanel(): React.JSX.Element {
             <span>Manage Pages</span>
           </button>
         )}
-        {selectedPdfEntries.length >= 2 && (
+        {pdfOnlySelection && (
           <button
             className="icon-btn"
+            disabled={!canMergePdfs}
             onClick={openMergeDialog}
             title="Merge the selected PDFs into a new file"
           >
@@ -1186,9 +1193,10 @@ export function FileListPanel(): React.JSX.Element {
               </span>
               {revealLabel('Show in Folder')}
             </button>
-            {selectedPdfEntries.length === 1 && (
+            {pdfOnlySelection && (
               <button
                 className="note-menu-item"
+                disabled={!canManagePages}
                 onClick={() => {
                   closeMenu()
                   openPageManager()
@@ -1200,9 +1208,10 @@ export function FileListPanel(): React.JSX.Element {
                 Manage Pages
               </button>
             )}
-            {selectedPdfEntries.length >= 2 && (
+            {pdfOnlySelection && (
               <button
                 className="note-menu-item"
+                disabled={!canMergePdfs}
                 onClick={() => {
                   closeMenu()
                   openMergeDialog()
