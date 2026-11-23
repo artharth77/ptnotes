@@ -6,6 +6,14 @@ import { newUid } from './uid'
 
 export type ScheduleStatus = 'not-started' | 'in-progress' | 'completed' | 'pending' | 'on-hold'
 
+/**
+ * How a parent rolls up its children:
+ * - `time`: parent `duration` is the working-day span between the earliest start and latest end.
+ * - `cost`: parent `duration` is the sum of the direct children's durations (total effort), so
+ *   nested `%Complete` weighting is effort-based rather than elapsed-time-based.
+ */
+export type PercentBasis = 'time' | 'cost'
+
 /** Dependency link type: how a predecessor pins a successor's dates. */
 export type TaskLinkType = 'FS' | 'SS' | 'FF' | 'SF'
 
@@ -68,6 +76,8 @@ export interface Schedule {
   titleWidth?: ScheduleTitleWidth
   /** Per-schedule editor column width overrides (px). Absent keys use the column default. */
   columnWidth?: Record<string, number>
+  /** Per-schedule rollup basis. Absent defaults to `'time'`. */
+  percentBasis?: PercentBasis
 }
 
 /** Title-column width overrides for the planner grid/gantt views. */
@@ -100,6 +110,13 @@ export function defaultCalendar(): ProjectCalendar {
 
 function clampInt(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.round(value)))
+}
+
+/** Round a percent to `decimals` places (0 = integer). */
+function roundPercent(value: number, decimals: number): number {
+  if (decimals <= 0) return Math.round(value)
+  const factor = 10 ** decimals
+  return Math.round(value * factor) / factor
 }
 
 /** Sanitize a (possibly partial/corrupt) calendar loaded from disk into a valid one. */
@@ -313,15 +330,28 @@ export function normalizeTitleWidth(value: unknown, min: number, max: number): n
   return Math.min(max, Math.max(min, Math.round(value)))
 }
 
+/** Sum of the children's positive durations, or null when none has one. */
+function sumChildDurations(children: ScheduleTask[]): number | null {
+  let sum = 0
+  for (const child of children) {
+    if (child.duration && child.duration > 0) sum += child.duration
+  }
+  return sum > 0 ? sum : null
+}
+
 /**
  * Compute a parent's fields from its (already rolled-up) children:
  * `%Complete` = duration-weighted mean, `planStart` = min, `planEnd` = max,
- * `duration` = working days between min..max, `status` = derived (pending/on-hold preserved).
+ * `duration` = working days between min..max in `time` mode or the sum of the children's
+ * durations in `cost` mode, `status` = derived (pending/on-hold preserved).
+ * `decimals` controls the `%Complete` precision (0 = integer, the stored form).
  */
 export function rollupChildren(
   children: ScheduleTask[],
   calendar: ProjectCalendar,
-  currentStatus?: ScheduleStatus
+  currentStatus?: ScheduleStatus,
+  basis: PercentBasis = 'time',
+  decimals = 0
 ): RolledUpTask {
   if (children.length === 0) {
     return {
@@ -347,9 +377,14 @@ export function rollupChildren(
   }
   const percent =
     weightTotal > 0
-      ? Math.round(weightedPercent / weightTotal)
-      : Math.round(plainTotal / children.length)
-  const duration = minStart && maxEnd ? computeDuration(minStart, maxEnd, calendar) : null
+      ? roundPercent(weightedPercent / weightTotal, decimals)
+      : roundPercent(plainTotal / children.length, decimals)
+  const duration =
+    basis === 'cost'
+      ? sumChildDurations(children)
+      : minStart && maxEnd
+        ? computeDuration(minStart, maxEnd, calendar)
+        : null
   return {
     percentComplete: percent,
     planStart: minStart,
@@ -363,12 +398,17 @@ export function rollupChildren(
  * Roll up one task subtree (bottom-up). Leaves keep their manual fields but get an
  * auto-derived status; parents get every computed field from their (rolled) children.
  */
-export function rollupTask(task: ScheduleTask, calendar: ProjectCalendar): ScheduleTask {
-  const children = task.children.map((c) => rollupTask(c, calendar))
+export function rollupTask(
+  task: ScheduleTask,
+  calendar: ProjectCalendar,
+  basis: PercentBasis = 'time',
+  decimals = 0
+): ScheduleTask {
+  const children = task.children.map((c) => rollupTask(c, calendar, basis, decimals))
   if (children.length === 0) {
     return { ...task, children, status: deriveStatus(task.percentComplete, task.status) }
   }
-  const rolled = rollupChildren(children, calendar, task.status)
+  const rolled = rollupChildren(children, calendar, task.status, basis, decimals)
   return {
     ...task,
     children,
@@ -383,9 +423,11 @@ export function rollupTask(task: ScheduleTask, calendar: ProjectCalendar): Sched
 /** Roll up a whole schedule's task tree (top-level tasks get rolled up recursively). */
 export function rollupScheduleTasks(
   tasks: ScheduleTask[],
-  calendar: ProjectCalendar
+  calendar: ProjectCalendar,
+  basis: PercentBasis = 'time',
+  decimals = 0
 ): ScheduleTask[] {
-  return tasks.map((t) => rollupTask(t, calendar))
+  return tasks.map((t) => rollupTask(t, calendar, basis, decimals))
 }
 
 // ---- Task dependencies ----
@@ -795,9 +837,9 @@ export function applyDependencies(
 /**
  * Overall %complete of a schedule: duration-weighted mean of the top-level tasks'
  * `percentComplete` (same weights as `rollupChildren`; plain mean when none have a
- * duration). 0 for an empty schedule.
+ * duration). 0 for an empty schedule. `decimals` controls the precision (0 = integer).
  */
-export function overallPercentComplete(tasks: ScheduleTask[]): number {
+export function overallPercentComplete(tasks: ScheduleTask[], decimals = 0): number {
   if (tasks.length === 0) return 0
   let weightTotal = 0
   let weightedPercent = 0
@@ -809,8 +851,8 @@ export function overallPercentComplete(tasks: ScheduleTask[]): number {
     plainTotal += task.percentComplete
   }
   return weightTotal > 0
-    ? Math.round(weightedPercent / weightTotal)
-    : Math.round(plainTotal / tasks.length)
+    ? roundPercent(weightedPercent / weightTotal, decimals)
+    : roundPercent(plainTotal / tasks.length, decimals)
 }
 
 /**
@@ -818,24 +860,39 @@ export function overallPercentComplete(tasks: ScheduleTask[]): number {
  * a leaf counts as 100 when it is already 100% or its `planEnd` is on/before the date,
  * otherwise it keeps its user-filled value (also when `planEnd` is missing). Parents and the
  * root level are the duration-weighted mean of their children's estimates — the same weights
- * as `rollupChildren`.
+ * as `rollupChildren` (including the selected `basis`). `decimals` controls the precision
+ * (0 = integer, the stored form).
  */
-export function estimatePercentComplete(tasks: ScheduleTask[], estimateDate: string): number {
-  const estimate = (task: ScheduleTask): number => {
-    if (task.children.length === 0) {
-      if (task.percentComplete >= 100) return 100
-      if (task.planEnd && task.planEnd <= estimateDate) return 100
-      return task.percentComplete
-    }
-    return rollupChildren(
-      task.children.map((c) => ({ ...c, percentComplete: estimate(c) })),
-      defaultCalendar()
-    ).percentComplete
+export function estimatePercentComplete(
+  tasks: ScheduleTask[],
+  estimateDate: string,
+  basis: PercentBasis = 'time',
+  decimals = 0
+): number {
+  const estimateLeaf = (task: ScheduleTask): number => {
+    if (task.percentComplete >= 100) return 100
+    if (task.planEnd && task.planEnd <= estimateDate) return 100
+    return task.percentComplete
   }
-  return rollupChildren(
-    tasks.map((t) => ({ ...t, percentComplete: estimate(t) })),
-    defaultCalendar()
-  ).percentComplete
+  const estimateTask = (task: ScheduleTask): ScheduleTask => {
+    if (task.children.length === 0) {
+      return { ...task, percentComplete: estimateLeaf(task) }
+    }
+    const children = task.children.map(estimateTask)
+    const rolled = rollupChildren(children, defaultCalendar(), undefined, basis, decimals)
+    return {
+      ...task,
+      children,
+      percentComplete: rolled.percentComplete,
+      planStart: rolled.planStart,
+      planEnd: rolled.planEnd,
+      // Time mode keeps the stored (project-calendar) durations, matching the previous
+      // estimate weighting; cost mode must use the summed child durations.
+      duration: basis === 'cost' ? rolled.duration : task.duration,
+      status: rolled.status
+    }
+  }
+  return overallPercentComplete(tasks.map(estimateTask), decimals)
 }
 
 /** Depth-first search for the first task whose title matches (case-insensitive). */
@@ -1053,6 +1110,8 @@ export interface PlannerExportPayload {
   /** Planned %complete as of `progressDate` (null when `progressMode` is `'percent'`). */
   planPercent: number | null
   ganttMode: PlannerGanttMode
+  /** Rollup basis used for the parent durations (defaults to `'time'`). */
+  percentBasis?: PercentBasis
 }
 
 /** Result of `planner:exportExcel`. */

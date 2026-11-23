@@ -26,6 +26,7 @@ import type {
   AskQuestion,
   AskRequest,
   ConfirmRequest,
+  PercentBasis,
   ProjectCalendar,
   Schedule,
   ScheduleMeta,
@@ -317,10 +318,14 @@ function dependsOnSchema(what = 'the task'): Record<string, unknown> {
 }
 
 /** Clean stale links, recompute dependency-pinned leaf dates, then roll parents up. */
-function dependencyAwareRollup(tasks: ScheduleTask[], calendar: ProjectCalendar): ScheduleTask[] {
+function dependencyAwareRollup(
+  tasks: ScheduleTask[],
+  calendar: ProjectCalendar,
+  basis: PercentBasis = 'time'
+): ScheduleTask[] {
   const stripped = stripInvalidLinks(tasks)
   const applied = applyDependencies(stripped.tasks, calendar)
-  return rollupScheduleTasks(applied.tasks, calendar)
+  return rollupScheduleTasks(applied.tasks, calendar, basis)
 }
 
 /**
@@ -1841,7 +1846,9 @@ export const tools: PTTool[] = [
       try {
         const { meta, schedule } = await requireSchedule(ctx, project, String(args.schedule ?? ''))
         const calendar = await ctx.service.readCalendar(project)
-        const tasks = slimTasks(withTaskNo(rollupScheduleTasks(schedule.tasks, calendar), null))
+        const tasks = slimTasks(
+          withTaskNo(rollupScheduleTasks(schedule.tasks, calendar, schedule.percentBasis), null)
+        )
         return JSON.stringify({
           ok: true,
           project,
@@ -2074,7 +2081,7 @@ export const tools: PTTool[] = [
           }
           const saved = {
             ...schedule,
-            tasks: dependencyAwareRollup(tasks, calendar),
+            tasks: dependencyAwareRollup(tasks, calendar, schedule.percentBasis),
             updatedAt: Date.now()
           }
           return {
@@ -2309,7 +2316,7 @@ export const tools: PTTool[] = [
           }
           const saved = {
             ...schedule,
-            tasks: dependencyAwareRollup(tasks, calendar),
+            tasks: dependencyAwareRollup(tasks, calendar, schedule.percentBasis),
             updatedAt: Date.now()
           }
           return {

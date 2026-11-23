@@ -7045,6 +7045,19 @@ fieldset.kanban-form {
   gap: 2px;
 }
 
+/* Compact Time/Cost segmented control in the planner toolbar. */
+.planner-basis-seg {
+  height: 26px;
+  margin: 0 2px;
+  overflow: hidden;
+}
+
+.planner-basis-seg .seg-btn {
+  height: 24px;
+  padding: 0 7px;
+  line-height: 1;
+}
+
 .planner-toolbar-divider {
   width: 1px;
   height: 20px;

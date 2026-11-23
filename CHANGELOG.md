@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Planner: Time / Cost rollup basis** — a new per-schedule segmented control (clock / dollar icons) switches how parent rows are rolled up. **Time** (the default, unchanged) computes a parent's duration from the earliest start to the latest end and weights `%Complete` by that elapsed span; **Cost** computes a parent's duration as the sum of its direct children's durations, so nested `%Complete` weighting follows total effort instead of elapsed time. The choice is stored in the schedule (`percentBasis`), applies to the Estimate %Completed projection, the Excel export, the dashboard and the AI planner tools, and participates in undo/redo and snapshots. Existing schedules keep the time basis.
+
+### Changed
+
+- **Planner: Estimate %Completed shows two decimals** — the current and projected values in the Estimate dialog are now computed and displayed to two decimal places (e.g. `66.67%`) instead of being rounded to whole percentages.
+
 ## [0.24.2] - 2026-11-08
 
 ### Changed

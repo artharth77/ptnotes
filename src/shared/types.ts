@@ -606,6 +606,7 @@ export interface AiTraceFile {
 // ---- Planner (project schedules + calendar) ----
 
 export type {
+  PercentBasis,
   PlannerExportColumn,
   PlannerExportPayload,
   PlannerExportResult,

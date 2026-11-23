@@ -2192,7 +2192,8 @@ export class PTNotesService {
           ...schedule,
           tasks: rollupScheduleTasks(
             applyDependencies(stripInvalidLinks(schedule.tasks).tasks, calendar).tasks,
-            calendar
+            calendar,
+            schedule.percentBasis
           ),
           updatedAt: Date.now()
         })

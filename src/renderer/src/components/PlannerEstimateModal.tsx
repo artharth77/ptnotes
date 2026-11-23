@@ -5,7 +5,8 @@ import {
   defaultCalendar,
   estimatePercentComplete,
   formatDate,
-  rollupChildren
+  overallPercentComplete,
+  rollupScheduleTasks
 } from '@shared/planner'
 
 export function PlannerEstimateModal({ onClose }: { onClose: () => void }): React.JSX.Element {
@@ -14,18 +15,23 @@ export function PlannerEstimateModal({ onClose }: { onClose: () => void }): Reac
   const [date, setDate] = useState(formatDate(new Date()))
 
   const tasks = schedule?.tasks ?? []
-  const current = rollupChildren(tasks, calendar ?? defaultCalendar()).percentComplete
-  const estimated = estimatePercentComplete(tasks, date)
+  const basis = schedule?.percentBasis ?? 'time'
+  const current = overallPercentComplete(
+    rollupScheduleTasks(tasks, calendar ?? defaultCalendar(), basis, 2),
+    2
+  )
+  const estimated = estimatePercentComplete(tasks, date, basis, 2)
 
   return (
     <Modal title="Estimate %Completed" onClose={onClose}>
       <p className="hint">
         Assumes every leaf task planned to finish on or before the estimate date is 100% complete;
-        other leaves keep their entered value. Parents are duration-weighted averages.
+        other leaves keep their entered value. Parents are{' '}
+        {basis === 'cost' ? 'cost-weighted' : 'duration-weighted'} averages.
       </p>
       <div className="form-label">
         Current %Complete
-        <div className="estimate-value">{current}%</div>
+        <div className="estimate-value">{current.toFixed(2)}%</div>
       </div>
       <div className="form-label">
         Estimate date
@@ -38,7 +44,7 @@ export function PlannerEstimateModal({ onClose }: { onClose: () => void }): Reac
       </div>
       <div className="form-label">
         Estimated %Complete
-        <div className="estimate-value">{estimated}%</div>
+        <div className="estimate-value">{estimated.toFixed(2)}%</div>
       </div>
       <div className="modal-actions">
         <button className="btn" onClick={onClose}>

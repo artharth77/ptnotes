@@ -11,10 +11,12 @@ import {
   mdiChartTimeline,
   mdiChevronDown,
   mdiChevronRight,
+  mdiClockOutline,
   mdiClose,
   mdiContentCopy,
   mdiContentCut,
   mdiContentPaste,
+  mdiCurrencyUsd,
   mdiFileExcelOutline,
   mdiGrid,
   mdiHistory,
@@ -88,6 +90,7 @@ import {
 } from '@shared/planner'
 import type {
   NoteMeta,
+  PercentBasis,
   PlannerExportColumn,
   PlannerExportRow,
   Schedule,
@@ -872,7 +875,12 @@ export function PlannerEditor(): React.JSX.Element {
   }
 
   function scheduleKey(s: Schedule): string {
-    return JSON.stringify({ name: s.name, tasks: s.tasks, columnVisibility: s.columnVisibility })
+    return JSON.stringify({
+      name: s.name,
+      tasks: s.tasks,
+      columnVisibility: s.columnVisibility,
+      percentBasis: s.percentBasis
+    })
   }
 
   function startEditSession(): void {
@@ -1245,6 +1253,7 @@ export function PlannerEditor(): React.JSX.Element {
 
   if (!schedule) return <></>
   const sc: Schedule = schedule
+  const basis: PercentBasis = sc.percentBasis ?? 'time'
   const allTaskMap: Map<string, ScheduleTask> = (() => {
     const map = new Map<string, ScheduleTask>()
     const walk = (list: ScheduleTask[]): void => {
@@ -1988,7 +1997,7 @@ export function PlannerEditor(): React.JSX.Element {
     const nextSchedule = {
       ...base,
       ...override,
-      tasks: rollupScheduleTasks(dep.tasks, cal)
+      tasks: rollupScheduleTasks(dep.tasks, cal, override?.percentBasis ?? base.percentBasis)
     }
     updateScheduleContent(nextSchedule)
     if (saveTimer.current !== null) clearTimeout(saveTimer.current)
@@ -2466,14 +2475,20 @@ export function PlannerEditor(): React.JSX.Element {
         progressMode: opts.progressMode,
         planPercent:
           opts.progressMode === 'percent-plan'
-            ? estimatePercentComplete(sc.tasks, opts.progressDate)
+            ? estimatePercentComplete(sc.tasks, opts.progressDate, basis)
             : null,
-        ganttMode: opts.ganttMode
+        ganttMode: opts.ganttMode,
+        percentBasis: basis
       })
       if (!result.ok && !result.canceled) window.alert(friendlyError(result.error))
     } catch (err) {
       window.alert(friendlyError(err))
     }
+  }
+
+  function handleSetBasis(next: PercentBasis): void {
+    if (next === basis) return
+    commit(sc, sc.tasks, { percentBasis: next })
   }
 
   function handleNewSubtask(): void {
@@ -3011,6 +3026,28 @@ export function PlannerEditor(): React.JSX.Element {
           >
             <MdiIcon path={mdiPercent} size={16} />
           </button>
+          <div className="seg planner-basis-seg" role="group" aria-label="Percent basis">
+            <button
+              type="button"
+              className={`seg-btn${basis === 'time' ? ' active' : ''}`}
+              title="Time basis: parent duration = date span"
+              aria-label="Time basis"
+              aria-pressed={basis === 'time'}
+              onClick={() => handleSetBasis('time')}
+            >
+              <MdiIcon path={mdiClockOutline} size={15} />
+            </button>
+            <button
+              type="button"
+              className={`seg-btn${basis === 'cost' ? ' active' : ''}`}
+              title="Cost basis: parent duration = sum of children"
+              aria-label="Cost basis"
+              aria-pressed={basis === 'cost'}
+              onClick={() => handleSetBasis('cost')}
+            >
+              <MdiIcon path={mdiCurrencyUsd} size={15} />
+            </button>
+          </div>
         </div>
         <span className="planner-toolbar-divider" />
         <div className="planner-toolbar-group">

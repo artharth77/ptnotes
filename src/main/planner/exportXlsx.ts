@@ -180,7 +180,8 @@ function sheetNameOf(name: string): string {
  *   bold when the row has children, status-cell accent fills)
  * - % cells of rows with children are live formulas: duration-weighted mean of the
  *   direct children (SUMPRODUCT, plain AVERAGE fallback when no child has a duration),
- *   or plain AVERAGE when the Duration column is not exported
+ *   or plain AVERAGE when the Duration column is not exported (in `cost` mode the numeric
+ *   rollup value is written instead, since the durations are not available in the sheet)
  * - column alignment (header + data): No. right; Status/Owner/Duration/date columns center
  * - margin columns (A and the one right of the table) 2.33 wide
  * - Calibri 11 everywhere in A1..(sweep end, lastRow+1) — the sweep end is the column right
@@ -208,6 +209,7 @@ export async function renderPlannerExportXlsx(payload: PlannerExportPayload): Pr
   const ws = workbook.addWorksheet(sheetNameOf(payload.scheduleName))
   const cols = payload.columns
   const rows = payload.rows
+  const percentBasis = payload.percentBasis ?? 'time'
   const tableRight = HEADER_COL + Math.max(1, cols.length) - 1
   const tableBottom = HEADER_ROW + rows.length
   const right = tableRight + 1
@@ -290,12 +292,15 @@ export async function renderPlannerExportXlsx(payload: PlannerExportPayload): Pr
                 ? `SUMPRODUCT(${dRefs},${pRefs})/SUM(${dRefs})`
                 : `SUM(${childRows.map((rn) => `${durLetter}${rn}*${pLetter}${rn}`).join(',')})/SUM(${dRefs})`
               : null
-            value = {
-              formula: weighted
-                ? `IF(SUM(${dRefs})>0,${weighted},AVERAGE(${pRefs}))`
-                : `AVERAGE(${pRefs})`,
-              result: row.percentComplete
-            }
+            value =
+              !durLetter && percentBasis === 'cost'
+                ? row.percentComplete
+                : {
+                    formula: weighted
+                      ? `IF(SUM(${dRefs})>0,${weighted},AVERAGE(${pRefs}))`
+                      : `AVERAGE(${pRefs})`,
+                    result: row.percentComplete
+                  }
           } else {
             value = row.percentComplete
           }
