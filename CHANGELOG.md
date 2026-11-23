@@ -9,6 +9,7 @@
 
 ### Changed
 
+- **Electron 44.10.2 → 44.11.5** — a patch-level runtime upgrade within Electron 44: Chromium 152.0.7977.169, V8 15.2 and the Node 24 ABI (149) are unchanged (Node itself moves 24.22.2 → 24.22.3), so `@types/node` 24, `electron-builder`, `electron-vite` and the N-API prebuilds (`@napi-rs/canvas`, `@resvg/resvg-js`) need no changes. No removed or changed app-facing APIs; the only addition is `Menu.setHighlightColors()` (Windows). Relevant fixes: non-network Web Worker requests (custom schemes, `file://`) no longer bypass `protocol.handle()` / `webRequest`, macOS default menu icons/titles survive a menu refresh, revoked `eMudhra` RSA intermediates are no longer trusted, plus upstream ANGLE / Chromium / Dawn / FFmpeg / PDFium / Skia / V8 backports. The macOS 13 (Ventura) minimum is unchanged.
 - **Planner: Estimate %Completed shows two decimals** — the current and projected values in the Estimate dialog are now computed and displayed to two decimal places (e.g. `66.67%`) instead of being rounded to whole percentages.
 
 ## [0.24.2] - 2026-11-08
