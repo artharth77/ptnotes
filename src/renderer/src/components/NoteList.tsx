@@ -4,6 +4,7 @@ import {
   mdiArrowUp,
   mdiCheck,
   mdiDotsVertical,
+  mdiFileExportOutline,
   mdiFolderOpenOutline,
   mdiPencil,
   mdiPlus,
@@ -16,12 +17,13 @@ import {
 import { useAppStore } from '../store/useAppStore'
 import { Modal, ConfirmModal, TextField } from './Modal'
 import { MdiIcon } from './MdiIcon'
-import { revealIcon, revealLabel } from '../uiMode'
+import { exportIcon, exportLabel, isWebUi, revealIcon, revealLabel } from '../uiMode'
+import { friendlyError } from '../errors'
 
 const SORT_MENU_W = 200
 const SORT_MENU_H = 220
 const CONTEXT_MENU_W = 180
-const CONTEXT_MENU_H = 160
+const CONTEXT_MENU_H = 200
 const MENU_MARGIN = 8
 
 function formatDate(ms: number): string {
@@ -153,6 +155,17 @@ export function NoteList(): React.JSX.Element {
     setMenuFor(null)
     if (activeProject) {
       await window.ptnotes.notes.reveal(activeProject, id)
+    }
+  }
+
+  async function handleExport(id: string): Promise<void> {
+    setMenuFor(null)
+    if (!activeProject) return
+    try {
+      const result = await window.ptnotes.notes.export(activeProject, id)
+      if (!result.ok && !result.canceled) window.alert(friendlyError(result.error))
+    } catch (err) {
+      window.alert(friendlyError(err))
     }
   }
 
@@ -430,12 +443,20 @@ export function NoteList(): React.JSX.Element {
                     </span>{' '}
                     Rename
                   </button>
-                  <button className="note-menu-item" onClick={() => void handleReveal(menuFor)}>
+                  <button className="note-menu-item" onClick={() => void handleExport(menuFor)}>
                     <span className="note-menu-icon">
-                      <MdiIcon path={revealIcon(mdiFolderOpenOutline)} size={16} />
+                      <MdiIcon path={exportIcon(mdiFileExportOutline)} size={16} />
                     </span>{' '}
-                    {revealLabel('Show in Folder')}
+                    {exportLabel('Export')}
                   </button>
+                  {!isWebUi() && (
+                    <button className="note-menu-item" onClick={() => void handleReveal(menuFor)}>
+                      <span className="note-menu-icon">
+                        <MdiIcon path={revealIcon(mdiFolderOpenOutline)} size={16} />
+                      </span>{' '}
+                      {revealLabel('Show in Folder')}
+                    </button>
+                  )}
                   <button
                     className="note-menu-item danger"
                     onClick={() => void handleDelete(menuFor)}

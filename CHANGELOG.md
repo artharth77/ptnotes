@@ -5,6 +5,7 @@
 ### Added
 
 - **Planner: Time / Cost rollup basis** — a new per-schedule segmented control (clock / dollar icons) switches how parent rows are rolled up. **Time** (the default, unchanged) computes a parent's duration from the earliest start to the latest end and weights `%Complete` by that elapsed span; **Cost** computes a parent's duration as the sum of its direct children's durations, so nested `%Complete` weighting follows total effort instead of elapsed time. The choice is stored in the schedule (`percentBasis`), applies to the Estimate %Completed projection, the Excel export, the dashboard and the AI planner tools, and participates in undo/redo and snapshots. Existing schedules keep the time basis.
+- **Notes: export a note together with its images** — the note list context menu now has **Export…**, which saves the note to a chosen location through the native save dialog. When the note references gallery images (`images/…` in markdown or an `<img src>`), it saves `<note>.zip` containing `<note>.md` plus the referenced `images/` files, so the relative links keep working after unzipping; without image references it saves a plain `<note>.md`. Traversal, absolute and remote references are ignored, missing images fall back to the markdown file, and a cancel is a no-op. In the web UI the same action is the note's **Download** menu item (it previously downloaded the raw `.md`), served by the same `notes:export` IPC through `/api/blob`.
 
 ### Changed
 

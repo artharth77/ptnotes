@@ -274,6 +274,14 @@ export interface DiagramSaveResult {
   error?: string
 }
 
+/** Result of exporting a note (markdown, or a zip with its referenced gallery images). */
+export interface NoteExportResult {
+  ok: boolean
+  path?: string
+  canceled?: boolean
+  error?: string
+}
+
 export interface InfographicRenderResult {
   ok: boolean
   svg?: string
