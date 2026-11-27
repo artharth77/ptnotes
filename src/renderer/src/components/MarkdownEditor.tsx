@@ -31,6 +31,7 @@ import {
   mdiTableColumnPlusAfter,
   mdiTableColumnPlusBefore,
   mdiTableColumnRemove,
+  mdiTableOfContents,
   mdiTablePlus,
   mdiTableRemove,
   mdiTableRowPlusAfter,
@@ -88,6 +89,16 @@ interface MarkdownEditorProps {
   noteId: string
   content: string
 }
+
+interface TocHeading {
+  pos: number
+  level: number
+  text: string
+}
+
+const TOC_DEFAULT_WIDTH = 260
+const TOC_MIN_WIDTH = 200
+const TOC_MAX_WIDTH = 480
 
 function ToolbarBtn({
   icon,
@@ -436,6 +447,8 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
   const txCount = useRef(0)
   const formatHelperEnabled = useAppStore((s) => s.formatHelperEnabled)
   const setFormatHelperEnabled = useAppStore((s) => s.setFormatHelperEnabled)
+  const tocOpen = useAppStore((s) => s.tocOpen)
+  const setTocOpen = useAppStore((s) => s.setTocOpen)
 
   // Debounced persistence. `appliedContent` is advanced alongside the store
   // update so the content-sync effect below never resets the live editor to the
@@ -599,6 +612,21 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
     }
   })
 
+  const tocHeadings = useEditorState({
+    editor,
+    selector: (ctx) => {
+      const out: TocHeading[] = []
+      ctx.editor.state.doc.descendants((node, pos) => {
+        if (node.type.name !== 'heading') return
+        const level = node.attrs.level as number
+        if (level >= 1 && level <= 3) {
+          out.push({ pos, level, text: node.textContent || 'Untitled heading' })
+        }
+      })
+      return out
+    }
+  })
+
   const cbLang = state?.codeBlockLang
   const cbText = state?.codeBlockText
   const suggestedLang = useMemo(
@@ -632,6 +660,11 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
   const [matchCase, setMatchCase] = useState(false)
   const [galleryOpen, setGalleryOpen] = useState(false)
   const [dropActive, setDropActive] = useState(false)
+  const [tocWidth, setTocWidth] = useState(() => {
+    const saved = Number(localStorage.getItem('ptnotes:tocWidth'))
+    if (!Number.isFinite(saved) || saved < TOC_MIN_WIDTH) return TOC_DEFAULT_WIDTH
+    return Math.min(saved, TOC_MAX_WIDTH)
+  })
   const findInputRef = useRef<HTMLInputElement | null>(null)
   const findBarRef = useRef<HTMLDivElement | null>(null)
   const metaRef = useRef<HTMLDivElement | null>(null)
@@ -831,6 +864,56 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
     const text = e.target.value
     setRawText(text)
     scheduleSave(text)
+  }
+
+  function scrollToHeading(pos: number): void {
+    const node = editor.view.nodeDOM(pos)
+    const el = node instanceof HTMLElement ? node : node instanceof Node ? node.parentElement : null
+    if (!el) return
+    const scroller = editor.view.dom.closest<HTMLElement>('.editor-content')
+    if (!scroller) {
+      el.scrollIntoView({ block: 'start' })
+      return
+    }
+    const top = Math.max(
+      0,
+      scroller.scrollTop + el.getBoundingClientRect().top - chromeBottomFor(el) - 12
+    )
+    scroller.scrollTo({ top, behavior: 'smooth' })
+  }
+
+  function startTocResize(e: React.PointerEvent): void {
+    if (e.button !== 0) return
+    e.preventDefault()
+    e.stopPropagation()
+    const startX = e.clientX
+    const wrapWidth = wrapRef.current?.getBoundingClientRect().width ?? 0
+    const maxWidth = Math.max(TOC_MIN_WIDTH, Math.min(TOC_MAX_WIDTH, wrapWidth - 24))
+    const startWidth = Math.min(tocWidth, maxWidth)
+    let last = startWidth
+    document.body.style.cursor = 'col-resize'
+    const onMove = (ev: PointerEvent): void => {
+      last = Math.min(
+        maxWidth,
+        Math.max(TOC_MIN_WIDTH, Math.round(startWidth + ev.clientX - startX))
+      )
+      setTocWidth(last)
+    }
+    const onUp = (): void => {
+      document.body.style.cursor = ''
+      document.removeEventListener('pointermove', onMove)
+      document.removeEventListener('pointerup', onUp)
+      document.removeEventListener('pointercancel', onUp)
+      localStorage.setItem('ptnotes:tocWidth', String(last))
+    }
+    document.addEventListener('pointermove', onMove)
+    document.addEventListener('pointerup', onUp)
+    document.addEventListener('pointercancel', onUp)
+  }
+
+  function resetTocWidth(): void {
+    setTocWidth(TOC_DEFAULT_WIDTH)
+    localStorage.setItem('ptnotes:tocWidth', String(TOC_DEFAULT_WIDTH))
   }
 
   return (
@@ -1102,6 +1185,61 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
           >
             <MdiIcon path={mdiClose} size={16} />
           </button>
+        </div>
+      )}
+      {!rawMode && !tocOpen && (
+        <button
+          type="button"
+          className="toc-toggle"
+          title="Table of contents"
+          aria-label="Table of contents"
+          aria-expanded={false}
+          onClick={() => setTocOpen(true)}
+        >
+          <MdiIcon path={mdiTableOfContents} size={18} />
+        </button>
+      )}
+      {!rawMode && tocOpen && (
+        <div className="toc-panel frost" style={{ width: tocWidth }}>
+          <div className="toc-header">
+            <span>Table of Contents</span>
+            <button
+              type="button"
+              className="toc-close"
+              title="Hide table of contents"
+              aria-label="Hide table of contents"
+              onClick={() => setTocOpen(false)}
+            >
+              <MdiIcon path={mdiClose} size={16} />
+            </button>
+          </div>
+          <div className="toc-list">
+            {tocHeadings.length ? (
+              tocHeadings.map((h) => (
+                <button
+                  key={`${h.pos}-${h.level}`}
+                  type="button"
+                  className={`toc-item toc-level-${h.level}`}
+                  title={h.text}
+                  onClick={() => scrollToHeading(h.pos)}
+                >
+                  {h.text}
+                </button>
+              ))
+            ) : (
+              <div className="toc-empty">No headings</div>
+            )}
+          </div>
+          <span
+            className="toc-resize-handle"
+            title="Drag to resize — double-click to reset"
+            onPointerDown={startTocResize}
+            onDoubleClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              resetTocWidth()
+            }}
+          />
         </div>
       )}
       {rawMode ? (

@@ -158,6 +158,7 @@ interface AppState {
   /** Last explorer op error, shown in the file list banner. */
   explorerOpsError: string | null
   formatHelperEnabled: boolean
+  tocOpen: boolean
   theme: 'light' | 'dark' | 'system'
   fontSize: 'small' | 'default' | 'large' | 'xlarge'
   uiDensity: 'compact' | 'cozy'
@@ -337,6 +338,7 @@ interface AppState {
   setExplorerOpsDialog: (dialog: ExplorerOpsDialog | null) => void
   setExplorerOpsError: (error: string | null) => void
   setFormatHelperEnabled: (enabled: boolean) => void
+  setTocOpen: (open: boolean) => void
   setTheme: (theme: 'light' | 'dark' | 'system') => void
   setFontSize: (size: 'small' | 'default' | 'large' | 'xlarge') => void
   setUiDensity: (density: 'compact' | 'cozy') => void
@@ -430,6 +432,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   explorerOpsDialog: null,
   explorerOpsError: null,
   formatHelperEnabled: localStorage.getItem('ptnotes:formatHelper') !== '0',
+  tocOpen: localStorage.getItem('ptnotes:tocOpen') === '1',
   theme: (localStorage.getItem('ptnotes:theme') as 'light' | 'dark' | 'system' | null) ?? 'system',
   fontSize:
     (localStorage.getItem('ptnotes:fontSize') as 'small' | 'default' | 'large' | 'xlarge' | null) ??
@@ -1868,6 +1871,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   setFormatHelperEnabled(enabled) {
     localStorage.setItem('ptnotes:formatHelper', enabled ? '1' : '0')
     set({ formatHelperEnabled: enabled })
+  },
+
+  setTocOpen(open) {
+    localStorage.setItem('ptnotes:tocOpen', open ? '1' : '0')
+    set({ tocOpen: open })
   },
 
   setTheme(theme) {

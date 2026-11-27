@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Notes: table of contents panel** — a circular table-of-contents button sits at the top-left of the editor below the toolbar and opens a floating panel listing the note's H1–H3 headings with per-level indentation. Clicking an entry smooth-scrolls the note to that heading (landing below the toolbar), the panel header carries an **X** to hide it, and the open state is saved app-wide so it survives note switches and restarts. The panel spans the editor height with margins above the toolbar and the status bar, can be resized by dragging its right edge (200–480 px, double-click resets), and remembers its width. It is hidden in RAW markdown mode.
+
 ## [0.25.0] - 2026-11-23
 
 ### Added
