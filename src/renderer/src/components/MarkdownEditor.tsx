@@ -428,6 +428,7 @@ function FormatButtons({
 export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.JSX.Element {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingContent = useRef<string | null>(null)
+  const pendingProject = useRef<string | null>(null)
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const toolbarRef = useRef<HTMLDivElement | null>(null)
   const [contentEl, setContentEl] = useState<HTMLElement | null>(null)
@@ -443,11 +444,14 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
   function scheduleSave(value: string): void {
     appliedContent.current = value
     pendingContent.current = value
+    pendingProject.current = useAppStore.getState().activeProject
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => {
       saveTimer.current = null
+      const project = pendingProject.current
       pendingContent.current = null
-      void useAppStore.getState().saveNote(value, noteId)
+      pendingProject.current = null
+      void useAppStore.getState().saveNote(value, noteId, project ?? undefined)
     }, 800)
   }
 
@@ -516,8 +520,15 @@ export function MarkdownEditor({ noteId, content }: MarkdownEditorProps): React.
       if (saveTimer.current) clearTimeout(saveTimer.current)
       saveTimer.current = null
       const pending = pendingContent.current
+      const project = pendingProject.current
       pendingContent.current = null
-      if (pending != null) void useAppStore.getState().saveNote(pending, noteId)
+      pendingProject.current = null
+      if (pending != null) {
+        void useAppStore
+          .getState()
+          .saveNote(pending, noteId, project ?? undefined)
+          .catch(() => {})
+      }
     }
   }, [noteId])
 

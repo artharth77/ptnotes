@@ -117,8 +117,9 @@ export function GlobalFind(): React.JSX.Element | null {
                 type="button"
                 className="search-note-title"
                 onClick={() => {
-                  setTab('notes')
                   void selectNote(noteId)
+                    .catch(() => {})
+                    .finally(() => setTab('notes'))
                   setOpen(false)
                 }}
               >
@@ -133,8 +134,9 @@ export function GlobalFind(): React.JSX.Element | null {
                     type="button"
                     className="search-match-item"
                     onClick={() => {
-                      setTab('notes')
                       void selectNote(noteId)
+                        .catch(() => {})
+                        .finally(() => setTab('notes'))
                       setOpen(false)
                     }}
                     title={m.name}

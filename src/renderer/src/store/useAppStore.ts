@@ -60,6 +60,28 @@ function readKanbanCollapsed(project: string): Record<string, boolean> {
   }
 }
 
+function lastNoteKey(project: string): string {
+  return `ptnotes:last-note:${project}`
+}
+
+function lastScheduleKey(project: string): string {
+  return `ptnotes:last-schedule:${project}`
+}
+
+function moveRememberedSelection(from: string, to: string): void {
+  const note = localStorage.getItem(lastNoteKey(from))
+  if (note) localStorage.setItem(lastNoteKey(to), note)
+  localStorage.removeItem(lastNoteKey(from))
+  const schedule = localStorage.getItem(lastScheduleKey(from))
+  if (schedule) localStorage.setItem(lastScheduleKey(to), schedule)
+  localStorage.removeItem(lastScheduleKey(from))
+}
+
+function clearRememberedSelection(project: string): void {
+  localStorage.removeItem(lastNoteKey(project))
+  localStorage.removeItem(lastScheduleKey(project))
+}
+
 interface AppState {
   projects: Project[]
   activeProject: string | null
@@ -228,8 +250,9 @@ interface AppState {
   refreshSchedules: () => Promise<void>
   loadCalendar: () => Promise<void>
   selectSchedule: (id: string) => Promise<void>
+  restoreLastSchedule: () => Promise<void>
   updateScheduleContent: (schedule: Schedule) => void
-  saveSchedule: (schedule: Schedule) => Promise<void>
+  saveSchedule: (schedule: Schedule, project?: string) => Promise<void>
   createSchedule: (name: string) => Promise<void>
   renameSchedule: (id: string, newName: string) => Promise<void>
   duplicateSchedule: (id: string) => Promise<void>
@@ -280,7 +303,8 @@ interface AppState {
   applyBotGroupEvent: (evt: BotGroupEvent) => void
   loadBotTasks: (project: string) => Promise<void>
   selectNote: (id: string) => Promise<void>
-  saveNote: (content: string, noteId?: string) => Promise<void>
+  restoreLastNote: () => Promise<void>
+  saveNote: (content: string, noteId?: string, project?: string) => Promise<void>
   createNote: (title: string, content?: string) => Promise<void>
   renameNote: (id: string, newTitle: string) => Promise<void>
   deleteNote: (id: string) => Promise<void>
@@ -482,6 +506,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async renameProject(oldName, newName) {
     await window.ptnotes.projects.rename(oldName, newName)
+    moveRememberedSelection(oldName, newName)
     const projects = await get().refreshProjects()
     set({ projects })
     if (get().activeProject === oldName) {
@@ -491,6 +516,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async deleteProject(name) {
     await window.ptnotes.projects.delete(name)
+    clearRememberedSelection(name)
     const projects = await get().refreshProjects()
     set((state) => {
       const chatMessages = { ...state.chatMessages }
@@ -580,15 +606,21 @@ export const useAppStore = create<AppState>((set, get) => ({
       return { loading: false }
     })
     if (get().tab === 'files') await get().loadExplorer()
+    if (get().tab === 'notes') await get().restoreLastNote()
+    else if (get().tab === 'planner') await get().restoreLastSchedule()
   },
 
   async refreshNotes() {
     const project = get().activeProject
     if (!project) return set({ notes: [] })
     const notes = await window.ptnotes.notes.list(project)
+    if (get().activeProject !== project) return
     const { activeNoteId } = get()
     if (activeNoteId && !notes.some((n) => n.id === activeNoteId)) {
       set({ notes, activeNoteId: null, noteContent: '' })
+      if (localStorage.getItem(lastNoteKey(project)) === activeNoteId) {
+        localStorage.removeItem(lastNoteKey(project))
+      }
     } else {
       set({ notes })
     }
@@ -970,6 +1002,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const project = get().activeProject
     if (!project) return set({ schedules: [] })
     const schedules = await window.ptnotes.planner.list(project)
+    if (get().activeProject !== project) return
     set({ schedules })
   },
 
@@ -984,21 +1017,39 @@ export const useAppStore = create<AppState>((set, get) => ({
     const project = get().activeProject
     if (!project) return
     const schedule = await window.ptnotes.planner.read(project, id)
-    if (!schedule) return
+    if (!schedule || get().activeProject !== project) return
     set({ activeScheduleId: id, scheduleContent: schedule })
+    localStorage.setItem(lastScheduleKey(project), id)
+  },
+
+  async restoreLastSchedule() {
+    const project = get().activeProject
+    if (!project || get().activeScheduleId) return
+    const id = localStorage.getItem(lastScheduleKey(project))
+    if (!id) return
+    try {
+      await get().selectSchedule(id)
+    } catch {
+      return
+    }
+    if (get().activeProject === project && !get().activeScheduleId) {
+      localStorage.removeItem(lastScheduleKey(project))
+    }
   },
 
   updateScheduleContent(schedule) {
     set({ scheduleContent: schedule })
   },
 
-  async saveSchedule(schedule) {
-    const project = get().activeProject
-    if (!project) return
+  async saveSchedule(schedule, project) {
+    const target = project ?? get().activeProject
+    if (!target) return
     const updated = { ...schedule, updatedAt: Date.now() }
-    set({ scheduleContent: updated })
-    await window.ptnotes.planner.save(project, updated)
-    await get().refreshSchedules()
+    if (get().activeProject === target && get().activeScheduleId === updated.id) {
+      set({ scheduleContent: updated })
+    }
+    await window.ptnotes.planner.save(target, updated)
+    if (get().activeProject === target) await get().refreshSchedules()
   },
 
   async createSchedule(name) {
@@ -1014,6 +1065,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     const project = get().activeProject
     if (!project) return
     const meta = await window.ptnotes.planner.rename(project, id, newName)
+    const rememberedKey = lastScheduleKey(project)
+    if (localStorage.getItem(rememberedKey) === id) {
+      localStorage.setItem(rememberedKey, meta.id)
+    }
     const wasActive = get().activeScheduleId === id
     if (wasActive) {
       const content = get().scheduleContent
@@ -1037,6 +1092,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     const project = get().activeProject
     if (!project) return
     await window.ptnotes.planner.delete(project, id)
+    const rememberedKey = lastScheduleKey(project)
+    if (localStorage.getItem(rememberedKey) === id) {
+      localStorage.removeItem(rememberedKey)
+    }
     if (get().activeScheduleId === id) {
       set({ activeScheduleId: null, scheduleContent: null })
     }
@@ -1533,15 +1592,33 @@ export const useAppStore = create<AppState>((set, get) => ({
     } catch {
       throw new Error(`Note ${id} could not be read`)
     }
+    if (get().activeProject !== project) return
     set({ activeNoteId: id, noteContent: content })
+    localStorage.setItem(lastNoteKey(project), id)
   },
 
-  async saveNote(content, noteId) {
-    const { activeProject } = get()
+  async restoreLastNote() {
+    const project = get().activeProject
+    if (!project || get().activeNoteId) return
+    const id = localStorage.getItem(lastNoteKey(project))
+    if (!id) return
+    try {
+      await get().selectNote(id)
+    } catch {
+      if (get().activeProject === project && localStorage.getItem(lastNoteKey(project)) === id) {
+        localStorage.removeItem(lastNoteKey(project))
+      }
+    }
+  },
+
+  async saveNote(content, noteId, project) {
+    const target = project ?? get().activeProject
     const id = noteId ?? get().activeNoteId
-    if (!activeProject || !id) return
-    if (get().activeNoteId === id) set({ noteContent: content })
-    await window.ptnotes.notes.save(activeProject, id, content)
+    if (!target || !id) return
+    if (get().activeProject === target && get().activeNoteId === id) {
+      set({ noteContent: content })
+    }
+    await window.ptnotes.notes.save(target, id, content)
   },
 
   async createNote(title, content) {
@@ -1562,6 +1639,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     const renamed = await window.ptnotes.notes.rename(project, id, newTitle)
     const { activeNoteId, noteContent } = get()
     const wasActive = activeNoteId === id
+    const rememberedKey = lastNoteKey(project)
+    if (localStorage.getItem(rememberedKey) === id) {
+      localStorage.setItem(rememberedKey, renamed.id)
+    }
     await get().refreshNotes()
     if (wasActive) {
       set({ activeNoteId: renamed.id, noteContent })
@@ -1572,6 +1653,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     const project = get().activeProject
     if (!project) return
     await window.ptnotes.notes.delete(project, id)
+    const rememberedKey = lastNoteKey(project)
+    if (localStorage.getItem(rememberedKey) === id) {
+      localStorage.removeItem(rememberedKey)
+    }
     if (get().activeNoteId === id) {
       set({ activeNoteId: null, noteContent: '' })
     }
@@ -1585,6 +1670,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     set({ tab })
     if (tab === 'files') void get().loadExplorer()
+    if (tab === 'notes' && !get().activeNoteId) void get().restoreLastNote()
+    if (tab === 'planner' && !get().activeScheduleId) void get().restoreLastSchedule()
   },
 
   restoreLastTab() {
@@ -1597,6 +1684,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     const target: Tab = state.lastTab !== 'dashboard' ? (state.lastTab ?? fallback) : fallback
     set({ tab: target, lastTab: state.tab })
     if (target === 'files') void get().loadExplorer()
+    if (target === 'notes' && !get().activeNoteId) void get().restoreLastNote()
+    if (target === 'planner' && !get().activeScheduleId) void get().restoreLastSchedule()
   },
 
   setChatOpen(chatOpen) {

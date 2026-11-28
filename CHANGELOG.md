@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Notes & Planner: remember the last opened item per project** — each project now remembers the last note and planner schedule you opened (renderer `localStorage`, `ptnotes:last-note:<project>` / `ptnotes:last-schedule:<project>`). Opening a project — including app start — auto-reopens the remembered note when the Notes tab is active, or the remembered schedule when the Planner tab is active; activating the Notes/Planner tab after a switch from another view also restores it. Project renames carry the memory over, and deleting a note, schedule or project clears the matching entry.
+
+### Fixed
+
+- **Notes & Planner: switching projects no longer misdirects or drops pending autosaves** — the debounced note/planner save now carries the project (and planner schedule) the edit belonged to. A pending edit made just before switching projects is written to the old project instead of the newly selected one, and planner edits are no longer lost when the project switch clears the editor state before the unmount flush. A stale flush also cannot overwrite the newly selected note/schedule in memory.
+
 ## [0.25.0] - 2026-11-23
 
 ### Added

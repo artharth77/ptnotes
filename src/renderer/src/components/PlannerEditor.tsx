@@ -785,6 +785,7 @@ export function PlannerEditor(): React.JSX.Element {
   const gridPercentBase = useRef<Schedule | null>(null)
   const pendingFocus = useRef<{ id: string; col: string } | null>(null)
   const saveTimer = useRef<number | null>(null)
+  const pendingSave = useRef<{ schedule: Schedule; project: string | null } | null>(null)
   const editSession = useRef<{ scheduleId: string; snapshot: Schedule } | null>(null)
   const plannerRef = useRef<HTMLDivElement | null>(null)
   const titlebarRef = useRef<HTMLDivElement | null>(null)
@@ -904,16 +905,25 @@ export function PlannerEditor(): React.JSX.Element {
     }
   }
 
+  function queueSave(next: Schedule): void {
+    pendingSave.current = { schedule: next, project: useAppStore.getState().activeProject }
+    if (saveTimer.current !== null) clearTimeout(saveTimer.current)
+    saveTimer.current = window.setTimeout(() => {
+      saveTimer.current = null
+      const pending = pendingSave.current
+      pendingSave.current = null
+      if (pending) {
+        void saveSchedule(pending.schedule, pending.project ?? undefined).catch(() => {})
+      }
+    }, 800)
+  }
+
   function restoreSchedule(restored: Schedule | null): void {
     if (!restored) return
-    if (saveTimer.current !== null) clearTimeout(saveTimer.current)
     setNumberDrafts({})
     setSelected(new Set())
     setAnchorId(null)
-    saveTimer.current = window.setTimeout(() => {
-      saveTimer.current = null
-      void saveSchedule(restored)
-    }, 800)
+    queueSave(restored)
   }
 
   function isTrackedField(el: HTMLElement | null): boolean {
@@ -980,14 +990,10 @@ export function PlannerEditor(): React.JSX.Element {
     const session = editSession.current
     if (session) {
       editSession.current = null
-      if (saveTimer.current !== null) clearTimeout(saveTimer.current)
       setNumberDrafts({})
       const restored = session.snapshot
       updateScheduleContent(restored)
-      saveTimer.current = window.setTimeout(() => {
-        saveTimer.current = null
-        void saveSchedule(restored)
-      }, 800)
+      queueSave(restored)
     } else {
       const f = focusValueRef.current
       if (f) {
@@ -1045,8 +1051,15 @@ export function PlannerEditor(): React.JSX.Element {
     return () => {
       if (saveTimer.current !== null) {
         clearTimeout(saveTimer.current)
-        const latest = useAppStore.getState().scheduleContent
-        if (latest) void useAppStore.getState().saveSchedule(latest)
+        saveTimer.current = null
+      }
+      const pending = pendingSave.current
+      pendingSave.current = null
+      if (pending) {
+        void useAppStore
+          .getState()
+          .saveSchedule(pending.schedule, pending.project ?? undefined)
+          .catch(() => {})
       }
     }
   }, [])
@@ -2000,11 +2013,7 @@ export function PlannerEditor(): React.JSX.Element {
       tasks: rollupScheduleTasks(dep.tasks, cal, override?.percentBasis ?? base.percentBasis)
     }
     updateScheduleContent(nextSchedule)
-    if (saveTimer.current !== null) clearTimeout(saveTimer.current)
-    saveTimer.current = window.setTimeout(() => {
-      saveTimer.current = null
-      void saveSchedule(nextSchedule)
-    }, 800)
+    queueSave(nextSchedule)
   }
 
   function editTask(

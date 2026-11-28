@@ -140,12 +140,15 @@ export function DashboardPage(): React.JSX.Element {
     if (item.kind === 'kanban-card') {
       setActiveKanbanCard(item.id)
       setTab('kanban')
-    } else {
-      if (item.scheduleId) {
-        void selectSchedule(item.scheduleId)
-      }
-      setTab('planner')
+      return
     }
+    void (async () => {
+      try {
+        if (item.scheduleId) await selectSchedule(item.scheduleId)
+      } finally {
+        setTab('planner')
+      }
+    })()
   }
 
   const openNote = async (note: RecentNote): Promise<void> => {
